@@ -68,14 +68,14 @@ $(BUILD_DIR)/hal_test.o: $(HAL_DIR)/src/hal_test.c | $(BUILD_DIR)
 
 hal: $(HAL_OBJS)
 
-$(BUILD_DIR)/kernel.o: hal
+$(BUILD_DIR)/kernel.o: hal userspace
 	cd $(KERNEL_DIR) && $(CARGO) build --release -Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem -Z json-target-spec
 	cp $(KERNEL_DIR)/target/x86_64-unknown-none/release/libkernel.a $(BUILD_DIR)/kernel.o
 
 kernel: $(BUILD_DIR)/kernel.o
 
 $(BUILD_DIR)/kernel.elf: kernel
-	/usr/bin/ld.lld-19 -T $(KERNEL_DIR)/linker.ld -o $@ $(HAL_OBJS) $(BUILD_DIR)/kernel.o
+	/usr/bin/ld.lld -T $(KERNEL_DIR)/linker.ld -o $@ $(HAL_OBJS) $(BUILD_DIR)/kernel.o
 
 userspace:
 	mkdir -p $(USERSPACE_BUILD_DIR)
