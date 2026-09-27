@@ -1,0 +1,172 @@
+# Dunit DWM system defaults — BOOT-SMOKE-TESTS variant.
+#
+# IDENTICAL to assets/dwm/default.toml EXCEPT for the [startup] table at the
+# bottom, which autostarts two gui_clients (M3 cross-process isolation invariant,
+# "served two untrusted clients OK") plus gui_terminal + gui_files so their
+# per-app config is exercised headless. Selected at build time in
+# kernel/src/fs/vfs.rs when the `boot-smoke-tests` feature is on
+# (limine_test_gui.conf / limine_test_terminal.conf); the plain desktop kernel
+# (limine_dwm.conf) embeds default.toml, which boots clean with no windows.
+#
+# KEEP IN SYNC with default.toml: the two files must differ ONLY in [startup].
+#
+# Loaded by gui_server at desktop start from /system/share/dwm/default.toml
+# (embedded in the kernel MemFS). Unknown keys are ignored for forward
+# compatibility; a missing or unparseable file falls back to the built-in
+# Green Tea defaults baked into gui_server (the last-known-good baseline).
+#
+# Colors are #RRGGBB or #AARRGGBB (alpha defaults to opaque). Geometry is in
+# pixels.
+
+[theme]
+desktop          = "#1E1E2E"
+title_focused    = "#313244"
+title_unfocused  = "#232331"
+border_focused   = "#A6E3A1"
+border_unfocused = "#45475A"
+close            = "#F38BA8"
+panel            = "#181825"
+panel_text       = "#CDD6F4"
+launcher         = "#A6E3A1"
+taskbtn          = "#313244"
+taskbtn_focused  = "#45475A"
+menu             = "#11111B"
+menu_hover       = "#45475A"
+# Title-bar / taskbar label text. `title_text_focused` is the crisp TTF title on
+# the active window (and the focused taskbar button); `_unfocused` is the dimmer
+# variant on inactive windows. Were hardcoded 0xEAF2EC / 0xA8B4AC in gui_server.
+title_text_focused   = "#EAF2EC"
+title_text_unfocused = "#A8B4AC"
+
+# Compositor geometry, in pixels. `max_windows` is a safety cap on how many
+# client windows may be composited at once, not a pixel count. Non-numeric
+# values are ignored and keep the built-in baseline.
+[layout]
+title_h          = 26
+border           = 2
+panel_h          = 28
+# App-menu button width (holds the "Dunit" wordmark; workspace pips follow it).
+launcher_w       = 92
+# Vestigial after REF-2 (top taskbar → dock task-switcher + centered title);
+# kept for config round-trip stability.
+taskbtn_w        = 120
+taskbtn_gap      = 4
+menu_w           = 130
+menu_item_h      = 26
+dock_w           = 48
+ws_w             = 22
+max_windows      = 8
+# Point sizes for the compositor's TTF text. `title_font_px` sizes window-title
+# and system-tray text; `panel_font_px` sizes the taskbar-button labels. Were
+# hardcoded 14.0 / 13.0. Clamped to 6..=64 on load.
+title_font_px    = 14
+panel_font_px    = 13
+
+# Compositor visual effects (concept §5). Every effect is tunable or can be
+# switched off here without a rebuild. `corner_radius`/`shadow`/`blur_radius` are
+# pixels; the `*_alpha` values are 0-255 opacity; `blur`/`gradient`/`anim` are
+# booleans (true/false/1/0). Setting an effect to 0/false restores the flat look.
+[effects]
+corner_radius    = 8
+shadow           = 7
+shadow_alpha     = 90
+blur             = true
+blur_radius      = 4
+blur_iters       = 2
+panel_alpha      = 205
+menu_alpha       = 225
+gradient         = true
+anim             = true
+anim_ms          = 140
+
+# Asset paths — everything the desktop loads by path, so it is fully config-
+# driven (no hardcoded asset locations). `wallpaper` is a 1600x900 24-bit BMP
+# painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
+# directory name under /assets/icons/<name>/; the compositor dock/launcher and
+# the file manager resolve <name>/<key>.rgba from it. `font` is the TrueType font
+# every GUI app renders text with (missing/unparseable → the app's embedded
+# fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
+[desktop]
+wallpaper        = "/assets/wallpapers/wallpaper.bmp"
+icon_theme       = "breeze"
+font             = "/assets/fonts/DejaVuSans.ttf"
+# App-menu wordmark logo: a 32x32 straight-alpha RGBA with a circular mask baked
+# in. Blitted left of the "Dunit" wordmark on the panel (absent/mis-sized → the
+# wordmark draws its flat accent mark instead).
+logo             = "/assets/images/logo.rgba"
+
+# Desktop widget card: a translucent plasmoid painted on the wallpaper (behind
+# windows) with the uptime clock and a live RAM/process monitor. `corner`:
+# 0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right.
+[widgets]
+enabled = true
+clock   = true
+monitor = true
+corner  = 1
+
+# ============================================================================
+# Application registry + desktop composition (data-driven; concept: no app
+# names/exec paths/icons are baked into gui_server). Each `[application.<id>]`
+# table registers one launchable app. `<id>` is the registry key AND the default
+# for both `exec` (the ELF spawned from /app) and `icon` (the stem resolved as
+# <icon_theme>/<stem>.rgba, or an absolute VFS path if it contains '/'), so a
+# minimal entry needs only a `name`. `label` is the 1-4 char dock/menu initials
+# fallback when no icon renders (derived from `name`, upper-cased, when omitted).
+# Adding an app to the desktop is adding a table here — gui_server is never
+# edited. Registration order fixes each app's index; the dock/launcher/startup
+# lists below reference apps by id, so their order is independent.
+# ============================================================================
+[application.gui_client]
+name  = "Window"
+label = "WIN"
+
+[application.gui_calc]
+name  = "Calculator"
+label = "CALC"
+
+[application.gui_stat]
+name  = "System Monitor"
+label = "STAT"
+
+[application.gui_files]
+name  = "Files"
+label = "FILE"
+
+[application.gui_terminal]
+name  = "Terminal"
+label = "TERM"
+
+[application.gui_settings]
+name  = "Settings"
+label = "SET"
+
+# Pinned dock icons, left-edge strip, top-to-bottom. Ids resolve to registry
+# entries; unknown ids are dropped. Omit this table to pin the whole registry.
+[dock]
+entries = ["gui_client", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
+
+# Launcher-menu entries (the hamburger dropdown), top-to-bottom. Same id rules
+# as `[dock]`; omit to list the whole registry.
+[launcher]
+entries = ["gui_client", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
+
+# Autostart: THE ONLY DIFFERENCE FROM default.toml. Two gui_clients prove the M3
+# cross-process isolation invariant (two untrusted clients composited at once);
+# gui_terminal + gui_files then autostart so their per-app config (apps/*.toml)
+# is exercised and its resolved-config diagnostic is observable headless. The
+# isolation marker fires off the two gui_clients — the heavier apps come up later
+# as runtime-pumped windows and do not gate it.
+[startup]
+entries = ["gui_client", "gui_client", "gui_terminal", "gui_files"]
+# Phase 3 headless resize proof: the automated harness has no mouse, so the
+# title-bar maximize chip can't be clicked. With this set, the compositor drives
+# each runtime-pumped window (terminal + files) through the SAME maximize path
+# the chip uses — server-push CONFIGURE + client buffer re-import across a real
+# process boundary. NEVER set in default.toml (a real desktop must not auto-
+# maximize its windows).
+self_test = true
+
+# Virtual workspace count (the panel switcher lays out this many pips). Clamped
+# to 1..=9 on load.
+[workspaces]
+count = 5
