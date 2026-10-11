@@ -666,6 +666,59 @@ impl Process {
         self.fd_table.get(&fd)
     }
 
+    /// Snapshot the fds a child inherits across spawn: everything except
+    /// FD_CLOEXEC entries (posix_spawn closes those in the child).
+    pub fn snapshot_fds(&self) -> Vec<(ProcessFd, FdEntry)> {
+        self.fd_table
+            .iter()
+            .filter(|(_, entry)| !entry.cloexec)
+            .map(|(fd, entry)| (*fd, *entry))
+            .collect()
+    }
+
+    /// Replace this freshly created child's fd table with the parent's inherited
+    /// entries. Clears the child's default console stdio first, then re-takes a
+    /// per-process reference on each VFS/pipe target. Returns the distinct VFS
+    /// descriptors the caller must also `vfs.retain` — the inter-process
+    /// reference so the backing file is not closed while the child still holds
+    /// it (the Process layer cannot reach the VFS itself).
+    pub fn inherit_fds(
+        &mut self,
+        entries: &[(ProcessFd, FdEntry)],
+    ) -> Vec<crate::fs::vfs::FileDescriptor> {
+        self.fd_table.clear();
+        self.vfs_fd_refs.clear();
+        let mut vfs_fds = Vec::new();
+        for (fd, entry) in entries {
+            self.fd_table.insert(*fd, *entry);
+            self.retain_target(entry.target);
+            if let FdTarget::Vfs(vfs_fd) = entry.target {
+                if !vfs_fds.contains(&vfs_fd) {
+                    vfs_fds.push(vfs_fd);
+                }
+            }
+        }
+        vfs_fds
+    }
+
+    /// Install a freshly opened VFS descriptor at an exact child fd (the
+    /// posix_spawn OPEN file action). Releases whatever occupied `fd` first,
+    /// returning its cleanup for the syscall layer. The descriptor was just
+    /// opened for this child, so it is single-owner here.
+    pub fn place_vfs_fd(
+        &mut self,
+        fd: ProcessFd,
+        vfs_fd: crate::fs::vfs::FileDescriptor,
+    ) -> FdCleanup {
+        let cleanup = match self.fd_table.remove(&fd) {
+            Some(old) => self.release_target(old.target),
+            None => FdCleanup::None,
+        };
+        self.fd_table.insert(fd, FdEntry::vfs(vfs_fd));
+        *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
+        cleanup
+    }
+
     pub fn close_fd(&mut self, fd: ProcessFd) -> Result<FdEntry, ProcessError> {
         self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)
     }

@@ -764,6 +764,7 @@ pub extern "C" fn syscall_handler(
             arg2 as *const u8,
             arg3 as usize,
             arg4 as usize,
+            arg5 as usize,
         ),
         Syscall::TerminalDiag => sys_terminal_diag(
             arg0 as *const u8,
@@ -2818,29 +2819,40 @@ fn sys_spawn_args(
     block: *const u8,
     block_len: usize,
     argv_count: usize,
+    string_len: usize,
 ) -> i64 {
     let path = match copy_string_from_user_len(path, path_len, MAX_USER_PATH) {
         Ok(path) => path,
         Err(error) => return error,
     };
+    if string_len > block_len {
+        return EINVAL;
+    }
 
     let mut strings: Vec<String> = Vec::new();
+    let mut file_actions: Vec<SpawnFileAction> = Vec::new();
     if block_len > 0 {
-        // Copy the argv+env block through the validated user-copy helper rather
-        // than a raw from_raw_parts: it walks the page tables (PRESENT|USER) so
-        // an in-range-but-unmapped pointer returns EFAULT instead of faulting
-        // the kernel in ring 0 (which would panic the whole system).
+        // Copy the whole block through the validated user-copy helper rather than
+        // a raw from_raw_parts: it walks the page tables (PRESENT|USER) so an
+        // in-range-but-unmapped pointer returns EFAULT instead of faulting the
+        // kernel in ring 0 (which would panic the whole system). The block is
+        // [argv+env NUL-strings | serialized file actions]; `string_len` is where
+        // the string section ends.
         let bytes = match copy_buffer_from_user(block, block_len) {
             Ok(bytes) => bytes,
             Err(error) => return error,
         };
-        for piece in bytes.split(|&b| b == 0) {
+        for piece in bytes[..string_len].split(|&b| b == 0) {
             strings.push(String::from_utf8_lossy(piece).into_owned());
         }
         // A trailing NUL yields a final empty element; drop it.
         if strings.last().map(|s| s.is_empty()).unwrap_or(false) {
             strings.pop();
         }
+        file_actions = match parse_file_actions(&bytes[string_len..]) {
+            Ok(actions) => actions,
+            Err(error) => return error,
+        };
     }
     if argv_count == 0 || argv_count > strings.len() {
         return EINVAL;
@@ -2863,6 +2875,12 @@ fn sys_spawn_args(
     if crate::elf::ElfParser::new(&data).is_err() {
         return EIO;
     }
+    // Snapshot the parent's inheritable fds before the child exists; the child
+    // inherits them (POSIX) and the file actions then edit the child's table.
+    let parent_fds = match crate::process::current_process() {
+        Some(parent) => parent.snapshot_fds(),
+        None => return EINVAL,
+    };
     // posix_spawn (userspace) children are NEVER privileged — this is the
     // sandbox boundary: a user program cannot hand its children system-control.
     let pid = match crate::process::create_user_process_record(resolved.clone(), true, false) {
@@ -2873,7 +2891,131 @@ fn sys_spawn_args(
         let _ = crate::process::autoreap_process(pid, "spawn-args-prepare-failed");
         return EIO;
     }
+    if let Err(error) = setup_child_fds(pid, &parent_fds, &file_actions) {
+        let _ = crate::process::autoreap_process(pid, "spawn-args-fdsetup-failed");
+        return error;
+    }
     pid.0 as i64
+}
+
+/// A posix_spawn file action, decoded from the serialized spawn block. musl has
+/// already translated OPEN's flags into Dunit `OpenFlags` bits.
+enum SpawnFileAction {
+    Open { fd: u32, flags: u32, path: String },
+    Dup2 { srcfd: u32, fd: u32 },
+    Close { fd: u32 },
+    Chdir { path: String },
+    Fchdir,
+}
+
+/// Decode the file-actions section of the spawn block. Layout per action:
+/// `[cmd:u32][fd:u32][srcfd:u32][flags:u32][mode:u32][path_len:u32][path bytes]`
+/// (little-endian). `cmd` matches musl's FDOP_* (1=close 2=dup2 3=open 4=chdir
+/// 5=fchdir). A malformed section is EINVAL — never partially applied.
+fn parse_file_actions(bytes: &[u8]) -> Result<Vec<SpawnFileAction>, i64> {
+    const HEADER: usize = 24;
+    let mut actions = Vec::new();
+    let mut off = 0usize;
+    while off < bytes.len() {
+        if off + HEADER > bytes.len() {
+            return Err(EINVAL);
+        }
+        let word = |i: usize| {
+            u32::from_le_bytes([
+                bytes[off + i],
+                bytes[off + i + 1],
+                bytes[off + i + 2],
+                bytes[off + i + 3],
+            ])
+        };
+        let cmd = word(0);
+        let fd = word(4);
+        let srcfd = word(8);
+        let flags = word(12);
+        let _mode = word(16); // Dunit Open has no mode; kept for wire symmetry
+        let path_len = word(20) as usize;
+        off += HEADER;
+        if off + path_len > bytes.len() {
+            return Err(EINVAL);
+        }
+        let path = String::from_utf8_lossy(&bytes[off..off + path_len]).into_owned();
+        off += path_len;
+        actions.push(match cmd {
+            // Values match musl's FDOP_* (src/process/fdop.h).
+            1 => SpawnFileAction::Close { fd },
+            2 => SpawnFileAction::Dup2 { srcfd, fd },
+            3 => SpawnFileAction::Open { fd, flags, path },
+            4 => SpawnFileAction::Chdir { path },
+            5 => SpawnFileAction::Fchdir,
+            _ => return Err(EINVAL),
+        });
+    }
+    Ok(actions)
+}
+
+/// Build the child's fd table: inherit the parent's descriptors, then apply the
+/// posix_spawn file actions in order. On any error the caller reaps the child,
+/// so a half-built table never runs.
+fn setup_child_fds(
+    child: crate::process::ProcessId,
+    parent_fds: &[(u32, crate::process::FdEntry)],
+    actions: &[SpawnFileAction],
+) -> Result<(), i64> {
+    use crate::process::with_process_mut;
+    // Inherit the parent's fds, then take the inter-process VFS reference so a
+    // shared file is not closed while the child still holds it.
+    let vfs_fds = with_process_mut(child, |c| Ok(c.inherit_fds(parent_fds)))
+        .map_err(process_error_to_errno)?;
+    for vfs_fd in vfs_fds {
+        if let Some(vfs) = crate::fs::vfs::get_vfs() {
+            let _ = vfs.retain(vfs_fd);
+        }
+    }
+    // cwd is tracked locally so a CHDIR action affects later OPEN/CHDIR actions.
+    let mut cwd =
+        with_process_mut(child, |c| Ok(c.cwd.clone())).map_err(process_error_to_errno)?;
+    for action in actions {
+        match action {
+            SpawnFileAction::Open { fd, flags, path } => {
+                let open_flags = open_flags_from_u32(*flags)?;
+                let vfs_fd = crate::fs::vfs::get_vfs()
+                    .ok_or(EIO)
+                    .and_then(|vfs| vfs.open_at(&cwd, path, open_flags).map_err(vfs_error_to_errno))?;
+                let cleanup = with_process_mut(child, |c| Ok(c.place_vfs_fd(*fd, vfs_fd)))
+                    .map_err(process_error_to_errno)?;
+                apply_fd_cleanup(cleanup);
+            }
+            SpawnFileAction::Dup2 { srcfd, fd } => {
+                let cleanup = with_process_mut(child, |c| c.dup_fd(*srcfd, Some(*fd)))
+                    .map_err(process_error_to_errno)?
+                    .1;
+                apply_fd_cleanup(cleanup);
+            }
+            SpawnFileAction::Close { fd } => {
+                // POSIX: a close file action on a non-open fd is not an error.
+                if let Ok(cleanup) = with_process_mut(child, |c| c.drop_fd(*fd)) {
+                    apply_fd_cleanup(cleanup);
+                }
+            }
+            SpawnFileAction::Chdir { path } => {
+                let vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
+                let stat = vfs.stat_at(&cwd, path).map_err(vfs_error_to_errno)?;
+                if stat.file_type != crate::fs::vfs::FileType::Directory {
+                    return Err(ENOTDIR);
+                }
+                let normalized = vfs.normalize_at(&cwd, path).map_err(vfs_error_to_errno)?;
+                cwd = normalized.clone();
+                with_process_mut(child, |c| {
+                    c.cwd = normalized;
+                    Ok(())
+                })
+                .map_err(process_error_to_errno)?;
+            }
+            // No directory fd exists on Dunit, so fchdir has nothing to resolve.
+            SpawnFileAction::Fchdir => return Err(EOPNOTSUPP),
+        }
+    }
+    Ok(())
 }
 
 fn spawn_process_from_user(
