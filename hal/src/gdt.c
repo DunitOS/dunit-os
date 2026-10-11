@@ -37,6 +37,13 @@ gdt_entry_t gdt[7];
 gdt_ptr_t gdt_ptr;
 static tss_t kernel_tss;
 static uint8_t kernel_tss_stack[16384] __attribute__((aligned(16)));
+/* Dedicated interrupt-stack-table stacks so a fault whose delivery cannot push
+ * onto the current stack (e.g. a kernel-stack overflow, or a double fault /
+ * NMI) runs on a known-good stack instead of escalating to a triple fault and
+ * rebooting the machine. ist1 = #DF (vector 8), ist2 = NMI (vector 2); wired in
+ * idt.c. */
+static uint8_t kernel_df_stack[16384] __attribute__((aligned(16)));
+static uint8_t kernel_nmi_stack[16384] __attribute__((aligned(16)));
 
 extern void gdt_flush(uint64_t);
 extern void gdt_load_tss(uint16_t);
@@ -74,6 +81,8 @@ void hal_init_gdt(void) {
     gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xA0);
 
     kernel_tss.rsp0 = (uint64_t)&kernel_tss_stack[sizeof(kernel_tss_stack)];
+    kernel_tss.ist1 = (uint64_t)&kernel_df_stack[sizeof(kernel_df_stack)];
+    kernel_tss.ist2 = (uint64_t)&kernel_nmi_stack[sizeof(kernel_nmi_stack)];
     kernel_tss.iomap_base = sizeof(tss_t);
     gdt_set_tss_gate(5, (uint64_t)&kernel_tss, sizeof(tss_t) - 1);
     
