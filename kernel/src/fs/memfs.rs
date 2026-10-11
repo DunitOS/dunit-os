@@ -364,6 +364,14 @@ impl FileSystem for MemFs {
         Ok(new as u64)
     }
 
+    fn stat_handle(&mut self, handle: FileHandle) -> Result<FileStat> {
+        let hidx = self
+            .handle_index(handle)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        let path = self.open_handles[hidx].1.path.clone();
+        self.stat(&path)
+    }
+
     fn readdir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
         let clean = Self::clean(path);
         let mut entries = Vec::new();

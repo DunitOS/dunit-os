@@ -84,7 +84,8 @@
 #define SYS_TERMINAL_DIAG 78
 #define SYS_SPAWN_ARGS 79
 #define SYS_SEEK 80
+#define SYS_FSTAT 81
 
-#define DUNIT_SYSCALL_COUNT 81
+#define DUNIT_SYSCALL_COUNT 82
 
 #endif /* DUNIT_SYSCALL_H */

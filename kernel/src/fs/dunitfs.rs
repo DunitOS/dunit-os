@@ -941,6 +941,16 @@ impl FileSystem for DunitFs {
         Ok(new as u64)
     }
 
+    fn stat_handle(&mut self, handle: FileHandle) -> Result<FileStat> {
+        let handle_index = self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
+        let node = self.handles[handle_index].1.node;
+        let n = self.nodes[node].as_ref().ok_or(VfsError::NotFound)?;
+        Ok(FileStat {
+            file_type: n.file_type,
+            size: n.size as usize,
+        })
+    }
+
     fn fsync(&mut self, handle: FileHandle) -> Result<()> {
         self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
         self.commit()

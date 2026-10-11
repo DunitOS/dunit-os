@@ -90,6 +90,7 @@ pub enum Syscall {
     TerminalDiag = 78,
     SpawnArgs = 79,
     Seek = 80,
+    Fstat = 81,
 }
 
 impl Syscall {
@@ -177,6 +178,7 @@ impl Syscall {
             78 => Some(Syscall::TerminalDiag),
             79 => Some(Syscall::SpawnArgs),
             80 => Some(Syscall::Seek),
+            81 => Some(Syscall::Fstat),
             _ => None,
         }
     }
@@ -748,6 +750,7 @@ pub extern "C" fn syscall_handler(
             arg3 as usize,
         ),
         Syscall::Seek => sys_seek(arg0 as u32, arg1 as i64, arg2 as u32),
+        Syscall::Fstat => sys_fstat(arg0 as u32, arg1 as *mut UserFileStat),
     }
 }
 
@@ -1046,6 +1049,46 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     }
 
     bytes_read as i64
+}
+
+fn sys_fstat(fd: u32, stat: *mut UserFileStat) -> i64 {
+    if !is_valid_fd_number(fd) {
+        return EBADF;
+    }
+    if let Err(error) = validate_user_range(stat as u64, core::mem::size_of::<UserFileStat>()) {
+        return error;
+    }
+    // stat-by-fd only applies to real VFS files (not stdio streams).
+    match crate::process::get_fd(fd).map(|entry| entry.target) {
+        Some(crate::process::FdTarget::Vfs(_)) => {}
+        Some(_) => return EINVAL,
+        None => return EBADF,
+    }
+    let vfs_fd = match process_vfs_fd(fd) {
+        Ok(vfs_fd) => vfs_fd,
+        Err(error) => return error,
+    };
+    let file_stat = match crate::fs::vfs::get_vfs()
+        .ok_or(EIO)
+        .and_then(|vfs| vfs.fstat(vfs_fd).map_err(vfs_error_to_errno))
+    {
+        Ok(stat) => stat,
+        Err(error) => return error,
+    };
+    let user_stat = UserFileStat {
+        file_type: user_file_type(file_stat.file_type),
+        size: file_stat.size,
+    };
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            &user_stat as *const UserFileStat as *const u8,
+            core::mem::size_of::<UserFileStat>(),
+        )
+    };
+    match copy_buffer_to_user(stat as *mut u8, bytes) {
+        Ok(()) => 0,
+        Err(error) => error,
+    }
 }
 
 fn sys_seek(fd: u32, offset: i64, whence: u32) -> i64 {
