@@ -1,0 +1,13 @@
+{
+  "description": "Capability handles (memory objects, rights, map, transfer). userspace/system_apps/handle_test exercises handle_create_memory/handle_write/handle_read/map/transfer end to end. Also a regression guard for the sys_handle_read scratch-allocation bound (kernel/src/syscall/mod.rs): the per-read kernel buffer is clamped to MAX_MEMORY_OBJECT so a userspace-controlled length can no longer drive an unbounded kernel allocation. Run: tools/qemu_test.py --build --markers-file tools/m6_handle_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec handle_test"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "handle_test: start", "claim": "the handle test launched", "source": "userspace/system_apps/handle_test/src/main.rs" },
+    { "marker": "handle_test: OK", "claim": "memory-object create/write/read (bounded scratch), rights enforcement, map and transfer all succeeded", "source": "userspace/system_apps/handle_test/src/main.rs" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic (e.g. an allocation abort on the handle-read path)", "source": "kernel/src/lib.rs" },
+    { "marker": "handle_test: FAIL", "why": "a handle operation returned the wrong result", "source": "userspace/system_apps/handle_test/src/main.rs" }
+  ]
+}
