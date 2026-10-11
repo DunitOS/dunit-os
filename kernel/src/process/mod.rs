@@ -82,6 +82,31 @@ fn alloc_shared_vm_object(length: usize) -> Result<u64, ProcessError> {
 }
 /// Таблица процессов. Раньше `static mut Option<Vec<..>>`; теперь `UnsafeCell`-
 /// newtype без `static mut`. Единственная точка доступа — `process_table_mut`.
+///
+/// Безопасность на одном процессоре (UP). Таблица трогается с двух сторон:
+/// кооперативным путём ядра и таймерным IRQ (`wake_expired_waiters` ->
+/// `wake_entry`, interrupts.rs). Корректность держится на трёх инвариантах, а не
+/// на локе — на UP крутящийся лок свёлся бы ровно к тому же маскированию IF (его
+/// и делает `IrqSafeSpinLock::lock`), но создал бы ложное впечатление
+/// SMP-готовности, которой в ядре нет (единый syscall-стек, глобальные
+/// `syscall_saved_*`, в планировщике `smp=off`). Инварианты:
+///   1. Объект процесса лежит в `Box` (`record.process: Option<Box<Process>>`).
+///      Ссылка, выданная наружу (`current_process`/`current_thread`), указывает на
+///      кучу за `Box`, а не в буфер `Vec`, поэтому переживает реаллокацию таблицы.
+///   2. Любая СТРУКТУРНАЯ мутация (`push`/`remove`, меняющая длину/буфер) идёт при
+///      снятом IF — syscall-контекст (SFMASK маскирует IF, syscall.asm) либо явный
+///      `InterruptGuard` на каждом таком месте. Так реаллокация не перекроется с
+///      чтением таблицы из таймерного IRQ.
+///   3. Таймерный путь (`wake_entry`) мутирует запись ТОЛЬКО на месте и НИКОГДА не
+///      меняет длину таблицы, поэтому не инвалидирует индексы/ссылки, которые
+///      удерживает прерванный (Running) контекст; саму Running-запись он не трогает
+///      (будит лишь Blocked). Это позволяет планировщику читать таблицу при
+///      разрешённом IF на пути `enter_user_process` -> `run_user_context` (где IF
+///      обязан быть включён ради преемпшна userspace).
+/// Формально выдача `&'static mut` из таблицы нарушает noalias, но записи идут из
+/// асинхронного прерывания (невидимого оптимизатору) в непересекающуюся и
+/// стабильную (`Box`) память, так что мискомпиляции нет. Инвариант 3 проверяется
+/// в `wake_entry`.
 struct ProcessTableCell(UnsafeCell<Option<Vec<ProcessRecord>>>);
 unsafe impl Sync for ProcessTableCell {}
 static PROCESS_TABLE: ProcessTableCell = ProcessTableCell(UnsafeCell::new(None));
@@ -1976,6 +2001,12 @@ pub fn block_current(key_ipc: Option<ProcessId>, deadline: Option<u64>) -> Resul
 
 fn wake_entry(entry: WaitEntry) {
     let table = process_table_mut();
+    // Инвариант 3 таблицы процессов (см. ProcessTableCell): пробуждение мутирует
+    // запись только на месте и не меняет длину таблицы, иначе удерживаемые при
+    // включённом IF ссылки планировщика повиснут. Длина фиксируется здесь и
+    // сверяется в конце (debug-сборка): страховка от будущей правки, которая
+    // добавит push/remove на путь пробуждения.
+    let len_before = table.len();
     if let Some(index) = process_record_index(table, entry.entity) {
         let record = &mut table[index];
         if record.state == ProcessState::Blocked {
@@ -1986,6 +2017,11 @@ fn wake_entry(entry: WaitEntry) {
             let _ = scheduler::enqueue_ready(entry.entity);
         }
     }
+    debug_assert_eq!(
+        process_table_mut().len(),
+        len_before,
+        "wake_entry изменил длину таблицы процессов — нарушен инвариант 3"
+    );
 }
 
 pub fn wake_ipc_waiters(pid: ProcessId) {
