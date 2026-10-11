@@ -42,6 +42,43 @@ struct Pty {
     slave: Option<ProcessId>,
     to_slave: VecDeque<u8>,
     to_master: VecDeque<u8>,
+    /// POSIX `struct termios` (opaque 60-byte blob, x86_64 layout). Default is
+    /// RAW (c_lflag has neither ICANON nor ECHO) because the Dunit shells do
+    /// their own line editing — see `raw_termios`. A program opts into canonical
+    /// mode / echo with tcsetattr, and `master_write`/`slave_read_stdin` honour
+    /// it then.
+    termios: [u8; TERMIOS_SIZE],
+    /// Canonical-mode line accumulator: input is buffered here (not delivered to
+    /// the slave) until a newline, so a canonical read gets whole lines.
+    canon: VecDeque<u8>,
+}
+
+/// `struct termios` size + the few fields the line discipline reads (x86_64:
+/// c_iflag/oflag/cflag/lflag as u32, then c_line:u8, c_cc[32]:u8, 2×speed_t).
+const TERMIOS_SIZE: usize = 60;
+const C_LFLAG_OFF: usize = 12;
+const C_CC_OFF: usize = 17;
+const ICANON: u32 = 0o000002;
+const ECHO_FLAG: u32 = 0o000010;
+const VERASE: usize = 2;
+const VMIN: usize = 6;
+
+/// Default termios: RAW (no ICANON/ECHO), VERASE=DEL, VMIN=1. Matches the pty's
+/// historical passthrough behaviour so the shells keep working unchanged.
+const fn raw_termios() -> [u8; TERMIOS_SIZE] {
+    let mut t = [0u8; TERMIOS_SIZE];
+    t[C_CC_OFF + VERASE] = 0x7f;
+    t[C_CC_OFF + VMIN] = 1;
+    t
+}
+
+fn termios_lflag(t: &[u8; TERMIOS_SIZE]) -> u32 {
+    u32::from_le_bytes([
+        t[C_LFLAG_OFF],
+        t[C_LFLAG_OFF + 1],
+        t[C_LFLAG_OFF + 2],
+        t[C_LFLAG_OFF + 3],
+    ])
 }
 
 /// Синглтон таблицы PTY. Тот же паттерн, что у `IpcManager`/`PROCESS_TABLE`:
@@ -93,6 +130,8 @@ pub fn create(master: ProcessId) -> u32 {
             slave: None,
             to_slave: VecDeque::new(),
             to_master: VecDeque::new(),
+            termios: raw_termios(),
+            canon: VecDeque::new(),
         },
     );
     id
@@ -110,13 +149,71 @@ pub fn attach_slave(id: u32, master: ProcessId, slave: ProcessId) -> bool {
     }
 }
 
-/// Master → slave: enqueue keystrokes for the child's stdin. Returns bytes
-/// accepted, or `None` if the pty is unknown / not owned by `master`.
+/// Master → slave: enqueue keystrokes for the child's stdin, applying the
+/// slave's termios line discipline. RAW (default) is a straight passthrough.
+/// With ICANON, input is line-buffered (ERASE/backspace edits the pending line)
+/// and only released to the slave on a newline. With ECHO, input is echoed back
+/// to the master so the terminal shows it. Returns bytes accepted, or `None` if
+/// the pty is unknown / not owned by `master`.
 pub fn master_write(id: u32, master: ProcessId, data: &[u8]) -> Option<usize> {
-    match table().get_mut(&id) {
-        Some(pty) if pty.master == master => Some(ring_push(&mut pty.to_slave, data)),
-        _ => None,
+    let pty = table().get_mut(&id)?;
+    if pty.master != master {
+        return None;
     }
+    let lflag = termios_lflag(&pty.termios);
+    let canonical = lflag & ICANON != 0;
+    let echo = lflag & ECHO_FLAG != 0;
+    if !canonical && !echo {
+        return Some(ring_push(&mut pty.to_slave, data)); // fast raw path
+    }
+    let erase = pty.termios[C_CC_OFF + VERASE];
+    for &b in data {
+        if canonical && (b == erase || b == 0x08) {
+            if pty.canon.pop_back().is_some() && echo {
+                ring_push(&mut pty.to_master, b"\x08 \x08");
+            }
+            continue;
+        }
+        if canonical {
+            pty.canon.push_back(b);
+            if echo {
+                ring_push(&mut pty.to_master, &[b]);
+            }
+            if b == b'\n' {
+                let line: Vec<u8> = pty.canon.drain(..).collect();
+                ring_push(&mut pty.to_slave, &line);
+            }
+        } else {
+            ring_push(&mut pty.to_slave, &[b]);
+            if echo {
+                ring_push(&mut pty.to_master, &[b]);
+            }
+        }
+    }
+    Some(data.len())
+}
+
+/// tcgetattr: the slave's `struct termios`, or `None` if `pid` is not a pty
+/// slave (so `sys_ioctl` reports ENOTTY).
+pub fn get_termios(pid: ProcessId) -> Option<[u8; TERMIOS_SIZE]> {
+    let id = find_by_slave(pid)?;
+    Some(table().get(&id).unwrap().termios)
+}
+
+/// tcsetattr: replace the slave's termios. Returns false if `pid` is not a slave.
+pub fn set_termios(pid: ProcessId, blob: &[u8]) -> bool {
+    let Some(id) = find_by_slave(pid) else {
+        return false;
+    };
+    let pty = table().get_mut(&id).unwrap();
+    let n = blob.len().min(TERMIOS_SIZE);
+    pty.termios[..n].copy_from_slice(&blob[..n]);
+    true
+}
+
+/// True if `pid` is a pty slave (its stdin is a tty) — backs isatty/ENOTTY.
+pub fn is_slave(pid: ProcessId) -> bool {
+    find_by_slave(pid).is_some()
 }
 
 /// Master ← slave: drain the child's stdout. Returns `(bytes, hangup)` where
@@ -153,7 +250,26 @@ pub fn close(id: u32, master: ProcessId) -> bool {
 pub fn slave_read_stdin(pid: ProcessId, out: &mut [u8]) -> Option<SlaveRead> {
     let id = find_by_slave(pid)?;
     let pty = table().get_mut(&id).unwrap();
-    let n = ring_pop(&mut pty.to_slave, out);
+    // Canonical reads return at most one line (stop after the first newline);
+    // raw reads drain whatever is buffered.
+    let n = if termios_lflag(&pty.termios) & ICANON != 0 {
+        let mut cnt = 0;
+        while cnt < out.len() {
+            match pty.to_slave.pop_front() {
+                Some(b) => {
+                    out[cnt] = b;
+                    cnt += 1;
+                    if b == b'\n' {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+        cnt
+    } else {
+        ring_pop(&mut pty.to_slave, out)
+    };
     if n > 0 {
         return Some(SlaveRead::Data(n));
     }

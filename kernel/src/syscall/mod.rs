@@ -97,6 +97,7 @@ pub enum Syscall {
     DisplayOwner = 85,
     Fcntl = 86,
     Poll = 87,
+    Ioctl = 88,
 }
 
 impl Syscall {
@@ -191,6 +192,7 @@ impl Syscall {
             85 => Some(Syscall::DisplayOwner),
             86 => Some(Syscall::Fcntl),
             87 => Some(Syscall::Poll),
+            88 => Some(Syscall::Ioctl),
             _ => None,
         }
     }
@@ -203,6 +205,7 @@ pub const ENOSYS: i64 = -38;
 pub const ENOTEMPTY: i64 = -39;
 pub const EFBIG: i64 = -27;
 pub const ESPIPE: i64 = -29;
+pub const ENOTTY: i64 = -25;
 pub const ENAMETOOLONG: i64 = -36;
 pub const ENOENT: i64 = -2;
 pub const EACCES: i64 = -13;
@@ -769,6 +772,7 @@ pub extern "C" fn syscall_handler(
         Syscall::DisplayOwner => crate::handle::display_owner() as i64,
         Syscall::Fcntl => sys_fcntl(arg0 as u32, arg1, arg2),
         Syscall::Poll => sys_poll(arg0 as *mut u8, arg1 as usize),
+        Syscall::Ioctl => sys_ioctl(arg0 as u32, arg1, arg2),
     }
 }
 
@@ -1398,6 +1402,64 @@ fn poll_one(fd: i32, events: u16) -> u16 {
         }
     }
     revents
+}
+
+const TCGETS: u64 = 0x5401;
+const TCSETS: u64 = 0x5402;
+const TCSETSW: u64 = 0x5403;
+const TCSETSF: u64 = 0x5404;
+const TIOCGWINSZ: u64 = 0x5413;
+const TERMIOS_BYTES: usize = 60;
+
+/// ioctl for tty control: TCGETS/TCSETS* (termios) and TIOCGWINSZ route to the
+/// caller's pty (a slave has exactly one, so routing is by pid, not fd). A
+/// non-tty caller gets ENOTTY (so isatty() is correct); an unknown ioctl on a
+/// tty gets EINVAL. Other devices have no ioctls yet.
+fn sys_ioctl(_fd: u32, cmd: u64, arg: u64) -> i64 {
+    let pid = match crate::process::current_process().map(|p| p.pid) {
+        Some(pid) => pid,
+        None => return ENOTTY,
+    };
+    match cmd {
+        TCGETS => match crate::pty::get_termios(pid) {
+            Some(termios) => match copy_buffer_to_user(arg as *mut u8, &termios) {
+                Ok(()) => 0,
+                Err(error) => error,
+            },
+            None => ENOTTY,
+        },
+        TCSETS | TCSETSW | TCSETSF => {
+            if !crate::pty::is_slave(pid) {
+                return ENOTTY;
+            }
+            match copy_buffer_from_user(arg as *const u8, TERMIOS_BYTES) {
+                Ok(blob) => {
+                    crate::pty::set_termios(pid, &blob);
+                    0
+                }
+                Err(error) => error,
+            }
+        }
+        TIOCGWINSZ => {
+            if !crate::pty::is_slave(pid) {
+                return ENOTTY;
+            }
+            // struct winsize { u16 ws_row, ws_col, ws_xpixel, ws_ypixel }.
+            // Default 24x80 — the pty does not track the terminal's live size.
+            let ws: [u8; 8] = [24, 0, 80, 0, 0, 0, 0, 0];
+            match copy_buffer_to_user(arg as *mut u8, &ws) {
+                Ok(()) => 0,
+                Err(error) => error,
+            }
+        }
+        _ => {
+            if crate::pty::is_slave(pid) {
+                EINVAL
+            } else {
+                ENOTTY
+            }
+        }
+    }
 }
 
 fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
