@@ -167,6 +167,12 @@ userspace:
 		done; \
 	else echo "[USERSPACE] WARNING: $(MUSL_DIR) unavailable (not a git checkout or offline); musl ctests skipped. Fetch with: git submodule update --init --recursive"; fi
 	@echo "[USERSPACE] building tcc ctests ($(TCC_CTESTS)) with the Dunit cross-tcc"
+	@if [ ! -f $(TCC_DIR)/tools/dunit/build-tcc.sh ] && [ -f .gitmodules ] && \
+	   { [ -d .git ] || [ -f .git ]; } && command -v git >/dev/null 2>&1; then \
+		echo "[USERSPACE] fetching $(TCC_DIR) submodule (git submodule update --init)"; \
+		git submodule update --init --recursive $(TCC_DIR) || \
+			echo "[USERSPACE] WARNING: tcc submodule fetch failed (offline?)"; \
+	fi
 	@if [ -f $(TCC_DIR)/tools/dunit/build-tcc.sh ] && [ -f $(abspath $(MUSL_LIBC)) ]; then set -e; \
 		[ -f $(abspath $(TCC_BIN)) ] || CC=$(CC) $(TCC_DIR)/tools/dunit/build-tcc.sh $(abspath $(MUSL_SYSROOT)); \
 		for prog in $(TCC_CTESTS); do \
@@ -184,6 +190,14 @@ userspace:
 
 iso: $(BUILD_DIR)/kernel.elf userspace
 	test -f $(LIMINE_CONFIG)
+	@if [ ! -d limine ]; then \
+		echo "[ISO] cloning Limine bootloader (v8.x-binary)"; \
+		git clone https://github.com/limine-bootloader/limine.git --branch=v8.x-binary --depth=1; \
+	fi
+	@if [ ! -x limine/limine ]; then \
+		echo "[ISO] building Limine host tool"; \
+		$(CC) -O2 -o limine/limine limine/limine.c; \
+	fi
 	python3 tools/install_disk.py $(BUILD_DIR)/installer-esp.img --esp-image-only --no-build --config $(LIMINE_CONFIG) --yes-i-know-this-erases-the-disk
 	mkdir -p $(ISO_DIR)/boot/limine
 	cp $(BUILD_DIR)/kernel.elf $(ISO_DIR)/boot/
