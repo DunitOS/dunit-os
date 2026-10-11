@@ -145,24 +145,46 @@ pub fn handle_double_fault(frame: &InterruptFrame) {
 }
 
 pub fn handle_invalid_tss(frame: &InterruptFrame) {
-    panic!(
-        "Invalid TSS at RIP: {:#x}, error code: {:#x}",
-        frame.rip, frame.err_code
-    );
+    if (frame.cs & 0x3) == 3 {
+        terminate_current_process("invalid-tss", frame, 0, crate::process::ProcessFault::Unknown);
+    } else {
+        panic!(
+            "Invalid TSS at RIP: {:#x}, error code: {:#x}",
+            frame.rip, frame.err_code
+        );
+    }
 }
 
 pub fn handle_segment_not_present(frame: &InterruptFrame) {
-    panic!(
-        "Segment not present at RIP: {:#x}, error code: {:#x}",
-        frame.rip, frame.err_code
-    );
+    if (frame.cs & 0x3) == 3 {
+        terminate_current_process(
+            "segment-not-present",
+            frame,
+            0,
+            crate::process::ProcessFault::Unknown,
+        );
+    } else {
+        panic!(
+            "Segment not present at RIP: {:#x}, error code: {:#x}",
+            frame.rip, frame.err_code
+        );
+    }
 }
 
 pub fn handle_stack_segment_fault(frame: &InterruptFrame) {
-    panic!(
-        "Stack segment fault at RIP: {:#x}, error code: {:#x}",
-        frame.rip, frame.err_code
-    );
+    if (frame.cs & 0x3) == 3 {
+        terminate_current_process(
+            "stack-segment",
+            frame,
+            0,
+            crate::process::ProcessFault::Unknown,
+        );
+    } else {
+        panic!(
+            "Stack segment fault at RIP: {:#x}, error code: {:#x}",
+            frame.rip, frame.err_code
+        );
+    }
 }
 
 pub fn handle_general_protection_fault(frame: &InterruptFrame) {
@@ -209,10 +231,19 @@ pub fn handle_page_fault(frame: &InterruptFrame) {
 pub fn handle_x87_floating_point(_frame: &InterruptFrame) {}
 
 pub fn handle_alignment_check(frame: &InterruptFrame) {
-    panic!(
-        "Alignment check at RIP: {:#x}, error code: {:#x}",
-        frame.rip, frame.err_code
-    );
+    if (frame.cs & 0x3) == 3 {
+        terminate_current_process(
+            "alignment-check",
+            frame,
+            0,
+            crate::process::ProcessFault::Unknown,
+        );
+    } else {
+        panic!(
+            "Alignment check at RIP: {:#x}, error code: {:#x}",
+            frame.rip, frame.err_code
+        );
+    }
 }
 
 pub fn handle_machine_check(frame: &InterruptFrame) {

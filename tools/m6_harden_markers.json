@@ -1,0 +1,19 @@
+{
+  "description": "Kernel hardening against hostile/buggy userspace (M6.5). userspace/ctests/musl_harden.c drives four checks: SpawnArgs(79) with an unmapped block -> EFAULT (not a ring-0 panic), DrawRect(12) from a non-owner -> EACCES, an unbounded RAM-file write -> EFBIG (not heap OOM-abort), and a child that raises #SS gets killed while the kernel keeps running. Run: tools/qemu_test.py --build --markers-file tools/m6_harden_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 60 --timeout 260 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_harden"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[HARDEN] spawn_badptr EFAULT OK", "claim": "SpawnArgs validates the user block via the page-walking copy helper and returns EFAULT instead of faulting in ring 0", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[HARDEN] draw_rect EACCES OK", "claim": "DrawRect now enforces the display-owner capability like DrawPixel/FbPresent", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[HARDEN] memfs_cap EFBIG after", "claim": "an unbounded RAM-file write is capped with EFBIG instead of exhausting the kernel heap", "source": "kernel/src/fs/memfs.rs" },
+    { "marker": "[HARDEN] fault_child signaled", "claim": "a user process that raised #SS was terminated by the kernel, which kept running (fault isolation)", "source": "kernel/src/interrupts.rs" },
+    { "marker": "[HARDEN] DONE", "claim": "the kernel survived every hostile input and the driver ran to completion", "source": "userspace/ctests/musl_harden.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic — a userspace action took down the kernel", "source": "kernel/src/lib.rs" },
+    { "marker": "[HARDEN] spawn_badptr FAIL", "why": "SpawnArgs did not reject the bad pointer with EFAULT", "source": "userspace/ctests/musl_harden.c" },
+    { "marker": "[HARDEN] draw_rect FAIL", "why": "DrawRect capability gate missing or wrong errno", "source": "userspace/ctests/musl_harden.c" },
+    { "marker": "[HARDEN] memfs_cap FAIL", "why": "RAM-file write was not capped with EFBIG", "source": "userspace/ctests/musl_harden.c" },
+    { "marker": "[HARDEN] fault_child FAIL", "why": "fault isolation did not kill the faulting child as expected", "source": "userspace/ctests/musl_harden.c" }
+  ]
+}

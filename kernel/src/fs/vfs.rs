@@ -141,6 +141,7 @@ pub enum VfsError {
     Unsupported,
     IoError,
     DirectoryNotEmpty,
+    FileTooBig,
 }
 
 impl fmt::Display for VfsError {
@@ -156,6 +157,7 @@ impl fmt::Display for VfsError {
             VfsError::Unsupported => write!(f, "Operation unsupported"),
             VfsError::IoError => write!(f, "I/O error"),
             VfsError::DirectoryNotEmpty => write!(f, "Directory not empty"),
+            VfsError::FileTooBig => write!(f, "File too large"),
         }
     }
 }

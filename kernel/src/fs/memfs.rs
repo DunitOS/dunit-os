@@ -9,6 +9,13 @@ const BASE_DIRS: [&str; 8] = [
     "kernel", "proc", "app", "assets", "dev", "cfg", "usr", "tmp",
 ];
 
+/// Upper bound on a single RAM-backed (Owned) file. MemFS data lives in the
+/// kernel heap, so without a cap a userspace process that keeps appending can
+/// exhaust the heap and abort the kernel. 16 MiB is far above any legitimate
+/// temp/config file on this OS (persistent data goes to DunitFS, not here); a
+/// write past it returns EFBIG instead of taking the system down.
+const MAX_MEMFS_FILE_SIZE: usize = 16 * 1024 * 1024;
+
 struct MemNode {
     path: String,
     file_type: FileType,
@@ -311,6 +318,12 @@ impl FileSystem for MemFs {
             self.open_handles[hidx].1.offset
         };
         let end = offset + buf.len();
+        // Cap a single RAM file so a runaway writer cannot grow it until the
+        // kernel heap is exhausted (an unbounded write used to OOM-abort the
+        // whole kernel). Honest error (EFBIG) instead of taking the system down.
+        if end > MAX_MEMFS_FILE_SIZE {
+            return Err(VfsError::FileTooBig);
+        }
         if end > self.nodes[nidx].data.len() {
             self.nodes[nidx].data.resize(end)?;
         }

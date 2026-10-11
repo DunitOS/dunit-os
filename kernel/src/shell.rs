@@ -208,6 +208,7 @@ fn vfs_error_str(error: VfsError) -> &'static str {
         VfsError::Unsupported => "unsupported",
         VfsError::IoError => "I/O error",
         VfsError::DirectoryNotEmpty => "Directory not empty",
+        VfsError::FileTooBig => "file too large",
     }
 }
 

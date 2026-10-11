@@ -262,6 +262,7 @@ fn terminal_exec(console: &mut terminal::FbConsole, cwd: &str, command_line: &st
                 fs::vfs::VfsError::Unsupported => "unsupported",
                 fs::vfs::VfsError::IoError => "I/O error",
                 fs::vfs::VfsError::DirectoryNotEmpty => "Directory not empty",
+                fs::vfs::VfsError::FileTooBig => "file too large",
             });
             console.write_str("\n");
         }
