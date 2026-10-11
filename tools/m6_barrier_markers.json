@@ -1,0 +1,13 @@
+{
+  "description": "pthread_barrier over the native Dunit futex (M6-E pthread subset, M6.5 audit fix). The barrier owner's wait used a raw Linux SYS_futex (ENOSYS sentinel) and busy-spun; now it blocks on the native FutexWait via __futexwait like every other musl wait path (toolchains/dunit-musl/src/thread/pthread_barrier_wait.c). userspace/ctests/musl_barrier.c rendezvouses 4 threads at a barrier. Run: tools/qemu_test.py --build --markers-file tools/m6_barrier_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 240 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_barrier"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[BARRIER] before=4 after=4 serial=1", "claim": "all 4 threads reached and crossed the barrier (no deadlock on the native futex) and exactly one got PTHREAD_BARRIER_SERIAL_THREAD", "source": "userspace/ctests/musl_barrier.c" },
+    { "marker": "[BARRIER] OK", "claim": "pthread_barrier works over the native Dunit futex", "source": "toolchains/dunit-musl/src/thread/pthread_barrier_wait.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[BARRIER] FAIL", "why": "barrier init/create failed or threads did not rendezvous correctly", "source": "userspace/ctests/musl_barrier.c" }
+  ]
+}
