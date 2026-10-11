@@ -1,0 +1,17 @@
+{
+  "description": "fs: rewinddir + O_EXCL (M6-A, tcc-prep). userspace/ctests/musl_direxcl.c: rewinddir restarts a snapshot-backed directory (opendir snapshots via native Readdir, cursor lives in the snapshot, dir->fd=-1), and open(O_CREAT|O_EXCL) atomically creates — succeeding when absent, failing EEXIST when present. opendir capacity was also raised 256->1024 (kernel MAX_USER_DIRENTS=1024); not directly markable here (/app has few entries), correct by construction. Run: tools/qemu_test.py --build --markers-file tools/m6_direxcl_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_direxcl"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[DIREXCL] rewind OK", "claim": "rewinddir reset the snapshot cursor so a second pass saw the same entry count", "source": "toolchains/dunit-musl/src/dirent/rewinddir.c" },
+    { "marker": "[DIREXCL] excl create OK", "claim": "open(O_CREAT|O_EXCL) created a new file", "source": "kernel/src/fs/vfs.rs" },
+    { "marker": "[DIREXCL] excl reject OK", "claim": "open(O_CREAT|O_EXCL) on an existing path failed with EEXIST", "source": "kernel/src/fs/dunitfs.rs" },
+    { "marker": "[DIREXCL] DONE", "claim": "the test ran to completion", "source": "userspace/ctests/musl_direxcl.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[DIREXCL] rewind FAIL", "why": "rewinddir did not restart iteration", "source": "toolchains/dunit-musl/src/dirent/rewinddir.c" },
+    { "marker": "[DIREXCL] excl create FAIL", "why": "exclusive create of an absent path failed", "source": "kernel/src/fs/memfs.rs" },
+    { "marker": "[DIREXCL] excl reject FAIL", "why": "exclusive create of an existing path did not return EEXIST", "source": "kernel/src/fs/vfs.rs" }
+  ]
+}

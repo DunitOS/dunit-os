@@ -233,7 +233,12 @@ impl FileSystem for MemFs {
             return Err(VfsError::InvalidPath);
         }
 
-        if self.node_type(path).is_none() && flags.create() {
+        let exists = self.node_type(path).is_some();
+        // O_EXCL: exclusive create must fail if the path already exists.
+        if flags.create() && flags.is_exclusive() && exists {
+            return Err(VfsError::AlreadyExists);
+        }
+        if !exists && flags.create() {
             self.create(path)?;
         }
 

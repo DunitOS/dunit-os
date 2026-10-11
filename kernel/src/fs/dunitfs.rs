@@ -862,6 +862,10 @@ impl FileSystem for DunitFs {
             return Err(VfsError::PermissionDenied);
         }
         let clean = Self::clean(path);
+        // O_EXCL: exclusive create must fail if the path already exists.
+        if flags.create() && flags.is_exclusive() && self.node_index(clean).is_some() {
+            return Err(VfsError::AlreadyExists);
+        }
         let index = match self.node_index(clean) {
             Some(index) => index,
             None if flags.create() => {

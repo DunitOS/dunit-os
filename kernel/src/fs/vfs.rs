@@ -27,6 +27,9 @@ impl OpenFlags {
     pub const CREATE: Self = Self { bits: 1 << 2 };
     pub const TRUNC: Self = Self { bits: 1 << 3 };
     pub const APPEND: Self = Self { bits: 1 << 4 };
+    /// Exclusive create: with CREATE, fail (AlreadyExists -> EEXIST) if the path
+    /// already exists. Backs POSIX O_EXCL (atomic create used by mkstemp/tcc).
+    pub const EXCL: Self = Self { bits: 1 << 5 };
     pub const READ_WRITE: Self = Self {
         bits: Self::READ.bits | Self::WRITE.bits,
     };
@@ -35,7 +38,8 @@ impl OpenFlags {
         | Self::WRITE.bits
         | Self::CREATE.bits
         | Self::TRUNC.bits
-        | Self::APPEND.bits;
+        | Self::APPEND.bits
+        | Self::EXCL.bits;
 
     pub const fn from_bits(bits: u32) -> Self {
         Self { bits }
@@ -69,12 +73,19 @@ impl OpenFlags {
         self.contains(Self::APPEND)
     }
 
+    pub const fn is_exclusive(self) -> bool {
+        self.contains(Self::EXCL)
+    }
+
     pub const fn is_valid(self) -> bool {
         let has_unknown = (self.bits & !Self::VALID_BITS) != 0;
         let has_access_mode = self.can_read() || self.can_write();
         let write_only_modifiers_ok = (!self.trunc() && !self.append()) || self.can_write();
+        // EXCL is only meaningful together with CREATE; reject it alone rather
+        // than silently ignore it (M6.1: no quiet no-op).
+        let excl_needs_create = !self.is_exclusive() || self.create();
 
-        !has_unknown && has_access_mode && write_only_modifiers_ok
+        !has_unknown && has_access_mode && write_only_modifiers_ok && excl_needs_create
     }
 }
 
