@@ -1,0 +1,15 @@
+{
+  "description": "termios line discipline + ioctl(TCGETS/TCSETS/TIOCGWINSZ) over a pty slave (POSIX-gap list). Kernel Ioctl syscall (88) routes to the pty termios store (kernel/src/syscall/mod.rs sys_ioctl -> kernel/src/pty/mod.rs get_termios/set_termios/is_slave); the pty line discipline honours ICANON (line buffering + VERASE erase) and ECHO (kernel/src/pty/mod.rs master_write/slave_read_stdin). musl ioctl maps to 88 (tcgetattr/tcsetattr/isatty). /app/termios_test owns a pty and drives /app/musl_termios (the slave switches to canonical+echo, master types he<DEL>llo and verifies the echoed erase and the delivered line hllo). Run: tools/qemu_test.py --build --markers-file tools/m6_termios_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 240 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec /app/termios_test"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[TERMIOS] slave isatty + tcgetattr/tcsetattr round-trip ok", "claim": "a pty slave is a tty and tcgetattr/tcsetattr round-trip through Ioctl TCGETS/TCSETS", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[TERMIOS] echo + erase bytes observed on master", "claim": "ECHO echoed the typed input and the VERASE erase emitted the backspace sequence", "source": "kernel/src/pty/mod.rs" },
+    { "marker": "[TERMIOS] canonical line delivered: hllo", "claim": "ICANON line-buffered the input, applied the backspace edit, and released the whole line on newline", "source": "kernel/src/pty/mod.rs" },
+    { "marker": "[TERMIOS] PASS", "claim": "the full termios round-trip passed end to end", "source": "userspace/system_apps/termios_test/src/main.rs" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[TERMIOS] FAIL", "why": "any termios verification step failed", "source": "userspace/system_apps/termios_test/src/main.rs" }
+  ]
+}

@@ -1,0 +1,19 @@
+# PTY master driver for the termios line-discipline smoke test.
+#
+# Owns a pty and spawns `/app/musl_termios` as its slave. The slave switches
+# itself to canonical+echo via tcsetattr and announces readiness; the master
+# then types `he<DEL>llo\n` on the master side and verifies, off the bytes that
+# come back, that the kernel line discipline echoed the input (incl. the erase
+# "\x08 \x08") and delivered the backspace-edited line `hllo` to the slave.
+# Prints [TERMIOS] markers for the smoke harness; exits 0 on a full pass.
+[package]
+name = "termios_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libdunit = { path = "../../libdunit" }
+
+[[bin]]
+name = "termios_test"
+path = "src/main.rs"
