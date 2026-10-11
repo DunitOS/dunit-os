@@ -923,6 +923,24 @@ impl FileSystem for DunitFs {
         self.commit()
     }
 
+    fn seek(&mut self, handle: FileHandle, offset: i64, whence: u32) -> Result<u64> {
+        let handle_index = self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
+        let node = self.handles[handle_index].1.node;
+        let size = self.nodes[node].as_ref().ok_or(VfsError::NotFound)?.size as i64;
+        let base = match whence {
+            0 => 0,                                       // SEEK_SET
+            1 => self.handles[handle_index].1.offset as i64, // SEEK_CUR
+            2 => size,                                    // SEEK_END
+            _ => return Err(VfsError::InvalidPath),
+        };
+        let new = base.checked_add(offset).ok_or(VfsError::InvalidPath)?;
+        if new < 0 {
+            return Err(VfsError::InvalidPath);
+        }
+        self.handles[handle_index].1.offset = new as usize;
+        Ok(new as u64)
+    }
+
     fn fsync(&mut self, handle: FileHandle) -> Result<()> {
         self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
         self.commit()

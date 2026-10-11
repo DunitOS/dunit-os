@@ -82,3 +82,4 @@ pub const SYSCALL_CLOCK_GET_TIME: usize = 76;
 pub const SYSCALL_RMDIR: usize = 77;
 pub const SYSCALL_TERMINAL_DIAG: usize = 78;
 pub const SYSCALL_SPAWN_ARGS: usize = 79;
+pub const SYSCALL_SEEK: usize = 80;
