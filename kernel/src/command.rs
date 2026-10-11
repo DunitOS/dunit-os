@@ -31,6 +31,11 @@ impl ExecInput for NoExecInput {
     }
 }
 
+/// Directories searched for a bare `exec <name>` command, in order. Not a
+/// single hardcoded /app: /system/bin holds OS tools (tcc), /app holds bundled
+/// apps. A path with '/' bypasses this entirely.
+const EXEC_PATH: &[&str] = &["/system/bin", "/app"];
+
 pub fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, VfsError> {
     let vfs = vfs::get_vfs().ok_or(VfsError::IoError)?;
     if path.contains('/') {
@@ -42,13 +47,22 @@ pub fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, VfsError> {
         return Ok(normalized);
     }
 
-    let mut candidate = String::from("/app/");
-    candidate.push_str(path);
-    let stat = vfs.stat_at("/", &candidate)?;
-    if stat.file_type == FileType::Directory {
-        return Err(VfsError::IsADirectory);
+    // Bare command name: search the exec path, not a single hardcoded /app.
+    // /system/bin (OS-provided tools, e.g. tcc) takes precedence over /app
+    // (bundled applications), POSIX-PATH style. A name containing '/' is a
+    // literal path (handled above) and never searched.
+    let mut last_err = VfsError::NotFound;
+    for dir in EXEC_PATH {
+        let mut candidate = String::from(*dir);
+        candidate.push('/');
+        candidate.push_str(path);
+        match vfs.stat_at("/", &candidate) {
+            Ok(stat) if stat.file_type != FileType::Directory => return Ok(candidate),
+            Ok(_) => last_err = VfsError::IsADirectory,
+            Err(error) => last_err = error,
+        }
     }
-    Ok(candidate)
+    Err(last_err)
 }
 
 pub fn read_vfs_file(cwd: &str, path: &str) -> Result<Vec<u8>, VfsError> {
@@ -93,12 +107,7 @@ pub fn parse_exec_argv(
         Ok(path) => path,
         Err(error) => {
             let mut shown = String::new();
-            if requested.contains('/') {
-                shown.push_str(&requested);
-            } else {
-                shown.push_str("/app/");
-                shown.push_str(&requested);
-            }
+            shown.push_str(&requested);
             return Err(ExecRunError::Vfs(shown, error));
         }
     };

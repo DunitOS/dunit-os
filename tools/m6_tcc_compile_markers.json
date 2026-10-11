@@ -1,9 +1,9 @@
 {
-  "description": "On-device tcc COMPILE (P3b-2a): the Dunit tcc (/app/tcc) compiles a C source ON the kernel. `tcc -c /assets/tcc/probe.c -o /tmp/probe.o` runs tcc's full pipeline (preprocess/parse/codegen/write object) — no sysroot needed (the source has no #include and -c does not link). `ls /tmp` then shows probe.o, proving the object was written. Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_compile_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 300 --boot-timeout 180",
+  "description": "On-device tcc COMPILE (P3b-2a): the Dunit tcc (/system/bin/tcc) compiles a C source ON the kernel. `tcc -c /assets/tcc/probe.c -o /tmp/probe.o` runs tcc's full pipeline (preprocess/parse/codegen/write object) — no sysroot needed (the source has no #include and -c does not link). `ls /tmp` then shows probe.o, proving the object was written. Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_compile_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 300 --boot-timeout 180",
   "run": { "config": "limine.conf", "cmd": ["exec tcc -c /assets/tcc/probe.c -o /tmp/probe.o", "ls /tmp"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
-    { "marker": "/app/tcc returned code=0", "claim": "tcc compiled the source and exited cleanly on-device", "source": "kernel/src/shell.rs" },
+    { "marker": "tcc returned code=0", "claim": "tcc compiled the source and exited cleanly on-device", "source": "kernel/src/command.rs" },
     { "marker": "probe.o", "claim": "tcc wrote the ELF object to /tmp — codegen + object emission work on-device", "source": "assets/tcc/probe.c" }
   ],
   "forbidden": [
