@@ -1,0 +1,13 @@
+{
+  "description": "On-device tcc stress (bigger program): the Dunit tcc compiles+links /assets/tcc/stress.c — multiple functions, recursion (fib), qsort+malloc/free+calloc, structs, snprintf/strcmp, a prime sieve — into /tmp/stress, which the kernel runs. A larger translation unit exercises more of tcc's codegen and more of libc, and stresses tcc's own heap. Fixed inputs -> fixed results (25 primes <100, fib20=6765). Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_stress_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 60 --timeout 320 --boot-timeout 180",
+  "run": { "config": "limine.conf", "cmd": ["exec tcc /assets/tcc/stress.c -o /tmp/stress", "exec /tmp/stress"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[TCC-STRESS] OK", "claim": "tcc compiled+linked a larger multi-function program on-device and it ran with correct results (sieve/fib/qsort/struct/string)", "source": "assets/tcc/stress.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "tcc: error", "why": "tcc failed to compile/link the bigger program (codegen or heap limit?)", "source": "toolchains/dunit-tcc/tcc.c" },
+    { "marker": "[TCC-STRESS] FAIL", "why": "the compiled program produced wrong results", "source": "assets/tcc/stress.c" }
+  ]
+}
