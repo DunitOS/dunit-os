@@ -11,6 +11,13 @@ if [ -f .gitmodules ] && { [ -d .git ] || [ -f .git ]; } && command -v git &> /d
         git submodule update --init --recursive toolchains/dunit-musl || \
             echo "ВНИМАНИЕ: не удалось получить dunit-musl (нет сети?); musl-программы будут пропущены."
     fi
+    # Dunit tcc fork (M6 capstone) — on-device C compiler. Same story: fetch the
+    # submodule so `make` builds and packs /app/tcc (skipped gracefully offline).
+    if [ ! -f toolchains/dunit-tcc/tcc.c ]; then
+        echo "==> Загрузка submodule toolchains/dunit-tcc..."
+        git submodule update --init --recursive toolchains/dunit-tcc || \
+            echo "ВНИМАНИЕ: не удалось получить dunit-tcc (нет сети?); tcc будет пропущен."
+    fi
 fi
 
 # Проверка и настройка Limine
