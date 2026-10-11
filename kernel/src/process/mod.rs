@@ -1379,36 +1379,52 @@ impl ProcessOutputSink {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FdEntry {
     pub target: FdTarget,
+    /// FD_CLOEXEC (F_GETFD/F_SETFD). No runtime effect yet — Dunit has no
+    /// fd-preserving exec — but stored so a get after a set is consistent.
+    pub cloexec: bool,
+    /// POSIX file status flags (F_GETFL/F_SETFL): access mode + O_APPEND +
+    /// O_NONBLOCK. O_NONBLOCK is honoured on pipe reads; the rest round-trip.
+    pub status: u32,
 }
 
 impl FdEntry {
     pub const fn stdin() -> Self {
         Self {
             target: FdTarget::Stdin,
+            cloexec: false,
+            status: 0,
         }
     }
 
     pub const fn stdout() -> Self {
         Self {
             target: FdTarget::Stdout,
+            cloexec: false,
+            status: 0,
         }
     }
 
     pub const fn stderr() -> Self {
         Self {
             target: FdTarget::Stderr,
+            cloexec: false,
+            status: 0,
         }
     }
 
     pub const fn vfs(fd: crate::fs::vfs::FileDescriptor) -> Self {
         Self {
             target: FdTarget::Vfs(fd),
+            cloexec: false,
+            status: 0,
         }
     }
 
     pub const fn pipe(id: u64, write: bool) -> Self {
         Self {
             target: FdTarget::Pipe { id, write },
+            cloexec: false,
+            status: 0,
         }
     }
 }
@@ -2593,6 +2609,23 @@ pub fn dup_fd(
 
 pub fn get_fd(fd: ProcessFd) -> Option<&'static FdEntry> {
     current_process()?.get_fd(fd)
+}
+
+/// fcntl F_SETFD: set the FD_CLOEXEC bit on `fd`.
+pub fn fd_set_cloexec(fd: ProcessFd, value: bool) -> Result<(), ProcessError> {
+    let process = current_process_mut().ok_or(ProcessError::NoCurrentProcess)?;
+    let entry = process.fd_table.get_mut(&fd).ok_or(ProcessError::InvalidFd)?;
+    entry.cloexec = value;
+    Ok(())
+}
+
+/// fcntl F_SETFL: replace the file status flags on `fd` (the caller has already
+/// masked out the unsettable bits — access mode, creation flags).
+pub fn fd_set_status(fd: ProcessFd, status: u32) -> Result<(), ProcessError> {
+    let process = current_process_mut().ok_or(ProcessError::NoCurrentProcess)?;
+    let entry = process.fd_table.get_mut(&fd).ok_or(ProcessError::InvalidFd)?;
+    entry.status = status;
+    Ok(())
 }
 
 pub fn close_fd(fd: ProcessFd) -> Result<FdEntry, ProcessError> {

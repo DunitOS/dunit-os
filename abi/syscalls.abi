@@ -93,3 +93,4 @@
 83	Pipe
 84	Truncate
 85	DisplayOwner
+86	Fcntl

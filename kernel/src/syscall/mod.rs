@@ -95,6 +95,7 @@ pub enum Syscall {
     Pipe = 83,
     Truncate = 84,
     DisplayOwner = 85,
+    Fcntl = 86,
 }
 
 impl Syscall {
@@ -187,6 +188,7 @@ impl Syscall {
             83 => Some(Syscall::Pipe),
             84 => Some(Syscall::Truncate),
             85 => Some(Syscall::DisplayOwner),
+            86 => Some(Syscall::Fcntl),
             _ => None,
         }
     }
@@ -763,6 +765,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Pipe => sys_pipe(arg0 as *mut u32),
         Syscall::Truncate => sys_truncate(arg0 as u32, arg1 as i64),
         Syscall::DisplayOwner => crate::handle::display_owner() as i64,
+        Syscall::Fcntl => sys_fcntl(arg0 as u32, arg1, arg2),
     }
 }
 
@@ -1043,7 +1046,10 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
         }
         Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => return EBADF,
         Some(crate::process::FdTarget::Pipe { id, write: false }) => {
-            return sys_pipe_read(id, buf, count);
+            let nonblock = crate::process::get_fd(fd)
+                .map(|e| (e.status & O_NONBLOCK_BIT) != 0)
+                .unwrap_or(false);
+            return sys_pipe_read(id, buf, count, nonblock);
         }
         Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // read on write end
         Some(crate::process::FdTarget::Vfs(_)) => {}
@@ -1108,7 +1114,7 @@ fn sys_pipe(fds: *mut u32) -> i64 {
     0
 }
 
-fn sys_pipe_read(id: u64, buf: *mut u8, count: usize) -> i64 {
+fn sys_pipe_read(id: u64, buf: *mut u8, count: usize, nonblock: bool) -> i64 {
     let mut kbuf = Vec::new();
     kbuf.resize(count, 0);
     match crate::pipe::read(id, &mut kbuf) {
@@ -1121,6 +1127,9 @@ fn sys_pipe_read(id: u64, buf: *mut u8, count: usize) -> i64 {
             n as i64
         }
         crate::pipe::PipeRead::Eof => 0,
+        // Empty pipe with a live writer: O_NONBLOCK (fcntl F_SETFL) returns
+        // EAGAIN instead of parking the reader.
+        crate::pipe::PipeRead::WouldBlock if nonblock => EAGAIN,
         crate::pipe::PipeRead::WouldBlock => match crate::process::pipe_block_current(id) {
             Ok(()) => USER_CONTEXT_RETURN_MAGIC,
             Err(error) => process_error_to_errno(error),
@@ -1254,6 +1263,55 @@ fn sys_truncate(fd: u32, length: i64) -> i64 {
     }
 }
 
+// POSIX fcntl commands + flag bits (musl passes these values). The kernel keeps
+// a tiny per-fd flag state (FdEntry.cloexec / .status); O_NONBLOCK is honoured
+// on pipe reads, the rest round-trip. F_DUPFD stays in musl (built on dup).
+const F_GETFD: u64 = 1;
+const F_SETFD: u64 = 2;
+const F_GETFL: u64 = 3;
+const F_SETFL: u64 = 4;
+const FD_CLOEXEC_BIT: u64 = 1;
+const O_ACCMODE_BITS: u32 = 0o3;
+const O_APPEND_BIT: u32 = 0o2000;
+const O_NONBLOCK_BIT: u32 = 0o4000;
+
+fn sys_fcntl(fd: u32, cmd: u64, arg: u64) -> i64 {
+    if !is_valid_fd_number(fd) {
+        return EBADF;
+    }
+    let entry = match crate::process::get_fd(fd) {
+        Some(entry) => *entry,
+        None => return EBADF,
+    };
+    match cmd {
+        F_GETFD => {
+            if entry.cloexec {
+                FD_CLOEXEC_BIT as i64
+            } else {
+                0
+            }
+        }
+        F_SETFD => match crate::process::fd_set_cloexec(fd, (arg & FD_CLOEXEC_BIT) != 0) {
+            Ok(()) => 0,
+            Err(_) => EBADF,
+        },
+        F_GETFL => entry.status as i64,
+        F_SETFL => {
+            // Only O_APPEND and O_NONBLOCK are settable; the access mode and
+            // creation flags are preserved (POSIX).
+            let new = (entry.status & O_ACCMODE_BITS)
+                | ((arg as u32) & (O_APPEND_BIT | O_NONBLOCK_BIT));
+            match crate::process::fd_set_status(fd, new) {
+                Ok(()) => 0,
+                Err(_) => EBADF,
+            }
+        }
+        // F_DUPFD/F_DUPFD_CLOEXEC are handled in musl (via dup); locks/owner are
+        // unsupported -> documented ENOSYS (M6.1), not a fake.
+        _ => ENOSYS,
+    }
+}
+
 fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
     if !is_valid_fd_number(fd) {
         return EBADF;
@@ -1340,7 +1398,20 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
     };
 
     match crate::process::open_vfs_fd(vfs_fd) {
-        Ok(fd) => fd as i64,
+        Ok(fd) => {
+            // Seed the fd's status flags so F_GETFL reports the real access mode
+            // and O_APPEND (fcntl per-fd state).
+            let access = if flags.can_read() && flags.can_write() {
+                2 // O_RDWR
+            } else if flags.can_write() {
+                1 // O_WRONLY
+            } else {
+                0 // O_RDONLY
+            };
+            let status = access | if flags.append() { O_APPEND_BIT } else { 0 };
+            let _ = crate::process::fd_set_status(fd, status);
+            fd as i64
+        }
         Err(error) => {
             if let Some(vfs) = crate::fs::vfs::get_vfs() {
                 let _ = vfs.close(vfs_fd);

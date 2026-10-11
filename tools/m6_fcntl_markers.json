@@ -1,16 +1,18 @@
 {
-  "description": "fcntl subset (POSIX-gap list, step 1). userspace/ctests/musl_fcntl.c: F_DUPFD is implemented on the Dunit Dup syscall (toolchains/dunit-musl/src/fcntl/fcntl.c) — dup fd 1 to a floor of 10, write through the duplicate (reaches stdout), confirm the floor was honoured. F_GETFL returns a documented ENOSYS (per-fd flag state needs a future Dunit Fcntl syscall), not a fake value. Run: tools/qemu_test.py --build --markers-file tools/m6_fcntl_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "description": "fcntl subset (POSIX-gap list). userspace/ctests/musl_fcntl.c + toolchains/dunit-musl/src/fcntl/fcntl.c: F_DUPFD on the Dunit Dup syscall; F_GETFD/F_SETFD (FD_CLOEXEC) and F_GETFL/F_SETFL (status flags) via the new Dunit Fcntl syscall (86), which keeps per-fd flag state (kernel/src/process/mod.rs FdEntry.cloexec/.status); O_NONBLOCK is honoured on pipe reads. Operates on fd 1. Run: tools/qemu_test.py --build --markers-file tools/m6_fcntl_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
   "run": { "config": "limine.conf", "cmd": ["exec /app/musl_fcntl"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[FCNTL] dupfd write via dup OK", "claim": "F_DUPFD produced a working duplicate fd (a write through it reached stdout)", "source": "toolchains/dunit-musl/src/fcntl/fcntl.c" },
     { "marker": "[FCNTL] F_DUPFD floor OK", "claim": "the duplicate fd honoured the requested floor (>=10)", "source": "userspace/ctests/musl_fcntl.c" },
-    { "marker": "[FCNTL] F_GETFL ENOSYS OK", "claim": "an unsupported fcntl command returns a documented ENOSYS, not a fake value", "source": "toolchains/dunit-musl/src/fcntl/fcntl.c" },
+    { "marker": "[FCNTL] cloexec OK", "claim": "F_SETFD/F_GETFD store and return FD_CLOEXEC per fd", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[FCNTL] setfl nonblock OK", "claim": "F_GETFL/F_SETFL round-trip the status flags (O_NONBLOCK set then read back)", "source": "kernel/src/syscall/mod.rs" },
     { "marker": "[FCNTL] DONE", "claim": "the test ran to completion", "source": "userspace/ctests/musl_fcntl.c" }
   ],
   "forbidden": [
     { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
     { "marker": "[FCNTL] F_DUPFD FAIL", "why": "F_DUPFD did not return a working fd at/above the floor", "source": "toolchains/dunit-musl/src/fcntl/fcntl.c" },
-    { "marker": "[FCNTL] F_GETFL FAIL", "why": "F_GETFL returned something other than ENOSYS", "source": "toolchains/dunit-musl/src/fcntl/fcntl.c" }
+    { "marker": "[FCNTL] cloexec FAIL", "why": "FD_CLOEXEC did not round-trip", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[FCNTL] setfl FAIL", "why": "F_GETFL/F_SETFL did not round-trip the status flags", "source": "kernel/src/syscall/mod.rs" }
   ]
 }

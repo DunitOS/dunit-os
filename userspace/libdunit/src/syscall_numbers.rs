@@ -88,3 +88,4 @@ pub const SYSCALL_DUP: usize = 82;
 pub const SYSCALL_PIPE: usize = 83;
 pub const SYSCALL_TRUNCATE: usize = 84;
 pub const SYSCALL_DISPLAY_OWNER: usize = 85;
+pub const SYSCALL_FCNTL: usize = 86;
