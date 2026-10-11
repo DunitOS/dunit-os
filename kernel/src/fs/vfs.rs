@@ -218,6 +218,14 @@ pub trait FileSystem: Send {
     fn fsync(&mut self, _handle: FileHandle) -> Result<()> {
         Ok(())
     }
+
+    /// Set the length of an open handle's file to `len` (ftruncate): grow with
+    /// zero bytes or shrink, without moving the handle's read/write offset. The
+    /// handle must be writable. Filesystems that cannot support it inherit the
+    /// default (Unsupported).
+    fn ftruncate_handle(&mut self, _handle: FileHandle, _len: u64) -> Result<()> {
+        Err(VfsError::Unsupported)
+    }
 }
 
 pub struct OpenFile {
@@ -248,6 +256,10 @@ impl OpenFile {
 
     pub fn fsync(&mut self) -> Result<()> {
         unsafe { (&mut *self.fs).fsync(self.handle) }
+    }
+
+    pub fn ftruncate(&mut self, len: u64) -> Result<()> {
+        unsafe { (&mut *self.fs).ftruncate_handle(self.handle, len) }
     }
 }
 
@@ -390,6 +402,14 @@ impl VirtualFileSystem {
             .get_mut(&fd)
             .ok_or(VfsError::InvalidDescriptor)?;
         open_file.fsync()
+    }
+
+    pub fn ftruncate(&mut self, fd: FileDescriptor, len: u64) -> Result<()> {
+        let open_file = self
+            .open_files
+            .get_mut(&fd)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        open_file.ftruncate(len)
     }
 
     pub fn open_file_count(&self) -> usize {

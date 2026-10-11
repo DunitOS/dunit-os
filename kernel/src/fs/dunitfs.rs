@@ -960,6 +960,55 @@ impl FileSystem for DunitFs {
         self.commit()
     }
 
+    fn ftruncate_handle(&mut self, handle: FileHandle, len: u64) -> Result<()> {
+        self.ensure_writable()?;
+        let hidx = self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
+        if !self.handles[hidx].1.flags.can_write() {
+            return Err(VfsError::PermissionDenied);
+        }
+        let node = self.handles[hidx].1.node;
+        let meta = self.nodes[node].as_ref().ok_or(VfsError::NotFound)?;
+        if meta.file_type != FileType::File {
+            return Err(VfsError::IsADirectory);
+        }
+        let cur = meta.size as usize;
+        let target = len as usize;
+        if target == cur {
+            return Ok(());
+        }
+        if target < cur {
+            // Shrink: keep [0, target), drop the rest. Read the retained prefix
+            // (extents still valid), free the extents, rewrite the prefix, then
+            // set the size explicitly — free_extents leaves node.size stale and
+            // write_node only ever grows it.
+            let mut keep = vec![0u8; target];
+            if target > 0 {
+                self.read_node(node, 0, &mut keep)?;
+            }
+            self.free_extents(node);
+            if target > 0 {
+                self.write_node(node, 0, &keep)?;
+            }
+            let node = self.nodes[node].as_mut().unwrap();
+            node.size = target as u64;
+            node.mtime_ns = clock::monotonic_ns();
+        } else {
+            // Grow: zero-extend from cur to target. write_node allocates the new
+            // blocks, preserves the existing data and advances the size.
+            let mut remaining = target - cur;
+            let mut offset = cur;
+            let zeros = [0u8; BLOCK_SIZE];
+            while remaining > 0 {
+                let chunk = remaining.min(BLOCK_SIZE);
+                self.write_node(node, offset, &zeros[..chunk])?;
+                offset += chunk;
+                remaining -= chunk;
+            }
+        }
+        self.dirty = true;
+        self.commit()
+    }
+
     fn readdir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
         let mut buffer = [DirEntry::empty(); 64];
         let count = self.readdir_into(path, &mut buffer)?;

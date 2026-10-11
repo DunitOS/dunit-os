@@ -1,0 +1,18 @@
+{
+  "description": "tcc-prep file ops: access(), ftruncate(), mkstemp(). userspace/ctests/musl_fileops.c. access() is a Stat-based existence check (no perms model). ftruncate() shrinks then grows an open file (kernel Truncate=84 -> VFS ftruncate -> memfs/dunitfs resize), verifying size via fstat and zero-fill on growth. mkstemp() creates a unique temp atomically via O_EXCL. Run: tools/qemu_test.py --build --markers-file tools/m6_fileops_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 240 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_fileops"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[FILEOPS] access OK", "claim": "access() reports an existing path present and a missing path absent", "source": "toolchains/dunit-musl/src/unistd/faccessat.c" },
+    { "marker": "[FILEOPS] ftruncate OK", "claim": "ftruncate shrank then grew an open file; fstat saw the new sizes and growth zero-filled", "source": "kernel/src/fs/vfs.rs" },
+    { "marker": "[FILEOPS] mkstemp OK", "claim": "mkstemp created a unique temp file via O_EXCL and filled the template", "source": "toolchains/dunit-musl/src/temp/mkstemp.c" },
+    { "marker": "[FILEOPS] DONE", "claim": "the test ran to completion", "source": "userspace/ctests/musl_fileops.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[FILEOPS] access FAIL", "why": "access() gave the wrong presence answer", "source": "toolchains/dunit-musl/src/unistd/faccessat.c" },
+    { "marker": "[FILEOPS] ftruncate FAIL", "why": "ftruncate or the resulting size/zero-fill was wrong", "source": "kernel/src/fs/memfs.rs" },
+    { "marker": "[FILEOPS] ftruncate_persist FAIL", "why": "DunitFS ftruncate (extent shrink/grow) was wrong", "source": "kernel/src/fs/dunitfs.rs" },
+    { "marker": "[FILEOPS] mkstemp FAIL", "why": "mkstemp did not create a unique temp file", "source": "toolchains/dunit-musl/src/temp/mkstemp.c" }
+  ]
+}

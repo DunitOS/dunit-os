@@ -377,6 +377,27 @@ impl FileSystem for MemFs {
         self.stat(&path)
     }
 
+    fn ftruncate_handle(&mut self, handle: FileHandle, len: u64) -> Result<()> {
+        let hidx = self
+            .handle_index(handle)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        if !self.open_handles[hidx].1.flags.can_write() {
+            return Err(VfsError::PermissionDenied);
+        }
+        let path = self.open_handles[hidx].1.path.clone();
+        let nidx = self.node_index(&path).ok_or(VfsError::NotFound)?;
+        if self.nodes[nidx].file_type != FileType::File {
+            return Err(VfsError::IsADirectory);
+        }
+        let len = len as usize;
+        if len > MAX_MEMFS_FILE_SIZE {
+            return Err(VfsError::FileTooBig);
+        }
+        // ftruncate changes only the size (grow with zeros / shrink); the
+        // handle's offset is intentionally left where it is (POSIX).
+        self.nodes[nidx].data.resize(len)
+    }
+
     fn readdir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
         let clean = Self::clean(path);
         let mut entries = Vec::new();
