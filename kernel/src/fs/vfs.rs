@@ -188,6 +188,13 @@ pub trait FileSystem: Send {
         Err(VfsError::Unsupported)
     }
 
+    /// Reposition the read/write offset of an open handle. `whence`: 0=SET,
+    /// 1=CUR, 2=END (POSIX lseek). Returns the resulting absolute offset.
+    /// Filesystems that cannot support it inherit the default (Unsupported).
+    fn seek(&mut self, _handle: FileHandle, _offset: i64, _whence: u32) -> Result<u64> {
+        Err(VfsError::Unsupported)
+    }
+
     /// Flush any buffered metadata/data for an open handle to stable storage.
     /// In-memory and mechanism filesystems have nothing to flush and inherit
     /// this no-op; persistent backends (DunitFS) override it to commit.
@@ -212,6 +219,10 @@ impl OpenFile {
 
     pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
         unsafe { (&mut *self.fs).write(self.handle, buf) }
+    }
+
+    pub fn seek(&mut self, offset: i64, whence: u32) -> Result<u64> {
+        unsafe { (&mut *self.fs).seek(self.handle, offset, whence) }
     }
 
     pub fn fsync(&mut self) -> Result<()> {
@@ -327,6 +338,14 @@ impl VirtualFileSystem {
             .get_mut(&fd)
             .ok_or(VfsError::InvalidDescriptor)?;
         open_file.write(buf)
+    }
+
+    pub fn seek(&mut self, fd: FileDescriptor, offset: i64, whence: u32) -> Result<u64> {
+        let open_file = self
+            .open_files
+            .get_mut(&fd)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        open_file.seek(offset, whence)
     }
 
     pub fn close(&mut self, fd: FileDescriptor) -> Result<()> {

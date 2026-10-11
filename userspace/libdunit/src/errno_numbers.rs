@@ -18,6 +18,8 @@ pub const ENOTDIR: isize = -20;
 pub const EISDIR: isize = -21;
 pub const EINVAL: isize = -22;
 pub const ENFILE: isize = -23;
+pub const EFBIG: isize = -27;
+pub const ESPIPE: isize = -29;
 pub const EPIPE: isize = -32;
 pub const ENAMETOOLONG: isize = -36;
 pub const ENOSYS: isize = -38;
@@ -45,6 +47,8 @@ pub fn error_name(code: isize) -> &'static str {
         -21 => "EISDIR",
         -22 => "EINVAL",
         -23 => "ENFILE",
+        -27 => "EFBIG",
+        -29 => "ESPIPE",
         -32 => "EPIPE",
         -36 => "ENAMETOOLONG",
         -38 => "ENOSYS",

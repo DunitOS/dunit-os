@@ -83,7 +83,8 @@
 #define SYS_RMDIR 77
 #define SYS_TERMINAL_DIAG 78
 #define SYS_SPAWN_ARGS 79
+#define SYS_SEEK 80
 
-#define DUNIT_SYSCALL_COUNT 80
+#define DUNIT_SYSCALL_COUNT 81
 
 #endif /* DUNIT_SYSCALL_H */

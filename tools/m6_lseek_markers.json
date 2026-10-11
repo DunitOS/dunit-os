@@ -1,0 +1,13 @@
+{
+  "description": "lseek over the native Dunit Seek syscall (80). userspace/ctests/musl_lseek.c writes 10 bytes to /tmp then checks SEEK_SET/SEEK_END/SEEK_CUR reposition the offset and reads return the right bytes. Was ENOSYS (files sequential-only) before. Run: tools/qemu_test.py --build --markers-file tools/m6_lseek_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_lseek"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[SEEK] all OK", "claim": "lseek SEEK_SET/END/CUR reposition the file offset via the Dunit Seek syscall", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[SEEK] DONE", "claim": "the lseek driver ran to completion", "source": "userspace/ctests/musl_lseek.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[SEEK] FAIL", "why": "a seek or a post-seek read returned the wrong result", "source": "userspace/ctests/musl_lseek.c" }
+  ]
+}

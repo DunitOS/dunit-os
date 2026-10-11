@@ -340,6 +340,30 @@ impl FileSystem for MemFs {
         Ok(())
     }
 
+    fn seek(&mut self, handle: FileHandle, offset: i64, whence: u32) -> Result<u64> {
+        let hidx = self
+            .handle_index(handle)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        let path = self.open_handles[hidx].1.path.clone();
+        let nidx = self.node_index(&path).ok_or(VfsError::NotFound)?;
+        if self.nodes[nidx].file_type != FileType::File {
+            return Err(VfsError::IsADirectory);
+        }
+        let size = self.nodes[nidx].data.len() as i64;
+        let base = match whence {
+            0 => 0,                                      // SEEK_SET
+            1 => self.open_handles[hidx].1.offset as i64, // SEEK_CUR
+            2 => size,                                   // SEEK_END
+            _ => return Err(VfsError::InvalidPath),
+        };
+        let new = base.checked_add(offset).ok_or(VfsError::InvalidPath)?;
+        if new < 0 {
+            return Err(VfsError::InvalidPath);
+        }
+        self.open_handles[hidx].1.offset = new as usize;
+        Ok(new as u64)
+    }
+
     fn readdir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
         let clean = Self::clean(path);
         let mut entries = Vec::new();

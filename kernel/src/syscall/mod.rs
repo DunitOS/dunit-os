@@ -89,6 +89,7 @@ pub enum Syscall {
     Rmdir = 77,
     TerminalDiag = 78,
     SpawnArgs = 79,
+    Seek = 80,
 }
 
 impl Syscall {
@@ -175,6 +176,7 @@ impl Syscall {
             77 => Some(Syscall::Rmdir),
             78 => Some(Syscall::TerminalDiag),
             79 => Some(Syscall::SpawnArgs),
+            80 => Some(Syscall::Seek),
             _ => None,
         }
     }
@@ -186,6 +188,7 @@ pub const EBADF: i64 = -9;
 pub const ENOSYS: i64 = -38;
 pub const ENOTEMPTY: i64 = -39;
 pub const EFBIG: i64 = -27;
+pub const ESPIPE: i64 = -29;
 pub const ENAMETOOLONG: i64 = -36;
 pub const ENOENT: i64 = -2;
 pub const EACCES: i64 = -13;
@@ -744,6 +747,7 @@ pub extern "C" fn syscall_handler(
             arg2 as *mut u8,
             arg3 as usize,
         ),
+        Syscall::Seek => sys_seek(arg0 as u32, arg1 as i64, arg2 as u32),
     }
 }
 
@@ -1042,6 +1046,29 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     }
 
     bytes_read as i64
+}
+
+fn sys_seek(fd: u32, offset: i64, whence: u32) -> i64 {
+    if !is_valid_fd_number(fd) {
+        return EBADF;
+    }
+    // Only real VFS files are seekable; stdio streams return ESPIPE like a pipe.
+    match crate::process::get_fd(fd).map(|entry| entry.target) {
+        Some(crate::process::FdTarget::Vfs(_)) => {}
+        Some(_) => return ESPIPE,
+        None => return EBADF,
+    }
+    let vfs_fd = match process_vfs_fd(fd) {
+        Ok(vfs_fd) => vfs_fd,
+        Err(error) => return error,
+    };
+    match crate::fs::vfs::get_vfs()
+        .ok_or(EIO)
+        .and_then(|vfs| vfs.seek(vfs_fd, offset, whence).map_err(vfs_error_to_errno))
+    {
+        Ok(pos) => pos as i64,
+        Err(error) => error,
+    }
 }
 
 fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
