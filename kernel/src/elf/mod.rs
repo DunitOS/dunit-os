@@ -189,7 +189,8 @@ pub fn run_process_elf(data: &[u8], argv: &[String]) -> Result<ProcessExit, ElfE
     }
 
     let path = argv.first().cloned().unwrap_or_else(|| String::from("elf"));
-    let pid = match crate::process::create_user_process_record(path, true) {
+    // Kernel-launched (smoke/boot path): privileged.
+    let pid = match crate::process::create_user_process_record(path, true, true) {
         Ok(pid) => pid,
         Err(_) => {
             crate::memory::serial_write("[ELF-TEST] process create failed\r\n");

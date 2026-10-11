@@ -124,7 +124,8 @@ pub fn run_foreground_exec(
 
     let data = read_vfs_file(cwd, &normalized)
         .map_err(|error| ExecRunError::Vfs(normalized.clone(), error))?;
-    let pid = process::create_user_process_record(normalized.clone(), true)
+    // Launched from the kernel console / init: privileged (system-control).
+    let pid = process::create_user_process_record(normalized.clone(), true, true)
         .map_err(|_| ExecRunError::ProcessCreate)?;
 
     if crate::elf::prepare_process_elf(pid, &data, &argv).is_err() {

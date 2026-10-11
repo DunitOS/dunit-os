@@ -291,6 +291,13 @@ pub struct Process {
     /// Native CLONE_CHILD_CLEARTID / set_tid_address; musl uses it to release
     /// the thread-list lock on thread death.
     pub clear_child_tid: u64,
+    /// Privileged (system-control) capability. Granted by the kernel to the
+    /// processes it launches directly (init and `exec` from the kernel console)
+    /// and inherited across the libdunit SpawnProcess path, but NEVER granted
+    /// via the userspace posix_spawn (SpawnArgs) path. Gates destructive admin
+    /// operations: killing a process that is not the caller's child, and the
+    /// mutating TerminalDiag verbs (blkwrite/mkfs/mount/install).
+    pub privileged: bool,
     pub is_kernel: bool,
     pub cwd: String,
     pub status: Option<ProcessExitStatus>,
@@ -353,6 +360,7 @@ impl Process {
             fpu_state: FpuState::new(),
             fs_base: 0,
             clear_child_tid: 0,
+            privileged: false,
             is_kernel,
             cwd: String::from("/"),
             status: None,
@@ -393,6 +401,7 @@ impl Process {
             fpu_state: FpuState::new(),
             fs_base: 0,
             clear_child_tid: 0,
+            privileged: false,
             is_kernel: false,
             cwd: String::from("/"),
             status: None,
@@ -1546,11 +1555,16 @@ pub fn insert_process_record(
     });
 }
 
-pub fn create_user_process_record(path: String, waitable: bool) -> Result<ProcessId, ProcessError> {
+pub fn create_user_process_record(
+    path: String,
+    waitable: bool,
+    privileged: bool,
+) -> Result<ProcessId, ProcessError> {
     let pid = allocate_pid();
     let parent = current_pid();
     let mut process = Process::new_user(pid)?;
     process.state = ProcessState::Prepared;
+    process.privileged = privileged;
     if let Some(current) = current_process() {
         process.cwd = current.cwd.clone();
     }
@@ -1581,9 +1595,27 @@ pub fn create_user_process_record(path: String, waitable: bool) -> Result<Proces
     Ok(pid)
 }
 
-/// Create a schedulable thread in the caller's address space. The caller
-/// supplies an already mapped user stack; the kernel owns a separate syscall
-/// stack, GPR context and FXSAVE area for each TID.
+/// Whether the current process holds the privileged (system-control) capability.
+pub fn current_is_privileged() -> bool {
+    current_process().map(|process| process.privileged).unwrap_or(false)
+}
+
+/// Authorization for killing `target`: a privileged process (init and the
+/// system service tree, the kernel console) may signal any process; an
+/// unprivileged one may signal only its own direct children. Closes the hole
+/// where any process could terminate gui_server, the shell or a sibling.
+pub fn current_may_kill(target: ProcessId) -> bool {
+    if current_is_privileged() {
+        return true;
+    }
+    let Some(caller) = current_pid() else {
+        return false;
+    };
+    let table = process_table_mut();
+    process_record_index(table, target)
+        .map(|index| table[index].parent == Some(caller))
+        .unwrap_or(false)
+}
 pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<ThreadId, ProcessError> {
     let owner = current_pid().ok_or(ProcessError::NoCurrentProcess)?;
     if current_process().map(|p| p.is_kernel).unwrap_or(true) {
