@@ -86,7 +86,8 @@
 #define SYS_SEEK 80
 #define SYS_FSTAT 81
 #define SYS_DUP 82
+#define SYS_PIPE 83
 
-#define DUNIT_SYSCALL_COUNT 83
+#define DUNIT_SYSCALL_COUNT 84
 
 #endif /* DUNIT_SYSCALL_H */
