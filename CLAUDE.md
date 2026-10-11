@@ -205,7 +205,7 @@ python3 tools/qemu_test.py --build --markers-file tools/<имя>_markers.json \
 
 ## 8. musl-порт (`dunit-musl`)
 
-Репозиторий: https://github.com/coreformdev/dunit-musl (ветка `master`).
+Репозиторий: https://github.com/DunitOS/dunit-musl (ветка `master`).
 Подключён как сабмодуль `toolchains/dunit-musl`. Это полный форк musl, а не набор отдельных `.c`.
 
 Целевая платформа: `x86_64-dunit`, static-first. Хост-компилятор служит кросс-компилятором, потому что процессор тот же.
