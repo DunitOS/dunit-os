@@ -1,0 +1,17 @@
+{
+  "description": "file-backed mmap (POSIX-gap list). Kernel Mmap syscall (7) now honours fd+offset: a MAP_PRIVATE file mapping is eagerly populated from the file via the VFS (kernel/src/syscall/mod.rs sys_mmap + populate_file_mapping; kernel/src/process/mod.rs write_mapped_region writes through the phys alias), writes stay private, the sub-page tail past EOF reads zero, the fd offset is preserved, and MAP_SHARED is a documented EOPNOTSUPP (no coherent write-back yet, not a silent private substitute). Stock musl mmap() already passes all six args, so userspace/ctests/musl_mmap.c needs no fork change. Run: tools/qemu_test.py --build --markers-file tools/m6_mmap_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 240 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_mmap"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[MMAP] read OK", "claim": "a MAP_PRIVATE file mapping reads back the file content and the sub-page tail past EOF is zero", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[MMAP] cursor OK", "claim": "mmap left the fd offset untouched (POSIX)", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[MMAP] private-write OK", "claim": "a write to a MAP_PRIVATE mapping stays private and never reaches the file", "source": "kernel/src/process/mod.rs" },
+    { "marker": "[MMAP] offset OK", "claim": "a page-aligned file offset maps the correct slice of the file", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[MMAP] shared rejected OK", "claim": "MAP_SHARED is refused with EOPNOTSUPP, not silently downgraded to a private mapping", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[MMAP] DONE", "claim": "the test ran to completion", "source": "userspace/ctests/musl_mmap.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[MMAP] FAIL", "why": "a file-backed mmap check failed", "source": "userspace/ctests/musl_mmap.c" }
+  ]
+}
