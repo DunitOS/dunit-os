@@ -21,6 +21,7 @@
 #define DUNIT_EISDIR 21
 #define DUNIT_EINVAL 22
 #define DUNIT_ENFILE 23
+#define DUNIT_ENOTTY 25
 #define DUNIT_EFBIG 27
 #define DUNIT_ESPIPE 29
 #define DUNIT_EPIPE 32

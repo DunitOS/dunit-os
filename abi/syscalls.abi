@@ -95,3 +95,4 @@
 85	DisplayOwner
 86	Fcntl
 87	Poll
+88	Ioctl

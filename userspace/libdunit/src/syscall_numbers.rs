@@ -90,3 +90,4 @@ pub const SYSCALL_TRUNCATE: usize = 84;
 pub const SYSCALL_DISPLAY_OWNER: usize = 85;
 pub const SYSCALL_FCNTL: usize = 86;
 pub const SYSCALL_POLL: usize = 87;
+pub const SYSCALL_IOCTL: usize = 88;

@@ -91,7 +91,8 @@
 #define SYS_DISPLAY_OWNER 85
 #define SYS_FCNTL 86
 #define SYS_POLL 87
+#define SYS_IOCTL 88
 
-#define DUNIT_SYSCALL_COUNT 88
+#define DUNIT_SYSCALL_COUNT 89
 
 #endif /* DUNIT_SYSCALL_H */
