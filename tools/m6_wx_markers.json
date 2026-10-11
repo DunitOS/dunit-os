@@ -1,0 +1,14 @@
+{
+  "description": "ELF loader W^X + NX stack (M6.5 memory hygiene). The ELF loader now maps the main user stack non-executable (honoring PT_GNU_STACK), rejects RWX PT_LOAD segments, and never leaves a shared page writable+executable. userspace/ctests/musl_wx.c loads (proving normal R-X/RW binaries still work) and spawns nx_child, which must be killed for executing on its NX stack. Run: tools/qemu_test.py --build --markers-file tools/m6_wx_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_hello", "exec musl_wx"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[MUSL-HELLO] OK", "claim": "a normal static musl binary still loads and runs after the W^X tightening", "source": "userspace/ctests/musl_hello.c" },
+    { "marker": "[WX] nx_stack signaled", "claim": "executing on the user stack now faults (stack mapped NX) and the kernel kills the process", "source": "kernel/src/elf/mod.rs" },
+    { "marker": "[WX] DONE", "claim": "the W^X driver ran to completion with the kernel alive", "source": "userspace/ctests/musl_wx.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[WX] nx_stack FAIL", "why": "the stack was executable (NX not enforced) or the child was not killed", "source": "userspace/ctests/musl_wx.c" }
+  ]
+}
