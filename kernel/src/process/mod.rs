@@ -308,6 +308,10 @@ pub struct Process {
     pub entry_argv: usize,
     pub entry_envp: usize,
     fd_table: BTreeMap<ProcessFd, FdEntry>,
+    /// How many process fds reference each underlying VFS descriptor. dup/dup2
+    /// make several process fds share one VFS open file (and its offset); the
+    /// VFS close only fires when the last of them is closed.
+    vfs_fd_refs: BTreeMap<crate::fs::vfs::FileDescriptor, u32>,
     next_fd: ProcessFd,
     next_mmap_addr: usize,
     shared_owned: Vec<u64>,
@@ -371,6 +375,7 @@ impl Process {
             entry_argv: 0,
             entry_envp: 0,
             fd_table: BTreeMap::new(),
+            vfs_fd_refs: BTreeMap::new(),
             next_fd: FIRST_PROCESS_FD,
             next_mmap_addr: USER_MMAP_BASE,
             shared_owned: Vec::new(),
@@ -414,6 +419,7 @@ impl Process {
             entry_argv: 0,
             entry_envp: 0,
             fd_table: BTreeMap::new(),
+            vfs_fd_refs: BTreeMap::new(),
             next_fd: FIRST_PROCESS_FD,
             next_mmap_addr: USER_MMAP_BASE,
             shared_owned: Vec::new(),
@@ -504,19 +510,88 @@ impl Process {
     }
 
     pub fn cleanup_fds(&mut self) -> usize {
-        let fd_table = core::mem::take(&mut self.fd_table);
+        self.fd_table.clear();
+        let refs = core::mem::take(&mut self.vfs_fd_refs);
         let mut closed = 0;
+        // Close each distinct VFS descriptor exactly once, even if several
+        // process fds (dups) referenced it.
+        for (vfs_fd, _) in refs {
+            if let Some(vfs) = crate::fs::vfs::get_vfs() {
+                let _ = vfs.close(vfs_fd);
+                closed += 1;
+            }
+        }
+        closed
+    }
 
-        for (_, entry) in fd_table {
-            if let FdTarget::Vfs(vfs_fd) = entry.target {
-                if let Some(vfs) = crate::fs::vfs::get_vfs() {
-                    let _ = vfs.close(vfs_fd);
-                    closed += 1;
+    /// Register a freshly opened VFS descriptor as a new process fd and count a
+    /// reference to it.
+    pub fn open_vfs_fd(
+        &mut self,
+        vfs_fd: crate::fs::vfs::FileDescriptor,
+    ) -> Result<ProcessFd, ProcessError> {
+        let pfd = self.allocate_fd(FdEntry::vfs(vfs_fd))?;
+        *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
+        Ok(pfd)
+    }
+
+    /// Drop a process fd. Returns `Ok(Some(vfs_fd))` when this was the last
+    /// reference to a VFS descriptor and the caller must close it in the VFS;
+    /// `Ok(None)` otherwise (stdio, or a VFS fd still referenced by a dup).
+    pub fn drop_fd(
+        &mut self,
+        fd: ProcessFd,
+    ) -> Result<Option<crate::fs::vfs::FileDescriptor>, ProcessError> {
+        let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
+        Ok(self.release_target(entry.target))
+    }
+
+    fn release_target(&mut self, target: FdTarget) -> Option<crate::fs::vfs::FileDescriptor> {
+        if let FdTarget::Vfs(vfs_fd) = target {
+            if let Some(count) = self.vfs_fd_refs.get_mut(&vfs_fd) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    self.vfs_fd_refs.remove(&vfs_fd);
+                    return Some(vfs_fd);
                 }
             }
         }
+        None
+    }
 
-        closed
+    fn retain_target(&mut self, target: FdTarget) {
+        if let FdTarget::Vfs(vfs_fd) = target {
+            *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
+        }
+    }
+
+    /// dup / dup2. `newfd = None` picks the lowest free fd (dup); `Some(nf)`
+    /// targets exactly `nf` (dup2), closing whatever it held first. Returns the
+    /// new fd and, when dup2 displaced an open VFS descriptor whose last
+    /// reference is now gone, the `vfs_fd` the caller must close in the VFS.
+    pub fn dup_fd(
+        &mut self,
+        oldfd: ProcessFd,
+        newfd: Option<ProcessFd>,
+    ) -> Result<(ProcessFd, Option<crate::fs::vfs::FileDescriptor>), ProcessError> {
+        let entry = *self.fd_table.get(&oldfd).ok_or(ProcessError::InvalidFd)?;
+        match newfd {
+            Some(nf) if nf == oldfd => Ok((nf, None)),
+            Some(nf) => {
+                let to_close = match self.fd_table.remove(&nf) {
+                    Some(old) => self.release_target(old.target),
+                    None => None,
+                };
+                self.fd_table.insert(nf, entry);
+                self.retain_target(entry.target);
+                Ok((nf, to_close))
+            }
+            None => {
+                let pfd = self.allocate_fd(entry)?;
+                self.retain_target(entry.target);
+                Ok((pfd, None))
+            }
+        }
     }
 
     pub fn allocate_fd(&mut self, entry: FdEntry) -> Result<ProcessFd, ProcessError> {
@@ -2359,6 +2434,27 @@ pub fn allocate_fd(entry: FdEntry) -> Result<ProcessFd, ProcessError> {
     current_process_mut()
         .ok_or(ProcessError::NoCurrentProcess)?
         .allocate_fd(entry)
+}
+
+pub fn open_vfs_fd(vfs_fd: crate::fs::vfs::FileDescriptor) -> Result<ProcessFd, ProcessError> {
+    current_process_mut()
+        .ok_or(ProcessError::NoCurrentProcess)?
+        .open_vfs_fd(vfs_fd)
+}
+
+pub fn drop_fd(fd: ProcessFd) -> Result<Option<crate::fs::vfs::FileDescriptor>, ProcessError> {
+    current_process_mut()
+        .ok_or(ProcessError::NoCurrentProcess)?
+        .drop_fd(fd)
+}
+
+pub fn dup_fd(
+    oldfd: ProcessFd,
+    newfd: Option<ProcessFd>,
+) -> Result<(ProcessFd, Option<crate::fs::vfs::FileDescriptor>), ProcessError> {
+    current_process_mut()
+        .ok_or(ProcessError::NoCurrentProcess)?
+        .dup_fd(oldfd, newfd)
 }
 
 pub fn get_fd(fd: ProcessFd) -> Option<&'static FdEntry> {
