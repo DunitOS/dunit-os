@@ -1,0 +1,12 @@
+{
+  "description": "poweroff command actually powers the machine off (M6.5). Typing `poweroff` in the kernel terminal calls crate::power::poweroff(), which pulls the emulator ACPI soft-off ports; QEMU exits during the settle window so the FAILED marker never prints. Run: tools/qemu_test.py --build --markers-file tools/m6_poweroff_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 30 --timeout 180 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["poweroff"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[POWER] poweroff requested", "claim": "the poweroff command reached the power mechanism", "source": "kernel/src/power.rs" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[POWER] poweroff FAILED", "why": "the machine did not actually power off — the ACPI soft-off ports were not honoured", "source": "kernel/src/power.rs" }
+  ]
+}

@@ -44,8 +44,11 @@ pub const COMMAND_NAMES: &[&str] = &[
     "free",
     "top",
     "exit",
+    "reboot",
+    "restart",
     "poweroff",
     "shutdown",
+    "halt",
 ];
 
 /// Output abstraction for command handlers. `write_str` is the only required
@@ -1128,7 +1131,8 @@ fn cmd_help(out: &mut dyn ShellSink) {
     out.write_str("  free       - Memory status\n");
     out.write_str("  top        - Scheduler status\n");
     out.write_str("  exit       - Exit the terminal\n");
-    out.write_str("  poweroff   - Shutdown status\n");
+    out.write_str("  reboot     - Restart the machine\n");
+    out.write_str("  poweroff   - Power the machine off\n");
 }
 
 /// Gated dispatcher for the PRIVILEGED hardware/block/fs-admin diagnostics that
@@ -1222,8 +1226,15 @@ pub fn run_command(out: &mut dyn ShellSink, cwd: &mut String, line: &str) -> She
         }
         "usb" => cmd_usb(out),
         "top" => out.write_str("top unavailable: scheduler not active\n"),
-        "poweroff" | "shutdown" => {
-            out.write_str("shutdown not implemented: ACPI/QEMU shutdown device unavailable\n")
+        "poweroff" | "shutdown" | "halt" => {
+            out.write_str("Powering off...\n");
+            crate::power::poweroff();
+            out.write_str("poweroff failed: no supported power-off mechanism on this platform\n");
+        }
+        "reboot" | "restart" => {
+            out.write_str("Rebooting...\n");
+            crate::power::reboot();
+            out.write_str("reboot failed: no supported reset mechanism on this platform\n");
         }
         "blkread" => cmd_blkread(out, ""),
         _ if trimmed.starts_with("blkread ") => cmd_blkread(out, &trimmed["blkread ".len()..]),
