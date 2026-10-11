@@ -1639,8 +1639,17 @@ fn sys_readdir(
         return EINVAL;
     }
     if capacity > 0 {
+        // `capacity` is already bounded by MAX_USER_DIRENTS, so the output buffer
+        // (up to 1024 * size_of::<UserDirEntry>() ≈ 80 KiB) is a legitimate bulk
+        // transfer that legitimately exceeds the small MAX_USER_COPY (64 KiB)
+        // cap. Validate the pages directly as writable — like the other bounded
+        // bulk copies — instead of validate_user_range, whose 64 KiB cap would
+        // reject a full 1024-entry readdir (the opendir snapshot capacity).
         let bytes = capacity.saturating_mul(core::mem::size_of::<UserDirEntry>());
-        if let Err(error) = validate_user_range(entries as u64, bytes) {
+        if !is_valid_user_pointer(entries as u64, bytes) {
+            return EFAULT;
+        }
+        if let Err(error) = validate_user_pages(entries as u64, bytes, true) {
             return error;
         }
     }
