@@ -94,3 +94,4 @@
 84	Truncate
 85	DisplayOwner
 86	Fcntl
+87	Poll

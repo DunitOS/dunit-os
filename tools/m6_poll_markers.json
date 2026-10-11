@@ -1,0 +1,19 @@
+{
+  "description": "poll/select (POSIX-gap list). Kernel Poll syscall (87) is a non-blocking readiness snapshot (kernel/src/syscall/mod.rs poll_one over pipe/vfs/stdio; pipe readiness in kernel/src/pipe.rs); musl poll() adds the timeout wait (re-poll + sleep), select() rides on poll(). userspace/ctests/musl_poll.c over a pipe. Run: tools/qemu_test.py --build --markers-file tools/m6_poll_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 240 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_poll"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[POLL] empty nonblock OK", "claim": "poll(timeout=0) on an empty pipe reports nothing ready", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[POLL] pollin OK", "claim": "after a write the pipe read end polls POLLIN ready", "source": "kernel/src/pipe.rs" },
+    { "marker": "[POLL] select OK", "claim": "select() agrees the read end is readable", "source": "toolchains/dunit-musl/src/select/select.c" },
+    { "marker": "[POLL] hup OK", "claim": "closing the write end makes the read end poll ready (POLLHUP/POLLIN, EOF)", "source": "kernel/src/pipe.rs" },
+    { "marker": "[POLL] DONE", "claim": "the test ran to completion", "source": "userspace/ctests/musl_poll.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[POLL] empty nonblock FAIL", "why": "poll falsely reported an empty pipe ready", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[POLL] pollin FAIL", "why": "poll missed a readable pipe", "source": "kernel/src/pipe.rs" },
+    { "marker": "[POLL] select FAIL", "why": "select disagreed with the pipe state", "source": "toolchains/dunit-musl/src/select/select.c" },
+    { "marker": "[POLL] hup FAIL", "why": "poll missed POLLHUP/EOF on a closed write end", "source": "kernel/src/pipe.rs" }
+  ]
+}

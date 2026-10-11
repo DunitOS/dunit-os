@@ -96,6 +96,7 @@ pub enum Syscall {
     Truncate = 84,
     DisplayOwner = 85,
     Fcntl = 86,
+    Poll = 87,
 }
 
 impl Syscall {
@@ -189,6 +190,7 @@ impl Syscall {
             84 => Some(Syscall::Truncate),
             85 => Some(Syscall::DisplayOwner),
             86 => Some(Syscall::Fcntl),
+            87 => Some(Syscall::Poll),
             _ => None,
         }
     }
@@ -766,6 +768,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Truncate => sys_truncate(arg0 as u32, arg1 as i64),
         Syscall::DisplayOwner => crate::handle::display_owner() as i64,
         Syscall::Fcntl => sys_fcntl(arg0 as u32, arg1, arg2),
+        Syscall::Poll => sys_poll(arg0 as *mut u8, arg1 as usize),
     }
 }
 
@@ -1310,6 +1313,91 @@ fn sys_fcntl(fd: u32, cmd: u64, arg: u64) -> i64 {
         // unsupported -> documented ENOSYS (M6.1), not a fake.
         _ => ENOSYS,
     }
+}
+
+const POLLIN_BIT: u16 = 0x001;
+const POLLOUT_BIT: u16 = 0x004;
+const POLLHUP_BIT: u16 = 0x010;
+const POLLNVAL_BIT: u16 = 0x020;
+const MAX_POLL_FDS: usize = 1024;
+
+/// Non-blocking readiness snapshot (POSIX poll minus the wait). musl's poll()
+/// loops over this with a short sleep to implement the timeout, so the kernel
+/// never parks here. Each `struct pollfd` is {i32 fd; u16 events; u16 revents}
+/// (8 bytes). Returns the number of fds with a non-zero revents.
+fn sys_poll(fds: *mut u8, nfds: usize) -> i64 {
+    if nfds == 0 {
+        return 0;
+    }
+    if nfds > MAX_POLL_FDS {
+        return EINVAL;
+    }
+    let mut buf = match copy_buffer_from_user(fds, nfds * 8) {
+        Ok(b) => b,
+        Err(error) => return error,
+    };
+    let mut ready = 0i64;
+    for i in 0..nfds {
+        let base = i * 8;
+        let fd = i32::from_le_bytes([buf[base], buf[base + 1], buf[base + 2], buf[base + 3]]);
+        let events = u16::from_le_bytes([buf[base + 4], buf[base + 5]]);
+        let revents = poll_one(fd, events);
+        buf[base + 6] = (revents & 0xff) as u8;
+        buf[base + 7] = (revents >> 8) as u8;
+        if revents != 0 {
+            ready += 1;
+        }
+    }
+    if let Err(error) = copy_buffer_to_user(fds, &buf) {
+        return error;
+    }
+    ready
+}
+
+fn poll_one(fd: i32, events: u16) -> u16 {
+    if fd < 0 {
+        return 0; // negative fd: ignored
+    }
+    let fd = fd as u32;
+    let mut revents = 0u16;
+    match crate::process::get_fd(fd).map(|entry| entry.target) {
+        None => revents |= POLLNVAL_BIT,
+        Some(crate::process::FdTarget::Stdin) => {
+            // No kernel stdin-readiness query yet: report readable optimistically
+            // so a poll on stdin lets the subsequent read run (documented limit).
+            if events & POLLIN_BIT != 0 {
+                revents |= POLLIN_BIT;
+            }
+        }
+        Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => {
+            if events & POLLOUT_BIT != 0 {
+                revents |= POLLOUT_BIT;
+            }
+        }
+        Some(crate::process::FdTarget::Vfs(_)) => {
+            // Regular files are always ready in the requested direction.
+            if events & POLLIN_BIT != 0 {
+                revents |= POLLIN_BIT;
+            }
+            if events & POLLOUT_BIT != 0 {
+                revents |= POLLOUT_BIT;
+            }
+        }
+        Some(crate::process::FdTarget::Pipe { id, write: false }) => {
+            if events & POLLIN_BIT != 0 && crate::pipe::is_readable(id) {
+                revents |= POLLIN_BIT;
+            }
+            if crate::pipe::write_closed(id) {
+                revents |= POLLHUP_BIT;
+            }
+        }
+        Some(crate::process::FdTarget::Pipe { id, write: true }) => {
+            if events & POLLOUT_BIT != 0 && crate::pipe::is_writable(id) {
+                revents |= POLLOUT_BIT;
+            }
+        }
+    }
+    revents
 }
 
 fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {

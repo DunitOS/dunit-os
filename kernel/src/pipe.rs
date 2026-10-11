@@ -98,6 +98,35 @@ pub fn release(id: u64, write_end: bool) -> bool {
     wake
 }
 
+/// POLLIN readiness for a read end: data buffered, or all write ends closed
+/// (EOF is a readable event). A vanished pipe reads as EOF, so also ready.
+pub fn is_readable(id: u64) -> bool {
+    let reg = REGISTRY.lock();
+    match reg.pipes.get(&id) {
+        Some(pipe) => !pipe.buf.is_empty() || pipe.write_refs == 0,
+        None => true,
+    }
+}
+
+/// POLLOUT readiness for a write end: buffer has space, or all read ends closed
+/// (a write would return EPIPE immediately — i.e. it will not block).
+pub fn is_writable(id: u64) -> bool {
+    let reg = REGISTRY.lock();
+    match reg.pipes.get(&id) {
+        Some(pipe) => pipe.read_refs == 0 || pipe.buf.len() < PIPE_CAPACITY,
+        None => true,
+    }
+}
+
+/// True once all write ends are closed (POLLHUP on the read end).
+pub fn write_closed(id: u64) -> bool {
+    let reg = REGISTRY.lock();
+    match reg.pipes.get(&id) {
+        Some(pipe) => pipe.write_refs == 0,
+        None => true,
+    }
+}
+
 /// Read into `out`. Drains up to `out.len()` bytes. Empty + writers open =>
 /// WouldBlock; empty + no writers => Eof.
 pub fn read(id: u64, out: &mut [u8]) -> PipeRead {
