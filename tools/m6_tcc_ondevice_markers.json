@@ -1,9 +1,10 @@
 {
-  "description": "On-device Dunit tcc (P3b first proof): the tcc compiler itself, compiled with dunit-cc into a native Dunit ELF (toolchains/dunit-tcc/tools/dunit/build-tcc-dunit.sh), packed as /app/tcc, runs ON the kernel. `exec tcc -v` prints the version banner — proof the compiler binary starts and runs on Dunit (not just that it links). Full on-device compile (with the /system sysroot) is the next step. Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_ondevice_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 300 --boot-timeout 180",
+  "description": "On-device Dunit tcc (P3b first proof): the tcc compiler itself, compiled with dunit-cc into a native Dunit ELF (toolchains/dunit-tcc/tools/dunit/build-tcc-dunit.sh), packed as /system/bin/tcc, runs ON the kernel. `exec tcc -v` (resolved via the /system/bin exec path) prints the version banner — proof the compiler binary starts and runs on Dunit. Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_ondevice_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 300 --boot-timeout 180",
   "run": { "config": "limine.conf", "cmd": ["exec tcc -v"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
-    { "marker": "tcc version 0.9.28rc", "claim": "the tcc compiler, built with dunit-cc, started and ran on the Dunit kernel", "source": "toolchains/dunit-tcc/tcc.c" }
+    { "marker": "tcc version 0.9.28rc", "claim": "the tcc compiler, built with dunit-cc, started and ran on the Dunit kernel", "source": "toolchains/dunit-tcc/tcc.c" },
+    { "marker": "tcc returned code=0", "claim": "the on-device tcc (/system/bin/tcc) exited cleanly", "source": "kernel/src/command.rs" }
   ],
   "forbidden": [
     { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" }

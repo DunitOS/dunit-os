@@ -123,6 +123,13 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                 rel = host_path.relative_to(tinc).as_posix()
                 add(f"/system/tcc/include/{rel}", host_path)
 
+    # The on-device compiler itself: /system/bin/tcc (an OS tool, not a bundled
+    # /app application), found by `exec tcc` via the /system/bin exec path.
+    if args.tcc_bin is not None:
+        tcc_bin = Path(args.tcc_bin)
+        if tcc_bin.is_file():
+            add("/system/bin/tcc", tcc_bin)
+
     return sorted(entries.items())
 
 
@@ -151,6 +158,8 @@ def parse_args() -> argparse.Namespace:
                         help="Dunit sysroot (include/ + lib/) packed to /system for on-device tcc")
     parser.add_argument("--tcc-dir", type=Path, default=None,
                         help="tcc fork dir (libtcc1.a + include/) packed to /system/tcc")
+    parser.add_argument("--tcc-bin", type=Path, default=None,
+                        help="the on-device tcc binary, packed to /system/bin/tcc")
     parser.add_argument("--exclude", action="append", default=[],
                         help="asset path (relative to assets dir) to omit, repeatable")
     return parser.parse_args()

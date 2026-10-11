@@ -233,19 +233,26 @@ fn terminal_exec(console: &mut terminal::FbConsole, cwd: &str, command_line: &st
 
     match result {
         Ok((normalized, exit)) => {
-            console.write_str("exec: ");
-            console.write_str(&normalized);
+            // Surface a line only when something went wrong. A clean exit (0) is
+            // the common case and needs no terminal noise; the exit code still
+            // goes to the serial log ([EXEC] … returned code=…) for debugging.
             match exit.status {
+                process::ProcessExitStatus::Exited(0) => {}
                 process::ProcessExitStatus::Exited(code) => {
-                    console.write_str(" returned code=");
+                    console.write_str("exec: ");
+                    console.write_str(&normalized);
+                    console.write_str(" exited ");
                     shell::write_i32(console, code);
+                    console.write_str("\n");
                 }
                 process::ProcessExitStatus::Fault(fault) => {
+                    console.write_str("exec: ");
+                    console.write_str(&normalized);
                     console.write_str(" killed by ");
                     console.write_str(fault.reason());
+                    console.write_str("\n");
                 }
             }
-            console.write_str("\n");
             let _ = process::autoreap_process(exit.pid, "terminal-exec");
         }
         Err(command::ExecRunError::MissingPath) => console.write_str("exec: missing path\n"),
