@@ -2157,10 +2157,14 @@ pub fn is_pid_runnable(pid: ProcessId) -> bool {
 pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessError> {
     let parent_pid = current_process().ok_or(ProcessError::NoCurrentProcess)?.pid;
     let table = process_table_mut();
-    let has_requested_process =
-        requested_pid.0 == 0 || table.iter().any(|record| record.pid == requested_pid);
-
+    // Select a child that has already finished so a terminated child is reaped
+    // even when an earlier-listed sibling is still running (POSIX wait(-1)
+    // "any terminated child"). Report EAGAIN only when a matching child exists
+    // but none has finished; ECHILD (NotChild) when there is no matching child
+    // at all — including a specific pid that is not our child, which POSIX
+    // requires to be ECHILD rather than ENOENT.
     let mut child_index = None;
+    let mut matched_any = false;
     for (index, record) in table.iter().enumerate() {
         if record.parent != Some(parent_pid) || !record.waitable {
             continue;
@@ -2168,14 +2172,19 @@ pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessErr
         if requested_pid.0 != 0 && record.pid != requested_pid {
             continue;
         }
-        child_index = Some(index);
-        break;
+        matched_any = true;
+        let finished = (record.status.is_some() && record.has_run)
+            || (record.state == ProcessState::Prepared && !record.has_run);
+        if finished {
+            child_index = Some(index);
+            break;
+        }
     }
 
     let index = match child_index {
         Some(index) => index,
-        None if has_requested_process => return Err(ProcessError::NotChild),
-        None => return Err(ProcessError::NoSuchProcess),
+        None if matched_any => return Err(ProcessError::NotRunnable),
+        None => return Err(ProcessError::NotChild),
     };
 
     let record = &table[index];
@@ -2184,14 +2193,7 @@ pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessErr
         _ if record.state == ProcessState::Prepared && !record.has_run => {
             (WAIT_KIND_SPAWN_PREPARED, 0)
         }
-        _ if matches!(
-            record.state,
-            ProcessState::Ready | ProcessState::Running | ProcessState::Blocked
-        ) =>
-        {
-            return Err(ProcessError::NotRunnable);
-        }
-        _ => return Err(ProcessError::ProcessNotPrepared),
+        _ => return Err(ProcessError::NotRunnable),
     };
 
     let pid = record.pid;
