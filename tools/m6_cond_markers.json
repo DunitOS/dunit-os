@@ -1,0 +1,13 @@
+{
+  "description": "pthread_cond_broadcast with multiple waiters (M6-D). userspace/ctests/musl_cond.c blocks 3 worker threads in pthread_cond_wait and broadcasts once; all 3 must wake and join. This deadlocked before: the ordered wake chain uses FUTEX_REQUEUE, an unmapped sentinel (-ENOSYS no-op) on Dunit, so predecessors never woke. Fixed by waking instead of requeueing in the musl fork (src/thread/pthread_cond_timedwait.c). Run: tools/qemu_test.py --build --markers-file tools/m6_cond_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_cond"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[COND] broadcast woke 3 OK", "claim": "all three waiters woke from a single pthread_cond_broadcast (no requeue deadlock)", "source": "toolchains/dunit-musl/src/thread/pthread_cond_timedwait.c" },
+    { "marker": "[COND] DONE", "claim": "main joined all workers — no hang", "source": "userspace/ctests/musl_cond.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[COND] broadcast FAIL", "why": "not all waiters woke from the broadcast", "source": "userspace/ctests/musl_cond.c" }
+  ]
+}
