@@ -132,6 +132,13 @@ void hal_init_idt(void) {
     for (int i = 0; i < 256; i++) {
         idt_set_gate(i, (uint64_t)isr_table[i], 0x08, 0x8E);
     }
-    
+
+    /* Route the faults that must survive a bad current stack onto their own IST
+     * stacks (set up in gdt.c): #DF (vector 8) -> ist1, NMI (vector 2) -> ist2.
+     * This turns a kernel-stack overflow into a clean double-fault panic instead
+     * of a triple-fault reboot. */
+    idt[8].ist = 1;
+    idt[2].ist = 2;
+
     idt_flush((uint64_t)&idt_ptr);
 }
