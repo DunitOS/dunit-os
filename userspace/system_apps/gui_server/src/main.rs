@@ -906,6 +906,25 @@ fn spawn_client(
 /// is the SINGLE "launch an app" path shared by the launcher menu (mouse click +
 /// keyboard Enter) and the dock — so program-launch policy lives in exactly one
 /// place instead of being copied per trigger. Returns true iff a client spawned.
+/// Register a client the compositor did NOT spawn — a process launched
+/// standalone (e.g. `exec gui_calc` from a terminal) that sent a CONNECT
+/// request. Reserve a protocol connection and hand it the same
+/// `[our_pid][client_id]` handshake a spawned client gets, so its window then
+/// comes up through the ordinary surface/commit path. Bounded by the protocol's
+/// connection quota: `server.connect()` yields None when full.
+fn accept_client(server: &mut Server, pid: u32, id: u32) -> Option<ClientState> {
+    let conn = server.connect()?;
+    let mut c = ClientState::empty();
+    c.pid = pid;
+    c.conn = conn;
+    c.app = 0xFF; // not a registry app (launched directly)
+    let mut hs = [0u8; 8];
+    hs[0..4].copy_from_slice(&libdunit::get_pid().to_le_bytes());
+    hs[4..8].copy_from_slice(&id.to_le_bytes());
+    libdunit::ipc_send(pid, &hs);
+    Some(c)
+}
+
 fn try_launch(
     server: &mut Server,
     clients: &mut Vec<ClientState>,
@@ -2597,7 +2616,22 @@ fn pump_clients(
         let n = n as usize;
         let idx = match clients.iter().position(|c| c.pid == sender) {
             Some(i) => i,
-            None => continue, // message from an unknown pid — ignore
+            None => {
+                // A process we did not spawn asked to connect (launched
+                // standalone, e.g. from a terminal). Register it so its window
+                // appears like any other; its subsequent messages then route by
+                // pid. Bounded by the connection quota (accept_client -> None).
+                if n >= 4
+                    && u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]])
+                        == libdunit::GUI_CONNECT_MAGIC
+                {
+                    let id = clients.len() as u32 + 1;
+                    if let Some(c) = accept_client(server, sender, id) {
+                        clients.push(c);
+                    }
+                }
+                continue;
+            }
         };
         handle_client_payload(server, &mut clients[idx], &rx[..n], reload, notify_out);
         for (fc, fp) in &server.composite() {

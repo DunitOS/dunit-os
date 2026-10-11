@@ -94,6 +94,7 @@ pub enum Syscall {
     Dup = 82,
     Pipe = 83,
     Truncate = 84,
+    DisplayOwner = 85,
 }
 
 impl Syscall {
@@ -185,6 +186,7 @@ impl Syscall {
             82 => Some(Syscall::Dup),
             83 => Some(Syscall::Pipe),
             84 => Some(Syscall::Truncate),
+            85 => Some(Syscall::DisplayOwner),
             _ => None,
         }
     }
@@ -760,6 +762,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Dup => sys_dup(arg0 as u32, arg1 as i64),
         Syscall::Pipe => sys_pipe(arg0 as *mut u32),
         Syscall::Truncate => sys_truncate(arg0 as u32, arg1 as i64),
+        Syscall::DisplayOwner => crate::handle::display_owner() as i64,
     }
 }
 

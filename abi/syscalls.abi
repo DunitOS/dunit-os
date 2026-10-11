@@ -92,3 +92,4 @@
 82	Dup
 83	Pipe
 84	Truncate
+85	DisplayOwner

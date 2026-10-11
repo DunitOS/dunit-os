@@ -88,7 +88,8 @@
 #define SYS_DUP 82
 #define SYS_PIPE 83
 #define SYS_TRUNCATE 84
+#define SYS_DISPLAY_OWNER 85
 
-#define DUNIT_SYSCALL_COUNT 85
+#define DUNIT_SYSCALL_COUNT 86
 
 #endif /* DUNIT_SYSCALL_H */

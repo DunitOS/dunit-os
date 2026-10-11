@@ -447,7 +447,7 @@ fn u64_at(p: &[u8], off: usize) -> u64 {
 pub extern "C" fn _start() -> ! {
     // 1) Handshake: compositor pid + our client id (id is a tint hint only).
     let mut m = [0u8; 8];
-    if libdunit::ipc_recv_blocking(&mut m, 0) < 8 {
+    if libdunit::gui_connect(&mut m) == 0 {
         libdunit::println("gui_settings: FAIL recv handshake");
         libdunit::exit(1);
     }

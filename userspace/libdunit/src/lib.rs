@@ -1198,6 +1198,43 @@ pub fn get_pid() -> u32 {
     syscall0(SYSCALL_GET_PID) as u32
 }
 
+/// PID of the process holding the display master (the compositor), or 0 if none.
+/// Lets a GUI program launched OUTSIDE the compositor (e.g. from a terminal)
+/// discover gui_server and connect to it — see `gui_connect`.
+pub fn display_owner_pid() -> u32 {
+    syscall0(SYSCALL_DISPLAY_OWNER) as u32
+}
+
+/// Magic a not-spawned-by-the-compositor GUI client sends to request a
+/// connection (see `gui_connect`): the first word of its 8-byte CONNECT message.
+pub const GUI_CONNECT_MAGIC: u32 = 0x4755_4943; // "GUIC"
+
+/// Establish the client<->compositor link; returns the compositor pid (0 on
+/// failure) and fills `hs` with the 8-byte `[compositor_pid, client_id]`
+/// handshake. If the compositor SPAWNED us it already sent that handshake, so a
+/// short wait collects it. If we were launched standalone (e.g. `exec gui_calc`
+/// from a terminal) no handshake arrives, so we find the compositor via the
+/// display owner and send it a CONNECT request; it registers us and replies with
+/// the same handshake. One code path serves both launch styles.
+pub fn gui_connect(hs: &mut [u8; 8]) -> u32 {
+    if ipc_recv_blocking(hs, 500) >= 8 {
+        return u32::from_le_bytes([hs[0], hs[1], hs[2], hs[3]]);
+    }
+    let compositor = display_owner_pid();
+    if compositor == 0 {
+        return 0;
+    }
+    let mut req = [0u8; 8];
+    req[0..4].copy_from_slice(&GUI_CONNECT_MAGIC.to_le_bytes());
+    if ipc_send(compositor, &req) < 0 {
+        return 0;
+    }
+    if ipc_recv_blocking(hs, 3000) >= 8 {
+        return u32::from_le_bytes([hs[0], hs[1], hs[2], hs[3]]);
+    }
+    0
+}
+
 /// Start a thread in this process. `stack_top` must be the aligned top of a
 /// writable user stack; the caller retains its mapping until after join.
 pub fn thread_create(entry: extern "C" fn(usize) -> !, stack_top: *mut u8, arg: usize) -> isize {
