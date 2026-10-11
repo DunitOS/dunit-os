@@ -1,0 +1,12 @@
+{
+  "description": "reboot command actually resets the machine (M6.5). Typing `reboot` in the kernel terminal calls crate::power::reboot(), which pulses the 0xCF9 reset-control register and the i8042 CPU reset line; with QEMU's -no-reboot the reset exits QEMU during the settle window so the FAILED marker never prints. Run: tools/qemu_test.py --markers-file tools/m6_reboot_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 30 --timeout 180 --boot-timeout 120 (reuses the ISO from the poweroff run — no --build).",
+  "run": { "config": "limine.conf", "cmd": ["reboot"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[POWER] reboot requested", "claim": "the reboot command reached the power mechanism", "source": "kernel/src/power.rs" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[POWER] reboot FAILED", "why": "the machine did not actually reset — no reset line was honoured", "source": "kernel/src/power.rs" }
+  ]
+}

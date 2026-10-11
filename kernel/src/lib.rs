@@ -23,6 +23,7 @@ pub mod interrupts;
 pub mod ipc;
 pub mod kthreads;
 pub mod memory;
+pub mod power;
 pub mod process;
 pub mod pty;
 pub mod serial;
