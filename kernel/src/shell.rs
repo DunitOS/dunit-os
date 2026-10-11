@@ -1164,6 +1164,18 @@ pub fn run_terminal_diag(out: &mut dyn ShellSink, line: &str) -> bool {
     true
 }
 
+/// Whether a terminal-diag command line mutates persistent / block-device state
+/// (write sectors, make/mount a filesystem, run the installer) as opposed to a
+/// read-only diagnostic. The `terminal_diag` syscall requires the privileged
+/// capability for these; one source of truth shared with `run_terminal_diag`.
+pub fn terminal_diag_is_mutating(line: &str) -> bool {
+    let cmd = line.trim().split_whitespace().next().unwrap_or("");
+    matches!(
+        cmd,
+        "blkwrite" | "mkfs.dunit" | "mount.dunit" | "install.dunit"
+    )
+}
+
 /// Dispatch a command line shared by both terminals. `cwd` is owned by the
 /// caller and mutated by `cd`.
 pub fn run_command(out: &mut dyn ShellSink, cwd: &mut String, line: &str) -> ShellOutcome {

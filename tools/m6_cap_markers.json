@@ -1,0 +1,20 @@
+{
+  "description": "Capability-based privilege model (M6.5, option b). A process the kernel launches directly (`exec`, init) holds a privileged capability; a posix_spawn (SpawnArgs) child does not; libdunit SpawnProcess inherits it. The privileged musl_cap uses a read-only terminal diag, then its unprivileged posix_spawn child cap_child confirms a read-only diag is allowed, a mutating diag (mkfs.dunit) is EPERM, and killing a non-child (pid 1) is EPERM. Run: tools/qemu_test.py --build --markers-file tools/m6_cap_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_cap"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[CAP] parent diag_ro OK", "claim": "a privileged (console-launched) process may run a read-only terminal diagnostic", "source": "userspace/ctests/musl_cap.c" },
+    { "marker": "[CAP] child diag_ro OK", "claim": "a read-only terminal diagnostic is allowed to an unprivileged process too", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[CAP] child diag_mut_denied OK", "claim": "a mutating terminal diagnostic (mkfs.dunit) is denied to an unprivileged process with EPERM", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[CAP] child kill_denied OK", "claim": "an unprivileged process cannot kill a process that is not its child (EPERM)", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[CAP] DONE", "claim": "the capability driver ran to completion with the kernel alive", "source": "userspace/ctests/musl_cap.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[CAP] parent diag_ro FAIL", "why": "a privileged process could not run a read-only diagnostic", "source": "userspace/ctests/musl_cap.c" },
+    { "marker": "[CAP] child diag_ro FAIL", "why": "a read-only diagnostic was wrongly denied to an unprivileged process", "source": "userspace/ctests/cap_child.c" },
+    { "marker": "[CAP] child diag_mut_denied FAIL", "why": "an unprivileged process was allowed a mutating disk diagnostic", "source": "userspace/ctests/cap_child.c" },
+    { "marker": "[CAP] child kill_denied FAIL", "why": "an unprivileged process was allowed to kill a non-child", "source": "userspace/ctests/cap_child.c" },
+    { "marker": "[CAP] FAIL spawn", "why": "could not spawn the unprivileged probe child", "source": "userspace/ctests/musl_cap.c" }
+  ]
+}

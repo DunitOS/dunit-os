@@ -1222,9 +1222,10 @@ fn sys_rmdir(path: *const u8, path_len: usize) -> i64 {
 /// AHCI/block itself (§10). It REUSES the kernel's own formatters (one source of
 /// truth, same output both terminals show) and is GATED to a whitelist in
 /// `shell::run_terminal_diag`, so it can never run an arbitrary kernel-shell
-/// command. SECURITY: it exposes mutating admin ops (blkwrite/mkfs/mount/install)
-/// to any userspace caller — acceptable only while Dunit is single-user-root;
-/// gate behind a capability once a privilege model exists.
+/// command. SECURITY: the mutating admin verbs (blkwrite/mkfs/mount/install)
+/// additionally require the privileged (system-control) capability — see
+/// `shell::terminal_diag_is_mutating` and the check below; read-only
+/// diagnostics stay open to any caller.
 fn sys_terminal_diag(
     line_ptr: *const u8,
     line_len: usize,
@@ -1238,6 +1239,13 @@ fn sys_terminal_diag(
         Ok(l) => l,
         Err(error) => return error,
     };
+    // The mutating verbs (blkwrite / mkfs / mount / install) write disk or run
+    // the installer — require the privileged capability so an ordinary process
+    // cannot reformat the disk through this diagnostic syscall. Read-only
+    // diagnostics stay open to any caller.
+    if crate::shell::terminal_diag_is_mutating(&line) && !crate::process::current_is_privileged() {
+        return EPERM;
+    }
     let mut sink = crate::shell::StringSink::new();
     if !crate::shell::run_terminal_diag(&mut sink, &line) {
         // Not a whitelisted diagnostic — the gate rejects it rather than
@@ -2268,7 +2276,9 @@ fn sys_spawn_args(
     if crate::elf::ElfParser::new(&data).is_err() {
         return EIO;
     }
-    let pid = match crate::process::create_user_process_record(resolved.clone(), true) {
+    // posix_spawn (userspace) children are NEVER privileged — this is the
+    // sandbox boundary: a user program cannot hand its children system-control.
+    let pid = match crate::process::create_user_process_record(resolved.clone(), true, false) {
         Ok(pid) => pid,
         Err(error) => return process_error_to_errno(error),
     };
@@ -2299,7 +2309,11 @@ fn spawn_process_from_user(
         return Err(EIO);
     }
 
-    let pid = crate::process::create_user_process_record(resolved.clone(), true)
+    // libdunit SpawnProcess path (init + system services): inherit the
+    // caller's privilege so init's service tree stays privileged, but a child
+    // of an unprivileged process stays unprivileged.
+    let privileged = crate::process::current_is_privileged();
+    let pid = crate::process::create_user_process_record(resolved.clone(), true, privileged)
         .map_err(process_error_to_errno)?;
 
     let argv0 = resolved
@@ -2601,6 +2615,12 @@ fn sys_get_pid() -> i64 {
 fn sys_kill_process(pid: u32) -> i64 {
     if pid == 0 {
         return EINVAL;
+    }
+    // Authorization: a privileged process may kill anything; an unprivileged one
+    // may kill only its own children. Without this any process could terminate
+    // gui_server, the shell or a sibling by guessing its (small sequential) pid.
+    if !crate::process::current_may_kill(crate::process::ProcessId(pid as u64)) {
+        return EPERM;
     }
     match crate::process::kill_process(crate::process::ProcessId(pid as u64), -9) {
         Ok(true) => USER_CONTEXT_RETURN_MAGIC,
