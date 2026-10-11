@@ -36,7 +36,7 @@ MUSL_SYSROOT = $(BUILD_DIR)/dunit-sysroot
 MUSL_LIBC = $(MUSL_SYSROOT)/lib/libc.a
 # C programs linked against the Dunit musl port (userspace/ctests/<name>.c),
 # packed into the initrd as /app/<name>.
-MUSL_CTESTS = musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops musl_fcntl musl_poll musl_termios musl_mmap musl_barrier
+MUSL_CTESTS = musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops musl_fcntl musl_poll musl_termios musl_mmap musl_barrier musl_redir
 
 # Dunit TinyCC port (M6 capstone): the x86_64-dunit tcc fork lives in the
 # submodule toolchains/dunit-tcc. tools/dunit/build-tcc.sh builds a host-hosted

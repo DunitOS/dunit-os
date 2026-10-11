@@ -6,8 +6,7 @@
     { "marker": "[CHILD] argc=2 argv1=hi", "claim": "posix_spawn launched the child and passed argv through the native SpawnArgs", "source": "userspace/ctests/musl_child.c" },
     { "marker": "[MUSL-SPAWN] child pid=", "claim": "the parent reaped the child via waitpid (native WaitProcess)", "source": "userspace/ctests/musl_spawn.c" },
     { "marker": "exited=1 code=7", "claim": "waitpid reported WIFEXITED with WEXITSTATUS 7 — exit status crossed the process boundary", "source": "userspace/ctests/musl_spawn.c" },
-    { "marker": "[MUSL-SPAWN] OK", "claim": "posix_spawn + waitpid work end to end", "source": "userspace/ctests/musl_spawn.c" },
-    { "marker": "[MUSL-SPAWN] file-actions refused ENOSYS OK", "claim": "posix_spawn with a file action is refused with a documented ENOSYS, not silently ignored (M6.1)", "source": "toolchains/dunit-musl/src/process/posix_spawn.c" }
+    { "marker": "[MUSL-SPAWN] OK", "claim": "posix_spawn + waitpid work end to end", "source": "userspace/ctests/musl_spawn.c" }
   ],
   "forbidden": [
     { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },

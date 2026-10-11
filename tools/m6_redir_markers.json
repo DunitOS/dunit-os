@@ -1,0 +1,13 @@
+{
+  "description": "posix_spawn file actions = redirection (M6-D). The SpawnArgs block now carries serialized file actions; the kernel has the child inherit the parent's fds and applies open/dup2/close to the child's fd table before scheduling it (kernel/src/syscall/mod.rs sys_spawn_args/setup_child_fds + kernel/src/process/mod.rs inherit_fds/place_vfs_fd; VFS open-file refcount in kernel/src/fs/vfs.rs). musl serializes the actions (toolchains/dunit-musl/src/process/posix_spawn.c). userspace/ctests/musl_redir.c redirects a child's stdout to /tmp/redir.out and reads it back. Run: tools/qemu_test.py --build --markers-file tools/m6_redir_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 240 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_redir"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[REDIR] child stdout redirected to file OK", "claim": "posix_spawn file actions (open+dup2+close) redirected the child's stdout into a file, read back by the parent", "source": "kernel/src/syscall/mod.rs" },
+    { "marker": "[REDIR] DONE", "claim": "the test ran to completion", "source": "userspace/ctests/musl_redir.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[REDIR] FAIL", "why": "redirection via file actions did not work", "source": "userspace/ctests/musl_redir.c" }
+  ]
+}
