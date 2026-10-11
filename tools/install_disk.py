@@ -129,6 +129,8 @@ def build_initrd(root: Path, config: Path) -> Path:
         "--assets-dir", str(root / "assets"),
         "--services-dir", str(root / "services"),
         "--config", str(config),
+        "--sysroot-dir", str(root / "build/dunit-sysroot"),
+        "--tcc-dir", str(root / "toolchains/dunit-tcc"),
         "--exclude", "gui/boot_blur.bmp",
     ])
     return out
