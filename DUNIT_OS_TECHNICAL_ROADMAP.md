@@ -561,8 +561,8 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 ##### M6-D — process model без обязательного `fork`
 
-- [ ] Спроектировать `spawn/exec-image/wait/kill` с arguments, environment, cwd и явным inheritance handles.
-- [ ] Переписать musl `posix_spawn` backend на прямой Dunit spawn contract, не эмулировать его через Linux `clone/vfork`.
+- [~] Спроектировать `spawn/exec-image/wait/kill` с arguments, environment, cwd и явным inheritance handles.
+- [x] Переписать musl `posix_spawn` backend на прямой Dunit spawn contract, не эмулировать его через Linux `clone/vfork`.
 - [ ] Реализовать pipes, descriptor duplication и redirection до заявления shell/process compatibility.
 - [x] Возвращать `ENOSYS` для `fork`, пока нет корректных COW, multithreaded semantics и `pthread_atfork`.
 
