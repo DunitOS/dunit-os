@@ -111,6 +111,10 @@ enum WaitKey {
     /// Dunit-native futex key: threads share their owner's address space, so
     /// (owner, user virtual address of the word) uniquely names a futex word.
     Word { owner: ProcessId, addr: u64 },
+    /// A pipe end, named by the global pipe-object id. Readers block here when
+    /// the pipe is empty with writers still open; writers block when it is full
+    /// with readers still open.
+    Pipe(u64),
 }
 
 #[derive(Clone, Copy)]
@@ -510,11 +514,18 @@ impl Process {
     }
 
     pub fn cleanup_fds(&mut self) -> usize {
-        self.fd_table.clear();
-        let refs = core::mem::take(&mut self.vfs_fd_refs);
+        let fds = core::mem::take(&mut self.fd_table);
         let mut closed = 0;
-        // Close each distinct VFS descriptor exactly once, even if several
-        // process fds (dups) referenced it.
+        // Release pipe ends in the registry (no wake: on teardown any peer is in
+        // this same dying process; cross-process pipe wake-on-exit is a
+        // posix_spawn-file-actions concern that does not exist yet).
+        for (_, entry) in &fds {
+            if let FdTarget::Pipe { id, write } = entry.target {
+                let _ = crate::pipe::release(id, write);
+            }
+        }
+        let refs = core::mem::take(&mut self.vfs_fd_refs);
+        // Close each distinct VFS descriptor exactly once, even across dups.
         for (vfs_fd, _) in refs {
             if let Some(vfs) = crate::fs::vfs::get_vfs() {
                 let _ = vfs.close(vfs_fd);
@@ -535,61 +546,76 @@ impl Process {
         Ok(pfd)
     }
 
-    /// Drop a process fd. Returns `Ok(Some(vfs_fd))` when this was the last
-    /// reference to a VFS descriptor and the caller must close it in the VFS;
-    /// `Ok(None)` otherwise (stdio, or a VFS fd still referenced by a dup).
-    pub fn drop_fd(
-        &mut self,
-        fd: ProcessFd,
-    ) -> Result<Option<crate::fs::vfs::FileDescriptor>, ProcessError> {
+    /// Install a pipe end as a new process fd. The pipe's end refcount is set by
+    /// `crate::pipe::create` for the two initial fds, so this does not retain.
+    pub fn install_pipe_fd(&mut self, id: u64, write: bool) -> Result<ProcessFd, ProcessError> {
+        self.allocate_fd(FdEntry::pipe(id, write))
+    }
+
+    /// Drop a process fd, returning any follow-up the syscall layer must do
+    /// (close a VFS file whose last reference went away, or wake a pipe end).
+    pub fn drop_fd(&mut self, fd: ProcessFd) -> Result<FdCleanup, ProcessError> {
         let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
         Ok(self.release_target(entry.target))
     }
 
-    fn release_target(&mut self, target: FdTarget) -> Option<crate::fs::vfs::FileDescriptor> {
-        if let FdTarget::Vfs(vfs_fd) = target {
-            if let Some(count) = self.vfs_fd_refs.get_mut(&vfs_fd) {
-                *count = count.saturating_sub(1);
-                if *count == 0 {
-                    self.vfs_fd_refs.remove(&vfs_fd);
-                    return Some(vfs_fd);
+    fn release_target(&mut self, target: FdTarget) -> FdCleanup {
+        match target {
+            FdTarget::Vfs(vfs_fd) => {
+                if let Some(count) = self.vfs_fd_refs.get_mut(&vfs_fd) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        self.vfs_fd_refs.remove(&vfs_fd);
+                        return FdCleanup::CloseVfs(vfs_fd);
+                    }
+                }
+                FdCleanup::None
+            }
+            FdTarget::Pipe { id, write } => {
+                if crate::pipe::release(id, write) {
+                    FdCleanup::WakePipe(id)
+                } else {
+                    FdCleanup::None
                 }
             }
+            _ => FdCleanup::None,
         }
-        None
     }
 
     fn retain_target(&mut self, target: FdTarget) {
-        if let FdTarget::Vfs(vfs_fd) = target {
-            *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
+        match target {
+            FdTarget::Vfs(vfs_fd) => {
+                *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
+            }
+            FdTarget::Pipe { id, write } => crate::pipe::retain(id, write),
+            _ => {}
         }
     }
 
     /// dup / dup2. `newfd = None` picks the lowest free fd (dup); `Some(nf)`
-    /// targets exactly `nf` (dup2), closing whatever it held first. Returns the
-    /// new fd and, when dup2 displaced an open VFS descriptor whose last
-    /// reference is now gone, the `vfs_fd` the caller must close in the VFS.
+    /// targets exactly `nf` (dup2), releasing whatever it held first. Returns the
+    /// new fd plus the cleanup for a displaced dup2 target.
     pub fn dup_fd(
         &mut self,
         oldfd: ProcessFd,
         newfd: Option<ProcessFd>,
-    ) -> Result<(ProcessFd, Option<crate::fs::vfs::FileDescriptor>), ProcessError> {
+    ) -> Result<(ProcessFd, FdCleanup), ProcessError> {
         let entry = *self.fd_table.get(&oldfd).ok_or(ProcessError::InvalidFd)?;
         match newfd {
-            Some(nf) if nf == oldfd => Ok((nf, None)),
+            Some(nf) if nf == oldfd => Ok((nf, FdCleanup::None)),
             Some(nf) => {
-                let to_close = match self.fd_table.remove(&nf) {
+                let cleanup = match self.fd_table.remove(&nf) {
                     Some(old) => self.release_target(old.target),
-                    None => None,
+                    None => FdCleanup::None,
                 };
                 self.fd_table.insert(nf, entry);
                 self.retain_target(entry.target);
-                Ok((nf, to_close))
+                Ok((nf, cleanup))
             }
             None => {
                 let pfd = self.allocate_fd(entry)?;
                 self.retain_target(entry.target);
-                Ok((pfd, None))
+                Ok((pfd, FdCleanup::None))
             }
         }
     }
@@ -1295,6 +1321,18 @@ pub enum FdTarget {
     Stdout,
     Stderr,
     Vfs(crate::fs::vfs::FileDescriptor),
+    /// One end of an anonymous pipe (see crate::pipe). `write` selects which end.
+    Pipe { id: u64, write: bool },
+}
+
+/// What the fd layer asks the syscall layer to finish after a close/dup2 that
+/// dropped the last reference to a shared object (the Process cannot reach the
+/// VFS or the wait queue itself).
+#[derive(Clone, Copy)]
+pub enum FdCleanup {
+    None,
+    CloseVfs(crate::fs::vfs::FileDescriptor),
+    WakePipe(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1340,6 +1378,12 @@ impl FdEntry {
     pub const fn vfs(fd: crate::fs::vfs::FileDescriptor) -> Self {
         Self {
             target: FdTarget::Vfs(fd),
+        }
+    }
+
+    pub const fn pipe(id: u64, write: bool) -> Self {
+        Self {
+            target: FdTarget::Pipe { id, write },
         }
     }
 }
@@ -1957,6 +2001,54 @@ pub fn wake_ipc_waiters(pid: ProcessId) {
     }
 }
 
+/// Block the current process on a pipe end so that its read/write syscall
+/// RE-EXECUTES on wake (via syscall_restart_user_context) instead of returning
+/// a value captured now — a pipe read must recompute its byte count after data
+/// arrives. Safe against lost wakeups on this UP, non-preemptible-in-kernel
+/// design: nothing else runs between the caller's pipe-buffer check and this
+/// enqueue.
+pub fn pipe_block_current(id: u64) -> Result<(), ProcessError> {
+    let _irq = InterruptGuard::new();
+    let entity = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
+    let table = process_table_mut();
+    let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
+    let record = &mut table[index];
+    if record.state != ProcessState::Running {
+        return Err(ProcessError::NotRunnable);
+    }
+    let process = record.process.as_mut().ok_or(ProcessError::ProcessNotPrepared)?;
+    if process.is_kernel {
+        return Err(ProcessError::InvalidUserContext);
+    }
+    unsafe {
+        crate::hal::syscall_restart_user_context(&mut process.context);
+    }
+    record.state = ProcessState::Blocked;
+    process.state = ProcessState::Blocked;
+    WAIT_QUEUE.lock().push(WaitEntry {
+        entity,
+        key: WaitKey::Pipe(id),
+        deadline: None,
+    });
+    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
+    PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Wake every process blocked on the pipe end `id`.
+pub fn wake_pipe_waiters(id: u64) {
+    let _irq = InterruptGuard::new();
+    let mut queue = WAIT_QUEUE.lock();
+    let mut index = 0;
+    while index < queue.len() {
+        if queue[index].key == WaitKey::Pipe(id) {
+            wake_entry(queue.remove(index));
+        } else {
+            index += 1;
+        }
+    }
+}
+
 pub fn wake_expired_waiters() {
     let _irq = InterruptGuard::new();
     let mut queue = WAIT_QUEUE.lock();
@@ -2442,7 +2534,13 @@ pub fn open_vfs_fd(vfs_fd: crate::fs::vfs::FileDescriptor) -> Result<ProcessFd, 
         .open_vfs_fd(vfs_fd)
 }
 
-pub fn drop_fd(fd: ProcessFd) -> Result<Option<crate::fs::vfs::FileDescriptor>, ProcessError> {
+pub fn open_pipe_fd(id: u64, write: bool) -> Result<ProcessFd, ProcessError> {
+    current_process_mut()
+        .ok_or(ProcessError::NoCurrentProcess)?
+        .install_pipe_fd(id, write)
+}
+
+pub fn drop_fd(fd: ProcessFd) -> Result<FdCleanup, ProcessError> {
     current_process_mut()
         .ok_or(ProcessError::NoCurrentProcess)?
         .drop_fd(fd)
@@ -2451,7 +2549,7 @@ pub fn drop_fd(fd: ProcessFd) -> Result<Option<crate::fs::vfs::FileDescriptor>, 
 pub fn dup_fd(
     oldfd: ProcessFd,
     newfd: Option<ProcessFd>,
-) -> Result<(ProcessFd, Option<crate::fs::vfs::FileDescriptor>), ProcessError> {
+) -> Result<(ProcessFd, FdCleanup), ProcessError> {
     current_process_mut()
         .ok_or(ProcessError::NoCurrentProcess)?
         .dup_fd(oldfd, newfd)

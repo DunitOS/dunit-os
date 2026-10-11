@@ -1,0 +1,16 @@
+{
+  "description": "Anonymous pipe with a blocking reader (M6-D, Pipe syscall 83 + syscall-restart). userspace/ctests/musl_pipe.c: a reader thread blocks in read() on an empty pipe, main writes 'hello' and the reader wakes with it, then main closes the write end and the reader's next read returns EOF. Exercises the kernel pipe object and the hal syscall_restart_user_context path. Run: tools/qemu_test.py --build --markers-file tools/m6_pipe_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
+  "run": { "config": "limine.conf", "cmd": ["exec musl_pipe"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[PIPE] reader got hello OK", "claim": "a reader blocked on an empty pipe woke on write and its read re-executed to return the real bytes (syscall-restart)", "source": "hal/src/syscall.asm" },
+    { "marker": "[PIPE] reader eof OK", "claim": "closing the write end unblocks the reader with EOF", "source": "kernel/src/pipe.rs" },
+    { "marker": "[PIPE] DONE", "claim": "main joined the reader — no hang", "source": "userspace/ctests/musl_pipe.c" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" },
+    { "marker": "[PIPE] reader FAIL", "why": "the blocking read did not return the written bytes", "source": "userspace/ctests/musl_pipe.c" },
+    { "marker": "[PIPE] reader eof FAIL", "why": "closing the write end did not yield EOF", "source": "userspace/ctests/musl_pipe.c" },
+    { "marker": "[PIPE] FAIL pipe", "why": "pipe() failed to create", "source": "userspace/ctests/musl_pipe.c" }
+  ]
+}

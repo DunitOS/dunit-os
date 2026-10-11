@@ -236,6 +236,53 @@ syscall_capture_user_context:
     mov [rdi + 136], rax
     ret
 
+global syscall_restart_user_context
+syscall_restart_user_context:
+    ; Rust extern "C": rdi = *mut CpuContext.
+    ; Like syscall_capture_user_context, but set up to RE-EXECUTE the syscall on
+    ; resume instead of returning past it: rax = the original syscall number and
+    ; rip = the `syscall` instruction itself (saved return rip - 2 bytes). Used
+    ; by blocking syscalls (pipe read/write) that must re-run and recompute their
+    ; result on wake, not return a value captured at block time.
+    mov rax, [rel syscall_saved_rax]
+    mov [rdi + 0], rax                 ; rax = original syscall number
+    mov rax, [rel syscall_saved_rbx]
+    mov [rdi + 8], rax
+    mov rax, [rel syscall_saved_rcx]
+    mov [rdi + 16], rax
+    mov rax, [rel syscall_saved_rdx]
+    mov [rdi + 24], rax
+    mov rax, [rel syscall_saved_rsi]
+    mov [rdi + 32], rax
+    mov rax, [rel syscall_saved_rdi]
+    mov [rdi + 40], rax
+    mov rax, [rel syscall_saved_rbp]
+    mov [rdi + 48], rax
+    mov rax, [rel syscall_user_rsp]
+    mov [rdi + 56], rax
+    mov rax, [rel syscall_saved_r8]
+    mov [rdi + 64], rax
+    mov rax, [rel syscall_saved_r9]
+    mov [rdi + 72], rax
+    mov rax, [rel syscall_saved_r10]
+    mov [rdi + 80], rax
+    mov rax, [rel syscall_saved_r11]
+    mov [rdi + 88], rax
+    mov rax, [rel syscall_saved_r12]
+    mov [rdi + 96], rax
+    mov rax, [rel syscall_saved_r13]
+    mov [rdi + 104], rax
+    mov rax, [rel syscall_saved_r14]
+    mov [rdi + 112], rax
+    mov rax, [rel syscall_saved_r15]
+    mov [rdi + 120], rax
+    mov rax, [rel syscall_saved_rcx]
+    sub rax, 2                         ; rip = the 2-byte `syscall` instruction
+    mov [rdi + 128], rax
+    mov rax, [rel syscall_saved_r11]
+    mov [rdi + 136], rax
+    ret
+
 global syscall_escape_user_fault
 syscall_escape_user_fault:
     cmp qword [rel syscall_smoke_active], 1

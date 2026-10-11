@@ -92,6 +92,7 @@ pub enum Syscall {
     Seek = 80,
     Fstat = 81,
     Dup = 82,
+    Pipe = 83,
 }
 
 impl Syscall {
@@ -181,6 +182,7 @@ impl Syscall {
             80 => Some(Syscall::Seek),
             81 => Some(Syscall::Fstat),
             82 => Some(Syscall::Dup),
+            83 => Some(Syscall::Pipe),
             _ => None,
         }
     }
@@ -754,6 +756,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Seek => sys_seek(arg0 as u32, arg1 as i64, arg2 as u32),
         Syscall::Fstat => sys_fstat(arg0 as u32, arg1 as *mut UserFileStat),
         Syscall::Dup => sys_dup(arg0 as u32, arg1 as i64),
+        Syscall::Pipe => sys_pipe(arg0 as *mut u32),
     }
 }
 
@@ -1027,6 +1030,10 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
             }
         }
         Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => return EBADF,
+        Some(crate::process::FdTarget::Pipe { id, write: false }) => {
+            return sys_pipe_read(id, buf, count);
+        }
+        Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // read on write end
         Some(crate::process::FdTarget::Vfs(_)) => {}
         None => return EBADF,
     }
@@ -1054,6 +1061,76 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     bytes_read as i64
 }
 
+fn sys_pipe(fds: *mut u32) -> i64 {
+    if let Err(error) = validate_user_range(fds as u64, 2 * core::mem::size_of::<u32>()) {
+        return error;
+    }
+    // create() sets both end refcounts to 1 for the two fds we are about to
+    // install, so the fds are added without an extra retain.
+    let id = crate::pipe::create();
+    let read_fd = match crate::process::allocate_fd(crate::process::FdEntry::pipe(id, false)) {
+        Ok(fd) => fd,
+        Err(error) => {
+            let _ = crate::pipe::release(id, false);
+            let _ = crate::pipe::release(id, true);
+            return process_error_to_errno(error);
+        }
+    };
+    let write_fd = match crate::process::allocate_fd(crate::process::FdEntry::pipe(id, true)) {
+        Ok(fd) => fd,
+        Err(error) => {
+            let _ = crate::process::drop_fd(read_fd); // releases the read end
+            let _ = crate::pipe::release(id, true); // write end never installed
+            return process_error_to_errno(error);
+        }
+    };
+    let out = [read_fd, write_fd];
+    let bytes = unsafe {
+        core::slice::from_raw_parts(out.as_ptr() as *const u8, core::mem::size_of::<[u32; 2]>())
+    };
+    if let Err(error) = copy_buffer_to_user(fds as *mut u8, bytes) {
+        let _ = crate::process::drop_fd(read_fd);
+        let _ = crate::process::drop_fd(write_fd);
+        return error;
+    }
+    0
+}
+
+fn sys_pipe_read(id: u64, buf: *mut u8, count: usize) -> i64 {
+    let mut kbuf = Vec::new();
+    kbuf.resize(count, 0);
+    match crate::pipe::read(id, &mut kbuf) {
+        crate::pipe::PipeRead::Data(n) => {
+            if let Err(error) = copy_buffer_to_user(buf, &kbuf[..n]) {
+                return error;
+            }
+            // Freed buffer space — wake any writer blocked on a full pipe.
+            crate::process::wake_pipe_waiters(id);
+            n as i64
+        }
+        crate::pipe::PipeRead::Eof => 0,
+        crate::pipe::PipeRead::WouldBlock => match crate::process::pipe_block_current(id) {
+            Ok(()) => USER_CONTEXT_RETURN_MAGIC,
+            Err(error) => process_error_to_errno(error),
+        },
+    }
+}
+
+fn sys_pipe_write(id: u64, data: &[u8]) -> i64 {
+    match crate::pipe::write(id, data) {
+        crate::pipe::PipeWrite::Wrote(n) => {
+            // New data — wake any reader blocked on an empty pipe.
+            crate::process::wake_pipe_waiters(id);
+            n as i64
+        }
+        crate::pipe::PipeWrite::Broken => EPIPE,
+        crate::pipe::PipeWrite::WouldBlock => match crate::process::pipe_block_current(id) {
+            Ok(()) => USER_CONTEXT_RETURN_MAGIC,
+            Err(error) => process_error_to_errno(error),
+        },
+    }
+}
+
 fn sys_dup(oldfd: u32, newfd: i64) -> i64 {
     if !is_valid_fd_number(oldfd) {
         return EBADF;
@@ -1067,17 +1144,12 @@ fn sys_dup(oldfd: u32, newfd: i64) -> i64 {
         }
         Some(newfd as u32)
     };
-    let (new_fd, to_close) = match crate::process::dup_fd(oldfd, target) {
+    let (new_fd, cleanup) = match crate::process::dup_fd(oldfd, target) {
         Ok(result) => result,
         Err(error) => return process_error_to_errno(error),
     };
-    // dup2 may have displaced an open VFS descriptor whose last reference is now
-    // gone — close it in the VFS.
-    if let Some(vfs_fd) = to_close {
-        if let Some(vfs) = crate::fs::vfs::get_vfs() {
-            let _ = vfs.close(vfs_fd);
-        }
-    }
+    // dup2 may have displaced an open fd whose last reference is now gone.
+    apply_fd_cleanup(cleanup);
     new_fd as i64
 }
 
@@ -1183,6 +1255,10 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
             return data.len() as i64;
         }
         Some(crate::process::FdTarget::Stdin) => return EBADF,
+        Some(crate::process::FdTarget::Pipe { id, write: true }) => {
+            return sys_pipe_write(id, &data);
+        }
+        Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // write on read end
         Some(crate::process::FdTarget::Vfs(_)) => {}
         None => return EBADF,
     }
@@ -1446,23 +1522,29 @@ fn sys_close(fd: u32) -> i64 {
         crate::process::FdTarget::Stdin
         | crate::process::FdTarget::Stdout
         | crate::process::FdTarget::Stderr => EOPNOTSUPP,
-        crate::process::FdTarget::Vfs(vfs_fd) => {
-            // Only close the underlying VFS file when the LAST process fd
-            // referencing it (dups share one) is dropped.
-            let _ = vfs_fd;
-            let to_close = match crate::process::drop_fd(fd) {
-                Ok(result) => result,
+        crate::process::FdTarget::Vfs(_) | crate::process::FdTarget::Pipe { .. } => {
+            // Drop this process fd; the fd layer tells us whether that was the
+            // last reference (close the VFS file / wake the pipe's other end).
+            match crate::process::drop_fd(fd) {
+                Ok(cleanup) => apply_fd_cleanup(cleanup),
                 Err(error) => return process_error_to_errno(error),
-            };
-            if let Some(vfs_fd_to_close) = to_close {
-                if let Err(error) = crate::fs::vfs::get_vfs()
-                    .ok_or(EIO)
-                    .and_then(|vfs| vfs.close(vfs_fd_to_close).map_err(vfs_error_to_errno))
-                {
-                    return error;
-                }
             }
             0
+        }
+    }
+}
+
+/// Finish a close/dup2 that dropped the last reference to a shared object.
+fn apply_fd_cleanup(cleanup: crate::process::FdCleanup) {
+    match cleanup {
+        crate::process::FdCleanup::None => {}
+        crate::process::FdCleanup::CloseVfs(vfs_fd) => {
+            if let Some(vfs) = crate::fs::vfs::get_vfs() {
+                let _ = vfs.close(vfs_fd);
+            }
+        }
+        crate::process::FdCleanup::WakePipe(id) => {
+            crate::process::wake_pipe_waiters(id);
         }
     }
 }
@@ -1491,6 +1573,7 @@ fn sys_fsync(fd: u32) -> i64 {
                 Err(error) => error,
             }
         }
+        crate::process::FdTarget::Pipe { .. } => EINVAL, // fsync on a pipe (POSIX)
     }
 }
 
@@ -1807,6 +1890,7 @@ fn process_vfs_fd(fd: u32) -> Result<crate::fs::vfs::FileDescriptor, i64> {
             | crate::process::FdTarget::Stdout
             | crate::process::FdTarget::Stderr,
         ) => Err(EBADF),
+        Some(crate::process::FdTarget::Pipe { .. }) => Err(EBADF),
         None => Err(EBADF),
     }
 }

@@ -85,3 +85,4 @@ pub const SYSCALL_SPAWN_ARGS: usize = 79;
 pub const SYSCALL_SEEK: usize = 80;
 pub const SYSCALL_FSTAT: usize = 81;
 pub const SYSCALL_DUP: usize = 82;
+pub const SYSCALL_PIPE: usize = 83;

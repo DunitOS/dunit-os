@@ -90,3 +90,4 @@
 80	Seek
 81	Fstat
 82	Dup
+83	Pipe
