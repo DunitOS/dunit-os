@@ -93,6 +93,7 @@ pub enum Syscall {
     Fstat = 81,
     Dup = 82,
     Pipe = 83,
+    Truncate = 84,
 }
 
 impl Syscall {
@@ -183,6 +184,7 @@ impl Syscall {
             81 => Some(Syscall::Fstat),
             82 => Some(Syscall::Dup),
             83 => Some(Syscall::Pipe),
+            84 => Some(Syscall::Truncate),
             _ => None,
         }
     }
@@ -757,6 +759,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Fstat => sys_fstat(arg0 as u32, arg1 as *mut UserFileStat),
         Syscall::Dup => sys_dup(arg0 as u32, arg1 as i64),
         Syscall::Pipe => sys_pipe(arg0 as *mut u32),
+        Syscall::Truncate => sys_truncate(arg0 as u32, arg1 as i64),
     }
 }
 
@@ -1218,6 +1221,32 @@ fn sys_seek(fd: u32, offset: i64, whence: u32) -> i64 {
         .and_then(|vfs| vfs.seek(vfs_fd, offset, whence).map_err(vfs_error_to_errno))
     {
         Ok(pos) => pos as i64,
+        Err(error) => error,
+    }
+}
+
+fn sys_truncate(fd: u32, length: i64) -> i64 {
+    if !is_valid_fd_number(fd) {
+        return EBADF;
+    }
+    if length < 0 {
+        return EINVAL;
+    }
+    // Only real VFS files can be truncated; pipes/stdio streams -> EINVAL.
+    match crate::process::get_fd(fd).map(|entry| entry.target) {
+        Some(crate::process::FdTarget::Vfs(_)) => {}
+        Some(_) => return EINVAL,
+        None => return EBADF,
+    }
+    let vfs_fd = match process_vfs_fd(fd) {
+        Ok(vfs_fd) => vfs_fd,
+        Err(error) => return error,
+    };
+    match crate::fs::vfs::get_vfs()
+        .ok_or(EIO)
+        .and_then(|vfs| vfs.ftruncate(vfs_fd, length as u64).map_err(vfs_error_to_errno))
+    {
+        Ok(()) => 0,
         Err(error) => error,
     }
 }
