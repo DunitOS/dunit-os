@@ -88,6 +88,7 @@ pub enum Syscall {
     ClockGetTime = 76,
     Rmdir = 77,
     TerminalDiag = 78,
+    SpawnArgs = 79,
 }
 
 impl Syscall {
@@ -173,6 +174,7 @@ impl Syscall {
             76 => Some(Syscall::ClockGetTime),
             77 => Some(Syscall::Rmdir),
             78 => Some(Syscall::TerminalDiag),
+            79 => Some(Syscall::SpawnArgs),
             _ => None,
         }
     }
@@ -728,6 +730,13 @@ pub extern "C" fn syscall_handler(
         Syscall::SetTidAddress => sys_set_tid_address(arg0),
         Syscall::ClockGetTime => sys_clock_gettime(arg0, arg1 as *mut u64),
         Syscall::Rmdir => sys_rmdir(arg0 as *const u8, arg1 as usize),
+        Syscall::SpawnArgs => sys_spawn_args(
+            arg0 as *const u8,
+            arg1 as usize,
+            arg2 as *const u8,
+            arg3 as usize,
+            arg4 as usize,
+        ),
         Syscall::TerminalDiag => sys_terminal_diag(
             arg0 as *const u8,
             arg1 as usize,
@@ -2190,6 +2199,68 @@ fn sys_get_mouse_state(out: *mut u8) -> i64 {
         return error;
     }
     0
+}
+
+/// Spawn an ELF with an explicit argv + env (the native backend for musl's
+/// posix_spawn). `block` is the argv and env strings concatenated, each
+/// NUL-terminated; the first `argv_count` are argv, the rest are env. Returns
+/// the child pid (Ready/scheduled); the parent reaps it via WaitProcess.
+fn sys_spawn_args(
+    path: *const u8,
+    path_len: usize,
+    block: *const u8,
+    block_len: usize,
+    argv_count: usize,
+) -> i64 {
+    let path = match copy_string_from_user_len(path, path_len, MAX_USER_PATH) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
+
+    let mut strings: Vec<String> = Vec::new();
+    if block_len > 0 {
+        if let Err(error) = validate_user_range(block as u64, block_len) {
+            return error;
+        }
+        let bytes = unsafe { core::slice::from_raw_parts(block, block_len) };
+        for piece in bytes.split(|&b| b == 0) {
+            strings.push(String::from_utf8_lossy(piece).into_owned());
+        }
+        // A trailing NUL yields a final empty element; drop it.
+        if strings.last().map(|s| s.is_empty()).unwrap_or(false) {
+            strings.pop();
+        }
+    }
+    if argv_count == 0 || argv_count > strings.len() {
+        return EINVAL;
+    }
+    let argv: Vec<String> = strings[..argv_count].to_vec();
+    let env_refs: Vec<&str> = strings[argv_count..].iter().map(|s| s.as_str()).collect();
+
+    let cwd = match crate::process::current_process() {
+        Some(process) => process.cwd.clone(),
+        None => return EINVAL,
+    };
+    let resolved = match resolve_exec_path(&cwd, &path) {
+        Ok(resolved) => resolved,
+        Err(error) => return error,
+    };
+    let data = match read_vfs_file(&cwd, &resolved) {
+        Ok(data) => data,
+        Err(error) => return vfs_error_to_errno(error),
+    };
+    if crate::elf::ElfParser::new(&data).is_err() {
+        return EIO;
+    }
+    let pid = match crate::process::create_user_process_record(resolved.clone(), true) {
+        Ok(pid) => pid,
+        Err(error) => return process_error_to_errno(error),
+    };
+    if crate::elf::prepare_process_elf_env(pid, &data, &argv, &env_refs).is_err() {
+        let _ = crate::process::autoreap_process(pid, "spawn-args-prepare-failed");
+        return EIO;
+    }
+    pid.0 as i64
 }
 
 fn spawn_process_from_user(
