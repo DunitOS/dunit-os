@@ -85,3 +85,5 @@
 75	SetTidAddress
 76	ClockGetTime
 77	Rmdir
+78	TerminalDiag
+79	SpawnArgs
