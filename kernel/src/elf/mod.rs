@@ -46,6 +46,7 @@ pub const ELF_MACHINE_X86_64: u16 = 0x3E;
 pub const ELF_TYPE_EXEC: u16 = 2;
 pub const PT_LOAD: u32 = 1;
 pub const PT_TLS: u32 = 7;
+pub const PT_GNU_STACK: u32 = 0x6474_e551;
 pub const PF_X: u32 = 0x1;
 pub const PF_W: u32 = 0x2;
 pub const PF_R: u32 = 0x4;
@@ -489,9 +490,19 @@ fn load_into_process_address_space(
         load_segment_process(parser.data, address_space, &ph)?;
     }
 
+    // Stack: writable and non-executable (W^X). A classic missing-NX hole was
+    // leaving the main user stack executable. Honor PT_GNU_STACK: only make the
+    // stack executable if the ELF explicitly asks for it (a static musl binary
+    // never does), otherwise map it NX.
+    let mut stack_flags = PageFlags::WRITABLE | PageFlags::NO_EXECUTE;
+    for ph in parser.program_headers()? {
+        if ph.p_type == PT_GNU_STACK && (ph.p_flags & PF_X) != 0 {
+            stack_flags.remove(PageFlags::NO_EXECUTE);
+        }
+    }
     for page in 1..=(USER_STACK_SIZE / PAGE_SIZE) {
         let virt = VirtualAddress::from_usize(USER_STACK_TOP - (page * PAGE_SIZE));
-        ensure_process_page(address_space, virt, PageFlags::WRITABLE)?;
+        ensure_process_page(address_space, virt, stack_flags)?;
     }
 
     Ok(())
@@ -552,6 +563,13 @@ fn load_segment_process(
     let page_start = align_down(virt_start, PAGE_SIZE);
     let page_end = align_up(virt_end, PAGE_SIZE).ok_or(ElfError::InvalidProgramHeader)?;
 
+    // W^X: a single PT_LOAD segment must never be both writable and
+    // executable. Static binaries never emit RWX; reject it rather than map a
+    // writable+executable page (matches the mmap/mprotect W^X policy).
+    if (ph.p_flags & PF_W) != 0 && (ph.p_flags & PF_X) != 0 {
+        return Err(ElfError::InvalidProgramHeader);
+    }
+
     let mut flags = PageFlags::USER;
     if ph.p_flags & PF_W != 0 {
         flags |= PageFlags::WRITABLE;
@@ -602,6 +620,12 @@ fn ensure_process_page(
                 || !flags.contains(PageFlags::NO_EXECUTE)
             {
                 merged_flags.remove(PageFlags::NO_EXECUTE);
+            }
+            // W^X: when two segments share a page (e.g. a writable segment next
+            // to an executable one), never leave the result writable AND
+            // executable. Writable wins — force NX.
+            if merged_flags.contains(PageFlags::WRITABLE) {
+                merged_flags.insert(PageFlags::NO_EXECUTE);
             }
             address_space
                 .protect_user_page(virt, merged_flags, true)
