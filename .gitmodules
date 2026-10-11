@@ -1,3 +1,6 @@
 [submodule "toolchains/dunit-musl"]
 	path = toolchains/dunit-musl
 	url = https://github.com/DunitOS/dunit-musl.git
+[submodule "toolchains/dunit-tcc"]
+	path = toolchains/dunit-tcc
+	url = https://github.com/DunitOS/dunit-tcc.git
