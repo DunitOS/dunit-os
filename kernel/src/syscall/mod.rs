@@ -796,9 +796,15 @@ fn sys_handle_read(handle: u32, user_buf: *mut u8, len: usize) -> i64 {
     if len == 0 || !is_valid_user_pointer(user_buf as u64, len) {
         return EINVAL;
     }
-    // Читаем во временный буфер ядра, затем копируем в userspace через
-    // проверенный путь copy_buffer_to_user.
-    let mut scratch = alloc::vec![0u8; len];
+    // Объект памяти хэндла не превышает MAX_MEMORY_OBJECT (handle.rs), поэтому
+    // читать — и выделять под это ядерный буфер — больше смысла нет. Ограничение
+    // ОБЯЗАТЕЛЬНО: без него процесс передаёт произвольно большой userspace-len и
+    // заставляет ядро сделать `vec![0; len]` на весь свой heap → OOM-abort всего
+    // ядра (DoS из любого процесса). Клампим (а не отвергаем): handle_memory_read
+    // всё равно копирует min(cap, размер_объекта), так что легальное чтение не
+    // усекается — объект физически не бывает больше cap.
+    let cap = len.min(crate::handle::MAX_MEMORY_OBJECT);
+    let mut scratch = alloc::vec![0u8; cap];
     let copied = match crate::process::current_process_mut() {
         Some(process) => match process.handle_memory_read(handle, &mut scratch) {
             Ok(n) => n,
