@@ -176,6 +176,10 @@ userspace:
 				$(USERSPACE_DIR)/ctests/$$prog.c; \
 		done; \
 	else echo "[USERSPACE] WARNING: $(TCC_DIR) unavailable or sysroot missing; tcc ctests skipped. Fetch with: git submodule update --init --recursive"; fi
+	@if [ -f $(TCC_DIR)/tools/dunit/build-tcc-dunit.sh ] && [ -f $(TCC_DIR)/config.h ] && [ -f $(abspath $(MUSL_LIBC)) ]; then \
+		echo "[USERSPACE] building on-device Dunit tcc -> /app/tcc"; \
+		$(TCC_DIR)/tools/dunit/build-tcc-dunit.sh $(abspath $(MUSL_SYSROOT)) $(abspath $(USERSPACE_BUILD_DIR))/tcc; \
+	else echo "[USERSPACE] on-device tcc skipped (tcc fork/config/sysroot missing)"; fi
 	@echo "Userspace programs built in $(USERSPACE_BUILD_DIR)/"
 
 iso: $(BUILD_DIR)/kernel.elf userspace
