@@ -195,6 +195,12 @@ pub trait FileSystem: Send {
         Err(VfsError::Unsupported)
     }
 
+    /// Stat an open handle (fstat). Filesystems that cannot support it inherit
+    /// the default (Unsupported).
+    fn stat_handle(&mut self, _handle: FileHandle) -> Result<FileStat> {
+        Err(VfsError::Unsupported)
+    }
+
     /// Flush any buffered metadata/data for an open handle to stable storage.
     /// In-memory and mechanism filesystems have nothing to flush and inherit
     /// this no-op; persistent backends (DunitFS) override it to commit.
@@ -223,6 +229,10 @@ impl OpenFile {
 
     pub fn seek(&mut self, offset: i64, whence: u32) -> Result<u64> {
         unsafe { (&mut *self.fs).seek(self.handle, offset, whence) }
+    }
+
+    pub fn stat(&mut self) -> Result<FileStat> {
+        unsafe { (&mut *self.fs).stat_handle(self.handle) }
     }
 
     pub fn fsync(&mut self) -> Result<()> {
@@ -346,6 +356,14 @@ impl VirtualFileSystem {
             .get_mut(&fd)
             .ok_or(VfsError::InvalidDescriptor)?;
         open_file.seek(offset, whence)
+    }
+
+    pub fn fstat(&mut self, fd: FileDescriptor) -> Result<FileStat> {
+        let open_file = self
+            .open_files
+            .get_mut(&fd)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        open_file.stat()
     }
 
     pub fn close(&mut self, fd: FileDescriptor) -> Result<()> {
