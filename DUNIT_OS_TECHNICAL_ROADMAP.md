@@ -215,7 +215,7 @@ root@dunit:~#
 - [x] Safe shared-memory objects and capability-based IPC handles. Shared VM object с guard pages/W^X/teardown (`[VM-TEST] OK`) и per-process handle table с rights (`READ/WRITE/MAP/SIGNAL/TRANSFER/DISPLAY_MASTER`, права только сужаются; `handle_test: OK`) — на M1; активно используются gui-v1 (shared framebuffers + capability-передача буфера компоситору).
 - [x] Userspace GUI Server/compositor/DWM and declarative UI Runtime. **Готово:** userspace `gui_server` (software compositor, damage, focus/input routing), config-driven DWM (панель/dock/launcher/workspaces/widgets, quick settings, notifications, Alt/Super switcher, config-driven край панели/трея, protocol resize/maximize, ARGB-прозрачность) и declarative UI Runtime (крейты `runtime/`, `gui_client` рисует DUI+DSS). Остаётся только persistence session-store через ребут (зависит от M5/DunitFS v2 — учтено в M4).
 - [ ] Disk-backed system root, first boot, user profiles, recovery-capable DunitFS.
-- [~] Dunit musl fork, native C toolchain and static userspace baseline. **Готово (M6-A…E, static-first):** static-C suite + полный fs surface (open/read/write/close, seek, stat/fstat, ftruncate, access, dirs+rewinddir, rename/unlink/mkdir/rmdir, fsync, O_EXCL/mkstemp) + stdio/malloc/thread/cwd/time, процессная модель spawn/wait/kill + pipes + dup/dup2/dup3, dunit-cc toolchain+SDK manifest, DELTA.md. **Осталось (post-M6):** shell redirection (posix_spawn file-actions), и отдельными гейтами M6-F — signals/network/dynamic linking (M7). Капстоун M6 — порт on-device компилятора (TinyCC).
+- [~] Dunit musl fork, native C toolchain and static userspace baseline. **Готово (M6-A…E, static-first + капстоун):** static-C suite + полный fs surface (open/read/write/close, seek, stat/fstat, ftruncate, access, dirs+rewinddir, rename/unlink/mkdir/rmdir, fsync, O_EXCL/mkstemp) + stdio/malloc/thread/cwd/time, процессная модель spawn/wait/kill + pipes + dup/dup2/dup3, POSIX-пробелы fcntl/poll/select/termios(ioctl)/file-backed mmap, pthread subset (вкл. barrier на native futex), dunit-cc toolchain+SDK manifest, DELTA.md, on-device TinyCC (compile+link+run на ядре), M6.5 аудит форка. **Осталось:** полный redirection (posix_spawn file-actions — сейчас документированный `ENOSYS`; требует расширения wire-формата `SpawnArgs` = решение по контракту); SDK cross-файлы CMake/Meson/Autoconf (SDK-задача до M7); подключение `libc-test`; гейтом M6-F — signals/network/dynamic linking (**M7**).
 - [ ] Packet networking, audio, complete USB, ACPI/power and package/application platform.
 
 ## 8. Удачные решения и главные архитектурные проблемы
@@ -491,7 +491,7 @@ Green Tea Kernel native syscalls and objects
 - [x] Собрать из fork `crt1.o`, `crti.o`, `crtn.o`, `libc.a` и public headers в staging sysroot.
 - [x] Не смешивать host headers/libraries с Dunit sysroot; сборка с найденным host `/usr/include` должна падать.
 - [x] Создать команды `x86_64-dunit-cc`, `x86_64-dunit-ar`, `x86_64-dunit-strip` и SDK manifest с ABI/libc versions.
-- [ ] Добавить CMake toolchain file, Meson cross file и Autoconf cache только после стабильного прямого compiler flow.
+- [ ] Добавить CMake toolchain file, Meson cross file и Autoconf cache только после стабильного прямого compiler flow. **Статус:** прямой flow (`dunit-cc`) стабилен и собирает корректный Dunit-ELF; cross-файлы вынесены в SDK-задачу (до M7) — кросс-режим CMake требует настройки toolchain-файла.
 
 Предлагаемый sysroot:
 
@@ -525,9 +525,9 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 - [x] Сохранить upstream generic implementations там, где они не зависят от Linux semantics.
 - [x] Не размазывать `#ifdef __dunit__` по всему дереву: вводить небольшие backend interfaces и Dunit translation units.
-- [ ] Аудировать прямые `SYS_*`, Linux ioctls, `/proc`, `/dev`, fixed paths, cancellation points и kernel struct layouts.
-- [ ] Генерировать `bits/alltypes.h` и public ABI types только после утверждения их размеров.
-- [ ] Dunit-specific public functions помещать в отдельные headers/namespace, не загрязнять POSIX имена.
+- [x] Аудировать прямые `SYS_*`, Linux ioctls, `/proc`, `/dev`, fixed paths, cancellation points и kernel struct layouts. **Готово:** аудит в `dunit-musl/PORTING.md` (§M6.5 audit) — 23 реально-mapped syscall, остальные → документированный `ENOSYS` (fake-success не найдено нигде); Linux-пути наследованы от upstream и падают чисто (не фейкают успех); cancellation инертна; `stat`/`dirent` через field-by-field адаптеры, `termios` (60 байт) — осознанный pass-through. Найденное нарушение M6.1 (`posix_spawn` молча глотал file-actions) исправлено → `ENOSYS`.
+- [x] Генерировать `bits/alltypes.h` и public ABI types только после утверждения их размеров. **Готово:** `alltypes.h.in` upstream-stock, размеры ABI-типов — стандартный x86_64 LP64 (`off_t`/`time_t` 64-бит, `struct stat` 152, `termios` 60, `dirent` 280) и согласованы с адаптерами (аудит M6.5).
+- [x] Dunit-specific public functions помещать в отдельные headers/namespace, не загрязнять POSIX имена. **Готово:** ноль Dunit-имён в public `include/`; адаптеры (`__dunit_*`) в reserved `__`-namespace, публичные символы остаются POSIX-именами (аудит M6.5).
 
 #### M6.6. Фазы реализации
 
@@ -563,7 +563,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 - [x] Спроектировать `spawn/exec-image/wait/kill` с arguments, environment, cwd и явным inheritance handles. (SpawnArgs=79 с argv/env, WaitProcess=16, KillProcess=18; привилегии наследуются только через kernel-spawn, не через posix_spawn.)
 - [x] Переписать musl `posix_spawn` backend на прямой Dunit spawn contract, не эмулировать его через Linux `clone/vfork`.
-- [~] Реализовать pipes, descriptor duplication и redirection до заявления shell/process compatibility. **Готово:** анонимные pipes (Pipe=83, блокирующее чтение через syscall-restart), dup/dup2/dup3 (Dup=82). **Осталось:** redirection через posix_spawn file-actions — нужна межпроцессным пайплайнам оболочки, НЕ нужна tcc (однопроцессная сборка). Отложено до задачи про shell-пайплайны.
+- [~] Реализовать pipes, descriptor duplication и redirection до заявления shell/process compatibility. **Готово:** анонимные pipes (Pipe=83, блокирующее чтение через syscall-restart), dup/dup2/dup3 (Dup=82). **Осталось:** redirection через posix_spawn file-actions — сейчас возвращает документированный `ENOSYS` (M6.1, больше не тихо игнорируется); полный redirection требует расширения wire-формата `SpawnArgs`, чтобы ядро применяло dup2/open/close к fd-таблице ребёнка при spawn — отдельное решение по контракту kernel/userspace. Нужна межпроцессным пайплайнам оболочки, НЕ нужна tcc (однопроцессная сборка).
 - [x] Возвращать `ENOSYS` для `fork`, пока нет корректных COW, multithreaded semantics и `pthread_atfork`.
 
 **Результат:** C parent запускает C child и получает exit status. **Готовность:** spawn file actions, environment replacement и pipe redirection работают без fd leaks. **Тесты:** missing executable, permission denial, child fault, concurrent children, inherited/closed handles. **Риски:** deadlocks при spawn, неявная передача privileged handles, попытка приложений обойти отсутствие fork.
@@ -575,7 +575,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 - [x] Реализовать thread create/exit/join/detach и безопасное освобождение stack/TLS после завершения.
 - [x] Реализовать Dunit `wait_on_word/wake` с atomic compare-and-block, timeout и защитой от lost wakeups; не копировать Linux futex ABI.
 - [x] Адаптировать musl pthread create/join, mutex, condvar, rwlock, once и per-thread `errno`.
-- [~] Сначала запретить asynchronous cancellation; cancellation points включать только вместе с формально определённой interruption model.
+- [~] Сначала запретить asynchronous cancellation; cancellation points включать только вместе с формально определённой interruption model. **Готово:** async cancellation инертна (SIGCANCEL недоставляем — `rt_sigaction`/`tkill` → `ENOSYS`; native `__timedwait` оборачивает ожидание в `PTHREAD_CANCEL_DISABLE`). **Осталось (M7):** включение cancellation points вместе с signal/interruption-моделью.
 
 **Результат:** настоящий pthread subset поверх native Dunit threads. **Готовность:** уникальный TLS/errno у каждого потока, blocked mutex не расходует CPU, join/detach не течёт. **Тесты:** TLS isolation, 1000 create/join cycles, mutex/condvar contention, timeout race, owner death policy, preemption stress, allocator under threads. **Риски:** ABI-зависимый layout musl TCB, lost wakeups, освобождение живого TLS, scheduler/VM lock inversion.
 
@@ -620,13 +620,13 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 #### M6.9. Тестирование и release gate
 
-- [~] Добавить `tests/libc/` с маленькими self-checking ELF: startup, args/env, stdio, allocator, files, clocks, spawn, TLS, pthread.
+- [x] Добавить `tests/libc/` с маленькими self-checking ELF: startup, args/env, stdio, allocator, files, clocks, spawn, TLS, pthread. **Готово:** самопроверяющиеся ELF на каждую возможность живут в `userspace/ctests/` (musl_hello/stdio/malloc/file/read/stat/dir/cwd/time/fsmgmt/spawn/thread/cond/barrier/…) — конвенция тестов проекта вместо `tests/libc/`, каждый с `tools/m6_*_markers.json` и стабильным serial-маркером.
 - [x] Запускать все kernel/OS тесты только через `tools/qemu_test.py`; каждый тест выдаёт стабильный serial marker и exit status.
-- [ ] Подключить релевантный subset `libc-test`; unsupported cases перечислять с причиной и владельцем, а не молча исключать.
-- [ ] Добавить negative tests: invalid pointers, invalid UTF-8-neutral path bytes, bad fds, OOM, interrupted waits, child crash.
-- [~] Проверять ELF статически: target machine, program headers, executable stack, unexpected `NEEDED`/`INTERP`, unresolved symbols.
-- [ ] Для каждого ABI change пересобирать весь sysroot и все C apps; бинарная совместимость проверяется отдельным previous-release suite после ABI v1.
-- [ ] Разделить gates: single-thread static, filesystem/persistence, pthread/preemption, network, dynamic.
+- [ ] Подключить релевантный subset `libc-test`; unsupported cases перечислять с причиной и владельцем, а не молча исключать. **Статус:** QA-углубление, не capability-gate — покрытие возможностей уже даёт per-feature suite; подключение upstream `libc-test` — отдельная задача.
+- [~] Добавить negative tests: invalid pointers, invalid UTF-8-neutral path bytes, bad fds, OOM, interrupted waits, child crash. **Готово:** invalid pointers/bad fds/OOM/child-crash покрыты (musl_harden, fault_child, nx_child, musl_reap/slow_child). **Осталось (M7):** interrupted waits — нужна signal/interruption-модель.
+- [~] Проверять ELF статически: target machine, program headers, executable stack, unexpected `NEEDED`/`INTERP`, unresolved symbols. **Готово:** fork-CI (`dunit-build`) + ручная проверка `readelf` (ET_EXEC, нет INTERP/DYNAMIC, entry в crt1). **Осталось:** вынести в автоматический гейт qemu_test.
+- [~] Для каждого ABI change пересобирать весь sysroot и все C apps; бинарная совместимость проверяется отдельным previous-release suite после ABI v1. **Готово:** sysroot полностью пересобирается на каждую правку форка (сброс кэша). **Осталось:** previous-release binary-compat suite — после заморозки ABI v1.
+- [~] Разделить gates: single-thread static, filesystem/persistence, pthread/preemption, network, dynamic. **Готово:** раздельные marker-suite single-thread static / filesystem+persistence / pthread+preemption. **Осталось (M7):** network и dynamic gates.
 
 **Общий результат M6:** native Dunit-linked C programs и SDK без Linux kernel ABI. **Критерий завершения:** reproducible `x86_64-dunit` sysroot; static hello/args/env/file/malloc/spawn/thread suites проходят в QEMU; persistence case переживает power cycle; unsupported POSIX surface документирован. **Главные риски:** скрытые Linux assumptions, слишком ранняя заморозка ABI, некорректный TLS, попытка одновременно реализовать signals/fork/ldso. **Меры:** static-first, capability profiles, узкий adapter, фазовые test gates и контролируемый upstream delta.
 
