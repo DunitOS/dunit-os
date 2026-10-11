@@ -629,7 +629,7 @@ pub extern "C" fn syscall_handler(
     arg2: u64,
     arg3: u64,
     arg4: u64,
-    _arg5: u64,
+    arg5: u64,
 ) -> i64 {
     let syscall = match Syscall::from_u64(syscall_num) {
         Some(s) => s,
@@ -647,7 +647,14 @@ pub extern "C" fn syscall_handler(
         Syscall::Write => sys_write(arg0 as u32, arg1 as *const u8, arg2 as usize),
         Syscall::Open => sys_open(arg0 as *const u8, arg1 as usize, arg2 as u32),
         Syscall::Close => sys_close(arg0 as u32),
-        Syscall::Mmap => sys_mmap(arg0 as usize, arg1 as usize, arg2 as u32, arg3 as u32),
+        Syscall::Mmap => sys_mmap(
+            arg0 as usize,
+            arg1 as usize,
+            arg2 as u32,
+            arg3 as u32,
+            arg4 as i64,
+            arg5 as usize,
+        ),
         Syscall::SendMessage => sys_send_message(arg0 as u32, arg1 as *const u8, arg2 as usize),
         Syscall::ReceiveMessage => sys_receive_message(arg0 as *mut u8, arg1 as usize),
         Syscall::GetFramebuffer => sys_get_framebuffer(arg0 as *mut FbInfo),
@@ -2011,10 +2018,11 @@ fn write_terminal_foreground(data: &[u8]) {
     }
 }
 
-fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32) -> i64 {
+fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32, fd: i64, offset: usize) -> i64 {
     const PROT_READ: u32 = 1 << 0;
     const PROT_WRITE: u32 = 1 << 1;
     const PROT_EXEC: u32 = 1 << 2;
+    const MAP_SHARED: u32 = 1 << 0;
     const MAP_PRIVATE: u32 = 1 << 1;
     const MAP_ANONYMOUS: u32 = 1 << 5;
     const MAP_GUARD: u32 = 1 << 6;
@@ -2022,9 +2030,8 @@ fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32) -> i64 {
     if length == 0 {
         return EINVAL;
     }
+    // Shared prot rules: only known bits, never writable+executable at once.
     if prot & !(PROT_READ | PROT_WRITE | PROT_EXEC) != 0
-        || flags & !(MAP_PRIVATE | MAP_ANONYMOUS | MAP_GUARD) != 0
-        || flags & (MAP_PRIVATE | MAP_ANONYMOUS) != (MAP_PRIVATE | MAP_ANONYMOUS)
         || prot & (PROT_WRITE | PROT_EXEC) == (PROT_WRITE | PROT_EXEC)
     {
         return EINVAL;
@@ -2033,19 +2040,142 @@ fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32) -> i64 {
         return EINVAL;
     }
 
-    match crate::process::current_process_mut() {
-        Some(process) => {
-            match process.map_anonymous(
-                addr, length, prot & PROT_WRITE != 0, prot & PROT_EXEC != 0,
-                flags & MAP_GUARD != 0, prot != 0,
-            )
-            {
+    if flags & MAP_ANONYMOUS != 0 {
+        // Anonymous private — the historical path; fd/offset are ignored.
+        if flags & !(MAP_PRIVATE | MAP_ANONYMOUS | MAP_GUARD) != 0 || flags & MAP_PRIVATE == 0 {
+            return EINVAL;
+        }
+        return match crate::process::current_process_mut() {
+            Some(process) => match process.map_anonymous(
+                addr,
+                length,
+                prot & PROT_WRITE != 0,
+                prot & PROT_EXEC != 0,
+                flags & MAP_GUARD != 0,
+                prot != 0,
+            ) {
                 Ok(mapped) => mapped as i64,
                 Err(error) => process_error_to_errno(error),
+            },
+            None => EINVAL,
+        };
+    }
+
+    // File-backed, private only. The region is eagerly populated from the file,
+    // so writes stay in the private copy and never reach the file — exactly
+    // MAP_PRIVATE semantics (a lazily demand-paged variant would be observably
+    // identical). MAP_SHARED needs coherent write-back, which does not exist
+    // yet, so it is a documented EOPNOTSUPP, never a silent private substitute.
+    // MAP_GUARD is an anonymous-only extension.
+    if flags & MAP_SHARED != 0 {
+        return EOPNOTSUPP;
+    }
+    if flags & !MAP_PRIVATE != 0 || flags & MAP_PRIVATE == 0 {
+        return EINVAL;
+    }
+    if prot & PROT_READ == 0 {
+        return EINVAL; // a file mapping you cannot read is meaningless
+    }
+    if offset & (0x1000 - 1) != 0 {
+        return EINVAL; // POSIX: the file offset must be page-aligned
+    }
+    if fd < 0 {
+        return EBADF;
+    }
+    let vfs_fd = match process_vfs_fd(fd as u32) {
+        Ok(vfs_fd) => vfs_fd,
+        Err(error) => return error,
+    };
+    let stat = match crate::fs::vfs::get_vfs()
+        .ok_or(EIO)
+        .and_then(|vfs| vfs.fstat(vfs_fd).map_err(vfs_error_to_errno))
+    {
+        Ok(stat) => stat,
+        Err(error) => return error,
+    };
+    if stat.file_type != crate::fs::vfs::FileType::File {
+        return EACCES; // only regular files are mappable
+    }
+    // Real content is bounded by the file size; the sub-page tail past EOF stays
+    // zero because map_anonymous zero-fills every frame.
+    let copy_len = stat.size.saturating_sub(offset).min(length);
+
+    let base = match crate::process::current_process_mut() {
+        Some(process) => match process.map_anonymous(
+            addr,
+            length,
+            prot & PROT_WRITE != 0,
+            prot & PROT_EXEC != 0,
+            false,
+            true,
+        ) {
+            Ok(mapped) => mapped,
+            Err(error) => return process_error_to_errno(error),
+        },
+        None => return EINVAL,
+    };
+
+    if let Err(error) = populate_file_mapping(vfs_fd, offset, base, copy_len) {
+        // Never leave a half-filled region mapped.
+        if let Some(process) = crate::process::current_process_mut() {
+            let _ = process.unmap_range(base, length);
+        }
+        return error;
+    }
+    base as i64
+}
+
+/// Copy `copy_len` bytes from `vfs_fd` starting at `offset` into the freshly
+/// mapped user region at `base`, page by page through a bounce buffer (the same
+/// shape as `sys_read`). The file cursor is saved and restored so mmap leaves
+/// the fd's offset untouched (POSIX).
+fn populate_file_mapping(
+    vfs_fd: crate::fs::vfs::FileDescriptor,
+    offset: usize,
+    base: usize,
+    copy_len: usize,
+) -> Result<(), i64> {
+    const SEEK_SET: u32 = 0;
+    const SEEK_CUR: u32 = 1;
+    if copy_len == 0 {
+        return Ok(());
+    }
+    let vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
+    let saved = vfs.seek(vfs_fd, 0, SEEK_CUR).map_err(vfs_error_to_errno)?;
+    vfs.seek(vfs_fd, offset as i64, SEEK_SET)
+        .map_err(vfs_error_to_errno)?;
+    let mut buf = [0u8; 4096];
+    let mut pos = 0usize;
+    let mut outcome = Ok(());
+    while pos < copy_len {
+        let want = (copy_len - pos).min(buf.len());
+        let read = match vfs.read(vfs_fd, &mut buf[..want]) {
+            Ok(read) => read,
+            Err(error) => {
+                outcome = Err(vfs_error_to_errno(error));
+                break;
+            }
+        };
+        if read == 0 {
+            break; // short of the fstat size — leave the remainder zero
+        }
+        match crate::process::current_process() {
+            Some(process) => {
+                if let Err(error) = process.write_mapped_region(base + pos, &buf[..read]) {
+                    outcome = Err(process_error_to_errno(error));
+                    break;
+                }
+            }
+            None => {
+                outcome = Err(EINVAL);
+                break;
             }
         }
-        None => EINVAL,
+        pos += read;
     }
+    // Restore the cursor on every path.
+    let _ = vfs.seek(vfs_fd, saved as i64, SEEK_SET);
+    outcome
 }
 
 fn sys_munmap(addr: usize, length: usize) -> i64 {

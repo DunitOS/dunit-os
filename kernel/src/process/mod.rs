@@ -922,6 +922,36 @@ impl Process {
         Ok(())
     }
 
+    /// Copy `data` into already-mapped user pages starting at `vaddr`, writing
+    /// through the kernel's physical alias so the user-visible protection bits
+    /// (a read-only or executable file mapping) do not block the fill. Used to
+    /// populate a freshly mapped region — e.g. file-backed mmap — with content;
+    /// the same translate + `phys_to_virt` idiom as the TLS image copy. The
+    /// caller guarantees `[vaddr, vaddr+data.len())` lies in a region it just
+    /// mapped.
+    pub fn write_mapped_region(&self, vaddr: usize, data: &[u8]) -> Result<(), ProcessError> {
+        let address_space = self.address_space().ok_or(ProcessError::NoAddressSpace)?;
+        let mut copied = 0;
+        while copied < data.len() {
+            let addr = vaddr + copied;
+            let chunk =
+                (USER_PAGE_SIZE - (addr & (USER_PAGE_SIZE - 1))).min(data.len() - copied);
+            let phys = address_space
+                .translate_user_page(VirtualAddress(addr))
+                .map_err(|_| ProcessError::InvalidMemoryRange)?
+                .ok_or(ProcessError::InvalidMemoryRange)?;
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    data.as_ptr().add(copied),
+                    crate::memory::vmm::phys_to_virt(phys.as_usize()) as *mut u8,
+                    chunk,
+                );
+            }
+            copied += chunk;
+        }
+        Ok(())
+    }
+
     fn allocate_tls_instance(&mut self) -> Result<(usize, usize, usize), ProcessError> {
         if self.tls_mem_size == 0 {
             return Ok((0, 0, 0));
