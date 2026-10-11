@@ -848,12 +848,16 @@ pub struct Applications {
 }
 
 impl AppEntry {
-    /// Build a registry entry; `exec`/`icon` default to `id`, `label` to `label`.
+    /// Build a registry entry; `exec` defaults to `/app/<id>` (apps are bundled
+    /// ELFs under /app; override with an explicit `exec = "..."` path in the
+    /// `[application.<id>]` table), `icon` defaults to `id`, `label` to `label`.
     fn new(id: &str, name: &str, label: &str) -> AppEntry {
+        let mut exec = String::from("/app/");
+        exec.push_str(id);
         AppEntry {
             id: String::from(id),
             name: String::from(name),
-            exec: String::from(id),
+            exec,
             icon: String::from(id),
             label: String::from(label),
         }

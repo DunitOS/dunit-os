@@ -1,6 +1,6 @@
 {
   "description": "fstat-by-fd over the native Dunit Fstat syscall (81). userspace/ctests/musl_fstat.c opens a file, writes 11 bytes, and fstat(fd) reports st_size=11 and S_ISREG. Was ENOSYS before (the open+fstat+read idiom broke cp/tar/loaders). Run: tools/qemu_test.py --build --markers-file tools/m6_fstat_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
-  "run": { "config": "limine.conf", "cmd": ["exec musl_fstat"] },
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_fstat"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[FSTAT] fstat OK", "claim": "fstat(fd) returns the right size and type via the Dunit Fstat syscall", "source": "kernel/src/syscall/mod.rs" },

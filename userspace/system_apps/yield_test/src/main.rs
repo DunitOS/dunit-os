@@ -16,7 +16,7 @@ fn panic(_: &PanicInfo) -> ! {
 pub extern "C" fn _start() -> ! {
     libdunit::println("yield_test: start");
 
-    let child = libdunit::spawn("yield_child");
+    let child = libdunit::spawn("/app/yield_child");
     if child < 0 {
         libdunit::println("yield_test: spawn failed");
         libdunit::exit(1);

@@ -237,7 +237,7 @@ fn exercise_invalid_user_copies() {
 
 fn exercise_resumable_roundtrip() {
     libdunit::println("runtime_stress: resumable start");
-    let child = libdunit::spawn("resumable_child");
+    let child = libdunit::spawn("/app/resumable_child");
     if child < 0 {
         fail("spawn resumable_child", 40);
     }
@@ -262,7 +262,7 @@ fn exercise_ipc_roundtrip() {
         fail("ipc empty recv", 50);
     }
 
-    let child = libdunit::spawn("ipc_child");
+    let child = libdunit::spawn("/app/ipc_child");
     if child < 0 {
         fail("spawn ipc_child", 51);
     }
@@ -299,7 +299,7 @@ fn exercise_repeated_spawn_wait() {
     libdunit::println("runtime_stress: repeated spawn start");
     let mut round = 0usize;
     while round < 3 {
-        let child = libdunit::spawn("elf_demo");
+        let child = libdunit::spawn("/app/elf_demo");
         if child < 0 {
             fail("spawn elf_demo", 60);
         }
@@ -317,7 +317,7 @@ fn exercise_repeated_spawn_wait() {
 
 fn exercise_kill_prepared_child() {
     libdunit::println("runtime_stress: kill start");
-    let child = libdunit::spawn("kill_target");
+    let child = libdunit::spawn("/app/kill_target");
     if child < 0 {
         fail("spawn child for kill", 65);
     }
@@ -331,7 +331,7 @@ fn exercise_kill_prepared_child() {
 
 fn exercise_fault_after_normal_apps() {
     libdunit::println("runtime_stress: fault start");
-    let child = libdunit::spawn("fault_pf");
+    let child = libdunit::spawn("/app/fault_pf");
     if child < 0 {
         fail("spawn fault_pf", 70);
     }

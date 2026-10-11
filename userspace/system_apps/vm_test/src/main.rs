@@ -82,7 +82,7 @@ pub extern "C" fn _start() -> ! {
     if mapped < 0 { fail("shared map"); }
     let mapped = mapped as usize;
     unsafe { (mapped as *mut u8).write_volatile(7); }
-    let peer = libdunit::spawn("vm_peer");
+    let peer = libdunit::spawn("/app/vm_peer");
     if peer <= 0 { fail("peer spawn"); }
     let mut msg = [0u8; 12];
     msg[..4].copy_from_slice(&libdunit::get_pid().to_le_bytes());
@@ -122,10 +122,10 @@ pub extern "C" fn _start() -> ! {
         fail("second shared frame leak");
     }
 
-    let fault = libdunit::spawn("vm_guard_fault");
+    let fault = libdunit::spawn("/app/vm_guard_fault");
     if fault <= 0 { fail("guard fault spawn"); }
     wait_for(fault as u32, true);
-    let fault = libdunit::spawn("vm_protect_fault");
+    let fault = libdunit::spawn("/app/vm_protect_fault");
     if fault <= 0 { fail("protect fault spawn"); }
     wait_for(fault as u32, true);
     libdunit::println("vm_test: OK");

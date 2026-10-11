@@ -78,7 +78,7 @@ fn child_exited(pid: u32) -> bool {
 pub extern "C" fn _start() -> ! {
     libdunit::println("preempt_test: start");
 
-    let child = libdunit::spawn("preempt_child");
+    let child = libdunit::spawn("/app/preempt_child");
     if child < 0 {
         fail("spawn preempt_child");
     }

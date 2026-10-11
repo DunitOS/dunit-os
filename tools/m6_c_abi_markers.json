@@ -2,7 +2,7 @@
   "description": "Dunit Userspace ABI v0 conformance — the roadmap's M6.3 'done' gate: an independent freestanding C program (no musl), built with the host C compiler against the generated ABI headers (abi/include/dunit) and the Dunit crt0 (userspace/ctests/crt0.s), reads its arguments/environment off the SysV initial stack, makes raw syscalls, respects the errno contract, and exits correctly. The program /app/c_hello is launched from the terminal; its stdout is mirrored to serial. Proves the C side of the ABI works end to end before any libc port. Run: tools/qemu_test.py --build --markers-file tools/m6_c_abi_markers.json --post-boot-delay 3 --settle 3 --timeout 110 --boot-timeout 80",
   "run": {
     "config": "limine.conf",
-    "cmd": ["exec c_hello"]
+    "cmd": ["exec /app/c_hello"]
   },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "the system booted to the terminal", "source": "kernel/src/lib.rs" },

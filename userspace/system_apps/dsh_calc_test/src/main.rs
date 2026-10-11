@@ -124,7 +124,7 @@ pub extern "C" fn _start() -> ! {
     let id = id as u32;
 
     // Spawn dsh as the pty slave (its fd 0/1/2 routed to the pty rings).
-    let child = libdunit::pty_spawn("dsh", id);
+    let child = libdunit::pty_spawn("/app/dsh", id);
     if child <= 0 {
         libdunit::println("dsh_calc_test: pty_spawn dsh failed");
         libdunit::pty_close(id);

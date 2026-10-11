@@ -1,6 +1,6 @@
 {
   "description": "Full on-device C toolchain (P3b-2b, M6 capstone): the Dunit tcc (/system/bin/tcc, resolved via the exec path) compiles AND links /assets/tcc/hello.c against the on-device /system sysroot (musl headers in /system/include, libc.a + crt in /system/lib + /system/tcc, libtcc1.a in /system/tcc — all packed by tools/pack_initrd.py), and the kernel then runs the emitted binary. Proof the whole compile->link->run chain works on the device itself. Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_full_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 60 --timeout 320 --boot-timeout 180",
-  "run": { "config": "limine.conf", "cmd": ["exec tcc /assets/tcc/hello.c -o /tmp/hello", "exec /tmp/hello"] },
+  "run": { "config": "limine.conf", "cmd": ["exec /system/bin/tcc /assets/tcc/hello.c -o /tmp/hello", "exec /tmp/hello"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[TCC-ONDEV] hello compiled and linked on Dunit by tcc", "claim": "tcc compiled+linked the source on-device and the kernel ran the resulting binary — full on-device C toolchain works", "source": "assets/tcc/hello.c" }

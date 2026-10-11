@@ -1,6 +1,6 @@
 {
   "description": "waitpid reap-order correctness (M6-D). userspace/ctests/musl_reap.c spawns a slow child (exits 3) first, then a fast child (exits 7); wait(-1) must return the finished fast child rather than EAGAIN-blocking on the earlier-listed slow one. Then the slow child reaps with code 3, and a final wait with no children returns ECHILD. Run: tools/qemu_test.py --build --markers-file tools/m6_reap_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
-  "run": { "config": "limine.conf", "cmd": ["exec musl_reap"] },
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_reap"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[REAP] first_is_fast OK", "claim": "wait(-1) reaped the terminated child even though an earlier-listed sibling was still running", "source": "kernel/src/process/mod.rs" },

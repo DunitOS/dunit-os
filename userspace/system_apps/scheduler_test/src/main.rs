@@ -37,7 +37,7 @@ pub extern "C" fn _start() -> ! {
         libdunit::exit(1);
     }
 
-    let pid = libdunit::spawn("elf_demo");
+    let pid = libdunit::spawn("/app/elf_demo");
     if pid < 0 {
         libdunit::println("scheduler_test: spawn failed");
         libdunit::exit(4);

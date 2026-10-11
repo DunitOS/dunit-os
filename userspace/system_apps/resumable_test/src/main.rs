@@ -16,7 +16,7 @@ fn panic(_: &PanicInfo) -> ! {
 pub extern "C" fn _start() -> ! {
     libdunit::println("resumable_test: start");
 
-    let child = libdunit::spawn("resumable_child");
+    let child = libdunit::spawn("/app/resumable_child");
     if child < 0 {
         libdunit::println("resumable_test: spawn failed");
         libdunit::exit(1);

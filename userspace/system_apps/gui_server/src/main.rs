@@ -122,7 +122,7 @@ pub extern "C" fn _start() -> ! {
                 core::ptr::write_volatile(ptr, 0xA5);
                 core::ptr::write_volatile(ptr.add(1), 0x5A);
             }
-            let peer = libdunit::spawn("gui_shbuf_peer");
+            let peer = libdunit::spawn("/app/gui_shbuf_peer");
             if peer > 0 {
                 // Transfer a duplicate so we keep our own handle + mapping.
                 let dup = libdunit::handle_dup(

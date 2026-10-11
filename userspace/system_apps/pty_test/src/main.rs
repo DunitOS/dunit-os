@@ -48,7 +48,7 @@ pub extern "C" fn _start() -> ! {
     let id = id as u32;
 
     // 2. Spawn the echo peer as the slave end (its fd 0/1/2 -> pty rings).
-    let child = libdunit::pty_spawn("pty_echo", id);
+    let child = libdunit::pty_spawn("/app/pty_echo", id);
     if child <= 0 {
         libdunit::println("pty_test: pty_spawn failed");
         libdunit::exit(1);

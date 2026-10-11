@@ -44,7 +44,7 @@ pub extern "C" fn _start() -> ! {
         libdunit::exit(7);
     }
 
-    let child = libdunit::spawn("ipc_child");
+    let child = libdunit::spawn("/app/ipc_child");
     if child < 0 {
         libdunit::println("ipc_parent: spawn failed");
         libdunit::exit(1);

@@ -31,38 +31,22 @@ impl ExecInput for NoExecInput {
     }
 }
 
-/// Directories searched for a bare `exec <name>` command, in order. Not a
-/// single hardcoded /app: /system/bin holds OS tools (tcc), /app holds bundled
-/// apps. A path with '/' bypasses this entirely.
-const EXEC_PATH: &[&str] = &["/system/bin", "/app"];
-
+/// Resolve a program path for exec/spawn. The argument is ALWAYS just a path —
+/// relative to the current directory, or absolute. There is NO magic search
+/// directory and nothing is prepended: `exec gui_server` means ./gui_server, so
+/// from / it is not found; you run `exec /app/gui_server`, `cd app; exec
+/// gui_server`, `exec /system/bin/tcc`, etc. This is the single, independent
+/// rule for the terminal `exec` command AND the spawn ABI (SpawnProcess/
+/// SpawnArgs) alike; every caller passes a real path (callers that launch a
+/// bundled app pass its /app/<name> path explicitly).
 pub fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, VfsError> {
     let vfs = vfs::get_vfs().ok_or(VfsError::IoError)?;
-    if path.contains('/') {
-        let normalized = vfs.normalize_at(cwd, path)?;
-        let stat = vfs.stat_at("/", &normalized)?;
-        if stat.file_type == FileType::Directory {
-            return Err(VfsError::IsADirectory);
-        }
-        return Ok(normalized);
+    let normalized = vfs.normalize_at(cwd, path)?;
+    let stat = vfs.stat_at("/", &normalized)?;
+    if stat.file_type == FileType::Directory {
+        return Err(VfsError::IsADirectory);
     }
-
-    // Bare command name: search the exec path, not a single hardcoded /app.
-    // /system/bin (OS-provided tools, e.g. tcc) takes precedence over /app
-    // (bundled applications), POSIX-PATH style. A name containing '/' is a
-    // literal path (handled above) and never searched.
-    let mut last_err = VfsError::NotFound;
-    for dir in EXEC_PATH {
-        let mut candidate = String::from(*dir);
-        candidate.push('/');
-        candidate.push_str(path);
-        match vfs.stat_at("/", &candidate) {
-            Ok(stat) if stat.file_type != FileType::Directory => return Ok(candidate),
-            Ok(_) => last_err = VfsError::IsADirectory,
-            Err(error) => last_err = error,
-        }
-    }
-    Err(last_err)
+    Ok(normalized)
 }
 
 pub fn read_vfs_file(cwd: &str, path: &str) -> Result<Vec<u8>, VfsError> {
@@ -210,7 +194,7 @@ pub fn run_preemption_smoke() -> bool {
     process::reset_preemption_count();
 
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "preempt_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/preempt_test", ProcessOutputSink::SerialOnly, &mut input);
 
     let preempts = process::preemption_count();
 
@@ -239,7 +223,7 @@ pub fn run_thread_smoke() -> bool {
     crate::serial_write("[THREAD-TEST] START\r\n");
     process::reset_preemption_count();
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "thread_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/thread_test", ProcessOutputSink::SerialOnly, &mut input);
     let preempts = process::preemption_count();
     let ok = match result {
         Ok((_, exit)) => {
@@ -259,7 +243,7 @@ pub fn run_thread_smoke() -> bool {
 pub fn run_wait_smoke() -> bool {
     crate::serial_write("[WAIT-TEST] START\r\n");
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "wait_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/wait_test", ProcessOutputSink::SerialOnly, &mut input);
     let ok = match result {
         Ok((_, exit)) => {
             let clean = process::thread_count_for_pid(exit.pid) == 0;
@@ -280,7 +264,7 @@ pub fn run_wait_smoke() -> bool {
 pub fn run_vm_smoke() -> bool {
     crate::serial_write("[VM-TEST] START\r\n");
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "vm_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/vm_test", ProcessOutputSink::SerialOnly, &mut input);
     let ok = match result {
         Ok((_, exit)) => {
             let _ = process::autoreap_process(exit.pid, "vm-smoke");
@@ -296,7 +280,7 @@ pub fn run_vm_smoke() -> bool {
 pub fn run_tls_smoke() -> bool {
     crate::serial_write("[TLS-TEST] START\r\n");
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "tls_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/tls_test", ProcessOutputSink::SerialOnly, &mut input);
     let ok = match result {
         Ok((_, exit)) => {
             let _ = process::autoreap_process(exit.pid, "tls-smoke");
@@ -315,7 +299,7 @@ pub fn run_tls_smoke() -> bool {
 pub fn run_pty_smoke() -> bool {
     crate::serial_write("[PTY-TEST] START\r\n");
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "pty_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/pty_test", ProcessOutputSink::SerialOnly, &mut input);
     let ok = match result {
         Ok((_, exit)) => {
             let _ = process::autoreap_process(exit.pid, "pty-smoke");
@@ -338,7 +322,7 @@ pub fn run_pty_smoke() -> bool {
 pub fn run_dsh_calc_smoke() -> bool {
     crate::serial_write("[DSH-CALC-TEST] START\r\n");
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "dsh_calc_test", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/dsh_calc_test", ProcessOutputSink::SerialOnly, &mut input);
     let ok = match result {
         Ok((_, exit)) => {
             let _ = process::autoreap_process(exit.pid, "dsh-calc-smoke");
@@ -369,7 +353,7 @@ pub fn run_fsck_cli_smoke() -> bool {
         return true;
     }
     let mut input = NoExecInput;
-    let result = run_foreground_exec("/", "fsck_dunit", ProcessOutputSink::SerialOnly, &mut input);
+    let result = run_foreground_exec("/", "/app/fsck_dunit", ProcessOutputSink::SerialOnly, &mut input);
     let ok = match result {
         Ok((_, exit)) => {
             let _ = process::autoreap_process(exit.pid, "fsck-cli-smoke");

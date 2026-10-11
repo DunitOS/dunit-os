@@ -13,7 +13,7 @@ fn panic(_: &PanicInfo) -> ! {
 }
 
 fn spawn_ready(label: &str) -> u32 {
-    let pid = libdunit::spawn("elf_demo");
+    let pid = libdunit::spawn("/app/elf_demo");
     if pid < 0 {
         libdunit::print("spawn_ready_test: spawn failed: ");
         libdunit::println(label);

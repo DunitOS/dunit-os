@@ -22,7 +22,7 @@ fn expect_wait_error(pid: u32, label: &str) {
 }
 
 fn spawn_and_expect_ready(label: &str, use_wait_any: bool) -> u32 {
-    let pid = libdunit::spawn("elf_demo");
+    let pid = libdunit::spawn("/app/elf_demo");
     if pid < 0 {
         libdunit::print("path_test: spawn failed: ");
         libdunit::println(label);
@@ -64,7 +64,7 @@ pub extern "C" fn _start() -> ! {
     expect_wait_error(any_pid, "wait-any-ready-repeat");
     expect_wait_error(0, "empty-wait-any");
 
-    let cleanup_pid = libdunit::spawn("elf_demo");
+    let cleanup_pid = libdunit::spawn("/app/elf_demo");
     if cleanup_pid < 0 {
         libdunit::println("path_test: parent-cleanup spawn failed");
         libdunit::exit(6);

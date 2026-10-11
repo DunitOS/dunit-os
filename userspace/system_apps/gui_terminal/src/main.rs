@@ -882,7 +882,7 @@ pub extern "C" fn _start() -> ! {
     // Hand the shell its prompt through the environment (desktop policy lives in
     // config, not baked into dsh): `[terminal] prompt` → `PROMPT=<value>`.
     let prompt_env = alloc::format!("PROMPT={}", tcfg.prompt.as_str());
-    if libdunit::pty_spawn_env("dsh", pty, &[&prompt_env]) <= 0 {
+    if libdunit::pty_spawn_env("/app/dsh", pty, &[&prompt_env]) <= 0 {
         libdunit::println("gui_terminal: FAIL pty spawn");
         libdunit::pty_close(pty);
         libdunit::handle_close(buf);
