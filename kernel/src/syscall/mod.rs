@@ -185,6 +185,7 @@ pub const EINVAL: i64 = -22;
 pub const EBADF: i64 = -9;
 pub const ENOSYS: i64 = -38;
 pub const ENOTEMPTY: i64 = -39;
+pub const EFBIG: i64 = -27;
 pub const ENAMETOOLONG: i64 = -36;
 pub const ENOENT: i64 = -2;
 pub const EACCES: i64 = -13;
@@ -1727,6 +1728,7 @@ fn vfs_error_to_errno(error: crate::fs::vfs::VfsError) -> i64 {
         crate::fs::vfs::VfsError::NotADirectory => ENOTDIR,
         crate::fs::vfs::VfsError::IsADirectory => EISDIR,
         crate::fs::vfs::VfsError::DirectoryNotEmpty => ENOTEMPTY,
+        crate::fs::vfs::VfsError::FileTooBig => EFBIG,
         crate::fs::vfs::VfsError::InvalidPath => EINVAL,
         crate::fs::vfs::VfsError::Unsupported => EOPNOTSUPP,
         crate::fs::vfs::VfsError::IoError => EIO,
@@ -1991,6 +1993,16 @@ fn sys_draw_pixel(x: u32, y: u32, color: u32) -> i64 {
 }
 
 fn sys_draw_rect(x: u32, y: u32, w: u32, h: u32, color: u32) -> i64 {
+    // Same display-owner gate as sys_draw_pixel / sys_fb_present: only the
+    // display-master owner (the userspace compositor) may poke the raw
+    // framebuffer. Without this a background app could scribble on the screen.
+    let pid = match crate::process::current_process() {
+        Some(process) => process.pid.0,
+        None => return EINVAL,
+    };
+    if pid == 0 || crate::handle::display_owner() != pid {
+        return EACCES;
+    }
     unsafe {
         if KERNEL_FB_ADDR.load(Ordering::Relaxed) == 0 {
             return EINVAL;
@@ -2219,10 +2231,14 @@ fn sys_spawn_args(
 
     let mut strings: Vec<String> = Vec::new();
     if block_len > 0 {
-        if let Err(error) = validate_user_range(block as u64, block_len) {
-            return error;
-        }
-        let bytes = unsafe { core::slice::from_raw_parts(block, block_len) };
+        // Copy the argv+env block through the validated user-copy helper rather
+        // than a raw from_raw_parts: it walks the page tables (PRESENT|USER) so
+        // an in-range-but-unmapped pointer returns EFAULT instead of faulting
+        // the kernel in ring 0 (which would panic the whole system).
+        let bytes = match copy_buffer_from_user(block, block_len) {
+            Ok(bytes) => bytes,
+            Err(error) => return error,
+        };
         for piece in bytes.split(|&b| b == 0) {
             strings.push(String::from_utf8_lossy(piece).into_owned());
         }
