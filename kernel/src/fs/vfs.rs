@@ -231,11 +231,15 @@ pub trait FileSystem: Send {
 pub struct OpenFile {
     fs: *mut dyn FileSystem,
     handle: FileHandle,
+    /// How many processes reference this open file. One at open; incremented
+    /// when a child inherits the fd across spawn (`retain`); the backing handle
+    /// is closed only when the last reference goes (`close`).
+    refs: u32,
 }
 
 impl OpenFile {
     pub fn new(fs: *mut dyn FileSystem, handle: FileHandle) -> Self {
-        Self { fs, handle }
+        Self { fs, handle, refs: 1 }
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -389,10 +393,30 @@ impl VirtualFileSystem {
         open_file.stat()
     }
 
-    pub fn close(&mut self, fd: FileDescriptor) -> Result<()> {
-        self.open_files
-            .remove(&fd)
+    /// Add a reference to an open file — a child inherited this descriptor
+    /// across spawn. Paired with `close`: the backing handle (and its offset)
+    /// is shared, and released only when the last referencing process closes.
+    pub fn retain(&mut self, fd: FileDescriptor) -> Result<()> {
+        let open = self
+            .open_files
+            .get_mut(&fd)
             .ok_or(VfsError::InvalidDescriptor)?;
+        open.refs = open.refs.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn close(&mut self, fd: FileDescriptor) -> Result<()> {
+        let open = self
+            .open_files
+            .get_mut(&fd)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        if open.refs > 1 {
+            open.refs -= 1;
+            return Ok(());
+        }
+        // Last reference: removing it drops OpenFile, which closes the backing
+        // handle.
+        self.open_files.remove(&fd);
         Ok(())
     }
 
