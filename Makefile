@@ -38,6 +38,15 @@ MUSL_LIBC = $(MUSL_SYSROOT)/lib/libc.a
 # packed into the initrd as /app/<name>.
 MUSL_CTESTS = musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops
 
+# Dunit TinyCC port (M6 capstone): the x86_64-dunit tcc fork lives in the
+# submodule toolchains/dunit-tcc. tools/dunit/build-tcc.sh builds a host-hosted
+# cross-tcc that emits native Dunit static ELFs. The programs below are compiled
+# BY that tcc (not dunit-cc) from userspace/ctests/<name>.c and packed as
+# /app/<name> — proof the tcc toolchain produces runnable Dunit binaries.
+TCC_DIR = toolchains/dunit-tcc
+TCC_BIN = $(TCC_DIR)/tcc
+TCC_CTESTS = tcc_hello
+
 USERSPACE_APPS = \
 	elf_demo fs_test exit_test args_test cwd_test path_test image_demo bmp_viewer color_test \
 	scheduler_test spawn_ready_test yield_child yield_test resumable_child resumable_test \
@@ -157,6 +166,16 @@ userspace:
 				$(USERSPACE_DIR)/ctests/$$prog.c; \
 		done; \
 	else echo "[USERSPACE] WARNING: $(MUSL_DIR) unavailable (not a git checkout or offline); musl ctests skipped. Fetch with: git submodule update --init --recursive"; fi
+	@echo "[USERSPACE] building tcc ctests ($(TCC_CTESTS)) with the Dunit cross-tcc"
+	@if [ -f $(TCC_DIR)/tools/dunit/build-tcc.sh ] && [ -f $(abspath $(MUSL_LIBC)) ]; then set -e; \
+		[ -f $(abspath $(TCC_BIN)) ] || CC=$(CC) $(TCC_DIR)/tools/dunit/build-tcc.sh $(abspath $(MUSL_SYSROOT)); \
+		for prog in $(TCC_CTESTS); do \
+			echo "  [TCC] $$prog"; \
+			$(abspath $(TCC_BIN)) -B$(abspath $(TCC_DIR)) -L$(abspath $(TCC_DIR)) \
+				-o $(USERSPACE_BUILD_DIR)/$$prog \
+				$(USERSPACE_DIR)/ctests/$$prog.c; \
+		done; \
+	else echo "[USERSPACE] WARNING: $(TCC_DIR) unavailable or sysroot missing; tcc ctests skipped. Fetch with: git submodule update --init --recursive"; fi
 	@echo "Userspace programs built in $(USERSPACE_BUILD_DIR)/"
 
 iso: $(BUILD_DIR)/kernel.elf userspace

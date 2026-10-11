@@ -1,0 +1,13 @@
+{
+  "description": "TinyCC port (M6 capstone) first behavioral proof: userspace/ctests/tcc_hello.c is compiled on the host by the Dunit cross-tcc (toolchains/dunit-tcc, built via tools/dunit/build-tcc.sh against build/dunit-sysroot) into a native x86_64-dunit static ELF, packed as /app/tcc_hello, and run on the kernel. sum(1..100)=5050 in the output proves tcc codegen (loop+arithmetic) and that the tcc-emitted ELF links our crt/libc and runs. Run: tools/qemu_test.py --build --markers-file tools/m6_tcc_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 260 --boot-timeout 150",
+  "run": { "config": "limine.conf", "cmd": ["exec tcc_hello"] },
+  "required": [
+    { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
+    { "marker": "[TCC-HELLO] ok: built by tcc, ran on Dunit", "claim": "a tcc-compiled Dunit ELF ran on the kernel", "source": "userspace/ctests/tcc_hello.c" },
+    { "marker": "[TCC-HELLO] sum=5050", "claim": "tcc codegen (loop+arithmetic) is correct — sum(1..100)=5050", "source": "userspace/ctests/tcc_hello.c" },
+    { "marker": "/app/tcc_hello returned code=0", "claim": "the tcc-built program exited cleanly", "source": "kernel/src/shell.rs" }
+  ],
+  "forbidden": [
+    { "marker": "[PANIC]", "why": "kernel panic", "source": "kernel/src/lib.rs" }
+  ]
+}
