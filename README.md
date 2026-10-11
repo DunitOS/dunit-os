@@ -115,9 +115,10 @@ by `tools/m6_musl_*_markers.json`):
 
 Threads use the native `__clone`, a futex wait/wake dispatcher, and a kernel
 clear-child-tid primitive (`SetTidAddress`) that releases musl's thread-list lock
-on thread exit. The filesystem surface (open/read/write/close, `stat`, directory
-iteration, buffered stdio) is complete; signals and networking are still
-documented `ENOSYS`.
+on thread exit. The syscall surface (files: open/read/write/close, `stat`,
+directory iteration, `mkdir`/`rmdir`/`unlink`/`rename`/`fsync`, `getcwd`/`chdir`;
+buffered stdio; `clock_gettime`/`sleep`) is complete; signals and networking are
+still documented `ENOSYS`.
 
 ## Userspace apps
 
@@ -258,7 +259,7 @@ Working but UP-only / early:
 Not implemented yet:
 - Signals, dynamic TLS/DTV, and full `exec`/`fork`.
 - In the musl port: signals and networking (the static C `hello`/`stdio`/
-  `malloc`/`file`/`thread` suite and the open/read/write/stat/dir/stdio surface
+  `malloc`/`file`/`thread` suite and the files/stat/dir/stdio/clock surface
   all run).
 - Networking, audio, complete USB, and ACPI power/shutdown.
 - A real RTC/date source; filesystem journaling/recovery.
@@ -292,8 +293,8 @@ Milestone status (full detail in `DUNIT_OS_TECHNICAL_ROADMAP.md`):
   install): **done**.
 - **M6** — Dunit musl fork, static-first: **in progress** — the static C suite
   (`hello`/`stdio`/`malloc`/`file`/`thread`) runs on the kernel and the
-  filesystem surface (open/read/write/stat/dir/stdio) is complete; signals and
-  networking remain.
+  syscall surface (files/stat/dir/stdio/clock/file-management) is complete;
+  signals and networking remain.
 - **M7** — networking, audio, USB, ACPI, package platform: **later**.
 
 ## License
