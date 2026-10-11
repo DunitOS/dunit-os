@@ -91,6 +91,7 @@ pub enum Syscall {
     SpawnArgs = 79,
     Seek = 80,
     Fstat = 81,
+    Dup = 82,
 }
 
 impl Syscall {
@@ -179,6 +180,7 @@ impl Syscall {
             79 => Some(Syscall::SpawnArgs),
             80 => Some(Syscall::Seek),
             81 => Some(Syscall::Fstat),
+            82 => Some(Syscall::Dup),
             _ => None,
         }
     }
@@ -751,6 +753,7 @@ pub extern "C" fn syscall_handler(
         ),
         Syscall::Seek => sys_seek(arg0 as u32, arg1 as i64, arg2 as u32),
         Syscall::Fstat => sys_fstat(arg0 as u32, arg1 as *mut UserFileStat),
+        Syscall::Dup => sys_dup(arg0 as u32, arg1 as i64),
     }
 }
 
@@ -1051,6 +1054,33 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     bytes_read as i64
 }
 
+fn sys_dup(oldfd: u32, newfd: i64) -> i64 {
+    if !is_valid_fd_number(oldfd) {
+        return EBADF;
+    }
+    // newfd < 0 => dup (lowest free fd); newfd >= 0 => dup2 to exactly that fd.
+    let target = if newfd < 0 {
+        None
+    } else {
+        if newfd as u64 >= MAX_FD as u64 {
+            return EBADF;
+        }
+        Some(newfd as u32)
+    };
+    let (new_fd, to_close) = match crate::process::dup_fd(oldfd, target) {
+        Ok(result) => result,
+        Err(error) => return process_error_to_errno(error),
+    };
+    // dup2 may have displaced an open VFS descriptor whose last reference is now
+    // gone — close it in the VFS.
+    if let Some(vfs_fd) = to_close {
+        if let Some(vfs) = crate::fs::vfs::get_vfs() {
+            let _ = vfs.close(vfs_fd);
+        }
+    }
+    new_fd as i64
+}
+
 fn sys_fstat(fd: u32, stat: *mut UserFileStat) -> i64 {
     if !is_valid_fd_number(fd) {
         return EBADF;
@@ -1195,7 +1225,7 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
         Err(error) => return error,
     };
 
-    match crate::process::allocate_fd(crate::process::FdEntry::vfs(vfs_fd)) {
+    match crate::process::open_vfs_fd(vfs_fd) {
         Ok(fd) => fd as i64,
         Err(error) => {
             if let Some(vfs) = crate::fs::vfs::get_vfs() {
@@ -1417,17 +1447,22 @@ fn sys_close(fd: u32) -> i64 {
         | crate::process::FdTarget::Stdout
         | crate::process::FdTarget::Stderr => EOPNOTSUPP,
         crate::process::FdTarget::Vfs(vfs_fd) => {
-            if let Err(error) = crate::fs::vfs::get_vfs()
-                .ok_or(EIO)
-                .and_then(|vfs| vfs.close(vfs_fd).map_err(vfs_error_to_errno))
-            {
-                return error;
+            // Only close the underlying VFS file when the LAST process fd
+            // referencing it (dups share one) is dropped.
+            let _ = vfs_fd;
+            let to_close = match crate::process::drop_fd(fd) {
+                Ok(result) => result,
+                Err(error) => return process_error_to_errno(error),
+            };
+            if let Some(vfs_fd_to_close) = to_close {
+                if let Err(error) = crate::fs::vfs::get_vfs()
+                    .ok_or(EIO)
+                    .and_then(|vfs| vfs.close(vfs_fd_to_close).map_err(vfs_error_to_errno))
+                {
+                    return error;
+                }
             }
-
-            match crate::process::close_fd(fd) {
-                Ok(_) => 0,
-                Err(error) => process_error_to_errno(error),
-            }
+            0
         }
     }
 }

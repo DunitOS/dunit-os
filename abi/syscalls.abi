@@ -89,3 +89,4 @@
 79	SpawnArgs
 80	Seek
 81	Fstat
+82	Dup
