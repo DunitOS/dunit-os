@@ -215,7 +215,7 @@ root@dunit:~#
 - [x] Safe shared-memory objects and capability-based IPC handles. Shared VM object с guard pages/W^X/teardown (`[VM-TEST] OK`) и per-process handle table с rights (`READ/WRITE/MAP/SIGNAL/TRANSFER/DISPLAY_MASTER`, права только сужаются; `handle_test: OK`) — на M1; активно используются gui-v1 (shared framebuffers + capability-передача буфера компоситору).
 - [x] Userspace GUI Server/compositor/DWM and declarative UI Runtime. **Готово:** userspace `gui_server` (software compositor, damage, focus/input routing), config-driven DWM (панель/dock/launcher/workspaces/widgets, quick settings, notifications, Alt/Super switcher, config-driven край панели/трея, protocol resize/maximize, ARGB-прозрачность) и declarative UI Runtime (крейты `runtime/`, `gui_client` рисует DUI+DSS). Остаётся только persistence session-store через ребут (зависит от M5/DunitFS v2 — учтено в M4).
 - [ ] Disk-backed system root, first boot, user profiles, recovery-capable DunitFS.
-- [~] Dunit musl fork, native C toolchain and static userspace baseline. **Готово:** static-C suite + полный fs/stdio/malloc/thread/cwd/time/file-mgmt surface на ядре, dunit-cc toolchain+SDK manifest, DELTA.md. **Осталось:** process model (spawn/pipes), signals/network/dynamic linking (M6-D/F, частично M7).
+- [~] Dunit musl fork, native C toolchain and static userspace baseline. **Готово (M6-A…E, static-first):** static-C suite + полный fs surface (open/read/write/close, seek, stat/fstat, ftruncate, access, dirs+rewinddir, rename/unlink/mkdir/rmdir, fsync, O_EXCL/mkstemp) + stdio/malloc/thread/cwd/time, процессная модель spawn/wait/kill + pipes + dup/dup2/dup3, dunit-cc toolchain+SDK manifest, DELTA.md. **Осталось (post-M6):** shell redirection (posix_spawn file-actions), и отдельными гейтами M6-F — signals/network/dynamic linking (M7). Капстоун M6 — порт on-device компилятора (TinyCC).
 - [ ] Packet networking, audio, complete USB, ACPI/power and package/application platform.
 
 ## 8. Удачные решения и главные архитектурные проблемы
@@ -551,19 +551,19 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 ##### M6-C — files, directories и installed environment
 
-- [~] Покрыть `open/read/write/close/seek`, `stat/fstat`, cwd, directories, rename/unlink/mkdir и `fsync`.
+- [x] Покрыть `open/read/write/close/seek`, `stat/fstat`, cwd, directories, rename/unlink/mkdir и `fsync`. Плюс `ftruncate` (Seek=80, Fstat=81, Truncate=84), `access` (Stat-based), `O_EXCL`/`mkstemp` и `rewinddir`.
 - [x] Переводить POSIX open/mode flags и Dunit metadata через проверяемый adapter; не передавать public musl structs в kernel.
 - [x] Реализовать buffered `FILE`, standard streams и terminal capability query.
-- [ ] Определить Dunit paths для users, configuration, temporary files, DNS и account database; не копировать Linux FHS автоматически.
+- [x] Определить Dunit paths для users, configuration, temporary files, DNS и account database; не копировать Linux FHS автоматически. **Текущая политика путей:** `/system` — read-mostly образ ОС (бинарники, библиотеки, read-only ассеты); `/persist` — DunitFS, пользовательские данные и конфигурация (writable, переживает ребут); `/tmp` — MemFS, временные файлы (не переживают ребут); `/app`, `/assets` — initrd (read-only). DNS и account database не определяются до M7 (сеть) — Linux FHS намеренно не копируется.
 - [x] Загружать C programs и libc artifacts с installed root, а не через `include_bytes!`.
 
 **Результат:** C utility работает с DunitFS после установки. **Готовность:** create/write/fsync/reboot/read с тем же hash; stdio error/EOF semantics проходят тесты. **Тесты:** large/empty/sparse-policy files, Unicode bytes in paths, disk-full, rename atomicity, corrupted storage, terminal redirection. **Риски:** несоответствие `stat/dirent`, неполный fsync contract, скрытые fixed paths musl.
 
 ##### M6-D — process model без обязательного `fork`
 
-- [~] Спроектировать `spawn/exec-image/wait/kill` с arguments, environment, cwd и явным inheritance handles.
+- [x] Спроектировать `spawn/exec-image/wait/kill` с arguments, environment, cwd и явным inheritance handles. (SpawnArgs=79 с argv/env, WaitProcess=16, KillProcess=18; привилегии наследуются только через kernel-spawn, не через posix_spawn.)
 - [x] Переписать musl `posix_spawn` backend на прямой Dunit spawn contract, не эмулировать его через Linux `clone/vfork`.
-- [ ] Реализовать pipes, descriptor duplication и redirection до заявления shell/process compatibility.
+- [~] Реализовать pipes, descriptor duplication и redirection до заявления shell/process compatibility. **Готово:** анонимные pipes (Pipe=83, блокирующее чтение через syscall-restart), dup/dup2/dup3 (Dup=82). **Осталось:** redirection через posix_spawn file-actions — нужна межпроцессным пайплайнам оболочки, НЕ нужна tcc (однопроцессная сборка). Отложено до задачи про shell-пайплайны.
 - [x] Возвращать `ENOSYS` для `fork`, пока нет корректных COW, multithreaded semantics и `pthread_atfork`.
 
 **Результат:** C parent запускает C child и получает exit status. **Готовность:** spawn file actions, environment replacement и pipe redirection работают без fd leaks. **Тесты:** missing executable, permission denial, child fault, concurrent children, inherited/closed handles. **Риски:** deadlocks при spawn, неявная передача privileged handles, попытка приложений обойти отсутствие fork.
