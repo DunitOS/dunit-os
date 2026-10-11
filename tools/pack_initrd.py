@@ -91,6 +91,38 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                 for host_path in sorted(test_dir.glob("*.toml")):
                     add(f"/system/services/{host_path.name}", host_path)
 
+    # Dunit sysroot for the on-device C toolchain (tcc). Headers + libc.a + crt
+    # go under /system so /app/tcc can compile and link C programs on the device
+    # itself. Only packed when --sysroot-dir is given (always, in a normal build).
+    if args.sysroot_dir is not None:
+        sysroot = Path(args.sysroot_dir)
+        inc = sysroot / "include"
+        if inc.is_dir():
+            for host_path in sorted(p for p in inc.rglob("*") if p.is_file()):
+                rel = host_path.relative_to(inc).as_posix()
+                add(f"/system/include/{rel}", host_path)
+        lib = sysroot / "lib"
+        for name in ("libc.a", "crt1.o", "crti.o", "crtn.o"):
+            p = lib / name
+            if p.is_file():
+                add(f"/system/lib/{name}", p)
+                # crt also under /system/tcc so tcc finds them via -B/CONFIG_TCCDIR
+                if name != "libc.a":
+                    add(f"/system/tcc/{name}", p)
+
+    # tcc's own runtime (libtcc1.a) and compiler headers (stddef.h/stdarg.h/…)
+    # live under /system/tcc = CONFIG_TCCDIR, found by -B/the baked tccdir.
+    if args.tcc_dir is not None:
+        tccd = Path(args.tcc_dir)
+        libtcc1 = tccd / "libtcc1.a"
+        if libtcc1.is_file():
+            add("/system/tcc/libtcc1.a", libtcc1)
+        tinc = tccd / "include"
+        if tinc.is_dir():
+            for host_path in sorted(p for p in tinc.rglob("*") if p.is_file()):
+                rel = host_path.relative_to(tinc).as_posix()
+                add(f"/system/tcc/include/{rel}", host_path)
+
     return sorted(entries.items())
 
 
@@ -115,6 +147,10 @@ def parse_args() -> argparse.Namespace:
                         help="dir of init service manifests packed to /system/services")
     parser.add_argument("--config", type=str, default=None,
                         help="limine config path; selects default vs test DWM toml")
+    parser.add_argument("--sysroot-dir", type=Path, default=None,
+                        help="Dunit sysroot (include/ + lib/) packed to /system for on-device tcc")
+    parser.add_argument("--tcc-dir", type=Path, default=None,
+                        help="tcc fork dir (libtcc1.a + include/) packed to /system/tcc")
     parser.add_argument("--exclude", action="append", default=[],
                         help="asset path (relative to assets dir) to omit, repeatable")
     return parser.parse_args()
