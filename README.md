@@ -20,6 +20,10 @@ preemptive multithreaded userspace processes with crash isolation, has a
 config-driven desktop, installs to a real disk with a persistent filesystem, and
 now runs static C programs built against its own ported libc.
 
+| 1. Limine Bootloader | 2. Terminal Mode | 3. DWM Mode |
+| :---: | :---: | :---: |
+| ![Limine Bootloader](assets/images/bootloader.gif) | ![Terminal Mode](assets/images/terminalmode.gif) | ![DWM Mode](assets/images/dwm.gif) |
+
 ## Current State
 
 ### Kernel & runtime
