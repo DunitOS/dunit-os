@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/images/image.png" width="1000" alt="Dunit OS logo"/>
+  <img src="assets/images/banner.png" width="1000" alt="Dunit OS banner"/>
 </p>
 
 Dunit OS
@@ -32,10 +32,8 @@ Quick Start
 
 Prerequisites
 -------------
-A standard 64-bit Linux development environment with:
-* Build tools: `gcc`, `nasm`, `lld`, `xorriso`, `python3`
-* Emulator: `qemu-system-x86_64`
-* Rust toolchain: Nightly with `rust-src` (`rustup override set nightly && rustup component add rust-src`)
+A standard 64-bit Linux development environment:
+`qemu-system-x86_64`, `gcc`, `nasm`, `lld`, `xorriso`, `python3`, and a nightly Rust toolchain with `rust-src` (`rustup override set nightly && rustup component add rust-src`).
 
 Build and Run
 -------------
@@ -54,62 +52,60 @@ make run        # Boot into Terminal mode
 make run-dwm    # Boot into DWM Desktop mode
 ```
 
-Common build targets:
-* `make iso` — Builds the terminal ISO (`build/microkernel.iso`)
-* `make iso-dwm` — Builds the graphical desktop ISO
-* `make disk-image` — Creates a bootable BIOS/UEFI raw disk image
+Common build targets:  
+`make iso` — Builds the terminal ISO (`build/microkernel.iso`)  
+`make iso-dwm` — Builds the graphical desktop ISO  
+`make disk-image` — Creates a bootable BIOS/UEFI raw disk image  
 
 System Overview
 ===============
 
 Architecture and Kernel
 -----------------------
-* Boot Flow: Limine bootloader with both BIOS and UEFI support.
-* Kernel: Rust `no_std` microkernel architecture (Green Tea Kernel).
-* HAL: C/NASM layer managing GDT, IDT, interrupts, context switching, and syscall entry.
-* Process Model: Independent ring-3 ELF processes with parent/child tracking and clean termination on faults.
+**Boot Flow**: Limine bootloader with both BIOS and UEFI support.  
+**Kernel**: Rust `no_std` microkernel architecture (Green Tea Kernel).  
+**HAL**: C/NASM layer managing GDT, IDT, interrupts, context switching, and syscall entry.  
+**Process Model**: Independent ring-3 ELF processes with parent/child tracking and clean termination on faults.  
 
 Multitasking and Memory
 -----------------------
-* Preemptive Scheduler: Timer-driven (PIT) round-robin scheduler preserving FPU and SSE registers across switches.
-* Threading: Multi-threaded processes with kernel-level thread management and `pthread` support.
-* Virtual Memory: PMM and VMM allocators, per-process page tables, guard pages, `mmap`/`munmap`/`mprotect`, and W^X enforcement.
+**Preemptive Scheduler**: Timer-driven (PIT) round-robin scheduler preserving FPU and SSE registers across switches.  
+**Threading**: Multi-threaded processes with kernel-level thread management and `pthread` support.  
+**Virtual Memory**: PMM and VMM allocators, per-process page tables, guard pages, `mmap`/`munmap`/`mprotect`, and W^X enforcement.  
 
 Terminal and Shell
 ------------------
-* Console: VGA framebuffer terminal using a Linux-style 8x16 bitmap console font.
-* Shell (`dsh`): Command history (Up/Down arrows), tab autocomplete, pipes (`|`), and path execution (`/system/bin`, `/app`).
-* Built-in tools:
-  * `dufetch`: Displays hardware specifications, memory statistics, and the ASCII logo.
-  * `calc`: Command-line mathematical expression calculator.
-  * `bmp_viewer`: Renders BMP image files directly to the framebuffer.
-  * `fsck_dunit`: Filesystem consistency check and diagnostic utility.
+**Console**: VGA framebuffer terminal using a Linux-style 8x16 bitmap console font.  
+**Shell (dsh)**: Command history (Up/Down arrows), tab autocomplete, pipes (`|`), and path execution (`/system/bin`, `/app`).  
+**dufetch**: Displays hardware specifications, memory statistics, and the ASCII logo.  
+**calc**: Command-line mathematical expression calculator.  
+**bmp_viewer**: Renders BMP image files directly to the framebuffer.  
+**fsck_dunit**: Filesystem consistency check and diagnostic utility.  
 
 Desktop Environment (DWM)
 -------------------------
-* Compositor: `gui_server` software compositor running entirely in userspace.
-* Configuration: Panel placement, dock items, themes, wallpapers, and widgets (clock, battery, stats) configured through TOML (`default.toml`).
-* Visuals: Per-pixel ARGB transparency, drop shadows, and responsive window dragging/resizing.
-* Window Switcher: Alt+Tab and Super key switcher with live active window outlines.
-* Applications: GUI Terminal, File Manager (`gui_files`), Calculator (`gui_calc`), Settings (`gui_settings`), and System Stats monitor (`gui_stat`).
+**Compositor**: `gui_server` software compositor running entirely in userspace.  
+**Configuration**: Panel placement, dock items, themes, wallpapers, and widgets (clock, battery, stats) configured through TOML (`default.toml`).  
+**Visuals**: Per-pixel ARGB transparency, drop shadows, and responsive window dragging/resizing.  
+**Window Switcher**: Alt+Tab and Super key switcher with live active window outlines.  
+**Applications**: GUI Terminal, File Manager (`gui_files`), Calculator (`gui_calc`), Settings (`gui_settings`), and System Stats monitor (`gui_stat`).  
 
 Storage and Filesystems
 -----------------------
-* Block Drivers: Native AHCI SATA and VirtIO block device support with GPT partitioning.
-* Filesystems: Ramdisk (MemFS) for `/app` and `/assets`, and a custom extent-based DunitFS.
-* Disk Installation: The `install.dunit` command installs the operating system to physical drives or USB media, creating an EFI System Partition and a persistent `/persist` filesystem that survives reboots.
+**Block Drivers**: Native AHCI SATA and VirtIO block device support with GPT partitioning.  
+**Filesystems**: Ramdisk (MemFS) for `/app` and `/assets`, and a custom extent-based DunitFS.  
+**Disk Installation**: The `install.dunit` command installs the operating system to physical drives or USB media, creating an EFI System Partition and a persistent `/persist` filesystem that survives reboots.  
 
 C Runtime and Toolchain
 -----------------------
-* Musl Libc: Dedicated static `musl libc` port mapped directly to the native Dunit syscall ABI.
-* Host Cross-Compiler: Build static C programs from Linux with the provided `dunit-cc` wrapper:
+**Musl Libc**: Dedicated static `musl libc` port mapped directly to the native Dunit syscall ABI.
 
+Host cross-compiler:
 ```bash
 build/dunit-sysroot/bin/dunit-cc -O2 -o build/userspace/hello hello.c
 ```
 
-* On-Device Compilation: Built-in Tiny C Compiler (`tcc`) allows compiling and running C programs directly inside Dunit OS:
-
+On-device compilation via Tiny C Compiler (`tcc`):
 ```text
 exec tcc /assets/tcc/hello.c -o /tmp/hello
 exec /tmp/hello
@@ -118,10 +114,10 @@ exec /tmp/hello
 Current Limitations
 ===================
 
-This is an experimental hobby operating system under active development. Current omissions:
-* Multi-core (SMP) — execution is currently single-core (UP)
-* Networking stack (TCP/IP) and audio subsystem
-* Dynamic linking (`.so` shared libraries)
+This is an experimental hobby operating system under active development. Current omissions:  
+Multi-core (SMP) — execution is currently single-core (UP)  
+Networking stack (TCP/IP) and audio subsystem  
+Dynamic linking (`.so` shared libraries)  
 
 License
 =======
