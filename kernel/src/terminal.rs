@@ -507,10 +507,19 @@ impl FbConsole {
             self.render_viewport();
         }
 
-        self.write_history_char(c as u8);
+        let ch_byte = match c {
+            '░' => 0xB0,
+            '▒' => 0xB1,
+            '▓' => 0xB2,
+            '█' => 0xDB,
+            c if (c as u32) < 256 => c as u8,
+            _ => b'?',
+        };
+
+        self.write_history_char(ch_byte);
         unsafe {
             if (*SCROLLBACK.0.get()).view_at_bottom {
-                self.draw_glyph(self.cursor_x, self.cursor_y, c as u8);
+                self.draw_glyph(self.cursor_x, self.cursor_y, ch_byte);
             }
         }
         self.cursor_x += 1;

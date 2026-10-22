@@ -244,6 +244,8 @@ struct Term {
     /// Logical current-line accumulator for the `[term]` serial echo — tracks the
     /// shell's line independent of on-screen column wrapping (see `flush_echo`).
     echo: String,
+    utf8_buf: [u8; 4],
+    utf8_len: usize,
 }
 
 impl Term {
@@ -270,6 +272,8 @@ impl Term {
             palette,
             cell_w,
             echo: String::new(),
+            utf8_buf: [0; 4],
+            utf8_len: 0,
         }
     }
 
@@ -529,17 +533,60 @@ impl Term {
                 Esc::Normal => {}
             }
             match b {
-                0x1b => self.esc = Esc::Esc,
-                b'\n' => self.newline(true),
+                0x1b => {
+                    self.utf8_len = 0;
+                    self.esc = Esc::Esc;
+                }
+                b'\n' => {
+                    self.utf8_len = 0;
+                    self.newline(true);
+                }
                 b'\r' => {
+                    self.utf8_len = 0;
                     self.ccol = 0;
                     self.echo.clear();
                 }
-                b'\t' => self.tab(),
-                0x0c => self.clear_screen(),
-                0x08 => self.backspace(),
-                0x20..=0x7e => self.put_char(b as char),
-                _ => {}
+                b'\t' => {
+                    self.utf8_len = 0;
+                    self.tab();
+                }
+                0x0c => {
+                    self.utf8_len = 0;
+                    self.clear_screen();
+                }
+                0x08 => {
+                    self.utf8_len = 0;
+                    self.backspace();
+                }
+                _ => {
+                    if self.utf8_len == 0 {
+                        if b < 0x80 {
+                            if (0x20..=0x7e).contains(&b) {
+                                self.put_char(b as char);
+                            }
+                        } else if (b & 0xE0) == 0xC0 || (b & 0xF0) == 0xE0 || (b & 0xF8) == 0xF0 {
+                            self.utf8_buf[0] = b;
+                            self.utf8_len = 1;
+                        }
+                    } else if (b & 0xC0) == 0x80 && self.utf8_len < 4 {
+                        self.utf8_buf[self.utf8_len] = b;
+                        self.utf8_len += 1;
+                        if let Ok(s) = core::str::from_utf8(&self.utf8_buf[..self.utf8_len]) {
+                            if let Some(ch) = s.chars().next() {
+                                self.put_char(ch);
+                            }
+                            self.utf8_len = 0;
+                        }
+                    } else {
+                        self.utf8_len = 0;
+                        if (0x20..=0x7e).contains(&b) {
+                            self.put_char(b as char);
+                        } else if (b & 0xE0) == 0xC0 || (b & 0xF0) == 0xE0 || (b & 0xF8) == 0xF0 {
+                            self.utf8_buf[0] = b;
+                            self.utf8_len = 1;
+                        }
+                    }
+                }
             }
         }
         if !bytes.is_empty() {

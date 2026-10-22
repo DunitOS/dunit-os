@@ -9,10 +9,12 @@
 //! on an inner pty). It writes ONLY ANSI SGR color codes — the terminal's active
 //! theme decides what each color looks like, so dufetch renders in whatever
 //! palette the terminal is themed with (the whole point of the theme system).
-//! Every fact is read through libdunit syscalls; nothing is hardcoded policy.
 //!
 //! Layout: logo on the left, system info on the right — just like fastfetch.
-//! Uses only printable ASCII (0x20..0x7E) so the GUI terminal renders it.
+//!
+//! Every displayed fact is read through libdunit syscalls at runtime — nothing
+//! is hardcoded policy. No fake user@host, no pretend hostname, no invented
+//! subsystem names. If the kernel doesn't expose it, dufetch doesn't show it.
 
 use core::panic::PanicInfo;
 
@@ -31,41 +33,18 @@ fn panic(_: &PanicInfo) -> ! {
 }
 
 /// The ASCII-art logo, baked into the ELF at build time — not loaded from VFS.
-/// Uses only printable ASCII chars so it renders in both terminals.
 const LOGO: &str = include_str!("../../../../assets/gui/dufetch_logo.txt");
 
 // Logical ANSI colors (the terminal's theme maps these to real RGB).
 const C_RESET: &str = "\x1b[0m";
-const C_GREEN: &str = "\x1b[1;32m"; // bold green  — logo ':' parts
-const C_CYAN: &str = "\x1b[1;36m"; // bold cyan   — logo '*' parts
-const C_BOLD: &str = "\x1b[1m"; // bold white  — title
+const C_GREEN: &str = "\x1b[1;32m"; // bold green  — logo '▓' parts
+const C_CYAN: &str = "\x1b[1;36m";  // bold cyan   — logo '▒' parts
 const C_LABEL: &str = "\x1b[1;36m"; // bold cyan   — info labels
-const C_VALUE: &str = "\x1b[97m"; // bright white — info values
-const C_DIM: &str = "\x1b[90m"; // dim         — separator/palette
-const C_YELLOW: &str = "\x1b[1;33m"; // bold yellow — logo '.' parts
+const C_VALUE: &str = "\x1b[97m";   // bright white — info values
+const C_DIM: &str = "\x1b[90m";     // dim         — separator/palette
 
 fn out(s: &str) {
     libdunit::write(1, s.as_bytes());
-}
-
-/// Visible width of a string (ASCII-only: 1 cell per byte, skip ESC sequences).
-fn visible_len(s: &str) -> usize {
-    let mut n = 0usize;
-    let mut in_esc = false;
-    for c in s.bytes() {
-        if in_esc {
-            if c >= b'A' && c <= b'Z' || c >= b'a' && c <= b'z' {
-                in_esc = false;
-            }
-            continue;
-        }
-        if c == 0x1b {
-            in_esc = true;
-            continue;
-        }
-        n += 1;
-    }
-    n
 }
 
 fn cwd_string() -> String {
@@ -78,29 +57,45 @@ fn cwd_string() -> String {
     }
 }
 
-/// Colorize one logo line: '.' and ':' in yellow, '\'' in green, '*' in cyan,
-/// spaces and other chars as-is. Returns the colored string.
+/// Colorize one logo line: '▓' in bold green, '▒' in bold cyan,
+/// spaces and other chars as-is.
 fn colorize_logo_line(line: &str) -> String {
     let mut result = String::new();
     let mut last_color: &str = "";
-    for ch in line.bytes() {
+    for ch in line.chars() {
         let color = match ch {
-            b'.' | b':' => C_YELLOW,
-            b'\'' => C_GREEN,
-            b'*' => C_CYAN,
+            '▓' => C_GREEN,
+            '▒' => C_CYAN,
+            '█' => C_GREEN,
             _ => C_RESET,
         };
         if color != last_color {
             result.push_str(color);
             last_color = color;
         }
-        result.push(ch as char);
+        result.push(ch);
     }
     result.push_str(C_RESET);
     result
 }
 
-// APPEND_RENDER
+/// Format uptime from ticks and hz into a human-readable string.
+fn format_uptime(ticks: u64, hz: u64) -> String {
+    if hz == 0 {
+        return String::from("unknown");
+    }
+    let total_secs = ticks / hz;
+    let hours = total_secs / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, mins, secs)
+    } else if mins > 0 {
+        format!("{}m {}s", mins, secs)
+    } else {
+        format!("{}s", secs)
+    }
+}
 
 fn render() {
     let mut s = SystemStats::default();
@@ -120,54 +115,37 @@ fn render() {
         started = true;
         logo_lines.push(line);
     }
-    // Trim trailing blank lines
     while logo_lines.last().map_or(false, |l| l.trim().is_empty()) {
         logo_lines.pop();
     }
 
-    // Find logo width (max visible length)
-    let logo_w: usize = logo_lines.iter().map(|l| l.len()).max().unwrap_or(0);
+    // Find logo width (max visible column count)
+    let logo_w: usize = logo_lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
     let pad = 2usize; // gap between logo and info
 
-    // Build info lines in fastfetch style
+    // Build info lines — only facts the kernel actually exposes via syscalls.
+    // No hardcoded policy, no fake identifiers.
     let mut info: Vec<String> = Vec::new();
-
-    // Title: user@host
-    info.push(format!("{}root{}{}@{}{}dunit{}", C_BOLD, C_RESET, C_BOLD, C_RESET, C_BOLD, C_RESET));
 
     // Separator
     let mut sep = String::new();
     sep.push_str(C_DIM);
-    for _ in 0..16 { sep.push('-'); }
+    for _ in 0..24 { sep.push('-'); }
     sep.push_str(C_RESET);
     info.push(sep);
 
-    // OS
-    info.push(format!("{}OS{}: {}Dunit OS x86_64{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
-
-    // Kernel
-    info.push(format!("{}Kernel{}: {}1.0.0 Green Tea{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
-
-    // Shell
-    info.push(format!("{}Shell{}: {}dsh{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
-
-    // Display
-    if fb.width > 0 && fb.height > 0 {
-        info.push(format!("{}Display{}: {}{}x{}{}", C_LABEL, C_RESET, C_VALUE, fb.width, fb.height, C_RESET));
-    } else {
-        info.push(format!("{}Display{}: {}framebuffer{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+    // Uptime (from real kernel tick counter)
+    if s.uptime_available != 0 {
+        let uptime = format_uptime(s.uptime_ticks, s.uptime_hz);
+        info.push(format!("{}Uptime{}: {}{}{}", C_LABEL, C_RESET, C_VALUE, uptime, C_RESET));
     }
 
-    // WM
-    info.push(format!("{}WM{}: {}DWM (Dunit Window Manager){}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+    // Display (from real framebuffer info)
+    if fb.width > 0 && fb.height > 0 {
+        info.push(format!("{}Display{}: {}{}x{}{}", C_LABEL, C_RESET, C_VALUE, fb.width, fb.height, C_RESET));
+    }
 
-    // Terminal
-    info.push(format!("{}Terminal{}: {}gui_terminal / kernel fb{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
-
-    // CPU (arch info)
-    info.push(format!("{}CPU{}: {}x86_64{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
-
-    // Memory
+    // Memory (from real PMM stats)
     info.push(format!(
         "{}Memory{}: {}{} KiB / {} KiB{}",
         C_LABEL, C_RESET, C_VALUE,
@@ -175,21 +153,62 @@ fn render() {
         C_RESET
     ));
 
-    // Disk / FS
-    info.push(format!("{}Disk{}: {}MemFS over VFS{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
-
-    // Tasks
+    // Heap (from real kernel heap stats)
     info.push(format!(
-        "{}Processes{}: {}{} ({} running){}",
+        "{}Heap{}: {}{} KiB / {} KiB{}",
+        C_LABEL, C_RESET, C_VALUE,
+        s.heap_used_bytes / 1024, s.heap_total_bytes / 1024,
+        C_RESET
+    ));
+
+    // Processes (from real scheduler)
+    info.push(format!(
+        "{}Processes{}: {}{} total, {} running{}",
         C_LABEL, C_RESET, C_VALUE,
         s.process_total, s.process_running,
         C_RESET
     ));
 
-    // PID
+    // Filesystem (from real VFS stats)
+    info.push(format!(
+        "{}FS{}: {}{} files, {} dirs, {} KiB{}",
+        C_LABEL, C_RESET, C_VALUE,
+        s.fs_files, s.fs_directories, s.fs_bytes / 1024,
+        C_RESET
+    ));
+
+    // Open handles
+    info.push(format!(
+        "{}Open FDs{}: {}{}{}",
+        C_LABEL, C_RESET, C_VALUE,
+        s.fs_open_handles,
+        C_RESET
+    ));
+
+    // IPC (from real IPC subsystem)
+    if s.ipc_queue_count > 0 || s.ipc_shared_regions > 0 {
+        info.push(format!(
+            "{}IPC{}: {}{} queues, {} msgs, {} shm regions{}",
+            C_LABEL, C_RESET, C_VALUE,
+            s.ipc_queue_count, s.ipc_queued_messages, s.ipc_shared_regions,
+            C_RESET
+        ));
+    }
+
+    // Network (from real NIC detection)
+    if s.net_total_nics > 0 {
+        info.push(format!(
+            "{}NICs{}: {}{} detected, {} supported{}",
+            C_LABEL, C_RESET, C_VALUE,
+            s.net_total_nics, s.net_supported_nics,
+            C_RESET
+        ));
+    }
+
+    // PID (from real syscall)
     info.push(format!("{}PID{}: {}{}{}", C_LABEL, C_RESET, C_VALUE, pid, C_RESET));
 
-    // CWD
+    // CWD (from real syscall)
     info.push(format!("{}CWD{}: {}{}{}", C_LABEL, C_RESET, C_VALUE, cwd, C_RESET));
 
     // Empty line before color swatches
@@ -215,20 +234,18 @@ fn render() {
 
     out("\n");
     for i in 0..total {
-        // Logo part (padded to logo_w)
+        // Logo part (padded to logo_w visible columns)
         if i < logo_lines.len() {
             let line = logo_lines[i];
             let colored = colorize_logo_line(line);
             out(&colored);
-            // Pad to logo_w
-            let vis = line.len();
+            let vis = line.chars().count();
             if vis < logo_w {
                 for _ in 0..(logo_w - vis) {
                     out(" ");
                 }
             }
         } else {
-            // Empty logo area
             for _ in 0..logo_w {
                 out(" ");
             }
