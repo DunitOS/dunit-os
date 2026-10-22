@@ -32,7 +32,9 @@ const LOGO: &str = include_str!("../../../../assets/gui/dufetch_logo.txt");
 
 // Logical ANSI colors (the terminal's theme maps these to real RGB).
 const C_RESET: &str = "\x1b[0m";
-const C_LOGO: &str = "\x1b[32m"; // green
+const C_GREEN: &str = "\x1b[1;32m"; // bold green  — ▓ blocks
+const C_CYAN: &str = "\x1b[1;36m"; // bold cyan   — ▒ blocks
+const C_BLUE: &str = "\x1b[1;34m"; // bold blue   — █ blocks
 const C_LABEL: &str = "\x1b[1;36m"; // bold cyan
 const C_VALUE: &str = "\x1b[97m"; // bright white
 const C_DIM: &str = "\x1b[90m"; // bright black (dim)
@@ -75,15 +77,31 @@ fn render() {
     // Plain-ASCII title: doubles as a stable serial marker (no SGR bytes in it).
     out("dufetch: system summary\n\n");
 
-    // Logo, themed (leading blank lines of the art are skipped to save height).
+    // Logo, themed — each block-element character gets its own ANSI color so the
+    // art looks vibrant in both terminals (just like the original video).
     let mut started = false;
     for line in LOGO.lines() {
         if !started && line.trim().is_empty() {
             continue;
         }
         started = true;
-        out(C_LOGO);
-        out(line);
+        let mut last_color: &str = "";
+        for ch in line.chars() {
+            let color = match ch {
+                '▓' => C_GREEN,
+                '▒' => C_CYAN,
+                '█' => C_BLUE,
+                _ => C_RESET,
+            };
+            if color != last_color {
+                out(color);
+                last_color = color;
+            }
+            // Write the character as UTF-8 bytes
+            let mut buf = [0u8; 4];
+            let s = ch.encode_utf8(&mut buf);
+            out(s);
+        }
         out(C_RESET);
         out("\n");
     }
