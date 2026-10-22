@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-//! dufetch — a neofetch-style system summary for Dunit OS, as a standalone
+//! dufetch — a fastfetch-style system summary for Dunit OS, as a standalone
 //! userspace program (`/app/dufetch`).
 //!
 //! Runs in BOTH terminals: kernel framebuffer Terminal Mode (`exec dufetch`,
@@ -10,6 +10,9 @@
 //! theme decides what each color looks like, so dufetch renders in whatever
 //! palette the terminal is themed with (the whole point of the theme system).
 //! Every fact is read through libdunit syscalls; nothing is hardcoded policy.
+//!
+//! Layout: logo on the left, system info on the right — just like fastfetch.
+//! Uses only printable ASCII (0x20..0x7E) so the GUI terminal renders it.
 
 use core::panic::PanicInfo;
 
@@ -17,6 +20,7 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use libdunit::{FbInfo, SystemStats};
 
@@ -26,32 +30,42 @@ fn panic(_: &PanicInfo) -> ! {
     libdunit::exit(101)
 }
 
-/// The ASCII-art logo, shared with the (now-removed) kernel builtin. Baked into
-/// the ELF at build time — not loaded from the VFS — so dufetch is self-contained.
+/// The ASCII-art logo, baked into the ELF at build time — not loaded from VFS.
+/// Uses only printable ASCII chars so it renders in both terminals.
 const LOGO: &str = include_str!("../../../../assets/gui/dufetch_logo.txt");
 
 // Logical ANSI colors (the terminal's theme maps these to real RGB).
 const C_RESET: &str = "\x1b[0m";
-const C_GREEN: &str = "\x1b[1;32m"; // bold green  — ▓ blocks
-const C_CYAN: &str = "\x1b[1;36m"; // bold cyan   — ▒ blocks
-const C_BLUE: &str = "\x1b[1;34m"; // bold blue   — █ blocks
-const C_LABEL: &str = "\x1b[1;36m"; // bold cyan
-const C_VALUE: &str = "\x1b[97m"; // bright white
-const C_DIM: &str = "\x1b[90m"; // bright black (dim)
+const C_GREEN: &str = "\x1b[1;32m"; // bold green  — logo ':' parts
+const C_CYAN: &str = "\x1b[1;36m"; // bold cyan   — logo '*' parts
+const C_BOLD: &str = "\x1b[1m"; // bold white  — title
+const C_LABEL: &str = "\x1b[1;36m"; // bold cyan   — info labels
+const C_VALUE: &str = "\x1b[97m"; // bright white — info values
+const C_DIM: &str = "\x1b[90m"; // dim         — separator/palette
+const C_YELLOW: &str = "\x1b[1;33m"; // bold yellow — logo '.' parts
 
 fn out(s: &str) {
     libdunit::write(1, s.as_bytes());
 }
 
-/// One "Label: value" line, label themed one color, value another.
-fn info(label: &str, value: &str) {
-    out(C_LABEL);
-    out(label);
-    out(C_RESET);
-    out(C_VALUE);
-    out(value);
-    out(C_RESET);
-    out("\n");
+/// Visible width of a string (ASCII-only: 1 cell per byte, skip ESC sequences).
+fn visible_len(s: &str) -> usize {
+    let mut n = 0usize;
+    let mut in_esc = false;
+    for c in s.bytes() {
+        if in_esc {
+            if c >= b'A' && c <= b'Z' || c >= b'a' && c <= b'z' {
+                in_esc = false;
+            }
+            continue;
+        }
+        if c == 0x1b {
+            in_esc = true;
+            continue;
+        }
+        n += 1;
+    }
+    n
 }
 
 fn cwd_string() -> String {
@@ -64,6 +78,28 @@ fn cwd_string() -> String {
     }
 }
 
+/// Colorize one logo line: '.' and ':' in yellow, '\'' in green, '*' in cyan,
+/// spaces and other chars as-is. Returns the colored string.
+fn colorize_logo_line(line: &str) -> String {
+    let mut result = String::new();
+    let mut last_color: &str = "";
+    for ch in line.bytes() {
+        let color = match ch {
+            b'.' | b':' => C_YELLOW,
+            b'\'' => C_GREEN,
+            b'*' => C_CYAN,
+            _ => C_RESET,
+        };
+        if color != last_color {
+            result.push_str(color);
+            last_color = color;
+        }
+        result.push(ch as char);
+    }
+    result.push_str(C_RESET);
+    result
+}
+
 // APPEND_RENDER
 
 fn render() {
@@ -74,75 +110,142 @@ fn render() {
     let pid = libdunit::get_pid();
     let cwd = cwd_string();
 
-    // Plain-ASCII title: doubles as a stable serial marker (no SGR bytes in it).
-    out("dufetch: system summary\n\n");
-
-    // Logo, themed — each block-element character gets its own ANSI color so the
-    // art looks vibrant in both terminals (just like the original video).
+    // Collect logo lines, skip leading/trailing blank lines
+    let mut logo_lines: Vec<&str> = Vec::new();
     let mut started = false;
     for line in LOGO.lines() {
         if !started && line.trim().is_empty() {
             continue;
         }
         started = true;
-        let mut last_color: &str = "";
-        for ch in line.chars() {
-            let color = match ch {
-                '▓' => C_GREEN,
-                '▒' => C_CYAN,
-                '█' => C_BLUE,
-                _ => C_RESET,
-            };
-            if color != last_color {
-                out(color);
-                last_color = color;
+        logo_lines.push(line);
+    }
+    // Trim trailing blank lines
+    while logo_lines.last().map_or(false, |l| l.trim().is_empty()) {
+        logo_lines.pop();
+    }
+
+    // Find logo width (max visible length)
+    let logo_w: usize = logo_lines.iter().map(|l| l.len()).max().unwrap_or(0);
+    let pad = 2usize; // gap between logo and info
+
+    // Build info lines in fastfetch style
+    let mut info: Vec<String> = Vec::new();
+
+    // Title: user@host
+    info.push(format!("{}root{}{}@{}{}dunit{}", C_BOLD, C_RESET, C_BOLD, C_RESET, C_BOLD, C_RESET));
+
+    // Separator
+    let mut sep = String::new();
+    sep.push_str(C_DIM);
+    for _ in 0..16 { sep.push('-'); }
+    sep.push_str(C_RESET);
+    info.push(sep);
+
+    // OS
+    info.push(format!("{}OS{}: {}Dunit OS x86_64{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // Kernel
+    info.push(format!("{}Kernel{}: {}1.0.0 Green Tea{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // Shell
+    info.push(format!("{}Shell{}: {}dsh{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // Display
+    if fb.width > 0 && fb.height > 0 {
+        info.push(format!("{}Display{}: {}{}x{}{}", C_LABEL, C_RESET, C_VALUE, fb.width, fb.height, C_RESET));
+    } else {
+        info.push(format!("{}Display{}: {}framebuffer{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+    }
+
+    // WM
+    info.push(format!("{}WM{}: {}DWM (Dunit Window Manager){}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // Terminal
+    info.push(format!("{}Terminal{}: {}gui_terminal / kernel fb{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // CPU (arch info)
+    info.push(format!("{}CPU{}: {}x86_64{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // Memory
+    info.push(format!(
+        "{}Memory{}: {}{} KiB / {} KiB{}",
+        C_LABEL, C_RESET, C_VALUE,
+        s.pmm_used_bytes / 1024, s.pmm_total_bytes / 1024,
+        C_RESET
+    ));
+
+    // Disk / FS
+    info.push(format!("{}Disk{}: {}MemFS over VFS{}", C_LABEL, C_RESET, C_VALUE, C_RESET));
+
+    // Tasks
+    info.push(format!(
+        "{}Processes{}: {}{} ({} running){}",
+        C_LABEL, C_RESET, C_VALUE,
+        s.process_total, s.process_running,
+        C_RESET
+    ));
+
+    // PID
+    info.push(format!("{}PID{}: {}{}{}", C_LABEL, C_RESET, C_VALUE, pid, C_RESET));
+
+    // CWD
+    info.push(format!("{}CWD{}: {}{}{}", C_LABEL, C_RESET, C_VALUE, cwd, C_RESET));
+
+    // Empty line before color swatches
+    info.push(String::new());
+
+    // Color swatches (2 rows of 8 colors each)
+    let mut colors1 = String::new();
+    for i in 0..8u8 {
+        colors1.push_str(&format!("\x1b[4{}m   ", i));
+    }
+    colors1.push_str(C_RESET);
+    info.push(colors1);
+
+    let mut colors2 = String::new();
+    for i in 0..8u8 {
+        colors2.push_str(&format!("\x1b[10{}m   ", i));
+    }
+    colors2.push_str(C_RESET);
+    info.push(colors2);
+
+    // Output side-by-side: logo left, info right
+    let total = if logo_lines.len() > info.len() { logo_lines.len() } else { info.len() };
+
+    out("\n");
+    for i in 0..total {
+        // Logo part (padded to logo_w)
+        if i < logo_lines.len() {
+            let line = logo_lines[i];
+            let colored = colorize_logo_line(line);
+            out(&colored);
+            // Pad to logo_w
+            let vis = line.len();
+            if vis < logo_w {
+                for _ in 0..(logo_w - vis) {
+                    out(" ");
+                }
             }
-            // Write the character as UTF-8 bytes
-            let mut buf = [0u8; 4];
-            let s = ch.encode_utf8(&mut buf);
-            out(s);
+        } else {
+            // Empty logo area
+            for _ in 0..logo_w {
+                out(" ");
+            }
         }
-        out(C_RESET);
+
+        // Gap
+        for _ in 0..pad {
+            out(" ");
+        }
+
+        // Info part
+        if i < info.len() {
+            out(&info[i]);
+        }
+
         out("\n");
     }
-    out("\n");
-
-    info("OS:      ", "Dunit OS");
-    info("Kernel:  ", "1.0.0 Green Tea");
-    info("Arch:    ", "x86_64");
-    info("Shell:   ", "dsh");
-    info("FS:      ", "MemFS over VFS");
-    if fb.width > 0 && fb.height > 0 {
-        info("Display: ", &format!("{}x{}", fb.width, fb.height));
-    } else {
-        info("Display: ", "framebuffer");
-    }
-    info("PID:     ", &format!("{}", pid));
-    info("CWD:     ", &cwd);
-    info(
-        "Memory:  ",
-        &format!("{} KiB / {} KiB", s.pmm_used_bytes / 1024, s.pmm_total_bytes / 1024),
-    );
-    info(
-        "Tasks:   ",
-        &format!("{} ({} running)", s.process_total, s.process_running),
-    );
-
-    // Color swatches: the active theme's 8 normal + 8 bright ANSI slots, drawn
-    // with ASCII '#' (renders in both terminals; a block glyph would not).
-    out("\n");
-    out(C_DIM);
-    out("palette: ");
-    out(C_RESET);
-    for i in 0..8 {
-        out(&format!("\x1b[3{}m###", i));
-    }
-    out(C_RESET);
-    out("\n         ");
-    for i in 0..8 {
-        out(&format!("\x1b[9{}m###", i));
-    }
-    out(C_RESET);
     out("\n");
 }
 
