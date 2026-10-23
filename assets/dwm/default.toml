@@ -1,9 +1,9 @@
 # Dunit DWM system defaults (Stack B compositor).
 #
 # Loaded by gui_server at desktop start from /system/share/dwm/default.toml
-# (embedded in the kernel MemFS). Unknown keys are ignored for forward
+# (loaded from initrd into MemFS). Unknown keys are ignored for forward
 # compatibility; a missing or unparseable file falls back to the built-in
-# Green Tea defaults baked into gui_server (the last-known-good baseline).
+# baseline in dwm_settings (the last-known-good fallback).
 #
 # Colors are #RRGGBB or #AARRGGBB (alpha defaults to opaque). Geometry is in
 # pixels.
@@ -18,32 +18,42 @@
 schema_version = 1
 
 [theme]
-desktop          = "#DCE8F2"
-title_focused    = "#F7F7FA"
-title_unfocused  = "#E9E9ED"
-border_focused   = "#A8AFBA"
-border_unfocused = "#CDD0D6"
-close            = "#FF5F57"
-panel            = "#F3F5F8"
-panel_text       = "#24262B"
-launcher         = "#007AFF"
-taskbtn          = "#E6E8ED"
-taskbtn_focused  = "#D3E5FC"
-menu             = "#F8F9FC"
-menu_hover       = "#D8E8FC"
+maximize = "#28C840"
+minimize = "#FFBD2E"
+desktop = "#18243A"
+title_focused = "#343436"
+title_unfocused = "#2B2B2D"
+border_focused = "#555558"
+border_unfocused = "#38383B"
+close = "#FF5F57"
+panel = "#1D293E"
+panel_text = "#F1F2F5"
+launcher = "#0A84FF"
+taskbtn = "#36363A"
+taskbtn_focused = "#54545A"
+menu = "#252527"
+menu_hover = "#3D506C"
 # Title-bar / taskbar label text. `title_text_focused` is the crisp TTF title on
 # the active window (and the focused taskbar button); `_unfocused` is the dimmer
 # variant on inactive windows. Were hardcoded 0xEAF2EC / 0xA8B4AC in gui_server.
-title_text_focused   = "#202124"
-title_text_unfocused = "#70757D"
+title_text_focused = "#F2F2F4"
+title_text_unfocused = "#98989E"
 
 # Compositor geometry, in pixels. `max_windows` is a safety cap on how many
 # client windows may be composited at once, not a pixel count. Non-numeric
 # values are ignored and keep the built-in baseline.
 [layout]
-title_h          = 26
-border           = 2
-panel_h          = 28
+dock_tile_alpha = 0
+show_workspaces = false
+traffic_lights = true
+dock_margin = 12
+dock_gap = 8
+dock_padding = 8
+dock_centered = true
+dock_edge = "bottom"
+title_h = 32
+border = 1
+panel_h = 26
 # App-menu button width (holds the "Dunit" wordmark; workspace pips follow it).
 launcher_w       = 92
 # Vestigial after REF-2 (top taskbar → dock task-switcher + centered title);
@@ -52,7 +62,7 @@ taskbtn_w        = 120
 taskbtn_gap      = 4
 menu_w           = 130
 menu_item_h      = 26
-dock_w           = 48
+dock_w = 68
 ws_w             = 22
 max_windows      = 8
 # Point sizes for the compositor's TTF text. `title_font_px` sizes window-title
@@ -66,33 +76,34 @@ panel_font_px    = 13
 # pixels; the `*_alpha` values are 0-255 opacity; `blur`/`gradient`/`anim` are
 # booleans (true/false/1/0). Setting an effect to 0/false restores the flat look.
 [effects]
-corner_radius    = 12
-shadow           = 12
-shadow_alpha     = 70
-blur             = true
-blur_radius      = 4
-blur_iters       = 2
-panel_alpha      = 220
-menu_alpha       = 240
-gradient         = true
-anim             = true
-anim_ms          = 180
+corner_radius = 8
+shadow = 16
+shadow_alpha = 100
+blur = true
+blur_radius = 5
+blur_iters = 2
+panel_alpha = 235
+menu_alpha = 240
+gradient = true
+anim = true
+anim_ms = 180
 
 # Asset paths — everything the desktop loads by path, so it is fully config-
-# driven (no hardcoded asset locations). `wallpaper` is a 1600x900 24-bit BMP
+# driven (no hardcoded asset locations). `wallpaper` is a 24-bit BMP
 # painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
 # directory name under /assets/icons/<name>/; the compositor dock/launcher and
 # the file manager resolve <name>/<key>.rgba from it. `font` is the TrueType font
 # every GUI app renders text with (missing/unparseable → the app's embedded
 # fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
 [desktop]
-wallpaper        = "/assets/wallpapers/wallpaper.bmp"
+wallpaper = "/assets/wallpapers/mojave.bmp"
 icon_theme       = "breeze"
 font             = "/assets/fonts/DejaVuSans.ttf"
 # App-menu wordmark logo: a 32x32 straight-alpha RGBA with a circular mask baked
 # in. Blitted left of the "Dunit" wordmark on the panel (absent/mis-sized → the
 # wordmark draws its flat accent mark instead).
 logo             = "/assets/images/logo.rgba"
+themes = "/assets/dwm/themes"
 palette          = "/assets/dwm/palettes/default.toml"
 
 # Desktop widget card: a translucent plasmoid painted on the wallpaper (behind
@@ -103,7 +114,7 @@ palette          = "/assets/dwm/palettes/default.toml"
 # /system/share/dwm/widgets/<name>.toml (clock, monitor, …) — remove a widget by
 # deleting its file or setting `enabled = false` there, not by a bool here.
 [widgets]
-enabled = true
+enabled = false
 corner  = 1
 
 # Runtime display resolution. `0/0` keeps the boot (Limine) resolution — the
@@ -117,8 +128,8 @@ height = 0
 
 # Panel placement. `pos`: which screen edge the panel (wordmark + workspace pips +
 # focused-window title + tray) docks to — "top" | "bottom" | "left" | "right".
-# Top/bottom are full text bars; left/right are narrow icon + pip bars. The dock
-# always stays on the left edge (only the panel and tray are edge-configurable).
+# Top/bottom are full text bars; left/right are narrow icon + pip bars.
+# Dock placement is independent, through [layout] dock_edge.
 [panel]
 pos = "top"
 
@@ -213,7 +224,7 @@ label = "TERM"
 name  = "Settings"
 label = "SET"
 
-# Pinned dock icons, left-edge strip, top-to-bottom. Ids resolve to registry
+# Pinned dock icons, ordered along its configured edge. Ids resolve to registry
 # entries; unknown ids are dropped. Omit this table to pin the whole registry.
 [dock]
 entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]

@@ -59,7 +59,7 @@ const ROW_H: i32 = 24;
 const Y0: i32 = 100;
 
 
-const NCOLORS: usize = 15;
+const NCOLORS: usize = 17;
 const COLOR_LABELS: [&str; NCOLORS] = [
     "Desktop background",
     "Active title bar",
@@ -76,6 +76,8 @@ const COLOR_LABELS: [&str; NCOLORS] = [
     "Menu selection",
     "Active title text",
     "Inactive title text",
+    "Minimize button",
+    "Maximize button",
 ];
 
 const NTOGGLES: usize = 3;
@@ -156,7 +158,9 @@ fn color_ref(t: &mut Theme, i: usize) -> &mut u32 {
         11 => &mut t.menu,
         12 => &mut t.menu_hover,
         13 => &mut t.title_text_focused,
-        _ => &mut t.title_text_unfocused,
+        14 => &mut t.title_text_unfocused,
+        15 => &mut t.minimize,
+        _ => &mut t.maximize,
     }
 }
 fn color_get(t: &Theme, i: usize) -> u32 {
@@ -175,7 +179,9 @@ fn color_get(t: &Theme, i: usize) -> u32 {
         11 => t.menu,
         12 => t.menu_hover,
         13 => t.title_text_focused,
-        _ => t.title_text_unfocused,
+        14 => t.title_text_unfocused,
+        15 => t.minimize,
+        _ => t.maximize,
     }
 }
 
@@ -230,6 +236,7 @@ enum Action {
     ScriptsToggle,
     ScriptLayout(i32),
     ScriptTimeout(i32),
+    ImportTheme(usize),
 }
 
 /// A clickable region and the action it fires.
@@ -262,6 +269,8 @@ struct App {
     script_layouts: Vec<String>,
     scripts_directory: String,
     scripts_listing_status: &'static str,
+    themes: Vec<String>,
+    themes_listing_status: &'static str,
 }
 
 
@@ -269,6 +278,8 @@ impl App {
     fn content_height(&self) -> u32 {
         if self.page == 0 {
             (Y0 + NCOLORS as i32 * (2 * ROW_H + 8) + 24) as u32
+        } else if self.page == 5 {
+            (Y0 + 96 + self.themes.len() as i32 * 40).max(H as i32) as u32
         } else { H }
     }
 
@@ -306,6 +317,8 @@ impl App {
             script_layouts: Vec::new(),
             scripts_directory: String::new(),
             scripts_listing_status: "",
+            themes: Vec::new(),
+            themes_listing_status: "",
         };
         app.refresh_scripts();
         app
@@ -354,13 +367,56 @@ impl App {
         } else { "Folder and runner can be changed in terminal setup." };
     }
 
+    fn refresh_themes(&mut self) {
+        self.themes.clear();
+        let directory = self.s.desktop.themes.as_str();
+        if !directory.starts_with('/') || directory.split('/').any(|p| p == "..") {
+            self.themes_listing_status = "Invalid theme folder; edit desktop.themes in setup.";
+            return;
+        }
+        let mut entries = alloc::vec![libdunit::DirEntry::empty(); 1024];
+        let count = libdunit::readdir(directory, &mut entries);
+        if count < 0 {
+            self.themes_listing_status = "Cannot read theme folder.";
+            return;
+        }
+        for entry in entries.iter().take((count as usize).min(entries.len())) {
+            let name = entry.name();
+            if entry.file_type == libdunit::FILE_TYPE_FILE && name.ends_with(".toml")
+                && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) {
+                self.themes.push(alloc::format!("{}/{}", directory.trim_end_matches('/'), name));
+            }
+        }
+        self.themes.sort_unstable();
+        self.themes.dedup();
+        self.themes_listing_status = if self.themes.is_empty() {
+            "No .toml themes in this folder."
+        } else {
+            "Choose a theme to validate, save and apply it."
+        };
+    }
+
+    fn refresh_color_choices(&mut self) {
+        self.palette = dwm_settings::load_palette(self.s.desktop.palette.as_str()).unwrap_or_default();
+        for i in 0..NCOLORS {
+            let color = color_get(&self.s.theme, i);
+            if !self.palette.contains(&color) { self.palette.push(color); }
+            self.color_idx[i] = self.palette.iter().position(|&p| p == color).unwrap_or(0);
+        }
+        self.res_idx = RES_PRESETS.iter()
+            .position(|&(w, h)| w == self.s.display.width && h == self.s.display.height)
+            .unwrap_or(0);
+    }
+
     fn apply(&mut self, act: Action) {
         match act {
+            Action::ImportTheme(_) => {},
             Action::SelectPage(page) => {
                 self.page = page;
                 self.scroll_x = 0;
                 self.scroll_y = 0;
                 if page == 4 { self.refresh_scripts(); }
+                if page == 5 { self.refresh_themes(); }
             }
             Action::ScriptsToggle => self.s.scripts.enabled = !self.s.scripts.enabled,
             Action::ScriptTimeout(delta) => {
@@ -537,7 +593,7 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
         col(theme.border_unfocused),
     );
     draw_text(&mut surf, font, 16, 22, 18.0, foreground, "Settings");
-    const PAGES: [&str; 5] = ["Appearance", "Effects", "Desktop geometry", "Display", "Window behavior"];
+    const PAGES: [&str; 6] = ["Appearance", "Effects", "Desktop geometry", "Display", "Window behavior", "Themes"];
     for (page, label) in PAGES.iter().enumerate() {
         let y = 76 + page as i32 * 40;
         if app.page == page {
@@ -791,6 +847,21 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
         draw_text(&mut surf, font, content, y, 11.0, foreground, "Use setup to edit scripts.runner and the script folder.");
         y += 24;
         draw_text(&mut surf, font, content, y, 11.0, foreground, "Lua applies placement and fade policy asynchronously.");
+    }
+    if app.page == 5 {
+        draw_text(&mut surf, font, content, y, 12.0, foreground,
+            app.s.desktop.themes.as_str());
+        y += 28;
+        draw_text(&mut surf, font, content, y, 11.0, foreground,
+            app.themes_listing_status);
+        y += 40;
+        for (index, path) in app.themes.iter().enumerate() {
+            let filename = path.rsplit('/').next().unwrap_or(path);
+            button(&mut surf, font, theme, content, y, 240, filename);
+            spots.push(Hotspot { x: content, y, w: 240, h: ROW_H,
+                act: Action::ImportTheme(index) });
+            y += 40;
+        }
     }
     drop(surf);
     let pixels = unsafe {
@@ -1290,7 +1361,23 @@ pub extern "C" fn _start() -> ! {
                 let previous = app.s;
                 let previous_colors = app.color_idx;
                 let previous_resolution = app.res_idx;
-                app.apply(a);
+                if let Action::ImportTheme(index) = a {
+                    let candidate = app.themes.get(index)
+                        .ok_or("Theme selection is no longer available.")
+                        .and_then(|path| dwm_settings::load_overlay(&app.s, path));
+                    match candidate {
+                        Ok(candidate) => app.s = candidate,
+                        Err(error) => {
+                            app.status = error;
+                            app.error = true;
+                            libdunit::println("gui_settings: theme rejected; previous settings retained");
+                            spots = render(px, &font, &app);
+                            continue;
+                        }
+                    }
+                } else {
+                    app.apply(a);
+                }
                 // Persist to the live config and ask the compositor to reload,
                 // so the desktop reflects the new theme/geometry immediately.
                 if !dwm_settings::save(&app.s) {
@@ -1302,6 +1389,10 @@ pub extern "C" fn _start() -> ! {
                     libdunit::println("gui_settings: save failed; previous settings retained");
                     spots = render(px, &font, &app);
                     continue;
+                }
+                if let Action::ImportTheme(index) = a {
+                    app.refresh_color_choices();
+                    libdunit::println(&alloc::format!("gui_settings: theme saved {}", app.themes[index]));
                 }
                 let mut sig = [0u8; 8];
                 sig[0..4].copy_from_slice(&RELOAD_MAGIC.to_le_bytes());

@@ -16,6 +16,8 @@
 extern crate alloc;
 
 mod preserve;
+mod overlay;
+pub use overlay::{apply_overlay, edit, load_overlay, value};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -29,6 +31,8 @@ pub struct Theme {
     pub border_focused: u32,
     pub border_unfocused: u32,
     pub close: u32,
+    pub minimize: u32,
+    pub maximize: u32,
     pub panel: u32,
     pub panel_text: u32,
     pub launcher: u32,
@@ -53,6 +57,8 @@ impl Theme {
             border_focused: 0xFFA6E3A1,
             border_unfocused: 0xFF45475A,
             close: 0xFFF38BA8,
+            minimize: 0xFF45475A,
+            maximize: 0xFF45475A,
             panel: 0xFF181825,
             panel_text: 0xFFCDD6F4,
             launcher: 0xFFA6E3A1,
@@ -78,6 +84,8 @@ impl Theme {
             "border_focused" => &mut self.border_focused,
             "border_unfocused" => &mut self.border_unfocused,
             "close" => &mut self.close,
+            "minimize" => &mut self.minimize,
+            "maximize" => &mut self.maximize,
             "panel" => &mut self.panel,
             "panel_text" => &mut self.panel_text,
             "launcher" => &mut self.launcher,
@@ -106,6 +114,16 @@ pub struct Layout {
     pub menu_w: i32,
     pub menu_item_h: i32,
     pub dock_w: i32,
+    /// Dock edge, compact alignment and cell spacing.
+    pub dock_edge: Edge,
+    pub dock_centered: bool,
+    pub dock_padding: i32,
+    pub dock_gap: i32,
+    pub dock_margin: i32,
+    pub dock_tile_alpha: u32,
+    /// Circular controls on the left and a centered title.
+    pub traffic_lights: bool,
+    pub show_workspaces: bool,
     pub ws_w: i32,
     pub max_windows: usize,
     /// Point size of the TTF window/tray title text. Was a hardcoded 14.0.
@@ -133,6 +151,14 @@ impl Layout {
             menu_w: 130,
             menu_item_h: 26,
             dock_w: 48,
+            dock_edge: Edge::Left,
+            dock_centered: false,
+            dock_padding: 6,
+            dock_gap: 6,
+            dock_margin: 0,
+            dock_tile_alpha: 255,
+            traffic_lights: false,
+            show_workspaces: true,
             ws_w: 22,
             max_windows: 8,
             title_font_px: 14,
@@ -145,6 +171,13 @@ impl Layout {
     /// `max_windows` is clamped to a sane range so a bad config cannot ask for
     /// zero (a dead desktop) or an unbounded spawn count.
     fn apply(&mut self, key: &str, value: &str) {
+        match key {
+            "dock_edge" => { if let Some(e) = Edge::parse(value) { self.dock_edge = e; } return; }
+            "dock_centered" => { if let Some(v) = parse_bool(value) { self.dock_centered = v; } return; }
+            "show_workspaces" => { if let Some(v) = parse_bool(value) { self.show_workspaces = v; } return; }
+            "traffic_lights" => { if let Some(v) = parse_bool(value) { self.traffic_lights = v; } return; }
+            _ => {}
+        }
         let Some(n) = parse_uint(value) else {
             return;
         };
@@ -157,7 +190,11 @@ impl Layout {
             "taskbtn_gap" => self.taskbtn_gap = n as i32,
             "menu_w" => self.menu_w = n as i32,
             "menu_item_h" => self.menu_item_h = n as i32,
-            "dock_w" => self.dock_w = n as i32,
+            "dock_w" => self.dock_w = (n.min(256) as i32).max(24),
+            "dock_padding" => self.dock_padding = (n as i32).clamp(0, 10),
+            "dock_gap" => self.dock_gap = (n as i32).clamp(0, 64),
+            "dock_margin" => self.dock_margin = (n as i32).clamp(0, 128),
+            "dock_tile_alpha" => self.dock_tile_alpha = (n as u32).min(255),
             "ws_w" => self.ws_w = n as i32,
             "max_windows" => self.max_windows = (n as usize).clamp(1, 32),
             "title_font_px" => self.title_font_px = (n as i32).clamp(6, 64),
@@ -317,6 +354,7 @@ pub struct Desktop {
     pub logo: ConfigStr,
     /// TOML swatches offered by graphical Settings, independent of renderer code.
     pub palette: ConfigStr,
+    pub themes: ConfigStr,
 }
 
 impl Desktop {
@@ -328,6 +366,7 @@ impl Desktop {
             font: ConfigStr::new("/assets/fonts/DejaVuSans.ttf"),
             logo: ConfigStr::new("/assets/images/logo.rgba"),
             palette: ConfigStr::new("/assets/dwm/palettes/default.toml"),
+            themes: ConfigStr::new("/assets/dwm/themes"),
         }
     }
 
@@ -340,6 +379,7 @@ impl Desktop {
             "font" => self.font.set(value),
             "logo" => self.logo.set(value),
             "palette" => self.palette.set(value),
+            "themes" => self.themes.set(value),
             _ => {}
         }
     }
@@ -1522,6 +1562,8 @@ pub fn to_toml(s: &Settings) -> String {
     push_color(&mut out, "border_focused", s.theme.border_focused);
     push_color(&mut out, "border_unfocused", s.theme.border_unfocused);
     push_color(&mut out, "close", s.theme.close);
+    push_color(&mut out, "minimize", s.theme.minimize);
+    push_color(&mut out, "maximize", s.theme.maximize);
     push_color(&mut out, "panel", s.theme.panel);
     push_color(&mut out, "panel_text", s.theme.panel_text);
     push_color(&mut out, "launcher", s.theme.launcher);
@@ -1547,6 +1589,14 @@ pub fn to_toml(s: &Settings) -> String {
     push_int(&mut out, "menu_w", s.layout.menu_w as i64);
     push_int(&mut out, "menu_item_h", s.layout.menu_item_h as i64);
     push_int(&mut out, "dock_w", s.layout.dock_w as i64);
+    push_string(&mut out, "dock_edge", s.layout.dock_edge.as_str());
+    push_bool(&mut out, "dock_centered", s.layout.dock_centered);
+    push_int(&mut out, "dock_padding", s.layout.dock_padding as i64);
+    push_int(&mut out, "dock_gap", s.layout.dock_gap as i64);
+    push_int(&mut out, "dock_margin", s.layout.dock_margin as i64);
+    push_int(&mut out, "dock_tile_alpha", s.layout.dock_tile_alpha as i64);
+    push_bool(&mut out, "traffic_lights", s.layout.traffic_lights);
+    push_bool(&mut out, "show_workspaces", s.layout.show_workspaces);
     push_int(&mut out, "ws_w", s.layout.ws_w as i64);
     push_int(&mut out, "max_windows", s.layout.max_windows as i64);
     push_int(&mut out, "title_font_px", s.layout.title_font_px as i64);
@@ -1573,6 +1623,7 @@ pub fn to_toml(s: &Settings) -> String {
     push_string(&mut out, "font", s.desktop.font.as_str());
     push_string(&mut out, "logo", s.desktop.logo.as_str());
     push_string(&mut out, "palette", s.desktop.palette.as_str());
+    push_string(&mut out, "themes", s.desktop.themes.as_str());
     out.push('\n');
 
     out.push_str("[widgets]\n");
@@ -1836,23 +1887,25 @@ pub struct FilesCfg {
 }
 
 impl FilesCfg {
-    pub const fn baseline() -> Self {
+    pub const fn baseline() -> Self { Self::from_theme(Theme::baseline()) }
+
+    const fn from_theme(theme: Theme) -> Self {
         FilesCfg {
             icon_theme: ConfigStr::new(""),
-            bg: 0xFF12_1820,
-            header_bg: 0xFF0E_141B,
-            status_bg: 0xFF0E_141B,
-            accent: 0xFF2F_8F5A,
-            label: 0xFFCD_D6F4,
-            muted: 0xFF8A_94A8,
-            sel_bg: 0x502F_8F5A,
+            bg: theme.menu,
+            header_bg: theme.panel,
+            status_bg: theme.panel,
+            accent: theme.launcher,
+            label: theme.panel_text,
+            muted: theme.title_text_unfocused,
+            sel_bg: theme.menu_hover,
             bg_alpha: 255,
             from_file: false,
         }
     }
 
     pub fn load(app_id: &str) -> Self {
-        let mut c = Self::baseline();
+        let mut c = Self::from_theme(load().theme);
         if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
             c.from_file = true;
             c.parse(&text);
@@ -1957,17 +2010,19 @@ pub struct CalcCfg {
 }
 
 impl CalcCfg {
-    pub const fn baseline() -> Self {
+    pub const fn baseline() -> Self { Self::from_theme(Theme::baseline()) }
+
+    const fn from_theme(theme: Theme) -> Self {
         CalcCfg {
             font: ConfigStr::new(""),
-            bg: 0xFF1E_1E2E,
-            display_bg: 0xFF18_1825,
-            text: 0xFFCD_D6F4,
-            muted: 0xFF8A_94A8,
-            btn: 0xFF31_3244,
-            btn_fn: 0xFF45_475A,
-            btn_op: 0xFF25_6D85,
-            btn_eq: 0xFF2D_7D46,
+            bg: theme.menu,
+            display_bg: theme.panel,
+            text: theme.panel_text,
+            muted: theme.title_text_unfocused,
+            btn: theme.taskbtn,
+            btn_fn: theme.taskbtn_focused,
+            btn_op: theme.menu_hover,
+            btn_eq: theme.launcher,
             bg_alpha: 255,
             from_file: false,
         }
@@ -1975,7 +2030,7 @@ impl CalcCfg {
 
     /// Load `apps/<app_id>.toml`, overlaying `[calc]` onto the baseline.
     pub fn load(app_id: &str) -> Self {
-        let mut c = Self::baseline();
+        let mut c = Self::from_theme(load().theme);
         if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
             c.from_file = true;
             c.parse(&text);
@@ -2080,14 +2135,16 @@ pub struct DemoCfg {
 }
 
 impl DemoCfg {
-    pub const fn baseline() -> Self {
+    pub const fn baseline() -> Self { Self::from_theme(Theme::baseline()) }
+
+    const fn from_theme(theme: Theme) -> Self {
         DemoCfg {
             font: ConfigStr::new(""),
-            bg: 0xFF1E_1E2E,
-            text: 0xFFCD_D6F4,
-            muted: 0xFF8A_94A8,
-            btn: 0xFF31_3244,
-            accent: 0xFF2D_7D46,
+            bg: theme.menu,
+            text: theme.panel_text,
+            muted: theme.title_text_unfocused,
+            btn: theme.taskbtn,
+            accent: theme.launcher,
             bg_alpha: 255,
             from_file: false,
         }
@@ -2095,7 +2152,7 @@ impl DemoCfg {
 
     /// Load `apps/<app_id>.toml`, overlaying `[demo]` onto the baseline.
     pub fn load(app_id: &str) -> Self {
-        let mut c = Self::baseline();
+        let mut c = Self::from_theme(load().theme);
         if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
             c.from_file = true;
             c.parse(&text);

@@ -226,7 +226,7 @@ mod runtime {
         }
 
         pub fn poll(&mut self) -> Poll {
-            let Some(child) = self.child.as_ref() else {
+            let Some(_) = self.child.as_ref() else {
                 return Poll::Pending;
             };
             let now = match clock() {

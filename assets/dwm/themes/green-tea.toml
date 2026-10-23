@@ -43,3 +43,23 @@ anim_ms          = 140
 # the file manager resolve <name>/<key>.rgba from it. `font` is the TrueType font
 # every GUI app renders text with (missing/unparseable → the app's embedded
 # fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
+
+[layout]
+dock_tile_alpha = 255
+dock_edge = "left"
+dock_centered = false
+traffic_lights = false
+show_workspaces = true
+title_h = 26
+border = 2
+panel_h = 28
+dock_w = 48
+dock_gap = 0
+dock_padding = 4
+dock_margin = 0
+
+[desktop]
+wallpaper = "/assets/wallpapers/wallpaper.bmp"
+
+[widgets]
+enabled = true

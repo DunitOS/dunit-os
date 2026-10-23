@@ -3,7 +3,7 @@
 GUI Settings is a compositor-launched gui-v1 client, separate from the terminal
 `setup` application. A sidebar groups the existing live controls:
 
-- Appearance: all fifteen theme color slots, including inactive borders and
+- Appearance: all seventeen theme color slots, including inactive borders and
   title text, with vertical scrolling through the full palette. GUI arrows cycle
   palette swatches; terminal `setup set theme.FIELD "#RRGGBB"` accepts arbitrary
   hexadecimal colors.
@@ -12,6 +12,12 @@ GUI Settings is a compositor-launched gui-v1 client, separate from the terminal
 - Display: the existing resolution presets and keep-boot-mode choice.
 - Window behavior: enable/disable the Lua window policy, choose a discovered
   layout script, and adjust its runner timeout from 50 to 5000 milliseconds.
+- Themes: discover regular `.toml` files in `desktop.themes`, validate a complete
+  overlay, then save and request compositor reload. The shipped theme names are
+  data in that folder; the picker has no compiled list. Invalid values, unknown
+  settings and incomplete reads reject the entire overlay and keep the current
+  settings. Theme overlays preserve the application registry and unrelated tables
+  through the common settings save path. The theme directory is editable in setup.
 
 The interface uses the current configured theme for its background, sidebar,
 buttons, selection, borders and text. It follows both light and dark palettes;
@@ -48,3 +54,7 @@ Color swatches come from the TOML file selected by desktop.palette, not a
 compiled color array. Change that path in setup and reopen Settings to load a
 different swatch set. An unreadable palette is reported; current theme colors
 remain available. Arbitrary current colors are retained in the selection list.
+
+Terminal import and GUI theme import share the same checked scalar edit and
+overlay validator in `dwm_settings::overlay`; each complete file is limited to
+64 KiB. Color and resolution pickers resynchronize after a successful import.

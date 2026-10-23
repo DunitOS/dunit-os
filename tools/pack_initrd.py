@@ -73,6 +73,11 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
         if src_dir.is_dir():
             for host_path in sorted(src_dir.glob("*.toml")):
                 add(f"/system/share/dwm/{sub}/{host_path.name}", host_path)
+            # Smoke palettes are explicit fixtures, just like test.toml and
+            # test service manifests. Production apps inherit the live theme.
+            if args.config is not None and os.path.basename(args.config) in SMOKE_CONFIGS:
+                for host_path in sorted((src_dir / "test").glob("*.toml")):
+                    add(f"/system/share/dwm/{sub}/{host_path.name}", host_path)
 
     # init service manifests read by /app/init at /system/services. The top-level
     # services/*.toml are the production services (e.g. gui-server.toml); they ship

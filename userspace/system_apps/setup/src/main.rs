@@ -4,108 +4,12 @@
 extern crate alloc;
 use alloc::{format, string::String, vec::Vec};
 use core::panic::PanicInfo;
-use dwm_settings::Settings;
+use dwm_settings::{Settings, edit, value};
 
 #[panic_handler]
 fn panic(_: &PanicInfo) -> ! {
     libdunit::println("setup: fatal error");
     libdunit::exit(1)
-}
-
-/// Enumerate the serializer's actual fields, avoiding a second settings schema.
-fn value<'a>(document: &'a str, field: &str) -> Option<&'a str> {
-    let (wanted_section, wanted_key) = field.split_once('.')?;
-    let mut section = "";
-    for line in document.lines().map(str::trim) {
-        if let Some(s) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            section = s;
-        } else if section == wanted_section {
-            if let Some((key, v)) = line.split_once('=') {
-                if key.trim() == wanted_key {
-                    return Some(v.trim());
-                }
-            }
-        }
-    }
-    None
-}
-
-fn scalar(s: &str) -> &str {
-    s.strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .unwrap_or(s)
-}
-
-fn edit(current: &Settings, field: &str, input: &str) -> Result<Settings, &'static str> {
-    if field.starts_with("meta.") {
-        return Err("schema metadata is read-only");
-    }
-    if input.is_empty() || input.chars().any(|c| c.is_control()) {
-        return Err("enter a non-empty, single-line TOML value");
-    }
-    let document = dwm_settings::to_toml(current);
-    let old = value(&document, field).ok_or("unknown field; use show to list supported fields")?;
-    // Strings use the same TOML representation displayed by show/get.
-    if old.starts_with('"') && !(input.starts_with('"') && input.ends_with('"')) {
-        return Err("string/color values must be enclosed in double quotes");
-    }
-    let (section, key) = field.split_once('.').ok_or("expected section.key")?;
-    let patch = format!("[{}]\n{} = {}\n", section, key, input);
-    let mut candidate = *current;
-    dwm_settings::parse_into(&patch, &mut candidate);
-    let encoded = dwm_settings::to_toml(&candidate);
-    let actual = value(&encoded, field).ok_or("field is not serializable")?;
-    let requested = scalar(input);
-    let resolved = scalar(actual);
-    // Reject silently ignored or clamped input. Canonical colors are case-insensitive.
-    let matches = if requested.starts_with('#') {
-        requested.eq_ignore_ascii_case(resolved)
-            || (requested.len() == 7
-                && resolved.len() == 9
-                && resolved[1..3].eq_ignore_ascii_case("FF")
-                && requested[1..].eq_ignore_ascii_case(&resolved[3..]))
-    } else {
-        requested == resolved
-    };
-    if !matches {
-        return Err("invalid value or out of range; value was not changed");
-    }
-    if !dwm_settings::roundtrip_ok(&candidate) {
-        return Err("settings failed serialization validation");
-    }
-    Ok(candidate)
-}
-
-/// Import is bounded and rejects I/O errors rather than accepting a prefix.
-fn read_overlay(path: &str) -> Result<String, &'static str> {
-    if !path.starts_with('/') || path.split('/').any(|p| p == "..") {
-        return Err("overlay path must be absolute without parent traversal");
-    }
-    let fd = libdunit::open(path, libdunit::OPEN_READ);
-    if fd < 0 {
-        return Err("could not open overlay");
-    }
-    let mut bytes = Vec::new();
-    loop {
-        let mut chunk = [0u8; 512];
-        let count = libdunit::read(fd as usize, &mut chunk);
-        if count < 0 {
-            libdunit::close(fd as usize);
-            return Err("overlay read failed");
-        }
-        if count == 0 {
-            break;
-        }
-        if bytes.len() + count as usize > 64 * 1024 {
-            libdunit::close(fd as usize);
-            return Err("overlay exceeds 64 KiB");
-        }
-        bytes.extend_from_slice(&chunk[..count as usize]);
-    }
-    if libdunit::close(fd as usize) < 0 {
-        return Err("overlay close failed");
-    }
-    String::from_utf8(bytes).map_err(|_| "overlay is not UTF-8")
 }
 
 fn help() {
@@ -172,58 +76,7 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
             libdunit::println("setup: staged; use save to write");
         }
         "import" => {
-            let text = read_overlay(rest)?;
-            let mut candidate = *settings;
-            let mut section = "";
-            let mut count = 0usize;
-            for raw in text.lines() {
-                // Match the shared TOML subset: # and // comments outside double quotes.
-                let mut quoted = false;
-                let bytes = raw.as_bytes();
-                let mut end = bytes.len();
-                for (i, byte) in bytes.iter().enumerate() {
-                    if *byte == b'"' {
-                        quoted = !quoted;
-                    }
-                    if !quoted
-                        && (*byte == b'#' || (*byte == b'/' && bytes.get(i + 1) == Some(&b'/')))
-                    {
-                        end = i;
-                        break;
-                    }
-                }
-                if quoted {
-                    return Err("overlay contains an unterminated string");
-                }
-                let line = raw[..end].trim();
-                if line.is_empty() {
-                    continue;
-                }
-                if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                    section = name.trim();
-                    continue;
-                }
-                let (key, input) = line
-                    .split_once('=')
-                    .ok_or("overlay contains a malformed line")?;
-                let field = format!("{}.{}", section, key.trim());
-                if field == "meta.schema_version" {
-                    let version = input
-                        .trim()
-                        .parse::<u32>()
-                        .map_err(|_| "invalid overlay schema")?;
-                    if !dwm_settings::version_supported(version) {
-                        return Err("unsupported overlay schema");
-                    }
-                    continue; // overlays cannot replace the running schema metadata
-                }
-                candidate = edit(&candidate, &field, input.trim())?;
-                count += 1;
-            }
-            if count == 0 {
-                return Err("overlay contains no supported settings");
-            }
-            *settings = candidate;
+            *settings = dwm_settings::load_overlay(settings, rest)?;
             *dirty = true;
             libdunit::println("setup: overlay staged; use show to review and save to write");
         }

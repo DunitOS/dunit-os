@@ -1,0 +1,142 @@
+{
+  "description": "Full upstream Lua compiled by cross-TCC, then rebuilt from all upstream sources ON Dunit using /system/bin/tcc @response-file. Both binaries execute the same standard-library/file/module regression. Interactive -i is exercised with real keys.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec musl_io",
+      "exec setup get desktop.palette",
+      "exec lua -v",
+      "exec lua /assets/lua/tests/system.lua",
+      "exec luac -o /tmp/bytecode.luac /assets/lua/tests/bytecode.lua",
+      "exec lua /tmp/bytecode.luac",
+      "exec tcc @/system/src/lua/build.rsp",
+      "exec /tmp/lua /assets/lua/tests/system.lua",
+      "exec lua -i",
+      "exec lua assets/lua/tests/system.lua",
+      "exec setup import /assets/dwm/themes/green-tea.toml",
+      "exec setup check",
+      "exec setup import /assets/dwm/themes/macos-light.toml",
+      "exec setup check",
+      "exec setup import /assets/dwm/themes/mojave-dark.toml",
+      "exec setup check",
+      "exec setup import /assets/dwm/themes/nord.toml",
+      "exec setup check"
+    ],
+    "command_actions": {
+      "exec lua -i": [
+        {
+          "wait_marker": "Lua 5.5.1"
+        },
+        {
+          "type_text": "io.write('[LUA-SYSTEM] interactive OK\\n')"
+        },
+        {
+          "wait_marker": "[LUA-SYSTEM] interactive OK"
+        },
+        {
+          "type_text": "os.exit(0)"
+        },
+        {
+          "wait_marker": "[EXEC] /system/bin/lua returned code=0",
+          "timeout": 10
+        }
+      ],
+      "exec lua /assets/lua/tests/system.lua": [
+        {
+          "wait_marker": "[LUA-SYSTEM] standard libraries and file modules OK",
+          "timeout": 40
+        },
+        {
+          "wait_marker": "[EXEC] /system/bin/lua returned code=0",
+          "timeout": 10
+        }
+      ],
+      "exec /tmp/lua /assets/lua/tests/system.lua": [
+        {
+          "wait_marker": "[LUA-SYSTEM] standard libraries and file modules OK",
+          "timeout": 40
+        },
+        {
+          "wait_marker": "[EXEC] /tmp/lua returned code=0",
+          "timeout": 10
+        }
+      ],
+      "exec tcc @/system/src/lua/build.rsp": [
+        {
+          "wait_marker": "[EXEC] /system/bin/tcc returned code=0",
+          "timeout": 100
+        }
+      ],
+      "exec musl_io": [
+        {
+          "wait_marker": "[MUSL-IO] large read/write/writev/stdio/remove OK"
+        },
+        {
+          "wait_marker": "[EXEC] /app/musl_io returned code=0"
+        }
+      ],
+      "exec lua /tmp/bytecode.luac": [
+        {
+          "wait_marker": "[LUA-SYSTEM] bytecode OK"
+        },
+        {
+          "wait_marker": "[EXEC] /system/bin/lua returned code=0"
+        }
+      ],
+      "exec luac -o /tmp/bytecode.luac /assets/lua/tests/bytecode.lua": [
+        {
+          "wait_marker": "[EXEC] /system/bin/luac returned code=0"
+        }
+      ],
+      "exec lua assets/lua/tests/system.lua": [
+        {
+          "wait_marker": "[LUA-SYSTEM] standard libraries and file modules OK",
+          "timeout": 40
+        },
+        {
+          "wait_marker": "[EXEC] /system/bin/lua returned code=0"
+        }
+      ],
+      "exec setup import /assets/dwm/themes/green-tea.toml": [
+        {
+          "wait_marker": "setup: saved; applies on next desktop session"
+        }
+      ],
+      "exec setup import /assets/dwm/themes/macos-light.toml": [
+        {
+          "wait_marker": "setup: saved; applies on next desktop session"
+        }
+      ],
+      "exec setup import /assets/dwm/themes/mojave-dark.toml": [
+        {
+          "wait_marker": "setup: saved; applies on next desktop session"
+        }
+      ],
+      "exec setup import /assets/dwm/themes/nord.toml": [
+        {
+          "wait_marker": "setup: saved; applies on next desktop session"
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "Lua 5.5.1",
+    "[LUA-SYSTEM] standard libraries and file modules OK",
+    "[EXEC] /system/bin/lua returned code=0",
+    "[EXEC] /system/bin/tcc returned code=0",
+    "[EXEC] /tmp/lua returned code=0",
+    "[LUA-SYSTEM] interactive OK",
+    "[MUSL-IO] large read/write/writev/stdio/remove OK",
+    "desktop.palette = \"/assets/dwm/palettes/default.toml\"",
+    "[LUA-SYSTEM] bytecode OK",
+    "[EXEC] /system/bin/luac returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "tcc: error",
+    "stack traceback:",
+    "assertion failed!",
+    "[MUSL-IO] FAIL"
+  ]
+}

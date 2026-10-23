@@ -1243,7 +1243,7 @@ fn reconfigure_client(
 
 /// Reserved screen margins (px) that the shell strips subtract from the usable
 /// desktop, one accumulator per edge. `reserved_insets` fills it from the
-/// configured panel/tray edges plus the always-left dock, and every geometry
+/// configured panel/tray/dock edges, and every geometry
 /// computation (work area, spawn/drag clamps, dock strip origin) reads from here
 /// so "what real estate is free" has a single source of truth.
 #[derive(Clone, Copy)]
@@ -1266,8 +1266,7 @@ fn add_edge(ins: &mut Insets, edge: Edge, size: i32) {
 
 /// Resolve the configured shell layout into reserved per-edge margins:
 /// - the panel reserves `ly.panel_h` on `panel_edge`;
-/// - the dock always reserves `ly.dock_w` on the LEFT edge (the dock stays left
-///   in this milestone — only the panel and tray are edge-configurable);
+/// - the dock reserves its thickness and outer margin on `ly.dock_edge`;
 /// - the tray reserves `tray_size` on `tray_edge`, but ONLY when it does not
 ///   share the panel's edge — a same-edge tray rides *inside* the panel strip
 ///   (the classic top-panel readout) and reserves nothing extra.
@@ -1278,7 +1277,7 @@ fn add_edge(ins: &mut Insets, edge: Edge, size: i32) {
 fn reserved_insets(ly: &Layout, panel_edge: Edge, tray_edge: Edge, tray_size: i32) -> Insets {
     let mut ins = Insets { top: 0, bottom: 0, left: 0, right: 0 };
     add_edge(&mut ins, panel_edge, ly.panel_h);
-    ins.left += ly.dock_w;
+    add_edge(&mut ins, ly.dock_edge, ly.dock_w + ly.dock_margin);
     if tray_edge != panel_edge {
         add_edge(&mut ins, tray_edge, tray_size);
     }
@@ -2228,22 +2227,46 @@ fn panel_strip(ly: &Layout, ins: &Insets, edge: Edge, bw: usize, bh: usize) -> (
     strip_rect(edge, ly.panel_h, 0, ins, bw, bh)
 }
 
-/// The dock strip: always the left vertical edge, nested just inside any
-/// left-edge panel/tray (offset = everything reserved on the left minus itself).
-fn dock_strip(ly: &Layout, ins: &Insets, bw: usize, bh: usize) -> (i32, i32, i32, i32) {
-    strip_rect(Edge::Left, ly.dock_w, ins.left - ly.dock_w, ins, bw, bh)
+/// Dock geometry is shared by drawing, hit-testing and layout reservations.
+fn dock_strip(ly: &Layout, ins: &Insets, bw: usize, bh: usize, count: usize) -> (i32, i32, i32, i32) {
+    let edge = ly.dock_edge;
+    let inset = match edge { Edge::Top => ins.top, Edge::Bottom => ins.bottom,
+        Edge::Left => ins.left, Edge::Right => ins.right };
+    let rect = strip_rect(edge, ly.dock_w, inset - ly.dock_w - ly.dock_margin, ins, bw, bh);
+    let (mut x, mut y, mut w, mut h) = rect;
+    // The margin is outside the dock, toward the screen edge.
+    match edge { Edge::Top => y += ly.dock_margin, Edge::Bottom => y -= ly.dock_margin,
+        Edge::Left => x += ly.dock_margin, Edge::Right => x -= ly.dock_margin }
+    if ly.dock_centered {
+        let cell = (ly.dock_w - 2 * ly.dock_padding).max(1);
+        let length = 2 * ly.dock_padding + count as i32 * cell
+            + (count as i32 - 1).max(0) * ly.dock_gap;
+        if edge.is_horizontal() {
+            let available = (bw as i32 - ins.left - ins.right).max(1);
+            w = length.min(available);
+            x = ins.left + (available - w) / 2;
+        } else {
+            h = length.min(h);
+            y += (rect.3 - h) / 2;
+        }
+    }
+    (x, y, w, h)
 }
 
-/// Rect of the i-th dock icon (0-based), a square cell laid top-down inside the
-/// dock strip. The dock stays a left vertical strip (only panel/tray are
-/// edge-configurable), so this is always vertical.
-fn dock_icon_rect(ly: &Layout, ins: &Insets, bw: usize, bh: usize, i: i32) -> (i32, i32, i32, i32) {
-    let (dx, dy, _, _) = dock_strip(ly, ins, bw, bh);
-    let inset = 6;
-    let iw = ly.dock_w - 2 * inset;
-    let x = dx + inset;
-    let y = dy + inset + i * (iw + inset);
-    (x, y, iw, iw)
+fn dock_icon_rect(ly: &Layout, ins: &Insets, bw: usize, bh: usize, count: usize, i: i32) -> (i32, i32, i32, i32) {
+    let (dx, dy, dw, dh) = dock_strip(ly, ins, bw, bh, count);
+    let pad = ly.dock_padding;
+    let natural = (ly.dock_w - 2 * pad).max(1);
+    let available = if ly.dock_edge.is_horizontal() { dw } else { dh };
+    let n = count.max(1) as i32;
+    // Fit every launcher even when a display is narrower than the requested dock.
+    let gap = if n > 1 { ly.dock_gap.min(((available - 2 * pad - n) / (n - 1)).max(0)) } else { 0 };
+    let iw = natural.min(((available - 2 * pad - (n - 1) * gap) / n).max(1));
+    if ly.dock_edge.is_horizontal() {
+        (dx + pad + i * (iw + gap), dy + (dh - iw) / 2, iw, iw)
+    } else {
+        (dx + (dw - iw) / 2, dy + pad + i * (iw + gap), iw, iw)
+    }
 }
 
 /// Rect of the i-th workspace pip (0-based), laid along the panel's main axis
@@ -2509,6 +2532,7 @@ struct Win {
     /// window's hit-tests and framing stay self-contained.
     title_h: i32,
     border: i32,
+    traffic_lights: bool,
     /// Index into the live application registry (0xFF = unknown) — drives the
     /// dock running marker and the window title (see `win_title`).
     app: u8,
@@ -2567,27 +2591,16 @@ impl Win {
     fn in_title(&self, mx: i32, my: i32) -> bool {
         mx >= self.cx && mx < self.cx + self.sw && my >= self.cy - self.title_h && my < self.cy
     }
-    /// Close box: a small square at the right end of the title bar.
-    fn in_close(&self, mx: i32, my: i32) -> bool {
-        let sz = self.title_h - 12;
-        let bx = self.cx + self.sw - sz - 6;
-        let by = self.cy - self.title_h + 6;
-        mx >= bx && mx < bx + sz && my >= by && my < by + sz
+    /// Role 0=close, 1=minimize, 2=maximize; one rect for paint and input.
+    fn control_rect(&self, role: i32) -> (i32, i32, i32, i32) {
+        let sz = (self.title_h - 12).max(4);
+        let x = if self.traffic_lights { self.cx + 8 + role * (sz + 6) }
+            else { self.cx + self.sw - (role + 1) * sz - 6 - role * 4 };
+        (x, self.cy - self.title_h + (self.title_h - sz) / 2, sz, sz)
     }
-    /// Minimize box: a small square just left of the close box.
-    fn in_min(&self, mx: i32, my: i32) -> bool {
-        let sz = self.title_h - 12;
-        let bx = self.cx + self.sw - 2 * sz - 10;
-        let by = self.cy - self.title_h + 6;
-        mx >= bx && mx < bx + sz && my >= by && my < by + sz
-    }
-    /// Maximize/restore box: a small square just left of the minimize box.
-    fn in_max(&self, mx: i32, my: i32) -> bool {
-        let sz = self.title_h - 12;
-        let bx = self.cx + self.sw - 3 * sz - 14;
-        let by = self.cy - self.title_h + 6;
-        mx >= bx && mx < bx + sz && my >= by && my < by + sz
-    }
+    fn in_close(&self, mx: i32, my: i32) -> bool { in_rect(self.control_rect(0), mx, my) }
+    fn in_min(&self, mx: i32, my: i32) -> bool { in_rect(self.control_rect(1), mx, my) }
+    fn in_max(&self, mx: i32, my: i32) -> bool { in_rect(self.control_rect(2), mx, my) }
     /// True when the window is not in its free-form floating state (currently only
     /// `Maximized`): it occupies a compositor-computed region, so a title-bar drag
     /// restores it to `restore` before following the pointer (macOS-style).
@@ -3116,7 +3129,7 @@ fn run_desktop_session(
     // a configurable screen edge (`[panel] pos` / `[tray] pos`), and the tray has
     // its own thickness (`[tray] size`). These are `mut` because the live-reload
     // block re-seeds them, exactly like theme/layout. `reserved_insets` turns them
-    // (plus the always-left dock) into the per-edge margins every geometry
+    // (plus the configured dock) into the per-edge margins every geometry
     // computation below subtracts, so maximize/spawn/drag all honor the edges.
     let mut panel_edge: Edge = cfg.settings.panel.pos;
     let mut tray_edge: Edge = cfg.settings.tray.pos;
@@ -3279,6 +3292,7 @@ fn run_desktop_session(
             buf_ptr: clients[i].buf_ptr,
             buf_size: clients[i].buf_size,
             alive: true,
+            traffic_lights: ly.traffic_lights,
             title_h: ly.title_h,
             border: ly.border,
             app: clients[i].app,
@@ -3456,7 +3470,7 @@ fn run_desktop_session(
     // Ping-pong scratch for the backdrop blur, sized for the largest blurred
     // region (panel / dock strip / menu) and allocated once.
     let panel_area = bw * ly.panel_h.max(0) as usize;
-    let dock_area = ly.dock_w.max(0) as usize * (bh as i32 - ly.panel_h).max(0) as usize;
+    let dock_area = ly.dock_w.max(0) as usize * bw.max(bh);
     let menu_area = ly.menu_w.max(0) as usize * (apps.launcher.len() * ly.menu_item_h.max(0) as usize);
     let scratch_len = panel_area.max(dock_area).max(menu_area).max(1);
     let mut blur_a: Vec<u32> = alloc::vec![0u32; scratch_len];
@@ -3580,6 +3594,7 @@ fn run_desktop_session(
                 // Every Win caches its own title_h/border (used by outer/contains):
                 // re-seed them so existing windows adopt the new geometry.
                 for w in wins.iter_mut() {
+                    w.traffic_lights = ly.traffic_lights;
                     w.title_h = ly.title_h;
                     w.border = ly.border;
                 }
@@ -3587,7 +3602,7 @@ fn run_desktop_session(
                 // panel/dock/menu after reload needs a bigger buffer (never shrink —
                 // a smaller region simply uses a prefix of the existing allocation).
                 let panel_area = bw * ly.panel_h.max(0) as usize;
-                let dock_area = ly.dock_w.max(0) as usize * (bh as i32 - ly.panel_h).max(0) as usize;
+                let dock_area = ly.dock_w.max(0) as usize * bw.max(bh);
                 let menu_area =
                     ly.menu_w.max(0) as usize * (apps.launcher.len() * ly.menu_item_h.max(0) as usize);
                 let need = panel_area.max(dock_area).max(menu_area).max(1);
@@ -3748,6 +3763,7 @@ fn run_desktop_session(
                 buf_ptr: clients[i].buf_ptr,
                 buf_size: clients[i].buf_size,
                 alive: true,
+                traffic_lights: ly.traffic_lights,
                 title_h: ly.title_h,
                 border: ly.border,
                 app: clients[i].app,
@@ -4075,7 +4091,7 @@ fn run_desktop_session(
         // `in_shell` marks the shell-owned region: a click/right-click there is the
         // shell's, never routed to a client window.
         let panel_rect = panel_strip(&ly, &ins, panel_edge, bw, bh);
-        let dock_rect = dock_strip(&ly, &ins, bw, bh);
+        let dock_rect = dock_strip(&ly, &ins, bw, bh, apps.dock.len());
         let tray_own = if tray_edge != panel_edge {
             Some(strip_rect(tray_edge, tray_size, 0, &ins, bw, bh))
         } else {
@@ -4087,7 +4103,7 @@ fn run_desktop_session(
         // flies out below/beside the panel and is NOT part of `in_shell` (a
         // transient overlay), so its clicks are caught by the `qs_open` branch
         // below before window routing — exactly like the launcher dropdown.
-        let qs_applet = qs_applet_rect(&ly, panel_edge, panel_rect, apps.workspaces);
+        let qs_applet = qs_applet_rect(&ly, panel_edge, panel_rect, if ly.show_workspaces { apps.workspaces } else { 0 });
         let in_shell = |x: i32, y: i32| {
             in_rect(panel_rect, x, y)
                 || in_rect(dock_rect, x, y)
@@ -4166,7 +4182,7 @@ fn run_desktop_session(
             } else {
                 // Workspace switcher: activate the clicked pip's workspace. A
                 // click in the gap between pips is consumed but changes nothing.
-                for i in 0..apps.workspaces {
+                for i in 0..if ly.show_workspaces { apps.workspaces } else { 0 } {
                     let r = ws_pip_rect(&ly, panel_edge, panel_rect, i as i32);
                     if in_rect(r, mx, my) {
                         if current_ws != i {
@@ -4179,13 +4195,13 @@ fn run_desktop_session(
             }
             // Any other panel click (centered title, tray) is consumed.
         } else if press && in_rect(dock_rect, mx, my) {
-            // Dock strip (left edge, inside any left panel/tray): the task switcher.
+            // Dock strip on its configured edge: the task switcher.
             // A click on a pinned icon raises its running window (switching
             // workspace if needed) or spawns the app when none is running. The dock
             // owns its strip — clicks never reach a client.
             let mut chosen: Option<usize> = None;
             for i in 0..apps.dock.len() {
-                let r = dock_icon_rect(&ly, &ins, bw, bh, i as i32);
+                let r = dock_icon_rect(&ly, &ins, bw, bh, apps.dock.len(), i as i32);
                 if in_rect(r, mx, my) {
                     chosen = Some(i);
                     break;
@@ -4797,45 +4813,32 @@ fn run_desktop_session(
             // surface tucks flush against the bottom edge (no corner poke-through).
             fill_rrect_grad(&mut back, bw, bh, ox, oy, ow, oh, fx.corner_radius, RR_TOP, shade(bcol, 18), shade(bcol, -12), a);
             fill_rrect_grad(&mut back, bw, bh, w.cx, w.cy - w.title_h, w.sw, w.title_h, fx.corner_radius, RR_TOP, shade(tcol, 16), shade(tcol, -10), a);
-            // Close box: a small rounded chip in the danger color.
-            let sz = w.title_h - 12;
-            fill_rrect(&mut back, bw, bh, w.cx + w.sw - sz - 6, w.cy - w.title_h + 6, sz, sz, fx.corner_radius.min(sz / 2), RR_ALL, ((a as u32) << 24) | (theme.close & 0x00FF_FFFF));
-            // Minimize box: a neutral chip just left of the close chip, carrying a
-            // horizontal minus glyph. Matches Win::in_min's hit rect.
-            {
-                let mbx = w.cx + w.sw - 2 * sz - 10;
-                let mby = w.cy - w.title_h + 6;
-                let chip = shade(tcol, 34);
-                fill_rrect(&mut back, bw, bh, mbx, mby, sz, sz, fx.corner_radius.min(sz / 2), RR_ALL, ((a as u32) << 24) | (chip & 0x00FF_FFFF));
-                let gw = (sz / 2).max(3);
-                let gx = mbx + (sz - gw) / 2;
-                let gy = mby + sz / 2;
-                let glyph = if is_focused { theme.title_text_focused } else { theme.title_text_unfocused };
-                fill_rect_alpha(&mut back, bw, bh, gx, gy, gw, 2, ((a as u32) << 24) | (glyph & 0x00FF_FFFF));
-            }
-            // Maximize/restore box: a neutral chip left of the minimize chip,
-            // carrying a small square-outline glyph (a doubled square hints
-            // "restore" once maximized). Matches Win::in_max's hit rect.
-            {
-                let xbx = w.cx + w.sw - 3 * sz - 14;
-                let xby = w.cy - w.title_h + 6;
-                let chip = shade(tcol, 34);
-                fill_rrect(&mut back, bw, bh, xbx, xby, sz, sz, fx.corner_radius.min(sz / 2), RR_ALL, ((a as u32) << 24) | (chip & 0x00FF_FFFF));
-                let glyph = if is_focused { theme.title_text_focused } else { theme.title_text_unfocused };
-                let gcol = ((a as u32) << 24) | (glyph & 0x00FF_FFFF);
-                let gs = (sz / 2).max(4);
-                let gx = xbx + (sz - gs) / 2;
-                let gy = xby + (sz - gs) / 2;
-                // Square outline (2px sides) — the maximize affordance.
-                fill_rect_alpha(&mut back, bw, bh, gx, gy, gs, 2, gcol);
-                fill_rect_alpha(&mut back, bw, bh, gx, gy + gs - 2, gs, 2, gcol);
-                fill_rect_alpha(&mut back, bw, bh, gx, gy, 2, gs, gcol);
-                fill_rect_alpha(&mut back, bw, bh, gx + gs - 2, gy, 2, gs, gcol);
-                // Already maximized: overlay a second, offset square (restore hint).
-                if w.state == WinState::Maximized {
-                    let o = 2;
-                    fill_rect_alpha(&mut back, bw, bh, gx + o, gy - o, gs, 2, gcol);
-                    fill_rect_alpha(&mut back, bw, bh, gx + gs - 2 + o, gy - o, 2, gs, gcol);
+            for (role, color) in [(0, theme.close), (1, theme.minimize), (2, theme.maximize)] {
+                let (x, y, size, _) = w.control_rect(role);
+                let radius = if w.traffic_lights { size / 2 } else { fx.corner_radius.min(size / 2) };
+                fill_rrect(&mut back, bw, bh, x, y, size, size, radius, RR_ALL,
+                    ((a as u32) << 24) | (color & 0x00FF_FFFF));
+                // Traffic lights reveal action glyphs on hover, like desktop controls.
+                if !w.traffic_lights || in_rect(w.control_rect(role), mx, my) {
+                    let glyph = if is_focused { theme.title_text_focused } else { theme.title_text_unfocused };
+                    let col = ((a as u32) << 24) | (glyph & 0x00FF_FFFF);
+                    let half = (size / 2).max(3);
+                    let gx = x + (size - half) / 2;
+                    let gy = y + size / 2;
+                    if role == 1 { fill_rect_alpha(&mut back, bw, bh, gx, gy, half, 1, col); }
+                    if role == 2 {
+                        let top = y + (size - half) / 2;
+                        fill_rect_alpha(&mut back, bw, bh, gx, top, half, 1, col);
+                        fill_rect_alpha(&mut back, bw, bh, gx, top + half - 1, half, 1, col);
+                        fill_rect_alpha(&mut back, bw, bh, gx, top, 1, half, col);
+                        fill_rect_alpha(&mut back, bw, bh, gx + half - 1, top, 1, half, col);
+                    }
+                    if role == 0 && w.traffic_lights {
+                        for j in 0..half {
+                            fill_rect_alpha(&mut back, bw, bh, gx + j, y + (size - half) / 2 + j, 1, 1, col);
+                            fill_rect_alpha(&mut back, bw, bh, gx + half - 1 - j, y + (size - half) / 2 + j, 1, 1, col);
+                        }
+                    }
                 }
             }
             // Window title text (TTF), left-aligned in the title bar, clear of the
@@ -4850,7 +4853,11 @@ fn run_desktop_session(
                     } else {
                         theme.title_text_unfocused & 0x00FF_FFFF
                     };
-                    draw_text_ttf(&mut back, bw, bh, f, w.cx + 12, baseline, px, win_title(&apps, w.app), txtcol);
+                    let title = win_title(&apps, w.app);
+                    let tx = if w.traffic_lights {
+                        w.cx + (w.sw - text_width_ttf(f, title, px)) / 2
+                    } else { w.cx + 12 };
+                    draw_text_ttf(&mut back, bw, bh, f, tx, baseline, px, title, txtcol);
                 }
             }
             // Client surface. Held back until the frame is nearly solid so the
@@ -4926,7 +4933,7 @@ fn run_desktop_session(
         // Workspace switcher: pips 1..=ws_count laid along the panel's main axis
         // after the launcher glyph. The active workspace is highlighted; any
         // workspace holding a live window gets an accent underline.
-        for i in 0..apps.workspaces {
+        for i in 0..if ly.show_workspaces { apps.workspaces } else { 0 } {
             let (px, py, pw, ph) = ws_pip_rect(&ly, panel_edge, panel_rect, i as i32);
             let base = if i == current_ws {
                 theme.taskbtn_focused
@@ -5035,10 +5042,15 @@ fn run_desktop_session(
             }
         }
 
-        // --- DWM dock: acrylic strip of pinned launchers down the left edge ---
-        // `dock_rect` nests just inside anything the panel/tray reserve on the left;
-        // for the default (top panel) it is (0,panel_h,dock_w,bh-panel_h).
-        fill_strip_bg(&mut back, bw, bh, dock_rect, theme.panel, &fx, 14, &mut blur_a, &mut blur_b);
+        // --- DWM dock: pinned launchers on the configured edge ---
+        if ly.dock_centered {
+            let (x, y, width, height) = dock_rect;
+            if fx.blur { blur_region(&mut back, bw, bh, x, y, width, height, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b); }
+            fill_rrect(&mut back, bw, bh, x, y, width, height, fx.corner_radius, RR_ALL,
+                ((fx.panel_alpha as u32) << 24) | (theme.panel & 0x00FF_FFFF));
+        } else {
+            fill_strip_bg(&mut back, bw, bh, dock_rect, theme.panel, &fx, 14, &mut blur_a, &mut blur_b);
+        }
         // Hover easing step per frame (instant when animations are off).
         let hover_step = if duration_ms == 0 { 255u8 } else {
             (animation_now.saturating_sub(previous_animation_time).saturating_mul(255)
@@ -5046,8 +5058,8 @@ fn run_desktop_session(
         };
         for i in 0..apps.dock.len() {
             let ri = apps.dock[i];
-            let (ix, iy, iw, ih) = dock_icon_rect(&ly, &ins, bw, bh, i as i32);
-            if iy + ih > bh as i32 {
+            let (ix, iy, iw, ih) = dock_icon_rect(&ly, &ins, bw, bh, apps.dock.len(), i as i32);
+            if iy + ih > dock_rect.1 + dock_rect.3 || ix + iw > dock_rect.0 + dock_rect.2 {
                 break;
             }
             let hovered = mx >= dock_rect.0 && mx < dock_rect.0 + dock_rect.2 && mx >= ix && mx < ix + iw && my >= iy && my < iy + ih;
@@ -5060,7 +5072,7 @@ fn run_desktop_session(
             let grow = 3 * hp / 255; // grow the cell up to 3px each side on hover
             let (cx0, cy0, cw, ch) = (ix - grow, iy - grow, iw + 2 * grow, ih + 2 * grow);
             let base = lerp_color(theme.taskbtn, theme.taskbtn_focused, hp as u32);
-            fill_rrect_grad(&mut back, bw, bh, cx0, cy0, cw, ch, 7, RR_ALL, shade(base, 20), shade(base, -10), 255);
+            fill_rrect_grad(&mut back, bw, bh, cx0, cy0, cw, ch, 7, RR_ALL, shade(base, 20), shade(base, -10), ly.dock_tile_alpha.max(hp as u32) as i32);
             // Icon for the pinned registry entry (grows with the hover zoom); if
             // the asset is missing, fall back to the app's label initial.
             if let Some(icon) = app_icons.get(ri).and_then(|s| s.as_ref()) {
@@ -5076,7 +5088,16 @@ fn run_desktop_session(
                     .get(ri)
                     .and_then(|a| a.label.as_bytes().first().copied())
                     .unwrap_or(b'?');
-                draw_text_3x5(&mut back, bw, bh, tx, ty, 3, theme.panel_text, &[ch0]);
+                if let Some(f) = font.as_ref() {
+                    let label = [ch0];
+                    let text = core::str::from_utf8(&label).unwrap_or("?");
+                    let px = ly.title_font_px as f32;
+                    let width = text_width_ttf(f, text, px);
+                    draw_text_ttf(&mut back, bw, bh, f, cx0 + (cw - width) / 2,
+                        cy0 + ch / 2 + ly.title_font_px / 3, px, text, theme.panel_text);
+                } else {
+                    draw_text_3x5(&mut back, bw, bh, tx, ty, 3, theme.panel_text, &[ch0]);
+                }
             }
             // Running/active marker: an accent bar on the icon's left edge. A
             // merely-running app gets a short, dimmed pip; the app that owns the
@@ -5086,7 +5107,10 @@ fn run_desktop_session(
                 let active = focused.map(|wi| wins[wi].app) == Some(ri as u8);
                 let barh = if active { ch * 2 / 3 } else { ch / 4 };
                 let bcol = if active { theme.launcher } else { shade(theme.launcher, -40) };
-                fill_rrect(&mut back, bw, bh, cx0 - 3, cy0 + (ch - barh) / 2, 3, barh, 1, RR_ALL, 0xFF00_0000 | (bcol & 0x00FF_FFFF));
+                let marker = if ly.dock_edge.is_horizontal() {
+                    (cx0 + (cw - barh) / 2, cy0 + ch, barh, 3)
+                } else { (cx0 - 3, cy0 + (ch - barh) / 2, 3, barh) };
+                fill_rrect(&mut back, bw, bh, marker.0, marker.1, marker.2, marker.3, 1, RR_ALL, 0xFF00_0000 | (bcol & 0x00FF_FFFF));
             }
         }
 

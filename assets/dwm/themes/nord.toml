@@ -1,0 +1,52 @@
+# Desktop preset: editable TOML, applied by setup or Settings.
+[theme]
+desktop = "#2E3440"
+title_focused = "#3B4252"
+title_unfocused = "#343A48"
+border_focused = "#81A1C1"
+border_unfocused = "#4C566A"
+close = "#BF616A"
+panel = "#2E3440"
+panel_text = "#ECEFF4"
+launcher = "#88C0D0"
+taskbtn = "#3B4252"
+taskbtn_focused = "#4C566A"
+menu = "#2E3440"
+menu_hover = "#434C5E"
+title_text_focused = "#ECEFF4"
+title_text_unfocused = "#D8DEE9"
+minimize = "#EBCB8B"
+maximize = "#A3BE8C"
+
+[layout]
+dock_tile_alpha = 0
+title_h = 32
+border = 1
+panel_h = 26
+dock_w = 68
+dock_edge = "bottom"
+dock_centered = true
+dock_padding = 8
+dock_gap = 8
+dock_margin = 12
+traffic_lights = true
+show_workspaces = false
+
+[effects]
+corner_radius = 8
+shadow = 16
+shadow_alpha = 100
+blur = true
+blur_radius = 5
+blur_iters = 2
+panel_alpha = 235
+menu_alpha = 240
+gradient = true
+anim = true
+anim_ms = 180
+
+[desktop]
+wallpaper = "/assets/wallpapers/mojave.bmp"
+
+[widgets]
+enabled = false

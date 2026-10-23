@@ -8,28 +8,70 @@
           "x": -127,
           "y": -127,
           "repeat": 24,
-          "interval": 0.03
+          "interval": 0.01
         }
       },
       {
         "relative_motion": {
-          "x": 24,
+          "x": 127,
           "y": 127,
-          "interval": 0.05
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 0,
+          "x": 127,
           "y": 127,
-          "interval": 0.05
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 0,
-          "y": 8,
-          "interval": 0.05
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 94,
+          "y": 18,
+          "interval": 0.02
         }
       },
       {
@@ -47,7 +89,7 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 150
       },
       {
         "execute": "input-send-event",
@@ -64,11 +106,40 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 500
       },
       {
         "wait_marker": "gui_settings: surface presented OK",
         "timeout": 25
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 24,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 8,
+          "interval": 0.02
+        }
       },
       {
         "delay_ms": 1000
@@ -403,8 +474,8 @@
       },
       {
         "relative_motion": {
-          "x": -23,
-          "y": 66,
+          "x": -73,
+          "y": 70,
           "interval": 0.05
         }
       },
