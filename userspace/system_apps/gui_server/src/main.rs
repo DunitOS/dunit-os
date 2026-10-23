@@ -24,6 +24,9 @@ use gui_protocol_v1::wire::Request;
 use gui_protocol_v1::wire::{FORMAT_ARGB8888, FORMAT_XRGB8888};
 use gui_protocol_v1::Opcode;
 
+mod lua_policy;
+mod animation;
+
 use dwm_settings as settings;
 use settings::{Applications, Edge, Effects, Layout, Theme};
 
@@ -739,6 +742,7 @@ struct ClientState {
     // so it is safe to blit; `win_created` once it owns a Win in the model.
     ready: bool,
     win_created: bool,
+    placement: Option<Placement>,
     /// Index into the live application registry (`settings::Applications.apps`)
     /// of the app this client runs (0xFF = unknown/not registered), used to draw
     /// a "running" indicator on the matching dock icon.
@@ -765,6 +769,7 @@ impl ClientState {
             format: FORMAT_XRGB8888,
             ready: false,
             win_created: false,
+            placement: None,
             app: 0xFF,
             ws: 0,
         }
@@ -916,7 +921,7 @@ fn try_launch(
     max_windows: usize,
     notifs: &mut Vec<Toast>,
     notifications: &settings::Notifications,
-    ticks: u32,
+    now_ms: u64,
 ) -> bool {
     if clients.len() >= max_windows {
         return false;
@@ -930,7 +935,7 @@ fn try_launch(
         c.ws = current_ws;
         clients.push(c);
         *next_id += 1;
-        notify_post(notifs, notifications, ticks, name);
+        notify_post(notifs, notifications, now_ms, name);
         true
     } else {
         false
@@ -1318,7 +1323,8 @@ fn work_area(bw: usize, bh: usize, ly: &Layout, ins: &Insets) -> (i32, i32, i32,
 /// decoration follows at once); the *size* only actually changes once the owning
 /// client re-imports at the CONFIGURE'd geometry (mirrored back by the per-frame
 /// Win<->ClientState sync), so a client that ignores CONFIGURE keeps its size while
-/// its position still updates — harmless. No-op if already in `new_state`.
+/// its position still updates — harmless. Reapplying Maximized refreshes the
+/// work area after a display change; other unchanged states are a no-op.
 fn set_window_state(
     server: &mut Server,
     clients: &[ClientState],
@@ -1331,7 +1337,7 @@ fn set_window_state(
 ) {
     // STATE_ACTIVATED — the surface stays focused across the reconfigure.
     const STATE_ACTIVATED: u32 = 1;
-    if win.state == new_state {
+    if win.state == new_state && new_state != WinState::Maximized {
         return;
     }
     // Snapshot floating geometry once, when first leaving the floating state.
@@ -1339,9 +1345,11 @@ fn set_window_state(
         win.restore = Some((win.cx, win.cy, win.sw, win.sh));
     }
     let target = match new_state {
+        WinState::Tiled => None,
         WinState::Maximized => Some(work_area(bw, bh, ly, ins)),
         WinState::Floating => win.restore.take(),
     };
+    win.motion = None;
     win.state = new_state;
     if let Some((tx, ty, tw, th)) = target {
         win.cx = tx;
@@ -1608,27 +1616,26 @@ fn reap_windows_of(
 }
 
 /// A transient desktop notification (M4, `[notifications]`). `born`/`expire` are
-/// frame ticks (~16 ms each); the compositor prunes a toast once `expire` passes.
+/// monotonic milliseconds; the compositor prunes a toast once `expire` passes.
 /// Purely runtime UI feedback — the policy (on/off, timeout, corner) lives in the
 /// config, never a constant.
 struct Toast {
     text: alloc::string::String,
-    born: u32,
-    expire: u32,
+    born: u64,
+    expire: u64,
 }
 
 /// Post a notification toast, gated by `[notifications] enabled` (single source of
 /// truth — the flag is the resolved config's, never a hardcoded default). The
-/// per-toast lifetime comes from `timeout_ms` (clamped 500..30000 at parse time)
-/// converted to ~16 ms frames. The queue is bounded so a burst of launches can't
+/// per-toast lifetime comes from `timeout_ms` (clamped 500..30000 at parse time). The queue is bounded so a burst of launches can't
 /// grow it without limit; the oldest toasts are dropped first.
-fn notify_post(q: &mut Vec<Toast>, cfg: &settings::Notifications, now: u32, text: &str) {
+fn notify_post(q: &mut Vec<Toast>, cfg: &settings::Notifications, now: u64, text: &str) {
     if !cfg.enabled {
         return;
     }
     const MAX_TOASTS: usize = 4;
-    let frames = (cfg.timeout_ms / 16).max(1);
-    q.push(Toast { text: text.into(), born: now, expire: now.saturating_add(frames) });
+    q.push(Toast { text: text.into(), born: now,
+        expire: now.saturating_add(cfg.timeout_ms as u64) });
     if q.len() > MAX_TOASTS {
         let drop = q.len() - MAX_TOASTS;
         q.drain(0..drop);
@@ -1748,19 +1755,13 @@ fn fill_rect_alpha(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32
     }
 }
 
-/// Ramp value 0..=255 for an animation `dur_frames` long, `dur_frames == 0` =
-/// instant (returns 255).
-#[inline]
-fn ramp(now: u32, start: u32, dur_frames: u32) -> u32 {
-    if dur_frames == 0 {
-        return 255;
-    }
-    let age = now.saturating_sub(start);
-    if age >= dur_frames {
-        255
-    } else {
-        age * 255 / dur_frames
-    }
+/// No animation clock means instant transitions, never a frozen half-open UI.
+fn animation_time_ms() -> Option<u64> {
+    let mut stats = libdunit::SystemStats::default();
+    if libdunit::get_system_stats(&mut stats) < 0 || stats.uptime_available == 0
+        || stats.uptime_hz == 0 { return None; }
+    Some((stats.uptime_ticks / stats.uptime_hz).saturating_mul(1000)
+        .saturating_add((stats.uptime_ticks % stats.uptime_hz) * 1000 / stats.uptime_hz))
 }
 
 // Rounded-corner selection bitmask for `fill_rrect*` (which corners get the arc).
@@ -2469,14 +2470,34 @@ fn win_title<'a>(apps: &'a Applications, app: u8) -> &'a str {
 /// protocol CONFIGURE mechanism that *any* state change drives).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WinState {
+    Tiled,
     Floating,
     Maximized,
 }
 
+/// Window policy retained across display-session re-entry. Client buffers stay
+/// owned by ClientState; this records only the compositor's placement decisions.
+#[derive(Clone, Copy)]
+struct Placement {
+    cx: i32,
+    cy: i32,
+    state: WinState,
+    restore: Option<(i32, i32, i32, i32)>,
+    lua_floating: bool,
+    st_step: u8,
+    minimized: bool,
+    ws: usize,
+}
+
 /// Per-window compositor state, derived from a `ClientState` but with a live
 /// content origin the user can drag around.
+#[derive(Clone, Copy)]
+struct Motion { from: (i32, i32), to: (i32, i32), start: u64, duration_ms: u32, ease_out: bool }
+
 struct Win {
+    motion: Option<Motion>,
     pid: u32,
+    lua_floating: bool,
     cx: i32,
     cy: i32,
     sw: i32,
@@ -2494,8 +2515,8 @@ struct Win {
     /// Workspace (0-based) this window belongs to; only the active workspace's
     /// windows are drawn and receive input.
     ws: usize,
-    /// Desktop tick when this window first appeared — drives the open fade-in.
-    born: u32,
+    /// Monotonic milliseconds when this window appeared — drives its open fade.
+    born: u64,
     /// Minimized windows are not composited and receive no input; a click on the
     /// app's dock icon (task switcher) restores and raises them.
     minimized: bool,
@@ -3204,11 +3225,15 @@ fn run_desktop_session(
 
     // Build the window model from presented clients, tiling them if their slot
     // origins collide, and keeping the title bar on-screen.
+    let animation_epoch = animation_time_ms().unwrap_or(0);
     let mut wins: Vec<Win> = Vec::new();
     let mut z: Vec<usize> = Vec::new();
     let mut offset = 0i32;
     for i in 0..clients.len() {
-        if !clients[i].presented || clients[i].buf_ptr.is_null() {
+        // Runtime clients become ready in pump_clients, whereas presented is
+        // the startup isolation proof. Both own live surfaces. Rebuild both on
+        // a display change, or runtime windows disappear behind win_created.
+        if !(clients[i].presented || clients[i].ready) || clients[i].buf_ptr.is_null() {
             continue;
         }
         let sw = clients[i].surf_w as i32;
@@ -3258,14 +3283,38 @@ fn run_desktop_session(
             border: ly.border,
             app: clients[i].app,
             ws: 0,
-            born: 0,
+            born: animation_epoch,
             minimized: false,
+            motion: None,
             state: WinState::Floating,
+            lua_floating: false,
             restore: None,
             st_step: 0,
             st_since: 0,
             format: clients[i].format,
         });
+        if let Some(p) = clients[i].placement {
+            let win = wins.last_mut().unwrap();
+            win.cx = p.cx.clamp(ins.left + ly.border,
+                (bw as i32 - ins.right - ly.border - win.sw).max(ins.left + ly.border));
+            win.cy = p.cy.clamp(ins.top + ly.title_h + ly.border,
+                (bh as i32 - ins.bottom - ly.border - win.sh).max(ins.top + ly.title_h + ly.border));
+            win.state = p.state;
+            win.restore = p.restore;
+            win.lua_floating = p.lua_floating;
+            win.st_step = p.st_step;
+            win.st_since = 0;
+            win.minimized = p.minimized;
+            win.ws = p.ws.min(apps.workspaces.saturating_sub(1));
+            if !cfg.settings.scripts.enabled && win.state == WinState::Tiled {
+                set_window_state(server, clients, win, WinState::Floating, bw, bh, &ly, &ins);
+            } else if win.state == WinState::Maximized {
+                // The old display's work area no longer describes maximized
+                // geometry. Refresh through the existing CONFIGURE path while
+                // keeping the original floating restore snapshot.
+                set_window_state(server, clients, win, WinState::Maximized, bw, bh, &ly, &ins);
+            }
+        }
         clients[i].ready = true;
         clients[i].win_created = true;
         offset += 32;
@@ -3373,7 +3422,7 @@ fn run_desktop_session(
     // (e.g. gui_demo's "I'm up") is honored exactly once here rather than lost to
     // the bring-up race. Policy stays the compositor's; the client only named text.
     for text in pending_notifies {
-        notify_post(&mut notifs, &notifications, ticks, &text);
+        notify_post(&mut notifs, &notifications, animation_epoch, &text);
         libdunit::println(&alloc::format!(
             "gui_server: client notify \"{}\" queued={} (enabled={})",
             text,
@@ -3393,14 +3442,13 @@ fn run_desktop_session(
     let mut recycle_phase: u8 = 0; // 0=wait 1=draining 2=done
     let mut recycle_pre: usize = 0; // clients present when we closed them
     let mut recycle_deadline: u32 = 0; // tick budget for the drain to finish
-    // Animation length in frames (~16ms/frame); 0 when animations are off, so
-    // every ramp/reveal collapses to instant (the flat look).
-    let mut anim_frames = if fx.anim { (fx.anim_ms / 16).max(1) as u32 } else { 0 };
-    // Workspace-switch crossfade: the active workspace's windows fade in from
-    // this tick (bumped on every switch below).
-    let mut ws_switch_tick = 0u32;
-    // Launcher-menu drop-in: stamped when the dropdown opens.
-    let mut menu_anim_tick = 0u32;
+    // Durations stay in milliseconds even when rendering misses a frame.
+    let mut anim_duration_ms = if fx.anim { fx.anim_ms as u32 } else { 0 };
+    // Workspace-switch crossfade: timestamped on the monotonic animation clock.
+    let mut ws_switch_tick = animation_epoch;
+    // Launcher-menu drop-in: monotonic timestamp when the dropdown opens.
+    let mut menu_anim_tick = animation_epoch;
+    let mut previous_animation_time = animation_epoch;
     let mut menu_was_open = false;
     // Per-dock-icon hover progress (0..255), eased toward hovered/idle each
     // frame. Sized to the live dock pin-count (config `[dock] entries`).
@@ -3433,11 +3481,18 @@ fn run_desktop_session(
     // in serve_two_clients/resize_one_client). The loop's reload block processes it
     // on the first tick, diffing the edited config against `applied_display` above.
     let mut reload_requested = pending_reload;
+    let mut scripts = cfg.settings.scripts;
+    let mut lua_engine = lua_policy::Engine::new();
+    let mut lua_snapshot: Option<(Vec<u32>, u32, u32, usize)> = None;
+    let mut lua_ease_out = false;
+    let mut lua_expected: Vec<(u32, u32, u32)> = Vec::new();
     // Client-posted notification texts collected by `pump_clients` this tick
     // (NOTIFY_MAGIC), turned into config-gated toasts right after the pump. Reused
     // across frames (cleared each tick) so no per-frame allocation in the hot path.
     let mut notify_requests: Vec<alloc::string::String> = Vec::new();
     loop {
+        let animation_clock = animation_time_ms();
+        let animation_now = animation_clock.unwrap_or(previous_animation_time);
         // Advance any runtime-spawned clients through their protocol handshake,
         // then hand each newly-ready client a cascaded, focused window.
         notify_requests.clear();
@@ -3470,7 +3525,34 @@ fn run_desktop_session(
                     libdunit::println(
                         "gui_server: [display] changed on reload — re-entering session",
                     );
+                    for win in wins.iter().filter(|w| w.alive) {
+                        if let Some(client) = clients.iter_mut().find(|c| c.pid == win.pid) {
+                            client.placement = Some(Placement { cx: win.cx, cy: win.cy,
+                                state: win.state, restore: win.restore, lua_floating: win.lua_floating, st_step: win.st_step,
+                                minimized: win.minimized, ws: win.ws });
+                        }
+                    }
                     return true;
+                }
+                lua_engine.cancel();
+                lua_snapshot = None;
+                lua_expected.clear();
+                scripts = ncfg.settings.scripts;
+                lua_ease_out = false;
+                for win in wins.iter_mut() {
+                    win.lua_floating = false;
+                    if !scripts.enabled && win.state == WinState::Tiled {
+                        set_window_state(
+                            server,
+                            clients,
+                            win,
+                            WinState::Floating,
+                            bw,
+                            bh,
+                            &ly,
+                            &ins,
+                        );
+                    }
                 }
                 theme = ncfg.settings.theme;
                 ly = ncfg.settings.layout;
@@ -3494,7 +3576,7 @@ fn run_desktop_session(
                 tray_edge = ncfg.settings.tray.pos;
                 tray_size = ncfg.settings.tray.size;
                 ins = reserved_insets(&ly, panel_edge, tray_edge, tray_size);
-                anim_frames = if fx.anim { (fx.anim_ms / 16).max(1) as u32 } else { 0 };
+                anim_duration_ms = if fx.anim { fx.anim_ms as u32 } else { 0 };
                 // Every Win caches its own title_h/border (used by outer/contains):
                 // re-seed them so existing windows adopt the new geometry.
                 for w in wins.iter_mut() {
@@ -3540,7 +3622,7 @@ fn run_desktop_session(
         // the client only supplied the (bounds-checked) text. Drained AFTER the
         // reload block so a just-reloaded `notifications` policy applies at once.
         for text in notify_requests.drain(..) {
-            notify_post(&mut notifs, &notifications, ticks, &text);
+            notify_post(&mut notifs, &notifications, animation_now, &text);
             libdunit::println(&alloc::format!(
                 "gui_server: client notify \"{}\" queued={} (enabled={})",
                 text,
@@ -3670,9 +3752,11 @@ fn run_desktop_session(
                 border: ly.border,
                 app: clients[i].app,
                 ws: clients[i].ws,
-                born: ticks,
+                born: animation_now,
                 minimized: false,
-                state: WinState::Floating,
+                motion: None,
+            state: WinState::Floating,
+            lua_floating: false,
                 restore: None,
                 st_step: 0,
                 st_since: 0,
@@ -3791,14 +3875,13 @@ fn run_desktop_session(
         // auto-dismiss predicate removes it once its timeout elapses — checked
         // against the very predicate the per-frame prune runs (`now < expire`), so
         // the queue lifecycle is verified without a fragile wall-clock wait. The
-        // toast stays queued and expires for real a few frames later (below),
+        // toast stays queued and expires at its monotonic deadline (below),
         // which trips the end-to-end `notify expired` marker.
         if apps.self_test && !notify_st_done && notifications.enabled {
             let before = notifs.len();
-            notify_post(&mut notifs, &notifications, ticks, "Self-test");
+            notify_post(&mut notifs, &notifications, animation_now, "Self-test");
             let posted = notifs.len();
-            let frames = (notifications.timeout_ms / 16).max(1);
-            let future = ticks.saturating_add(frames + 1);
+            let future = animation_now.saturating_add(notifications.timeout_ms as u64 + 1);
             let survivors = notifs.iter().filter(|t| future < t.expire).count();
             let ok = posted == before + 1 && survivors < posted;
             // Report the DELTA this post added (`added`), not the absolute queue
@@ -3949,7 +4032,7 @@ fn run_desktop_session(
                             ly.max_windows,
                             &mut notifs,
                             &notifications,
-                            ticks,
+                            animation_now,
                         ) {
                             reopened += 1;
                             if reopened >= ly.max_windows {
@@ -4046,7 +4129,7 @@ fn run_desktop_session(
                 if let Some(ri) = apps.launcher.get(i).copied() {
                     try_launch(
                         server, clients, &apps, ri, current_ws, &mut next_id,
-                        ly.max_windows, &mut notifs, &notifications, ticks,
+                        ly.max_windows, &mut notifs, &notifications, animation_now,
                     );
                 }
             }
@@ -4087,7 +4170,7 @@ fn run_desktop_session(
                     let r = ws_pip_rect(&ly, panel_edge, panel_rect, i as i32);
                     if in_rect(r, mx, my) {
                         if current_ws != i {
-                            ws_switch_tick = ticks; // start the incoming crossfade
+                            ws_switch_tick = animation_now; // start the incoming crossfade
                         }
                         current_ws = i;
                         break;
@@ -4116,20 +4199,20 @@ fn run_desktop_session(
                         .find(|&wi| wins[wi].alive && wins[wi].app as usize == ri);
                     if let Some(wi) = running {
                         if current_ws != wins[wi].ws {
-                            ws_switch_tick = ticks; // crossfade into the target ws
+                            ws_switch_tick = animation_now; // crossfade into the target ws
                             current_ws = wins[wi].ws;
                         }
                         // Restore if it was minimized, then raise to the top.
                         if wins[wi].minimized {
                             wins[wi].minimized = false;
-                            wins[wi].born = ticks; // replay the grow-in on restore
+                            wins[wi].born = animation_now; // replay the grow-in on restore
                         }
                         z.retain(|&i| i != wi);
                         z.push(wi);
                     } else {
                         try_launch(
                             server, clients, &apps, ri, current_ws, &mut next_id,
-                            ly.max_windows, &mut notifs, &notifications, ticks,
+                            ly.max_windows, &mut notifs, &notifications, animation_now,
                         );
                     }
                 }
@@ -4183,6 +4266,8 @@ fn run_desktop_session(
                     // was grabbed. `ox`/`oy` are offsets from the window content
                     // origin to the cursor (oy is negative — the bar sits above the
                     // content), matching the drag-move math below.
+                    if scripts.enabled { wins[wi].lua_floating = true; }
+                    wins[wi].motion = None;
                     if wins[wi].is_tiled() {
                         let old_w = wins[wi].sw.max(1);
                         let grip_x = (mx - wins[wi].cx).clamp(0, old_w);
@@ -4386,7 +4471,7 @@ fn run_desktop_session(
                             if let Some(ri) = apps.launcher.get(menu_sel).copied() {
                                 try_launch(
                                     server, clients, &apps, ri, current_ws, &mut next_id,
-                                    ly.max_windows, &mut notifs, &notifications, ticks,
+                                    ly.max_windows, &mut notifs, &notifications, animation_now,
                                 );
                             }
                         }
@@ -4403,7 +4488,7 @@ fn run_desktop_session(
             match match_shortcut(ev.scancode, ev.mods, ev.pressed, &shortcuts, apps.workspaces) {
                 ShortcutAction::Workspace(ws) => {
                     if current_ws != ws {
-                        ws_switch_tick = ticks; // start the incoming crossfade
+                        ws_switch_tick = animation_now; // start the incoming crossfade
                         current_ws = ws;
                     }
                     continue;
@@ -4453,6 +4538,118 @@ fn run_desktop_session(
                     ev.ascii as u32,
                 );
             }
+        }
+
+        // Lua policy is evaluated outside the compositor process. Only topology,
+        // workspace or configuration changes start a new request; frame rendering
+        // never waits for the VM. A dragged tiled window becomes floating until
+        // the next settings reload, so policy cannot fight the pointer.
+        if scripts.enabled {
+            let ids: Vec<u32> = wins
+                .iter()
+                .filter(|w| {
+                    w.alive
+                        && !w.minimized
+                        && w.ws == current_ws
+                        && !w.lua_floating
+                        && w.state != WinState::Maximized
+                })
+                .map(|w| w.pid)
+                .collect();
+            let width = (bw as i32 - ins.left - ins.right).max(1) as u32;
+            let height = (bh as i32 - ins.top - ins.bottom).max(1) as u32;
+            let changed = lua_snapshot.as_ref().map_or(true, |(old, ow, oh, ws)| {
+                *ow != width || *oh != height || *ws != current_ws || *old != ids
+            });
+            if changed {
+                lua_expected.clear();
+                lua_engine.cancel();
+                if !ids.is_empty() {
+                    if let Err(reason) = lua_engine.start(&scripts, width, height, ids.len()) {
+                        libdunit::println(&alloc::format!(
+                            "gui_server: Lua policy rejected: {}",
+                            reason
+                        ));
+                    }
+                }
+                lua_snapshot = Some((ids, width, height, current_ws));
+            }
+            match lua_engine.poll() {
+                lua_policy::Poll::Ready(policy) => {
+                    let (ids, _, _, _) = lua_snapshot.as_ref().unwrap();
+                    // Reject the WHOLE result if any cell cannot contain its
+                    // decorations. Never apply an early rectangle then fail late.
+                    let fits = policy
+                        .rects
+                        .iter()
+                        .all(|r| r.w > ly.border * 2 && r.h > ly.title_h + ly.border * 2);
+                    if fits {
+                        lua_expected.clear();
+                        for (pid, rect) in ids.iter().zip(&policy.rects) {
+                            if let Some(win) = wins.iter_mut().find(|w| w.pid == *pid && w.alive) {
+                                if win.state == WinState::Floating {
+                                    win.restore = Some((win.cx, win.cy, win.sw, win.sh));
+                                }
+                                lua_expected.push((win.pid, (rect.w - ly.border * 2) as u32,
+                                    (rect.h - ly.title_h - ly.border * 2) as u32));
+                                win.state = WinState::Tiled;
+                                let target = (ins.left + rect.x + ly.border,
+                                    ins.top + rect.y + ly.title_h + ly.border);
+                                let duration_ms = if fx.anim { policy.duration_ms } else { 0 };
+                                if duration_ms > 0 && target != (win.cx, win.cy) {
+                                    win.motion = Some(Motion { from: (win.cx, win.cy), to: target,
+                                        start: animation_now, duration_ms, ease_out: policy.ease_out });
+                                } else {
+                                    win.motion = None;
+                                    (win.cx, win.cy) = target;
+                                }
+                                reconfigure_client(
+                                    server,
+                                    clients,
+                                    win.pid,
+                                    (rect.w - ly.border * 2) as u32,
+                                    (rect.h - ly.title_h - ly.border * 2) as u32,
+                                    1,
+                                );
+                            }
+                        }
+                        anim_duration_ms = if fx.anim { policy.duration_ms } else { 0 };
+                        lua_ease_out = policy.ease_out;
+                        libdunit::println(&alloc::format!(
+                            "gui_server: Lua policy applied windows={} duration_ms={} easing={}",
+                            ids.len(),
+                            policy.duration_ms,
+                            if lua_ease_out { "ease_out" } else { "linear" }
+                        ));
+                    } else {
+                        libdunit::println(
+                            "gui_server: Lua policy rejected: cell smaller than window decorations",
+                        );
+                    }
+                }
+                lua_policy::Poll::Failed(reason) => {
+                    libdunit::println(&alloc::format!(
+                        "gui_server: Lua policy rejected: {}",
+                        reason
+                    ));
+                }
+                lua_policy::Poll::Pending => {}
+            }
+        }
+
+        for win in wins.iter_mut() {
+            if let Some(motion) = win.motion {
+                let progress = animation::progress(animation_now, motion.start, if animation_clock.is_some() { motion.duration_ms } else { 0 }, motion.ease_out) as i64;
+                win.cx = (motion.from.0 as i64 + (motion.to.0 - motion.from.0) as i64 * progress / 255) as i32;
+                win.cy = (motion.from.1 as i64 + (motion.to.1 - motion.from.1) as i64 * progress / 255) as i32;
+                if progress == 255 { win.motion = None; }
+            }
+        }
+
+        if !lua_expected.is_empty() && lua_expected.iter().all(|(pid, width, height)|
+            clients.iter().any(|c| c.pid == *pid && c.surf_w == *width && c.surf_h == *height)) {
+            libdunit::println(&alloc::format!("gui_server: Lua geometry committed windows={}", lua_expected.len()));
+            lua_expected.clear();
         }
 
         // Desktop backdrop: the wallpaper (pre-scaled) when present, else a
@@ -4559,14 +4756,15 @@ fn run_desktop_session(
         // gradient title bar, then the opaque client surface. Each window fades
         // in from `born`, and the active workspace fades in after a switch —
         // folded into one alpha `a` so both read as a single grow-in.
-        let ws_fade = ramp(ticks, ws_switch_tick, anim_frames);
+        let duration_ms = if animation_clock.is_some() { anim_duration_ms } else { 0 };
+        let ws_fade = animation::progress(animation_now, ws_switch_tick, duration_ms, lua_ease_out);
         for &wi in z.iter() {
             let w = &wins[wi];
             if !w.alive || w.ws != current_ws || w.minimized {
                 continue;
             }
             let is_focused = focused == Some(wi);
-            let a = ramp(ticks, w.born, anim_frames).min(ws_fade) as i32;
+            let a = animation::progress(animation_now, w.born, duration_ms, lua_ease_out).min(ws_fade) as i32;
             if a <= 0 {
                 continue;
             }
@@ -4842,7 +5040,10 @@ fn run_desktop_session(
         // for the default (top panel) it is (0,panel_h,dock_w,bh-panel_h).
         fill_strip_bg(&mut back, bw, bh, dock_rect, theme.panel, &fx, 14, &mut blur_a, &mut blur_b);
         // Hover easing step per frame (instant when animations are off).
-        let hover_step = if anim_frames == 0 { 255u8 } else { (255 / anim_frames).max(28) as u8 };
+        let hover_step = if duration_ms == 0 { 255u8 } else {
+            (animation_now.saturating_sub(previous_animation_time).saturating_mul(255)
+                / duration_ms as u64).min(255) as u8
+        };
         for i in 0..apps.dock.len() {
             let ri = apps.dock[i];
             let (ix, iy, iw, ih) = dock_icon_rect(&ly, &ins, bw, bh, i as i32);
@@ -4891,11 +5092,11 @@ fn run_desktop_session(
 
         // Launcher dropdown: acrylic rounded menu with a drop-in reveal.
         if menu_open && !menu_was_open {
-            menu_anim_tick = ticks; // stamp the open so the menu drops in
+            menu_anim_tick = animation_now; // stamp the open so the menu drops in
         }
         menu_was_open = menu_open;
         if menu_open {
-            let mprog = ramp(ticks, menu_anim_tick, anim_frames) as i32; // 0..255
+            let mprog = animation::progress(animation_now, menu_anim_tick, duration_ms, lua_ease_out) as i32; // 0..255
             let (mx0, my0, mw0, _) = menu_item_rect(&ly, menu_org, 0);
             let full_h = apps.launcher.len() as i32 * ly.menu_item_h;
             let reveal_h = full_h * mprog / 255; // grow the card downward
@@ -5017,7 +5218,7 @@ fn run_desktop_session(
         // verifies), then stack the survivors in the configured corner. The
         // one-shot `notify expired` marker fires when the self-test's toast has
         // drained end-to-end, proving the auto-dismiss path — not just the queue.
-        notifs.retain(|t| ticks < t.expire);
+        notifs.retain(|t| animation_clock.is_some() && animation_now < t.expire);
         if notify_st_done && !notify_expired_logged && notifs.is_empty() {
             libdunit::println("gui_server: notify expired (self-test)");
             notify_expired_logged = true;
@@ -5036,9 +5237,9 @@ fn run_desktop_session(
                     .map(|f| text_width_ttf(f, &t.text, px))
                     .unwrap_or(t.text.len() as i32 * 8);
                 let cardw = (tw + 30).clamp(96, bw as i32 - 2 * margin);
-                // Short slide-in from the anchored edge over the first few frames.
-                let age = ticks.saturating_sub(t.born) as i32;
-                let slide = (12 - age.min(12)).max(0);
+                // Slide-in follows the same monotonic transition duration.
+                let progress = animation::progress(animation_now, t.born, duration_ms, lua_ease_out);
+                let slide = 12 - (progress * 12 / 255) as i32;
                 let base_x = if leftc { margin } else { bw as i32 - margin - cardw };
                 let cx = if leftc { base_x - slide } else { base_x + slide };
                 let cy = if top {
@@ -5068,6 +5269,7 @@ fn run_desktop_session(
             desktop_ready_announced = true;
         }
 
+        previous_animation_time = animation_now;
         libdunit::sleep_ms(16);
         ticks += 1;
         // Report average ms/frame once the loop is warm (a single line, so the

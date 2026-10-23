@@ -3,10 +3,11 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering}
 
 const MOUSE_EVENT_QUEUE_LEN: usize = 64;
 
-static MOUSE_X: AtomicI32 = AtomicI32::new(512);
-static MOUSE_Y: AtomicI32 = AtomicI32::new(384);
-static MOUSE_MAX_X: AtomicI32 = AtomicI32::new(1023);
-static MOUSE_MAX_Y: AtomicI32 = AtomicI32::new(767);
+static MOUSE_X: AtomicI32 = AtomicI32::new(0);
+static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
+// Until a display publishes its geometry there is no addressable pointer area.
+static MOUSE_MAX_X: AtomicI32 = AtomicI32::new(0);
+static MOUSE_MAX_Y: AtomicI32 = AtomicI32::new(0);
 static MOUSE_BUTTONS: AtomicU8 = AtomicU8::new(0);
 static MOUSE_WHEEL_DELTA: AtomicI32 = AtomicI32::new(0);
 static MOUSE_EVENT_READ: AtomicUsize = AtomicUsize::new(0);
@@ -46,8 +47,14 @@ impl MouseEvent {
 }
 
 pub fn set_mouse_bounds(width: usize, height: usize) {
-    MOUSE_MAX_X.store(width.saturating_sub(1) as i32, Ordering::Relaxed);
-    MOUSE_MAX_Y.store(height.saturating_sub(1) as i32, Ordering::Relaxed);
+    MOUSE_MAX_X.store(
+        width.saturating_sub(1).min(i32::MAX as usize) as i32,
+        Ordering::Relaxed,
+    );
+    MOUSE_MAX_Y.store(
+        height.saturating_sub(1).min(i32::MAX as usize) as i32,
+        Ordering::Relaxed,
+    );
     clamp_mouse_position();
 }
 

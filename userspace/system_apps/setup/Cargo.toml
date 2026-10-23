@@ -1,0 +1,12 @@
+[package]
+name = "setup"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libdunit = { path = "../../libdunit" }
+dwm_settings = { path = "../../dwm_settings" }
+
+[[bin]]
+name = "setup"
+path = "src/main.rs"

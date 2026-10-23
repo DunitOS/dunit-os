@@ -15,6 +15,8 @@
 #![no_std]
 extern crate alloc;
 
+mod preserve;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -281,7 +283,11 @@ impl ConfigStr {
     /// Overwrite in place from a runtime `&str` (config apply), truncating to `CAP`.
     fn set(&mut self, s: &str) {
         let src = s.as_bytes();
-        let n = if src.len() > ConfigStr::CAP { ConfigStr::CAP } else { src.len() };
+        let n = if src.len() > ConfigStr::CAP {
+            ConfigStr::CAP
+        } else {
+            src.len()
+        };
         self.buf[..n].copy_from_slice(&src[..n]);
         self.len = n;
     }
@@ -309,6 +315,8 @@ pub struct Desktop {
     /// `R,G,B,A` raster (circular mask baked into the alpha). Absent/mis-sized →
     /// the compositor draws its flat accent mark instead.
     pub logo: ConfigStr,
+    /// TOML swatches offered by graphical Settings, independent of renderer code.
+    pub palette: ConfigStr,
 }
 
 impl Desktop {
@@ -319,6 +327,7 @@ impl Desktop {
             icon_theme: ConfigStr::new("breeze"),
             font: ConfigStr::new("/assets/fonts/DejaVuSans.ttf"),
             logo: ConfigStr::new("/assets/images/logo.rgba"),
+            palette: ConfigStr::new("/assets/dwm/palettes/default.toml"),
         }
     }
 
@@ -330,6 +339,7 @@ impl Desktop {
             "icon_theme" => self.icon_theme.set(value),
             "font" => self.font.set(value),
             "logo" => self.logo.set(value),
+            "palette" => self.palette.set(value),
             _ => {}
         }
     }
@@ -489,7 +499,10 @@ pub struct Tray {
 
 impl Tray {
     pub const fn baseline() -> Self {
-        Tray { pos: Edge::Top, size: 28 }
+        Tray {
+            pos: Edge::Top,
+            size: 28,
+        }
     }
 
     fn apply(&mut self, key: &str, value: &str) {
@@ -536,7 +549,9 @@ pub struct Meta {
 
 impl Meta {
     pub const fn baseline() -> Self {
-        Meta { schema_version: SCHEMA_VERSION }
+        Meta {
+            schema_version: SCHEMA_VERSION,
+        }
     }
 
     fn apply(&mut self, key: &str, value: &str) {
@@ -703,7 +718,11 @@ pub struct Notifications {
 
 impl Notifications {
     pub const fn baseline() -> Self {
-        Notifications { enabled: true, timeout_ms: 3000, corner: 1 }
+        Notifications {
+            enabled: true,
+            timeout_ms: 3000,
+            corner: 1,
+        }
     }
 
     fn apply(&mut self, key: &str, value: &str) {
@@ -753,8 +772,47 @@ impl Session {
 }
 
 /// Resolved DWM settings. Extends with `[layout]` etc. in later sub-slices.
+/// Optional Lua window-policy runner. The VM runs in a separate process;
+/// the compositor enforces a wall-clock deadline and validates its entire result.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Scripts {
+    pub enabled: bool,
+    pub runner: ConfigStr,
+    pub layout: ConfigStr,
+    pub timeout_ms: u32,
+}
+
+impl Scripts {
+    pub const fn baseline() -> Self {
+        Self {
+            enabled: false,
+            runner: ConfigStr::new("/app/dwm_lua"),
+            layout: ConfigStr::new("/assets/dwm/scripts/columns.lua"),
+            timeout_ms: 500,
+        }
+    }
+    fn apply(&mut self, key: &str, value: &str) {
+        match key {
+            "enabled" => {
+                if let Some(v) = parse_bool(value) {
+                    self.enabled = v;
+                }
+            }
+            "runner" => self.runner.set(value),
+            "layout" => self.layout.set(value),
+            "timeout_ms" => {
+                if let Ok(v) = value.parse::<u32>() {
+                    self.timeout_ms = v.clamp(50, 5000);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Settings {
+    pub scripts: Scripts,
     pub meta: Meta,
     pub theme: Theme,
     pub layout: Layout,
@@ -777,6 +835,7 @@ pub struct Settings {
 impl Settings {
     pub const fn defaults() -> Self {
         Settings {
+            scripts: Scripts::baseline(),
             meta: Meta::baseline(),
             theme: Theme::baseline(),
             layout: Layout::baseline(),
@@ -915,61 +974,24 @@ impl Config {
 /// session (RAM only until DunitFS v2). The caller then signals the compositor
 /// to reload. Never panics: a write error just returns `false`.
 pub fn save(settings: &Settings) -> bool {
+    if !version_supported(settings.meta.schema_version) || !roundtrip_ok(settings) {
+        return false;
+    }
     let mut text = to_toml(settings);
     // Preserve everything the settings app does not own — the `[application.*]`,
     // `[dock]`, `[launcher]`, `[startup]` and `[workspaces]` tables live only in
     // the file, so a settings-only rewrite must carry them over verbatim or a
     // save would silently wipe the app registry. `to_toml` re-emits the core
-    // theme/layout/effects/desktop tables; we append the rest as-is.
-    if let Some(existing) = read_file(CONFIG_PATH) {
-        let extra = extra_sections(&existing);
-        if !extra.is_empty() {
-            if !text.ends_with('\n') {
-                text.push('\n');
-            }
-            text.push('\n');
-            text.push_str(&extra);
-        }
-    }
+    // theme/layout/effects/desktop tables; merge unowned keys into them and
+    // retain independent tables verbatim.
+    let existing = match read_file_checked(CONFIG_PATH) {
+        Ok(text) => text,
+        Err(libdunit::ENOENT) => String::new(),
+        Err(_) => return false, // never replace data we could not preserve
+    };
+    text = preserve::merge(&text, &existing);
+    if text.len() > 64 * 1024 { return false; }
     libdunit::write_string(CONFIG_PATH, &text).is_ok()
-}
-
-/// Collect the raw text of every top-level table that `to_toml` does NOT emit
-/// (anything whose header's first segment is not one of the typed scalar tables
-/// meta/theme/layout/effects/desktop/widgets/panel/tray/shortcuts/quicksettings/
-/// notifications/session), so `save` can round-trip user-authored
-/// `[application.*]`/`[dock]`/etc. tables it has no typed knowledge of. Preamble
-/// before the first `[header]` is dropped.
-fn extra_sections(text: &str) -> String {
-    let mut out = String::new();
-    let mut keep = false;
-    for raw in text.lines() {
-        let trimmed = strip_comment(raw).trim();
-        if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            let base = name.trim().split('.').next().unwrap_or("").trim();
-            keep = !matches!(
-                base,
-                "theme"
-                    | "layout"
-                    | "effects"
-                    | "desktop"
-                    | "widgets"
-                    | "display"
-                    | "panel"
-                    | "tray"
-                    | "meta"
-                    | "shortcuts"
-                    | "quicksettings"
-                    | "notifications"
-                    | "session"
-            );
-        }
-        if keep {
-            out.push_str(raw);
-            out.push('\n');
-        }
-    }
-    out
 }
 
 /// Read + parse the system DWM config, overlaying it on the baseline. Never
@@ -1038,6 +1060,9 @@ pub fn parse_into(text: &str, settings: &mut Settings) {
         } else if section == "notifications" {
             settings.notifications.apply(key, value);
             settings.applied += 1;
+        } else if section == "scripts" {
+            settings.scripts.apply(key, value);
+            settings.applied += 1;
         } else if section == "session" {
             settings.session.apply(key, value);
             settings.applied += 1;
@@ -1053,8 +1078,14 @@ pub fn parse_into(text: &str, settings: &mut Settings) {
 /// point; `load()` remains for callers that only need the scalar `Settings`.
 pub fn load_config() -> Config {
     let mut settings = Settings::defaults();
-    let Some(text) = read_file(CONFIG_PATH) else {
-        return Config::defaults();
+    let text = match read_file_checked(CONFIG_PATH) {
+        Ok(text) => text,
+        Err(libdunit::ENOENT) => return Config::defaults(),
+        Err(_) => {
+            let mut config = Config::defaults();
+            config.valid = false;
+            return config;
+        }
     };
     settings.from_file = true;
     parse_into(&text, &mut settings);
@@ -1083,7 +1114,11 @@ pub fn load_config() -> Config {
         && apps.apps.len() <= MAX_APPS
         && (settings.applied > 0 || saw_apps);
 
-    Config { settings, apps, valid }
+    Config {
+        settings,
+        apps,
+        valid,
+    }
 }
 
 /// Forward-migrate a parsed document from an older schema `from` to
@@ -1194,11 +1229,61 @@ fn parse_apps(text: &str) -> (Applications, bool) {
         out
     };
     let all: Vec<usize> = (0..apps.len()).collect();
-    let dock = if have_dock { resolve(&dock_ids, &apps) } else { all.clone() };
-    let launcher = if have_launcher { resolve(&launcher_ids, &apps) } else { all.clone() };
-    let startup = if have_startup { resolve(&startup_ids, &apps) } else { Vec::new() };
+    let dock = if have_dock {
+        resolve(&dock_ids, &apps)
+    } else {
+        all.clone()
+    };
+    let launcher = if have_launcher {
+        resolve(&launcher_ids, &apps)
+    } else {
+        all.clone()
+    };
+    let startup = if have_startup {
+        resolve(&startup_ids, &apps)
+    } else {
+        Vec::new()
+    };
 
-    (Applications { apps, dock, launcher, startup, workspaces, self_test }, true)
+    (
+        Applications {
+            apps,
+            dock,
+            launcher,
+            startup,
+            workspaces,
+            self_test,
+        },
+        true,
+    )
+}
+
+/// Read configurable GUI swatches using the same TOML/color dialect as Settings.
+/// An invalid list is rejected as a whole, never silently shortened.
+pub fn load_palette(path: &str) -> Option<Vec<u32>> {
+    let text = read_file(path)?;
+    let mut section = "";
+    let mut result = None;
+    for raw in text.lines() {
+        let line = strip_comment(raw).trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            section = name.trim();
+        } else if let Some((key, value)) = line.split_once('=') {
+            if section != "palette" || key.trim() != "colors" { continue; }
+            if result.is_some() { return None; }
+            let value = value.trim();
+            if !value.starts_with('[') || !value.ends_with(']') { return None; }
+            let entries = parse_str_array(value);
+            if entries.is_empty() || entries.len() > 256 { return None; }
+            let mut colors = Vec::new();
+            for entry in entries {
+                let color = parse_color(&entry)?;
+                if !colors.contains(&color) { colors.push(color); }
+            }
+            result = Some(colors);
+        }
+    }
+    result
 }
 
 /// Parse a single-line TOML string array (`["a", "b"]`) into its elements.
@@ -1272,7 +1357,10 @@ fn unquote(value: &str) -> &str {
 /// A 6-digit value is forced fully opaque.
 fn parse_color(value: &str) -> Option<u32> {
     let hex = value.strip_prefix('#').unwrap_or(value);
-    let hex = hex.strip_prefix("0x").or_else(|| hex.strip_prefix("0X")).unwrap_or(hex);
+    let hex = hex
+        .strip_prefix("0x")
+        .or_else(|| hex.strip_prefix("0X"))
+        .unwrap_or(hex);
     if hex.len() != 6 && hex.len() != 8 {
         return None;
     }
@@ -1312,27 +1400,39 @@ fn parse_bool(value: &str) -> Option<bool> {
 }
 
 /// Slurp a whole VFS file into a String (best-effort). `None` on open error or
-/// non-UTF-8 content; a partial read still returns what was decoded.
+/// non-UTF-8 content, read error, or oversized input. Never accepts a partial read.
 fn read_file(path: &str) -> Option<String> {
+    read_file_checked(path).ok()
+}
+
+fn read_file_checked(path: &str) -> Result<String, isize> {
     let fd = libdunit::open(path, libdunit::OPEN_READ);
     if fd < 0 {
-        return None;
+        return Err(fd);
     }
     let fd = fd as usize;
     let mut data: Vec<u8> = Vec::new();
     let mut chunk = [0u8; 512];
     loop {
         let n = libdunit::read(fd, &mut chunk);
-        if n <= 0 {
+        if n < 0 {
+            libdunit::close(fd);
+            return Err(n);
+        }
+        if n == 0 {
             break;
         }
-        data.extend_from_slice(&chunk[..n as usize]);
-        if data.len() > 64 * 1024 {
-            break; // config sanity cap
+        if data.len() + n as usize > 64 * 1024 {
+            libdunit::close(fd);
+            return Err(libdunit::EFBIG);
         }
+        data.extend_from_slice(&chunk[..n as usize]);
     }
-    libdunit::close(fd);
-    String::from_utf8(data).ok()
+    let closed = libdunit::close(fd);
+    if closed < 0 {
+        return Err(closed);
+    }
+    String::from_utf8(data).map_err(|_| libdunit::EINVAL)
 }
 
 // ---------------------------------------------------------------------------
@@ -1430,7 +1530,11 @@ pub fn to_toml(s: &Settings) -> String {
     push_color(&mut out, "menu", s.theme.menu);
     push_color(&mut out, "menu_hover", s.theme.menu_hover);
     push_color(&mut out, "title_text_focused", s.theme.title_text_focused);
-    push_color(&mut out, "title_text_unfocused", s.theme.title_text_unfocused);
+    push_color(
+        &mut out,
+        "title_text_unfocused",
+        s.theme.title_text_unfocused,
+    );
     out.push('\n');
 
     out.push_str("[layout]\n");
@@ -1468,6 +1572,7 @@ pub fn to_toml(s: &Settings) -> String {
     push_string(&mut out, "icon_theme", s.desktop.icon_theme.as_str());
     push_string(&mut out, "font", s.desktop.font.as_str());
     push_string(&mut out, "logo", s.desktop.logo.as_str());
+    push_string(&mut out, "palette", s.desktop.palette.as_str());
     out.push('\n');
 
     out.push_str("[widgets]\n");
@@ -1511,6 +1616,11 @@ pub fn to_toml(s: &Settings) -> String {
 
     out.push_str("[session]\n");
     push_bool(&mut out, "restore", s.session.restore);
+    out.push_str("\n[scripts]\n");
+    push_bool(&mut out, "enabled", s.scripts.enabled);
+    push_string(&mut out, "runner", s.scripts.runner.as_str());
+    push_string(&mut out, "layout", s.scripts.layout.as_str());
+    push_int(&mut out, "timeout_ms", s.scripts.timeout_ms as i64);
 
     out
 }
@@ -1536,6 +1646,7 @@ pub fn roundtrip_ok(s: &Settings) -> bool {
         && back.quicksettings == s.quicksettings
         && back.notifications == s.notifications
         && back.session == s.session
+        && back.scripts == s.scripts
 }
 
 // ===========================================================================
@@ -1684,9 +1795,21 @@ impl TerminalCfg {
                 // `theme` is resolved in pass 1 (apply_theme); ignore it here so a
                 // later explicit color key wins over the preset, not vice versa.
                 "theme" => {}
-                "fg" => if let Some(c) = parse_color(unquote(rhs)) { self.fg = c; },
-                "bg" => if let Some(c) = parse_color(unquote(rhs)) { self.bg = c; },
-                "bg_alpha" => if let Some(n) = parse_uint(rhs) { self.bg_alpha = n.min(255); },
+                "fg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.fg = c;
+                    }
+                }
+                "bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.bg = c;
+                    }
+                }
+                "bg_alpha" => {
+                    if let Some(n) = parse_uint(rhs) {
+                        self.bg_alpha = n.min(255);
+                    }
+                }
                 "ansi" => parse_color_array_into(rhs, &mut self.ansi),
                 "ansi_bright" => parse_color_array_into(rhs, &mut self.ansi_bright),
                 _ => {}
@@ -1757,14 +1880,46 @@ impl FilesCfg {
             let rhs = line[eq + 1..].trim();
             match key {
                 "icon_theme" => self.icon_theme.set(unquote(rhs)),
-                "bg" => if let Some(c) = parse_color(unquote(rhs)) { self.bg = c; },
-                "header_bg" => if let Some(c) = parse_color(unquote(rhs)) { self.header_bg = c; },
-                "status_bg" => if let Some(c) = parse_color(unquote(rhs)) { self.status_bg = c; },
-                "accent" => if let Some(c) = parse_color(unquote(rhs)) { self.accent = c; },
-                "label" => if let Some(c) = parse_color(unquote(rhs)) { self.label = c; },
-                "muted" => if let Some(c) = parse_color(unquote(rhs)) { self.muted = c; },
-                "sel_bg" => if let Some(c) = parse_color(unquote(rhs)) { self.sel_bg = c; },
-                "bg_alpha" => if let Some(n) = parse_uint(rhs) { self.bg_alpha = n.min(255); },
+                "bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.bg = c;
+                    }
+                }
+                "header_bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.header_bg = c;
+                    }
+                }
+                "status_bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.status_bg = c;
+                    }
+                }
+                "accent" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.accent = c;
+                    }
+                }
+                "label" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.label = c;
+                    }
+                }
+                "muted" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.muted = c;
+                    }
+                }
+                "sel_bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.sel_bg = c;
+                    }
+                }
+                "bg_alpha" => {
+                    if let Some(n) = parse_uint(rhs) {
+                        self.bg_alpha = n.min(255);
+                    }
+                }
                 _ => {}
             }
         }
@@ -1848,15 +2003,51 @@ impl CalcCfg {
             let rhs = line[eq + 1..].trim();
             match key {
                 "font" => self.font.set(unquote(rhs)),
-                "bg" => if let Some(c) = parse_color(unquote(rhs)) { self.bg = c; },
-                "display_bg" => if let Some(c) = parse_color(unquote(rhs)) { self.display_bg = c; },
-                "text" => if let Some(c) = parse_color(unquote(rhs)) { self.text = c; },
-                "muted" => if let Some(c) = parse_color(unquote(rhs)) { self.muted = c; },
-                "btn" => if let Some(c) = parse_color(unquote(rhs)) { self.btn = c; },
-                "btn_fn" => if let Some(c) = parse_color(unquote(rhs)) { self.btn_fn = c; },
-                "btn_op" => if let Some(c) = parse_color(unquote(rhs)) { self.btn_op = c; },
-                "btn_eq" => if let Some(c) = parse_color(unquote(rhs)) { self.btn_eq = c; },
-                "bg_alpha" => if let Some(n) = parse_uint(rhs) { self.bg_alpha = n.min(255); },
+                "bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.bg = c;
+                    }
+                }
+                "display_bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.display_bg = c;
+                    }
+                }
+                "text" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.text = c;
+                    }
+                }
+                "muted" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.muted = c;
+                    }
+                }
+                "btn" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.btn = c;
+                    }
+                }
+                "btn_fn" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.btn_fn = c;
+                    }
+                }
+                "btn_op" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.btn_op = c;
+                    }
+                }
+                "btn_eq" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.btn_eq = c;
+                    }
+                }
+                "bg_alpha" => {
+                    if let Some(n) = parse_uint(rhs) {
+                        self.bg_alpha = n.min(255);
+                    }
+                }
                 _ => {}
             }
         }
@@ -1932,12 +2123,36 @@ impl DemoCfg {
             let rhs = line[eq + 1..].trim();
             match key {
                 "font" => self.font.set(unquote(rhs)),
-                "bg" => if let Some(c) = parse_color(unquote(rhs)) { self.bg = c; },
-                "text" => if let Some(c) = parse_color(unquote(rhs)) { self.text = c; },
-                "muted" => if let Some(c) = parse_color(unquote(rhs)) { self.muted = c; },
-                "btn" => if let Some(c) = parse_color(unquote(rhs)) { self.btn = c; },
-                "accent" => if let Some(c) = parse_color(unquote(rhs)) { self.accent = c; },
-                "bg_alpha" => if let Some(n) = parse_uint(rhs) { self.bg_alpha = n.min(255); },
+                "bg" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.bg = c;
+                    }
+                }
+                "text" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.text = c;
+                    }
+                }
+                "muted" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.muted = c;
+                    }
+                }
+                "btn" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.btn = c;
+                    }
+                }
+                "accent" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.accent = c;
+                    }
+                }
+                "bg_alpha" => {
+                    if let Some(n) = parse_uint(rhs) {
+                        self.bg_alpha = n.min(255);
+                    }
+                }
                 _ => {}
             }
         }
@@ -1960,7 +2175,12 @@ pub struct WidgetCfg {
 
 impl WidgetCfg {
     pub const fn baseline() -> Self {
-        WidgetCfg { enabled: true, accent: 0, corner: -1, from_file: false }
+        WidgetCfg {
+            enabled: true,
+            accent: 0,
+            corner: -1,
+            from_file: false,
+        }
     }
 
     /// Load `widgets/<name>.toml`. A missing file yields `from_file=false` with
@@ -1993,9 +2213,21 @@ impl WidgetCfg {
             let key = line[..eq].trim();
             let rhs = line[eq + 1..].trim();
             match key {
-                "enabled" => if let Some(b) = parse_bool(rhs) { self.enabled = b; },
-                "accent" => if let Some(c) = parse_color(unquote(rhs)) { self.accent = c; },
-                "corner" => if let Some(n) = parse_uint(rhs) { self.corner = n as i32; },
+                "enabled" => {
+                    if let Some(b) = parse_bool(rhs) {
+                        self.enabled = b;
+                    }
+                }
+                "accent" => {
+                    if let Some(c) = parse_color(unquote(rhs)) {
+                        self.accent = c;
+                    }
+                }
+                "corner" => {
+                    if let Some(n) = parse_uint(rhs) {
+                        self.corner = n as i32;
+                    }
+                }
                 _ => {}
             }
         }
@@ -2035,7 +2267,14 @@ impl WinGeom {
     pub fn new(id: &str, x: i32, y: i32, w: i32, h: i32, maximized: bool) -> Self {
         let mut s = ConfigStr::new("");
         s.set(id);
-        WinGeom { id: s, x, y, w, h, maximized }
+        WinGeom {
+            id: s,
+            x,
+            y,
+            w,
+            h,
+            maximized,
+        }
     }
 }
 
@@ -2084,11 +2323,31 @@ pub fn load_session() -> Vec<WinGeom> {
         let key = line[..eq].trim();
         let rhs = line[eq + 1..].trim();
         match key {
-            "x" => if let Some(n) = parse_uint(rhs) { cur.x = n as i32; },
-            "y" => if let Some(n) = parse_uint(rhs) { cur.y = n as i32; },
-            "w" => if let Some(n) = parse_uint(rhs) { cur.w = n as i32; },
-            "h" => if let Some(n) = parse_uint(rhs) { cur.h = n as i32; },
-            "maximized" => if let Some(b) = parse_bool(rhs) { cur.maximized = b; },
+            "x" => {
+                if let Some(n) = parse_uint(rhs) {
+                    cur.x = n as i32;
+                }
+            }
+            "y" => {
+                if let Some(n) = parse_uint(rhs) {
+                    cur.y = n as i32;
+                }
+            }
+            "w" => {
+                if let Some(n) = parse_uint(rhs) {
+                    cur.w = n as i32;
+                }
+            }
+            "h" => {
+                if let Some(n) = parse_uint(rhs) {
+                    cur.h = n as i32;
+                }
+            }
+            "maximized" => {
+                if let Some(b) = parse_bool(rhs) {
+                    cur.maximized = b;
+                }
+            }
             _ => {}
         }
     }

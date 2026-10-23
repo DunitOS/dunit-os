@@ -1,0 +1,46 @@
+{
+  "description": "Official Lua core compatibility plus real dwm_lua CLI/regression children. The C parent validates exact successful policy output and waitpid status for every case; merged PTY diagnostics and absence of policy records are required on failure. Boot smoke intentionally faults test children; runner crashes are detected by the regression parent wait status, rather than forbidding unrelated boot faults.",
+  "run": {
+    "cmd": [
+      "exec lua_spike",
+      "exec dwm_lua /assets/dwm/scripts/columns.lua 1200 800 3",
+      "exec dwm_lua_test"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[LUA] language OK",
+    "[LUA] libraries OK",
+    "[LUA] instruction-budget OK",
+    "[LUA] allocation-budget OK",
+    "[LUA] compatibility OK",
+    "[EXEC] /app/lua_spike returned code=0",
+    "DWM_LUA 1 1200 800 3",
+    "RECT 1 0 0 400 800",
+    "RECT 2 400 0 400 800",
+    "RECT 3 800 0 400 800",
+    "ANIMATION 140 ease_out",
+    "[EXEC] /app/dwm_lua returned code=0",
+    "[DWM-LUA] columns status=0 output=validated OK",
+    "[DWM-LUA] libraries status=0 output=validated OK",
+    "[DWM-LUA] monocle status=0 output=validated OK",
+    "[DWM-LUA] zero-windows status=0 output=validated OK",
+    "[DWM-LUA] environment status=0 output=validated OK",
+    "[DWM-LUA] outside status=1 output=validated OK",
+    "[DWM-LUA] missing status=1 output=validated OK",
+    "[DWM-LUA] quota status=1 output=validated OK",
+    "[DWM-LUA] memory status=1 output=validated OK",
+    "[DWM-LUA] syntax status=1 output=validated OK",
+    "[DWM-LUA] invalid-arguments status=2 output=validated OK",
+    "[DWM-LUA] regression OK",
+    "[EXEC] /app/dwm_lua_test returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[LUA] FAIL",
+    "[DWM-LUA] FAIL",
+    "[EXEC] /app/dwm_lua returned code=1",
+    "[EXEC] /app/dwm_lua returned code=2",
+    "[EXEC] /app/dwm_lua_test returned code=1"
+  ]
+}

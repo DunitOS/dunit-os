@@ -1,4 +1,7 @@
 pub mod scheduler;
+mod terminal_stdin;
+
+use terminal_stdin::TerminalStdin;
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -152,19 +155,10 @@ struct WaitEntry {
 /// `static mut`; теперь одна структура за `UnsafeCell`-newtype. Доступ идёт
 /// кооперативно (подача из оболочки и чтение из syscall на одном CPU); какой
 /// именно PID вправе читать, определяет отдельный атомик TERMINAL_STDIN_WAITING_PID.
-struct TerminalStdin {
-    buffer: [u8; 256],
-    len: usize,
-    ready: bool,
-}
-
 struct TerminalStdinCell(UnsafeCell<TerminalStdin>);
 unsafe impl Sync for TerminalStdinCell {}
-static TERMINAL_STDIN: TerminalStdinCell = TerminalStdinCell(UnsafeCell::new(TerminalStdin {
-    buffer: [0; 256],
-    len: 0,
-    ready: false,
-}));
+static TERMINAL_STDIN: TerminalStdinCell =
+    TerminalStdinCell(UnsafeCell::new(TerminalStdin::new()));
 
 pub const WAIT_KIND_EMPTY: i32 = -1;
 pub const WAIT_KIND_SPAWN_PREPARED: i32 = -2;
@@ -1520,8 +1514,7 @@ pub fn set_foreground_process(pid: Option<ProcessId>, sink: ProcessOutputSink) {
         TERMINAL_STDIN_WAITING_PID.store(0, Ordering::SeqCst);
         unsafe {
             let stdin = &mut *TERMINAL_STDIN.0.get();
-            stdin.len = 0;
-            stdin.ready = false;
+            stdin.clear();
         }
     }
 }
@@ -1577,10 +1570,7 @@ pub fn provide_terminal_stdin(pid: ProcessId, data: &[u8]) -> Result<(), Process
     }
     unsafe {
         let stdin = &mut *TERMINAL_STDIN.0.get();
-        let len = data.len().min(stdin.buffer.len());
-        stdin.buffer[..len].copy_from_slice(&data[..len]);
-        stdin.len = len;
-        stdin.ready = true;
+        stdin.provide(data);
     }
     Ok(())
 }
@@ -1592,15 +1582,13 @@ pub fn take_terminal_stdin_for_current(out: &mut [u8]) -> Result<Option<usize>, 
     }
     unsafe {
         let stdin = &mut *TERMINAL_STDIN.0.get();
-        if !stdin.ready {
-            return Ok(None);
+        let read = stdin.take(out);
+        // WAITING_PID also owns the supplied line. Keep that ownership while
+        // short reads leave bytes buffered, including the terminating newline.
+        if read.is_some() && !stdin.is_ready() {
+            TERMINAL_STDIN_WAITING_PID.store(0, Ordering::SeqCst);
         }
-        let len = stdin.len.min(out.len());
-        out[..len].copy_from_slice(&stdin.buffer[..len]);
-        stdin.len = 0;
-        stdin.ready = false;
-        TERMINAL_STDIN_WAITING_PID.store(0, Ordering::SeqCst);
-        Ok(Some(len))
+        Ok(read)
     }
 }
 

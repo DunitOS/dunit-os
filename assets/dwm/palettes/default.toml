@@ -1,0 +1,4 @@
+# Editable swatches offered by graphical Settings. Custom HEX values also work
+# through terminal setup; desktop.palette selects a different palette document.
+[palette]
+colors = ["#DCE8F2", "#F7F7FA", "#E9E9ED", "#A8AFBA", "#CDD0D6", "#FF5F57", "#F3F5F8", "#24262B", "#007AFF", "#E6E8ED", "#D3E5FC", "#F8F9FC", "#D8E8FC", "#202124", "#70757D", "#1E1E2E", "#181825", "#11111B", "#313244", "#45475A", "#CDD6F4", "#A6E3A1", "#94E2D5", "#89B4FA", "#CBA6F7", "#F38BA8", "#FAB387", "#F9E2AF", "#F5C2E7", "#89DCEB", "#EBA0AC"]

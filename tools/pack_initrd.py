@@ -110,6 +110,22 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                 if name != "libc.a":
                     add(f"/system/tcc/{name}", p)
 
+    # System Lua is a normal executable; its complete source SDK permits a real
+    # on-device rebuild through the same TCC, with no shell/command-size tricks.
+    if args.lua_bin is not None:
+        add("/system/bin/lua", Path(args.lua_bin))
+    if args.luac_bin is not None:
+        add("/system/bin/luac", Path(args.luac_bin))
+    if args.lua_dir is not None:
+        source = Path(args.lua_dir)
+        for path in sorted(source.iterdir()):
+            if path.suffix in (".c", ".h"):
+                add(f"/system/src/lua/{path.name}", path)
+    if args.lua_config is not None:
+        add("/system/src/lua/dunit-config.h", Path(args.lua_config))
+    if args.lua_build_rsp is not None:
+        add("/system/src/lua/build.rsp", Path(args.lua_build_rsp))
+
     # tcc's own runtime (libtcc1.a) and compiler headers (stddef.h/stdarg.h/…)
     # live under /system/tcc = CONFIG_TCCDIR, found by -B/the baked tccdir.
     if args.tcc_dir is not None:
@@ -158,6 +174,16 @@ def parse_args() -> argparse.Namespace:
                         help="Dunit sysroot (include/ + lib/) packed to /system for on-device tcc")
     parser.add_argument("--tcc-dir", type=Path, default=None,
                         help="tcc fork dir (libtcc1.a + include/) packed to /system/tcc")
+    parser.add_argument("--lua-bin", type=Path, default=None,
+                        help="System Lua executable, built by Dunit cross-TCC")
+    parser.add_argument("--luac-bin", type=Path, default=None,
+                        help="System Lua bytecode compiler, built by Dunit cross-TCC")
+    parser.add_argument("--lua-dir", type=Path, default=None,
+                        help="Unmodified Lua C sources/headers for on-device TCC")
+    parser.add_argument("--lua-config", type=Path, default=None,
+                        help="Dunit Lua installation defaults header")
+    parser.add_argument("--lua-build-rsp", type=Path, default=None,
+                        help="Generated on-device TCC response file")
     parser.add_argument("--tcc-bin", type=Path, default=None,
                         help="the on-device tcc binary, packed to /system/bin/tcc")
     parser.add_argument("--exclude", action="append", default=[],

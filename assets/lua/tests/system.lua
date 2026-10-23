@@ -1,0 +1,31 @@
+-- Tests the normal, unrestricted upstream interpreter, not the DWM runner.
+assert(_VERSION == 'Lua 5.5')
+for _, name in ipairs({'coroutine', 'debug', 'io', 'math', 'os', 'package', 'string', 'table', 'utf8'}) do
+    assert(type(_G[name]) == 'table', name .. ' is missing')
+end
+local co = coroutine.create(function(x) coroutine.yield(x + 1); return x + 2 end)
+local ok, value = coroutine.resume(co, 40)
+assert(ok and value == 41)
+ok, value = coroutine.resume(co)
+assert(ok and value == 42)
+assert(coroutine.status(co) == 'dead')
+assert(debug.getinfo(function() end).what == 'Lua')
+assert(utf8.len('Привет') == 6)
+local packed = string.pack('<I4', 123456)
+assert(string.unpack('<I4', packed) == 123456)
+local chunk = assert(load('return function(x) return x * x end'))()
+assert(assert(load(string.dump(chunk)))(9) == 81)
+local folder = assert(arg[0]:match('^(.*)/'))
+package.path = folder .. '/?.lua;' .. package.path
+assert(require('module').value(14) == 42)
+local path = '/tmp/lua-system-test.txt'
+local file = assert(io.open(path, 'w'))
+assert(file:write('native Lua file IO\n'))
+assert(file:close())
+file = assert(io.open(path, 'r'))
+assert(file:read('*l') == 'native Lua file IO')
+assert(file:close())
+assert(os.remove(path))
+assert(type(os.time()) == 'number')
+assert(type(math.sqrt(81)) == 'number' and math.sqrt(81) == 9)
+io.write('[LUA-SYSTEM] standard libraries and file modules OK\n')

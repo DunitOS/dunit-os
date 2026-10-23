@@ -1,14 +1,10 @@
 # Dunit DWM system defaults — BOOT-SMOKE-TESTS variant.
 #
-# IDENTICAL to assets/dwm/default.toml EXCEPT for the [startup] table at the
-# bottom, which autostarts two gui_clients (M3 cross-process isolation invariant,
-# "served two untrusted clients OK") plus gui_terminal + gui_files so their
-# per-app config is exercised headless. Selected at build time in
-# kernel/src/fs/vfs.rs when the `boot-smoke-tests` feature is on
-# (limine_test_gui.conf / limine_test_terminal.conf); the plain desktop kernel
-# (limine_dwm.conf) embeds default.toml, which boots clean with no windows.
-#
-# KEEP IN SYNC with default.toml: the two files must differ ONLY in [startup].
+# Uses the Green Tea regression palette and autostarts isolation/resize test
+# clients with [startup] self_test enabled. Production default.toml uses the
+# configurable macOS-inspired light palette and starts a clean desktop.
+# Keep schema and policy defaults in sync except these explicit test fixtures.
+# Selected by boot-smoke-tests (limine_test_gui.conf / terminal.conf).
 #
 # Loaded by gui_server at desktop start from /system/share/dwm/default.toml
 # (embedded in the kernel MemFS). Unknown keys are ignored for forward
@@ -103,6 +99,7 @@ font             = "/assets/fonts/DejaVuSans.ttf"
 # in. Blitted left of the "Dunit" wordmark on the panel (absent/mis-sized → the
 # wordmark draws its flat accent mark instead).
 logo             = "/assets/images/logo.rgba"
+palette          = "/assets/dwm/palettes/default.toml"
 
 # Desktop widget card: a translucent plasmoid painted on the wallpaper (behind
 # windows). `[widgets]` holds only desktop-wide policy: `enabled` is the master
@@ -256,3 +253,11 @@ self_test = true
 # to 1..=9 on load.
 [workspaces]
 count = 5
+
+# Optional Lua tiling policy. Runs in a separate process with a deadline.
+# Disable to keep floating window placement. Paths and timeout are editable in setup.
+[scripts]
+enabled = false
+runner = "/app/dwm_lua"
+layout = "/assets/dwm/scripts/columns.lua"
+timeout_ms = 500

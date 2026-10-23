@@ -358,7 +358,66 @@ def type_command(qmp: Qmp, text: str) -> None:
             print(f"[qemu_test] warning: cannot type {ch!r}", file=sys.stderr)
             continue
         qmp.send_key(keys)
+        # send-key replies before its timed key release. Overlapping the next
+        # character can leave Shift held after an underscore/quote and corrupt
+        # the command. Let the 40 ms press finish before sending another key.
+        time.sleep(0.05)
     qmp.send_key(["ret"])
+    time.sleep(0.05)
+
+
+def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
+                        output_start: int, deadline: float) -> None:
+    """Execute manifest input actions while a command is running in the guest.
+
+    Marker waits only inspect this command's output. Every wait and injection
+    shares the command deadline, so an unresponsive guest cannot hang the run.
+    """
+    for step in steps:
+        if time.monotonic() >= deadline:
+            raise RuntimeError("command actions exceeded command timeout")
+        if "wait_marker" in step:
+            marker = step["wait_marker"]
+            wait_deadline = min(deadline, time.monotonic() + float(step.get("timeout", 20)))
+            while True:
+                serial.pump()
+                if marker in serial.text[output_start:]:
+                    break
+                if time.monotonic() >= wait_deadline:
+                    raise RuntimeError(f"command action marker not seen: {marker!r}")
+                time.sleep(0.02)
+        elif "type_text" in step:
+            type_command(qmp, str(step["type_text"]))
+        elif "delay_ms" in step:
+            delay = float(step["delay_ms"]) / 1000
+            if not 0 <= delay <= 5:
+                raise ValueError("input action delay must be between 0 and 5000 ms")
+            time.sleep(min(delay, max(0, deadline - time.monotonic())))
+        elif "execute" in step:
+            reply = qmp.execute(step["execute"], step.get("arguments"))
+            if "error" in reply:
+                raise RuntimeError(f"command action QMP failed: {reply['error']}")
+        elif "relative_motion" in step:
+            motion = step["relative_motion"]
+            dx, dy = int(motion.get("x", 0)), int(motion.get("y", 0))
+            repeat = int(motion.get("repeat", 1))
+            interval = float(motion.get("interval", 0.03))
+            if not (-127 <= dx <= 127 and -127 <= dy <= 127):
+                raise ValueError("relative motion must fit a PS/2 packet (-127..127)")
+            if not (1 <= repeat <= 1024 and 0 <= interval <= 1):
+                raise ValueError("relative motion repeat/interval outside supported bounds")
+            events = [{"type": "rel", "data": {"axis": axis, "value": value}}
+                      for axis, value in (("x", dx), ("y", dy)) if value]
+            for _ in range(repeat):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("relative motion exceeded command timeout")
+                reply = qmp.execute("input-send-event", {"events": events})
+                if "error" in reply:
+                    raise RuntimeError(f"relative input injection failed: {reply['error']}")
+                serial.pump()
+                time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        else:
+            raise ValueError(f"unknown command action: {step!r}")
 
 
 def resolve_ovmf() -> tuple[Path, Path]:
@@ -573,7 +632,9 @@ def run(args: argparse.Namespace) -> RunResult:
             type_command(qmp, command)
             cmd_budget = min(args.cmd_timeout, remaining())
             t0 = time.monotonic()
-            serial.collect_until_idle(args.settle, cmd_budget)
+            actions = run_defaults.get("command_actions", {}).get(command, [])
+            run_command_actions(qmp, serial, actions, before, t0 + cmd_budget)
+            serial.collect_until_idle(args.settle, max(0, cmd_budget - (time.monotonic() - t0)))
             out = serial.text[before:]
             dur = time.monotonic() - t0
             result.commands.append(CommandResult(
@@ -582,6 +643,9 @@ def run(args: argparse.Namespace) -> RunResult:
                 duration_s=round(dur, 2),
                 timed_out=(dur >= cmd_budget - 0.05),
             ))
+
+        run_command_actions(qmp, serial, run_defaults.get("actions", []),
+                            len(serial.text), min(hard_deadline, time.monotonic() + args.cmd_timeout))
 
         if args.screenshot:
             shot = Path(args.screenshot)

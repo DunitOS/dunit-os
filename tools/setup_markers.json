@@ -1,0 +1,74 @@
+{
+  "run": {
+    "cmd": [
+      "exec setup",
+      "exec setup get theme.desktop",
+      "exec setup set effects.anim_ms 180",
+      "exec setup get effects.anim_ms",
+      "exec setup set effects.anim_ms 99999",
+      "exec setup get effects.anim_ms",
+      "exec setup check",
+      "exec lua_spike",
+      "exec setup import /assets/dwm/themes/macos-light.toml",
+      "exec setup get theme.title_focused",
+      "exec setup set scripts.enabled true",
+      "exec setup get scripts.enabled"
+    ],
+    "command_actions": {
+      "exec setup": [
+        {
+          "wait_marker": "Select:"
+        },
+        {
+          "type_text": "1"
+        },
+        {
+          "wait_marker": "Select field:"
+        },
+        {
+          "type_text": "1"
+        },
+        {
+          "wait_marker": "New TOML value"
+        },
+        {
+          "type_text": "\"#FF102030\""
+        },
+        {
+          "wait_marker": "setup: staged"
+        },
+        {
+          "type_text": "b"
+        },
+        {
+          "type_text": "s"
+        },
+        {
+          "wait_marker": "setup: saved"
+        },
+        {
+          "type_text": "q"
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "theme.desktop = \"#FF102030\"",
+    "effects.anim_ms = 180",
+    "setup: check OK",
+    "setup: error: invalid value or out of range; value was not changed",
+    "[LUA] language OK",
+    "[LUA] instruction-budget OK",
+    "[LUA] allocation-budget OK",
+    "[LUA] compatibility OK",
+    "/app/lua_spike returned code=0",
+    "theme.title_focused = \"#FFF7F7FA\"",
+    "scripts.enabled = true"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[LUA] FAIL",
+    "setup: fatal error"
+  ]
+}

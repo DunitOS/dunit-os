@@ -132,6 +132,11 @@ def build_initrd(root: Path, config: Path) -> Path:
         "--sysroot-dir", str(root / "build/dunit-sysroot"),
         "--tcc-dir", str(root / "toolchains/dunit-tcc"),
         "--tcc-bin", str(root / "build/dunit-tcc"),
+        "--lua-bin", str(root / "build/dunit-lua"),
+        "--luac-bin", str(root / "build/dunit-luac"),
+        "--lua-dir", str(root / "third_party/lua/src"),
+        "--lua-config", str(root / "config/lua.h"),
+        "--lua-build-rsp", str(root / "build/lua-build.rsp"),
         "--exclude", "gui/boot_blur.bmp",
     ])
     return out

@@ -1,0 +1,478 @@
+{
+  "description": "Real mouse launches Settings on the clean production desktop, scrolls palette, navigates fixed sidebar, enables Lua, and switches discovered scripts. Screenshots capture actual surfaces.",
+  "run": {
+    "config": "limine_dwm.conf",
+    "actions": [
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.03
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 24,
+          "y": 127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 8,
+          "interval": 0.05
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "wait_marker": "gui_settings: surface presented OK",
+        "timeout": 25
+      },
+      {
+        "delay_ms": 1000
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-settings-ui/appearance.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 51,
+          "y": 127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 81,
+          "interval": 0.05
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-settings-ui/palette-bottom.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -62,
+          "y": -127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": -127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": -35,
+          "interval": 0.05
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "wait_marker": "gui_settings: page 4"
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-settings-ui/window-behavior.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": -127,
+          "interval": 0.05
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 33,
+          "y": -15,
+          "interval": 0.05
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "wait_marker": "gui_server: Lua geometry committed windows=1",
+        "timeout": 25
+      },
+      {
+        "delay_ms": 1000
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-settings-ui/lua-columns.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -23,
+          "y": 66,
+          "interval": 0.05
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 300
+      },
+      {
+        "wait_marker": "duration_ms=0 easing=linear",
+        "timeout": 25
+      },
+      {
+        "delay_ms": 1000
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-settings-ui/lua-monocle.ppm"
+        }
+      }
+    ]
+  },
+  "required": [
+    "gui_server: desktop ready",
+    "gui_settings: surface presented OK",
+    "gui_settings: scroll 0,",
+    "gui_settings: page 4",
+    "gui_settings: reconfigured OK",
+    "gui_server: Lua geometry committed windows=1",
+    "duration_ms=140 easing=ease_out",
+    "duration_ms=0 easing=linear"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "gui_server: PANIC",
+    "gui_settings: PANIC",
+    "gui_settings: surface protocol error",
+    "gui_server: Lua policy rejected",
+    "gui_settings: save failed"
+  ]
+}

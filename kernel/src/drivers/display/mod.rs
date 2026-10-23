@@ -89,10 +89,14 @@ pub fn query_modes(out: &mut [Mode]) -> usize {
 /// Переключает scanout на `w`×`h`. Обновляет глобалы фреймбуфера как побочный
 /// эффект. Бэкенд Limine возвращает `Unsupported`.
 pub fn set_mode(w: u32, h: u32) -> Result<(), DisplayError> {
+    // PS/2 IRQs must not clamp against old bounds after scanout has changed.
+    let _interrupts = crate::sync::InterruptGuard::new();
     match &mut *ACTIVE.lock() {
         Backend::Limine => Err(DisplayError::Unsupported),
         Backend::Bochs(d) => d.set_mode(w, h),
-    }
+    }?;
+    crate::input::set_mouse_bounds(w as usize, h as usize);
+    Ok(())
 }
 
 /// Выталкивает текущий backing на физический дисплей. `None` = весь экран.

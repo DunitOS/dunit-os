@@ -36,7 +36,12 @@ MUSL_SYSROOT = $(BUILD_DIR)/dunit-sysroot
 MUSL_LIBC = $(MUSL_SYSROOT)/lib/libc.a
 # C programs linked against the Dunit musl port (userspace/ctests/<name>.c),
 # packed into the initrd as /app/<name>.
-MUSL_CTESTS = musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops
+LUA_UNITS = lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio lauxlib lbaselib lmathlib lstrlib ltablib
+LUA_SOURCES = $(addprefix third_party/lua/src/,$(addsuffix .c,$(LUA_UNITS)))
+LUA_FULL_UNITS = $(LUA_UNITS) lcorolib liolib loslib loadlib ldblib lutf8lib linit
+LUA_FULL_SOURCES = $(addprefix third_party/lua/src/,$(addsuffix .c,$(LUA_FULL_UNITS)))
+
+MUSL_CTESTS = dwm_lua_test musl_io musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops
 
 # Dunit TinyCC port (M6 capstone): the x86_64-dunit tcc fork lives in the
 # submodule toolchains/dunit-tcc. tools/dunit/build-tcc.sh builds a host-hosted
@@ -50,9 +55,9 @@ TCC_CTESTS = tcc_hello
 USERSPACE_APPS = \
 	elf_demo fs_test exit_test args_test cwd_test path_test image_demo bmp_viewer color_test \
 	scheduler_test spawn_ready_test yield_child yield_test resumable_child resumable_test \
-	ipc_child ipc_parent runtime_stress input_test file_api_test env_test calc \
+	ipc_child ipc_parent runtime_stress input_test pointer_test file_api_test env_test calc \
 	stdin_test fault_pf fault_ud dtop \
-	preempt_child preempt_test kill_target thread_test wait_test vm_test vm_peer vm_guard_fault vm_protect_fault tls_test futex_test handle_test gui_server gui_shbuf_peer gui_client gui_demo gui_calc gui_stat gui_files pty_echo pty_test dsh_calc_test dsh dufetch gui_terminal gui_settings init init_probe fsck_dunit abi_test
+	preempt_child preempt_test kill_target thread_test wait_test vm_test vm_peer vm_guard_fault vm_protect_fault tls_test futex_test handle_test gui_server gui_shbuf_peer gui_client gui_demo gui_calc gui_stat gui_files pty_echo pty_test dsh_calc_test dsh dufetch gui_terminal gui_settings setup init init_probe fsck_dunit abi_test
 USERSPACE_CARGO_FLAGS = --release --target ../../../userspace/x86_64-unknown-none.json \
 	-Z build-std=core,alloc -Z build-std-features=compiler-builtins-mem -Z json-target-spec
 
@@ -182,7 +187,25 @@ userspace:
 				$(USERSPACE_DIR)/ctests/$$prog.c; \
 		done; \
 	else echo "[USERSPACE] WARNING: $(TCC_DIR) unavailable or sysroot missing; tcc ctests skipped. Fetch with: git submodule update --init --recursive"; fi
-	@if [ -f $(TCC_DIR)/tools/dunit/build-tcc-dunit.sh ] && [ -f $(TCC_DIR)/config.h ] && [ -f $(abspath $(MUSL_LIBC)) ]; then \
+	@echo "[USERSPACE] building system Lua and DWM Lua with Dunit TinyCC"
+	@test -x $(TCC_BIN) || { echo "Lua requires the Dunit cross-TCC and musl sysroot" >&2; exit 1; }
+	$(TCC_BIN) -std=c11 -Wall -Wextra -B$(abspath $(TCC_DIR)) -L$(abspath $(TCC_DIR)) \
+		-Ithird_party/lua/src userspace/ctests/lua_spike.c $(LUA_SOURCES) \
+		-o $(USERSPACE_BUILD_DIR)/lua_spike
+	$(TCC_BIN) -std=c11 -Wall -Wextra -B$(abspath $(TCC_DIR)) -L$(abspath $(TCC_DIR)) \
+		-Ithird_party/lua/src userspace/system_apps/dwm_lua/main.c $(LUA_SOURCES) \
+		-o $(USERSPACE_BUILD_DIR)/dwm_lua
+	$(TCC_BIN) -std=c11 -Wall -Wextra -B$(abspath $(TCC_DIR)) -L$(abspath $(TCC_DIR)) \
+		-Ithird_party/lua/src -include config/lua.h $(LUA_FULL_SOURCES) third_party/lua/src/lua.c \
+		-o $(BUILD_DIR)/dunit-lua
+	$(TCC_BIN) -std=c11 -Wall -Wextra -B$(abspath $(TCC_DIR)) -L$(abspath $(TCC_DIR)) \
+		-Ithird_party/lua/src -include config/lua.h $(LUA_SOURCES) third_party/lua/src/luac.c \
+		-o $(BUILD_DIR)/dunit-luac
+	@printf '%s\n' '-std=c11' '-I/system/src/lua' '-include' '/system/src/lua/dunit-config.h' \
+		'-o' '/tmp/lua' $(addprefix /system/src/lua/,$(notdir $(LUA_FULL_SOURCES))) \
+		'/system/src/lua/lua.c' > $(BUILD_DIR)/lua-build.rsp
+	@if [ -f $(TCC_DIR)/tools/dunit/build-tcc-dunit.sh ] && [ -f $(TCC_DIR)/config.h ] && [ -f $(abspath $(MUSL_LIBC)) ]; then set -e; \
+		rm -f $(abspath $(BUILD_DIR))/dunit-tcc; \
 		echo "[USERSPACE] building on-device Dunit tcc -> /system/bin/tcc"; \
 		$(TCC_DIR)/tools/dunit/build-tcc-dunit.sh $(abspath $(MUSL_SYSROOT)) $(abspath $(BUILD_DIR))/dunit-tcc; \
 		$(abspath $(MUSL_SYSROOT))/bin/x86_64-dunit-strip $(abspath $(BUILD_DIR))/dunit-tcc 2>/dev/null || strip $(abspath $(BUILD_DIR))/dunit-tcc 2>/dev/null || true; \

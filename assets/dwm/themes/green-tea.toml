@@ -1,0 +1,45 @@
+# Original dark palette and effects. Import in setup.
+[theme]
+desktop          = "#1E1E2E"
+title_focused    = "#313244"
+title_unfocused  = "#232331"
+border_focused   = "#A6E3A1"
+border_unfocused = "#45475A"
+close            = "#F38BA8"
+panel            = "#181825"
+panel_text       = "#CDD6F4"
+launcher         = "#A6E3A1"
+taskbtn          = "#313244"
+taskbtn_focused  = "#45475A"
+menu             = "#11111B"
+menu_hover       = "#45475A"
+# Title-bar / taskbar label text. `title_text_focused` is the crisp TTF title on
+# the active window (and the focused taskbar button); `_unfocused` is the dimmer
+# variant on inactive windows. Were hardcoded 0xEAF2EC / 0xA8B4AC in gui_server.
+title_text_focused   = "#EAF2EC"
+title_text_unfocused = "#A8B4AC"
+
+# Compositor geometry, in pixels. `max_windows` is a safety cap on how many
+# client windows may be composited at once, not a pixel count. Non-numeric
+# values are ignored and keep the built-in baseline.
+
+[effects]
+corner_radius    = 8
+shadow           = 7
+shadow_alpha     = 90
+blur             = true
+blur_radius      = 4
+blur_iters       = 2
+panel_alpha      = 205
+menu_alpha       = 225
+gradient         = true
+anim             = true
+anim_ms          = 140
+
+# Asset paths — everything the desktop loads by path, so it is fully config-
+# driven (no hardcoded asset locations). `wallpaper` is a 1600x900 24-bit BMP
+# painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
+# directory name under /assets/icons/<name>/; the compositor dock/launcher and
+# the file manager resolve <name>/<key>.rgba from it. `font` is the TrueType font
+# every GUI app renders text with (missing/unparseable → the app's embedded
+# fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.

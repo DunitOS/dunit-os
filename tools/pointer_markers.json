@@ -1,0 +1,193 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec pointer_test"
+    ],
+    "command_actions": {
+      "exec pointer_test": [
+        {
+          "wait_marker": "[POINTER] WAIT top-left"
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.03
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT top-right"
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 24,
+            "interval": 0.03
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT bottom-right"
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": 127,
+            "repeat": 24,
+            "interval": 0.03
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT bottom-left"
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": 0,
+            "repeat": 24,
+            "interval": 0.03
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT click-target"
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 24,
+            "interval": 0.03
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT left-down"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT left-up"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT right-down"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "right"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT right-up"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "right"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[POINTER] WAIT grown-bottom-right"
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 24,
+            "interval": 0.03
+          }
+        },
+        {
+          "wait_marker": "[POINTER] PASS all"
+        }
+      ]
+    }
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "System booted",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[POINTER] PASS four corners",
+      "claim": "PS/2 injected relative motion reaches every corner at 1920x1080",
+      "source": "userspace/system_apps/pointer_test/src/main.rs"
+    },
+    {
+      "marker": "[POINTER] PASS bottom-right buttons",
+      "claim": "Left and right button transitions received beyond previous 1024x768 boundary",
+      "source": "userspace/system_apps/pointer_test/src/main.rs"
+    },
+    {
+      "marker": "[POINTER] PASS shrink clamp",
+      "claim": "Modeset to 1280x720 clamps existing pointer immediately",
+      "source": "userspace/system_apps/pointer_test/src/main.rs"
+    },
+    {
+      "marker": "[POINTER] PASS grow reaches edge",
+      "claim": "Modeset back to 1920x1080 allows motion to the enlarged bottom-right corner",
+      "source": "userspace/system_apps/pointer_test/src/main.rs"
+    },
+    {
+      "marker": "[POINTER] PASS all",
+      "claim": "Pointer regression app completed successfully",
+      "source": "userspace/system_apps/pointer_test/src/main.rs"
+    }
+  ],
+  "forbidden": [
+    {
+      "marker": "[PANIC]",
+      "why": "Kernel panic",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[POINTER] FAIL",
+      "why": "Pointer regression failed",
+      "source": "userspace/system_apps/pointer_test/src/main.rs"
+    }
+  ]
+}

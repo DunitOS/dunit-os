@@ -1,0 +1,29 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec setup set scripts.enabled true",
+      "exec gui_server"
+    ],
+    "command_actions": {
+      "exec gui_server": [
+        {
+          "wait_marker": "gui_server: Lua geometry committed",
+          "timeout": 100
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "gui_server: desktop ready",
+    "gui_server: Lua policy applied",
+    "gui_server: Lua geometry committed"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "gui_server: PANIC",
+    "gui_server: Lua policy rejected",
+    "gui_server: FAIL"
+  ]
+}

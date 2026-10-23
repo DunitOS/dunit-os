@@ -1,0 +1,26 @@
+# Light desktop palette. Import in setup, then save.
+[theme]
+desktop = "#DCE8F2"
+title_focused = "#F7F7FA"
+title_unfocused = "#E9E9ED"
+border_focused = "#A8AFBA"
+border_unfocused = "#CDD0D6"
+close = "#FF5F57"
+panel = "#F3F5F8"
+panel_text = "#24262B"
+launcher = "#007AFF"
+taskbtn = "#E6E8ED"
+taskbtn_focused = "#D3E5FC"
+menu = "#F8F9FC"
+menu_hover = "#D8E8FC"
+title_text_focused = "#202124"
+title_text_unfocused = "#70757D"
+[effects]
+corner_radius = 12
+shadow = 12
+shadow_alpha = 70
+panel_alpha = 220
+menu_alpha = 240
+gradient = true
+anim = true
+anim_ms = 180

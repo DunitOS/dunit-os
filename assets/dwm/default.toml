@@ -18,24 +18,24 @@
 schema_version = 1
 
 [theme]
-desktop          = "#1E1E2E"
-title_focused    = "#313244"
-title_unfocused  = "#232331"
-border_focused   = "#A6E3A1"
-border_unfocused = "#45475A"
-close            = "#F38BA8"
-panel            = "#181825"
-panel_text       = "#CDD6F4"
-launcher         = "#A6E3A1"
-taskbtn          = "#313244"
-taskbtn_focused  = "#45475A"
-menu             = "#11111B"
-menu_hover       = "#45475A"
+desktop          = "#DCE8F2"
+title_focused    = "#F7F7FA"
+title_unfocused  = "#E9E9ED"
+border_focused   = "#A8AFBA"
+border_unfocused = "#CDD0D6"
+close            = "#FF5F57"
+panel            = "#F3F5F8"
+panel_text       = "#24262B"
+launcher         = "#007AFF"
+taskbtn          = "#E6E8ED"
+taskbtn_focused  = "#D3E5FC"
+menu             = "#F8F9FC"
+menu_hover       = "#D8E8FC"
 # Title-bar / taskbar label text. `title_text_focused` is the crisp TTF title on
 # the active window (and the focused taskbar button); `_unfocused` is the dimmer
 # variant on inactive windows. Were hardcoded 0xEAF2EC / 0xA8B4AC in gui_server.
-title_text_focused   = "#EAF2EC"
-title_text_unfocused = "#A8B4AC"
+title_text_focused   = "#202124"
+title_text_unfocused = "#70757D"
 
 # Compositor geometry, in pixels. `max_windows` is a safety cap on how many
 # client windows may be composited at once, not a pixel count. Non-numeric
@@ -66,17 +66,17 @@ panel_font_px    = 13
 # pixels; the `*_alpha` values are 0-255 opacity; `blur`/`gradient`/`anim` are
 # booleans (true/false/1/0). Setting an effect to 0/false restores the flat look.
 [effects]
-corner_radius    = 8
-shadow           = 7
-shadow_alpha     = 90
+corner_radius    = 12
+shadow           = 12
+shadow_alpha     = 70
 blur             = true
 blur_radius      = 4
 blur_iters       = 2
-panel_alpha      = 205
-menu_alpha       = 225
+panel_alpha      = 220
+menu_alpha       = 240
 gradient         = true
 anim             = true
-anim_ms          = 140
+anim_ms          = 180
 
 # Asset paths — everything the desktop loads by path, so it is fully config-
 # driven (no hardcoded asset locations). `wallpaper` is a 1600x900 24-bit BMP
@@ -93,6 +93,7 @@ font             = "/assets/fonts/DejaVuSans.ttf"
 # in. Blitted left of the "Dunit" wordmark on the panel (absent/mis-sized → the
 # wordmark draws its flat accent mark instead).
 logo             = "/assets/images/logo.rgba"
+palette          = "/assets/dwm/palettes/default.toml"
 
 # Desktop widget card: a translucent plasmoid painted on the wallpaper (behind
 # windows). `[widgets]` holds only desktop-wide policy: `enabled` is the master
@@ -236,3 +237,11 @@ entries = []
 [workspaces]
 count = 5
 
+
+# Optional Lua tiling policy. Runs in a separate process with a deadline.
+# Disable to keep floating window placement. Paths and timeout are editable in setup.
+[scripts]
+enabled = false
+runner = "/app/dwm_lua"
+layout = "/assets/dwm/scripts/columns.lua"
+timeout_ms = 500

@@ -658,8 +658,9 @@ pub extern "C" fn kernel_main(
         screen_log_early(fb_addr, width, early_log_y, "[KERNEL] framebuffer ready");
         early_log_y += 10;
 
-        unsafe {
-            {
+        {
+            let _interrupts = sync::InterruptGuard::new();
+            unsafe {
                 let log = &mut *SCREEN_LOG.0.get();
                 log.fb = Some((fb_addr, width));
                 log.y = early_log_y;
@@ -672,6 +673,7 @@ pub extern "C" fn kernel_main(
                 .store(fb.height as u32, core::sync::atomic::Ordering::Relaxed);
             crate::syscall::KERNEL_FB_PITCH
                 .store(fb.pitch as u32, core::sync::atomic::Ordering::Relaxed);
+            input::set_mouse_bounds(width, height);
         }
         screen_log_early(fb_addr, width, early_log_y, "[KERNEL] screen log ready");
         early_log_y += 10;
