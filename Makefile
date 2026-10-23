@@ -30,7 +30,7 @@ USERSPACE_BUILD_DIR = $(BUILD_DIR)/userspace
 
 # Dunit musl port (M6): the x86_64-dunit libc fork lives in the submodule
 # toolchains/dunit-musl. build-libc.sh produces a static libc.a + crt objects
-# into this sysroot (built once; the recipe is skipped while libc.a exists).
+# into this sysroot; source/compiler fingerprints invalidate stale artifacts.
 MUSL_DIR = toolchains/dunit-musl
 MUSL_SYSROOT = $(BUILD_DIR)/dunit-sysroot
 MUSL_LIBC = $(MUSL_SYSROOT)/lib/libc.a
@@ -163,7 +163,7 @@ userspace:
 			echo "[USERSPACE] WARNING: submodule fetch failed (offline?)"; \
 	fi
 	@if [ -f $(MUSL_DIR)/tools/dunit/build-libc.sh ]; then set -e; \
-		[ -f $(abspath $(MUSL_LIBC)) ] || $(MUSL_DIR)/tools/dunit/build-libc.sh $(abspath $(MUSL_SYSROOT)); \
+		CC=$(CC) python3 tools/ensure_musl_sysroot.py; \
 		for prog in $(MUSL_CTESTS); do \
 			echo "  [MUSL] $$prog"; \
 			CC=$(CC) $(abspath $(MUSL_SYSROOT))/bin/dunit-cc -O2 \
