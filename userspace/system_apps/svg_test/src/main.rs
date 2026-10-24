@@ -97,5 +97,109 @@ pub extern "C" fn _start() -> ! {
         "[SVG-TEST] FAIL cycle rejection",
     );
     libdunit::println("[SVG-TEST] bitmap compatibility, wallpaper and invalid SVG rejection OK");
+    for theme in [
+        "breeze-chameleon-dark",
+        "breeze-chameleon-light",
+        "breeze-round-chameleon-dark",
+        "breeze-round-chameleon-light",
+        "chameleon-symbolic-dark",
+    ] {
+        let mut source = dunit_image::IconTheme::open(theme).unwrap_or_else(|error| {
+            libdunit::println(&alloc::format!(
+                "[ICON-THEME] FAIL open {} {:?}",
+                theme,
+                error
+            ));
+            libdunit::exit(1)
+        });
+        for name in names {
+            for side in [24u32, 32, 74] {
+                let image = source.icon(name, side).unwrap_or_else(|error| {
+                    libdunit::println(&alloc::format!(
+                        "[ICON-THEME] FAIL {} {} {} {:?}",
+                        theme,
+                        name,
+                        side,
+                        error
+                    ));
+                    libdunit::exit(1)
+                });
+                check(
+                    image.width == side as usize && image.pixels.iter().any(|p| p >> 24 != 0),
+                    "[ICON-THEME] FAIL pixels",
+                );
+            }
+        }
+        let direct = source
+            .icon("categories/32/applications-graphics.svg", 48)
+            .unwrap();
+        check(
+            direct.pixels.iter().any(|p| p >> 24 != 0),
+            "[ICON-THEME] FAIL explicit path",
+        );
+        check(
+            matches!(
+                source.icon("does-not-exist", 32),
+                Err(dunit_image::Error::Missing)
+            ),
+            "[ICON-THEME] FAIL missing",
+        );
+        check(
+            source.icon("../escape.svg", 32).is_err(),
+            "[ICON-THEME] FAIL traversal",
+        );
+        libdunit::println(&alloc::format!(
+            "[ICON-THEME] {} aliases, sizes, direct path OK",
+            theme
+        ));
+    }
+    let mut settings = dwm_settings::load();
+    for preset in [
+        "macos-light",
+        "mojave-dark",
+        "nord",
+        "green-tea",
+        "symbolic-dark",
+    ] {
+        settings = dwm_settings::load_overlay(
+            &settings,
+            &alloc::format!("/assets/dwm/themes/{}.toml", preset),
+        )
+        .unwrap();
+        check(
+            dwm_settings::roundtrip_ok(&settings),
+            "[ICON-THEME] FAIL config roundtrip",
+        );
+        let mut source =
+            dunit_image::IconTheme::open(settings.desktop.icon_theme.as_str()).unwrap();
+        check(
+            source
+                .icon("gui_files", 32)
+                .unwrap()
+                .pixels
+                .iter()
+                .any(|p| p >> 24 != 0),
+            "[ICON-THEME] FAIL config selection",
+        );
+    }
+    libdunit::println("[ICON-THEME] five sequential presets and config roundtrips OK");
+    let path = "/tmp/icon-theme-cycle.toml";
+    let fd = libdunit::open(
+        path,
+        libdunit::OPEN_WRITE | libdunit::OPEN_CREATE | libdunit::OPEN_TRUNC,
+    );
+    check(fd >= 0, "[ICON-THEME] FAIL manifest fixture");
+    let text =
+        b"[theme]\nroot = \"/assets/icons/aqua/\"\nfallback = \"/tmp/icon-theme-cycle.toml\"\n";
+    check(
+        libdunit::write(fd as usize, text) == text.len() as isize,
+        "[ICON-THEME] FAIL manifest write",
+    );
+    libdunit::close(fd as usize);
+    check(
+        dunit_image::IconTheme::open(path).is_err(),
+        "[ICON-THEME] FAIL fallback cycle",
+    );
+
     libdunit::exit(0)
 }

@@ -325,6 +325,9 @@ impl ConfigStr {
         } else {
             src.len()
         };
+        // Canonical padding matters: Settings equality and serialization checks
+        // must not depend on bytes left by a previously longer configuration.
+        self.buf.fill(0);
         self.buf[..n].copy_from_slice(&src[..n]);
         self.len = n;
     }
@@ -342,8 +345,8 @@ impl ConfigStr {
 pub struct Desktop {
     /// Wallpaper SVG or legacy 24-bit BMP painted as the compositor backdrop.
     pub wallpaper: ConfigStr,
-    /// Icon theme directory name under `/assets/icons/<name>/`; dock/launcher and
-    /// the file-manager mimetypes prefer `<name>/<key>.svg`, then legacy `.rgba`.
+    /// Icon theme name under `/assets/icons/<name>/`, or absolute theme manifest.
+    /// Shared loader resolves archive/index.theme/aliases or flat SVG/RGBA files.
     pub icon_theme: ConfigStr,
     /// TrueType font every GUI app loads for text (falls back to the embedded
     /// copy when the path is missing or unparseable).

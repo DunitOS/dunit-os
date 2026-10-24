@@ -542,7 +542,8 @@
     "gui_settings: theme saved /assets/dwm/themes/mojave-dark.toml",
     "gui_settings: theme saved /assets/dwm/themes/nord.toml",
     "gui_server: SVG wallpaper rendered 1920x1080",
-    "gui_server: icon assets loaded theme=aqua count=7 raster=74px"
+    "gui_server: icon assets loaded theme=breeze-round-chameleon-dark count=7 raster=74px",
+    "gui_files: icon assets loaded theme=breeze-chameleon-dark count=6"
   ],
   "forbidden": [
     "[PANIC]",
@@ -552,7 +553,9 @@
     "gui_settings: PANIC",
     "gui_server: PANIC",
     "gui_server: image rejected",
-    "gui_files: image rejected"
+    "gui_files: image rejected",
+    "gui_server: icon theme rejected",
+    "gui_files: icon theme rejected"
   ],
-  "description": "Production SVG wallpaper and Aqua icons, real pointer theme switching and the file manager. Native SVG is loaded from VFS and cached; no build-time rasterization."
+  "description": "Production SVG wallpaper and original Chameleon ZIP themes, real pointer theme switching and Files. Same VFS archive resolver in both clients; no build-time rasterization."
 }

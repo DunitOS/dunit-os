@@ -2,6 +2,8 @@
 #![no_std]
 extern crate alloc;
 use alloc::{format, vec::Vec};
+mod theme;
+pub use theme::IconTheme;
 
 pub struct Image {
     pub width: usize,
@@ -45,13 +47,7 @@ fn read(path: &str, cap: usize) -> Result<Vec<u8>, Error> {
 pub fn load(path: &str, width: u32, height: u32) -> Result<Image, Error> {
     if path.ends_with(".svg") {
         let data = read(path, 1024 * 1024)?;
-        let text = core::str::from_utf8(&data).map_err(|_| Error::Format)?;
-        let pixels = dunit_svg::render(text, width, height).map_err(Error::Svg)?;
-        Ok(Image {
-            width: width as usize,
-            height: height as usize,
-            pixels,
-        })
+        svg(&data, width, height)
     } else if path.ends_with(".rgba") {
         let data = read(path, 32 * 32 * 4)?;
         if data.len() != 32 * 32 * 4 {
@@ -71,6 +67,16 @@ pub fn load(path: &str, width: u32, height: u32) -> Result<Image, Error> {
     } else {
         Err(Error::Format)
     }
+}
+
+fn svg(data: &[u8], width: u32, height: u32) -> Result<Image, Error> {
+    let text = core::str::from_utf8(data).map_err(|_| Error::Format)?;
+    let pixels = dunit_svg::render(text, width, height).map_err(Error::Svg)?;
+    Ok(Image {
+        width: width as usize,
+        height: height as usize,
+        pixels,
+    })
 }
 
 /// A present but invalid SVG is reported, never silently replaced by a bitmap.

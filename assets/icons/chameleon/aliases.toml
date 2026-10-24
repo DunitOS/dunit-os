@@ -1,0 +1,17 @@
+# Desktop/application semantic keys map to upstream freedesktop icon names.
+# Any original icon can also be selected directly by name, or by archive-relative
+# path, e.g. places/64/folder.svg (pins a variant rather than choosing a size).
+[icons]
+gui_client = "applications-other"
+gui_demo = "applications-graphics"
+gui_calc = "accessories-calculator"
+gui_stat = "utilities-system-monitor"
+gui_files = "system-file-manager"
+gui_terminal = "utilities-terminal"
+gui_settings = "preferences-system"
+mime_folder = "folder"
+mime_text = "text-plain"
+mime_exec = "application-x-executable"
+mime_image = "image-x-generic"
+mime_archive = "application-x-archive"
+mime_unknown = "unknown"

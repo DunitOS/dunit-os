@@ -1,0 +1,10 @@
+[package]
+name = "dunit_icons"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
+
+[dev-dependencies]
+dunit_svg = { path = "../dunit-svg" }

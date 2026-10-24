@@ -39,8 +39,9 @@ anim_ms          = 140
 # Asset paths — everything the desktop loads by path, so it is fully config-
 # driven (no hardcoded asset locations). `wallpaper` is a 1600x900 24-bit BMP
 # painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
-# directory name under /assets/icons/<name>/; the compositor dock/launcher and
-# the file manager resolve <name>/<key>.rgba from it. `font` is the TrueType font
+# theme name under /assets/icons/<name>/, or absolute manifest path. The shared
+# loader resolves theme.toml, ZIP/index.theme and aliases (or flat SVG/RGBA files
+# for Aqua/legacy Breeze). `font` is the TrueType font
 # every GUI app renders text with (missing/unparseable → the app's embedded
 # fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
 
@@ -59,7 +60,7 @@ dock_padding = 4
 dock_margin = 0
 
 [desktop]
-icon_theme = "breeze"
+icon_theme = "breeze-chameleon-light"
 wallpaper = "/assets/wallpapers/wallpaper.bmp"
 
 [widgets]

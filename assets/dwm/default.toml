@@ -91,13 +91,14 @@ anim_ms = 180
 # Asset paths — everything the desktop loads by path, so it is fully config-
 # driven (no hardcoded asset locations). `wallpaper` is an SVG or legacy 24-bit BMP
 # painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
-# directory name under /assets/icons/<name>/; the compositor dock/launcher and
-# the file manager prefer <name>/<key>.svg, then legacy .rgba from it. `font` is the TrueType font
+# theme name under /assets/icons/<name>/, or absolute manifest path. The shared
+# loader resolves theme.toml, ZIP/index.theme and aliases (or flat SVG/RGBA files
+# for Aqua/legacy Breeze). `font` is the TrueType font
 # every GUI app renders text with (missing/unparseable → the app's embedded
 # fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
 [desktop]
 wallpaper = "/assets/wallpapers/mojave.svg"
-icon_theme       = "aqua"
+icon_theme = "breeze-round-chameleon-dark"
 font             = "/assets/fonts/DejaVuSans.ttf"
 # App-menu wordmark logo: a 32x32 straight-alpha RGBA with a circular mask baked
 # in. Blitted left of the "Dunit" wordmark on the panel (absent/mis-sized → the

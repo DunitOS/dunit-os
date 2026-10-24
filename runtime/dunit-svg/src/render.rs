@@ -38,6 +38,17 @@ pub fn render(source: &str, width: u32, height: u32) -> Result<Vec<u32>> {
         return Err(Error::Invalid);
     }
     validate(root, 0)?;
+    let mut css_bytes = 0usize;
+    let mut css_rules = 0usize;
+    for sheet in doc.descendants().filter(|n| crate::css::stylesheet(*n)) {
+        let text = sheet.text().unwrap_or("");
+        css_bytes += text.len();
+        css_rules += crate::css::rules(text).count();
+        if css_bytes > 65536 || css_rules > 128 {
+            return Err(Error::Limit);
+        }
+    }
+
     // IDs must be unique so paint references cannot depend on traversal order.
     let mut ids = Vec::new();
     for n in doc.descendants().filter(|n| n.is_element()) {
@@ -115,6 +126,9 @@ fn validate(n: Node<'_, '_>, depth: usize) -> Result<()> {
     if depth > MAX_DEPTH {
         return Err(Error::Limit);
     }
+    if crate::css::metadata(n) {
+        return Ok(());
+    }
     if n.tag_name()
         .namespace()
         .is_some_and(|v| v != "http://www.w3.org/2000/svg")
@@ -140,29 +154,63 @@ fn validate(n: Node<'_, '_>, depth: usize) -> Result<()> {
             | "radialGradient"
             | "stop"
             | "use"
+            | "metadata"
+            | "style"
+            | "filter"
+            | "feGaussianBlur"
     ) {
         return Err(Error::Unsupported);
     }
+    if name == "style" {
+        for rule in crate::css::rules(n.text().unwrap_or("")) {
+            let (_, body) = rule?;
+            for declaration in body.split(';').filter(|s| !s.trim().is_empty()) {
+                let (k, v) = declaration.split_once(':').ok_or(Error::Invalid)?;
+                if !style_value(k.trim(), v.trim()) {
+                    return Err(Error::Unsupported);
+                }
+            }
+        }
+    }
     for a in n.attributes() {
+        if matches!(
+            a.namespace(),
+            Some(
+                "http://www.inkscape.org/namespaces/inkscape"
+                    | "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+            )
+        ) {
+            continue;
+        }
+        if a.namespace() == Some("http://www.w3.org/XML/1998/namespace") && a.name() == "space" {
+            continue;
+        }
+
         if a.namespace()
             .is_some_and(|v| v != "http://www.w3.org/1999/xlink")
         {
             return Err(Error::Unsupported);
         }
-        if a.name() == "href" && name != "use" {
+        if a.name() == "href" && !matches!(name, "use" | "linearGradient" | "radialGradient") {
             return Err(Error::Unsupported);
         }
         if a.name() == "style" {
             for declaration in a.value().split(';').filter(|s| !s.trim().is_empty()) {
-                let (k, _) = declaration.split_once(':').ok_or(Error::Invalid)?;
-                if !style_key(k.trim()) {
+                let (k, v) = declaration.split_once(':').ok_or(Error::Invalid)?;
+                if !style_value(k.trim(), v.trim()) {
                     return Err(Error::Unsupported);
                 }
             }
-        } else if !style_key(a.name())
+        } else if !style_value(a.name(), a.value())
             && !matches!(
                 a.name(),
                 "id" | "version"
+                    | "class"
+                    | "type"
+                    | "stdDeviation"
+                    | "filterUnits"
+                    | "primitiveUnits"
+                    | "color-interpolation-filters"
                     | "viewBox"
                     | "preserveAspectRatio"
                     | "width"
@@ -203,7 +251,9 @@ fn validate(n: Node<'_, '_>, depth: usize) -> Result<()> {
 fn style_key(k: &str) -> bool {
     matches!(
         k,
-        "fill"
+        "filter"
+            | "paint-order"
+            | "fill"
             | "fill-rule"
             | "fill-opacity"
             | "stroke"
@@ -222,6 +272,31 @@ fn style_key(k: &str) -> bool {
             | "stop-color"
             | "stop-opacity"
     )
+}
+
+/// Neutral presentation defaults emitted by SVG editors do not alter this
+/// profile. Non-default effects still fail instead of being silently discarded.
+fn style_value(k: &str, v: &str) -> bool {
+    style_key(k)
+        || matches!(
+            (k, v),
+            ("clip-rule", "nonzero" | "evenodd")
+                | ("color-interpolation", "sRGB" | "auto")
+                | ("color-interpolation-filters", "sRGB" | "linearRGB" | "auto")
+                | (
+                    "color-rendering" | "image-rendering" | "shape-rendering" | "text-rendering",
+                    "auto"
+                )
+                | ("vector-effect", "none")
+                | ("isolation", "auto")
+                | ("mix-blend-mode" | "filter-blend-mode", "normal")
+                | ("filter-gaussianBlur-deviation", "0")
+                | ("marker", "none")
+                | ("overflow", "visible")
+                | ("enable-background", "accumulate")
+                | ("solid-color", "#000000")
+                | ("solid-opacity", "1")
+        )
 }
 
 struct Context {
@@ -244,10 +319,20 @@ impl Context {
             return Err(Error::Limit);
         }
         self.draws += 1;
+        if crate::css::metadata(n) {
+            return Ok(());
+        }
         let name = n.tag_name().name();
         if matches!(
             name,
-            "defs" | "title" | "desc" | "linearGradient" | "radialGradient" | "stop"
+            "defs"
+                | "title"
+                | "desc"
+                | "linearGradient"
+                | "radialGradient"
+                | "stop"
+                | "style"
+                | "filter"
         ) {
             return Ok(());
         }
@@ -267,7 +352,8 @@ impl Context {
         let style = inherited.inherit(n, self.view)?;
         let ts = parent.pre_concat(geometry::transform(prop(n, "transform"))?);
         let alpha = opacity(prop(n, "opacity"))?;
-        if alpha < 1.0 {
+        let filter = prop(n, "filter").filter(|v| *v != "none");
+        if alpha < 1.0 || filter.is_some() {
             let pixels = pix.width() as u64 * pix.height() as u64;
             if self.layer_pixels + pixels > MAX_PIXELS * 2 {
                 return Err(Error::Limit);
@@ -275,6 +361,9 @@ impl Context {
             self.layer_pixels += pixels;
             let mut layer = Pixmap::new(pix.width(), pix.height()).ok_or(Error::Allocation)?;
             self.content(n, &style, ts, &mut layer, depth, visible)?;
+            if let Some(filter) = filter {
+                crate::filter::apply(n, filter, ts, self.view, &mut layer)?;
+            }
             pix.draw_pixmap(
                 0,
                 0,
@@ -322,7 +411,9 @@ impl Context {
                     length(n.attribute("x").unwrap_or("0"), self.view.0)?,
                     length(n.attribute("y").unwrap_or("0"), self.view.1)?,
                 );
-                if n.attribute("width").is_some() || n.attribute("height").is_some() {
+                // SVG width/height on use only affect svg/symbol viewports.
+                // Referenced geometry and groups retain their own coordinates.
+                if matches!(target.tag_name().name(), "svg" | "symbol") {
                     return Err(Error::Unsupported);
                 }
                 self.node(
@@ -340,44 +431,31 @@ impl Context {
                 }
                 if let Some(path) = geometry::shape(n, self.view, &mut self.segments)? {
                     let bounds = path.compute_tight_bounds().ok_or(Error::Invalid)?;
-                    if let Some(shader) = crate::paint::shader(
-                        style.fill,
-                        style.fill_alpha,
-                        style.color,
-                        n,
-                        bounds,
-                        self.view,
-                    )? {
-                        pix.fill_path(
-                            &path,
-                            &Paint {
+                    for stroke in if style.stroke_first {
+                        [true, false]
+                    } else {
+                        [false, true]
+                    } {
+                        if stroke && style.pen.width <= 0.0 {
+                            continue;
+                        }
+                        let (value, alpha) = if stroke {
+                            (style.stroke, style.stroke_alpha)
+                        } else {
+                            (style.fill, style.fill_alpha)
+                        };
+                        if let Some(shader) =
+                            crate::paint::shader(value, alpha, style.color, n, bounds, self.view)?
+                        {
+                            let paint = Paint {
                                 shader,
                                 ..Paint::default()
-                            },
-                            style.rule,
-                            ts,
-                            None,
-                        );
-                    }
-                    if style.pen.width > 0.0 {
-                        if let Some(shader) = crate::paint::shader(
-                            style.stroke,
-                            style.stroke_alpha,
-                            style.color,
-                            n,
-                            bounds,
-                            self.view,
-                        )? {
-                            pix.stroke_path(
-                                &path,
-                                &Paint {
-                                    shader,
-                                    ..Paint::default()
-                                },
-                                &style.pen,
-                                ts,
-                                None,
-                            );
+                            };
+                            if stroke {
+                                pix.stroke_path(&path, &paint, &style.pen, ts, None);
+                            } else {
+                                pix.fill_path(&path, &paint, style.rule, ts, None);
+                            }
                         }
                     }
                 }

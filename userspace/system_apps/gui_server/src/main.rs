@@ -992,15 +992,15 @@ fn serve_two_clients() -> bool {
         // panel/dock/launcher are usable and can spawn apps on demand.
         libdunit::println("gui_server: no startup apps to autostart");
         // Loop so a live `[display]` change (which returns `true`) re-enters the
-        // session at the new resolution; `take` hands the notifies over once, then
-        // empties so re-entries start clean.
+        // session at the new resolution. The caller owns notifications until
+        // a session has actually processed them, including across mode changes.
         let mut pn = pending_notifies;
         let mut baseline = Some(boot_display);
         let mut pointer = PointerSession::default();
         while run_desktop_session(
             &mut server,
             &mut clients,
-            core::mem::take(&mut pn),
+            &mut pn,
             baseline.take(),
             core::mem::take(&mut bringup_reload),
             &mut pointer,
@@ -1098,7 +1098,7 @@ fn serve_two_clients() -> bool {
         resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload);
     }
     // Loop so a live `[display]` change re-enters the session at the new
-    // resolution (rebuilding all buffers); the notifies are handed over once.
+    // resolution (rebuilding all buffers); unprocessed notifications survive.
     let mut pn = pending_notifies;
     // The first session carries the boot display baseline + any reload pinged during
     // bring-up (serve_two_clients / resize_one_client); re-entries pass None/false
@@ -1108,7 +1108,7 @@ fn serve_two_clients() -> bool {
     while run_desktop_session(
         &mut server,
         &mut clients,
-        core::mem::take(&mut pn),
+        &mut pn,
         baseline.take(),
         core::mem::take(&mut bringup_reload),
         &mut pointer,
@@ -2744,11 +2744,21 @@ fn load_wallpaper(path: &str, bw: usize, bh: usize, background: u32) -> Option<V
 }
 
 /// Resolve SVG at the configured dock size; bitmap fallback retains its own size.
-fn resolve_app_icon(icon: &str, dir: &str, side: u32) -> Option<dunit_image::Image> {
+fn resolve_app_icon(icon: &str, theme: &mut Option<dunit_image::IconTheme>, side: u32) -> Option<dunit_image::Image> {
     if icon.is_empty() { return None; }
-    let result = if icon.contains('/') { dunit_image::load(icon, side, side) }
-        else { dunit_image::icon(dir, icon, side) };
+    let result = if icon.starts_with('/') { dunit_image::load(icon, side, side) }
+        else { theme.as_mut()?.icon(icon, side) };
     image_result(icon, result)
+}
+
+fn load_icon_theme(name: &str) -> Option<dunit_image::IconTheme> {
+    match dunit_image::IconTheme::open(name) {
+        Ok(theme) => Some(theme),
+        Err(error) => {
+            libdunit::println(&alloc::format!("gui_server: icon theme rejected {} {:?}", name, error));
+            None
+        }
+    }
 }
 
 fn image_result(path: &str, result: Result<dunit_image::Image, dunit_image::Error>) -> Option<dunit_image::Image> {
@@ -2760,24 +2770,6 @@ fn image_result(path: &str, result: Result<dunit_image::Image, dunit_image::Erro
             None
         }
     }
-}
-
-/// Build the icon-theme directory path `/assets/icons/<theme>/` into `buf` and
-/// return the slice. An empty or over-long theme name falls back to `breeze`, so
-/// a bad config never leaves the dock icon-less. Stack-assembled (no `String`).
-fn icon_dir<'a>(theme: &str, buf: &'a mut [u8; 160]) -> &'a str {
-    const PRE: &[u8] = b"/assets/icons/";
-    const FALLBACK: &str = "/assets/icons/breeze/";
-    let theme = if theme.is_empty() { "breeze" } else { theme };
-    let n = PRE.len() + theme.len() + 1;
-    if n > buf.len() {
-        buf[..FALLBACK.len()].copy_from_slice(FALLBACK.as_bytes());
-        return core::str::from_utf8(&buf[..FALLBACK.len()]).unwrap_or(FALLBACK);
-    }
-    buf[..PRE.len()].copy_from_slice(PRE);
-    buf[PRE.len()..PRE.len() + theme.len()].copy_from_slice(theme.as_bytes());
-    buf[n - 1] = b'/';
-    core::str::from_utf8(&buf[..n]).unwrap_or(FALLBACK)
 }
 
 /// Alpha-blend a packed-ARGB icon (`src`, `sw`×`sh`) into the back buffer,
@@ -2985,7 +2977,7 @@ struct PointerSession {
 fn run_desktop_session(
     server: &mut Server,
     clients: &mut Vec<ClientState>,
-    pending_notifies: Vec<alloc::string::String>,
+    pending_notifies: &mut Vec<alloc::string::String>,
     first_baseline: Option<settings::Display>,
     pending_reload: bool,
     pointer: &mut PointerSession,
@@ -3146,18 +3138,16 @@ fn run_desktop_session(
     }
 
     // Launcher icons, one slot per REGISTRY entry (indexed by app id → the same
-    // index the dock/launcher pin-lists resolve to). The theme directory
-    // (`/assets/icons/<icon_theme>/`) is a config knob; each entry's `icon` spec
-    // is a stem resolved against it, or an absolute VFS path when it contains
-    // '/'. A missing/mis-sized asset leaves the slot `None` and that cell falls
-    // back to the app's label initial.
+    // index the dock/launcher pin-lists resolve to). The shared loader resolves
+    // configured manifests, archive indices and aliases, or flat legacy themes.
+    // An app selects a semantic key, upstream name, archive-relative SVG path,
+    // or absolute VFS image. Missing assets use that app's label initial.
     let mut app_icons: Vec<Option<dunit_image::Image>> = Vec::with_capacity(apps.apps.len());
     let mut icon_count = 0usize;
     {
-        let mut dbuf = [0u8; 160];
-        let dir = icon_dir(cfg.settings.desktop.icon_theme.as_str(), &mut dbuf);
+        let mut icon_theme = load_icon_theme(cfg.settings.desktop.icon_theme.as_str());
         for entry in apps.apps.iter() {
-            let icon = resolve_app_icon(entry.icon.as_str(), dir, (ly.dock_w + 6).max(32) as u32);
+            let icon = resolve_app_icon(entry.icon.as_str(), &mut icon_theme, (ly.dock_w + 6).max(32) as u32);
             if icon.is_some() {
                 icon_count += 1;
             }
@@ -3408,7 +3398,7 @@ fn run_desktop_session(
     // per-tick client-notify drain and app-launch sites use — so a startup toast
     // (e.g. gui_demo's "I'm up") is honored exactly once here rather than lost to
     // the bring-up race. Policy stays the compositor's; the client only named text.
-    for text in pending_notifies {
+    for text in pending_notifies.drain(..) {
         notify_post(&mut notifs, &notifications, animation_epoch, &text);
         libdunit::println(&alloc::format!(
             "gui_server: client notify \"{}\" queued={} (enabled={})",
@@ -3493,7 +3483,10 @@ fn run_desktop_session(
         if reload_requested {
             reload_requested = false;
             let ncfg = settings::load_config();
-            if !ncfg.valid {
+            let mut next_icon_theme = if ncfg.valid {
+                load_icon_theme(ncfg.settings.desktop.icon_theme.as_str())
+            } else { None };
+            if !ncfg.valid || next_icon_theme.is_none() {
                 // Malformed/incoherent config: keep the running (last-known-good)
                 // state WHOLESALE. Never partially apply a bad file — a broken
                 // reload must not blank the dock or drop the registry.
@@ -3519,6 +3512,10 @@ fn run_desktop_session(
                                 minimized: win.minimized, ws: win.ws });
                         }
                     }
+                    // These requests were received in the same IPC batch as the
+                    // mode change. Keep them in the caller-owned queue until the
+                    // next session can apply its notification policy.
+                    pending_notifies.append(&mut notify_requests);
                     pointer.left = prev_left;
                     pointer.right = prev_right;
                     pointer.captured_pid = pressed_win.map(|wi| wins[wi].pid);
@@ -3591,11 +3588,9 @@ fn run_desktop_session(
                 wallpaper = load_wallpaper(ncfg.settings.desktop.wallpaper.as_str(), bw, bh, theme.desktop);
                 logo = image_result(ncfg.settings.desktop.logo.as_str(),
                     dunit_image::load(ncfg.settings.desktop.logo.as_str(), 32, 32));
-                let mut dbuf = [0u8; 160];
-                let dir = icon_dir(ncfg.settings.desktop.icon_theme.as_str(), &mut dbuf);
                 app_icons.clear();
                 for entry in apps.apps.iter() {
-                    app_icons.push(resolve_app_icon(entry.icon.as_str(), dir, (ly.dock_w + 6).max(32) as u32));
+                    app_icons.push(resolve_app_icon(entry.icon.as_str(), &mut next_icon_theme, (ly.dock_w + 6).max(32) as u32));
                 }
                 dock_hover = alloc::vec![0u8; apps.dock.len()];
                 if current_ws >= apps.workspaces {

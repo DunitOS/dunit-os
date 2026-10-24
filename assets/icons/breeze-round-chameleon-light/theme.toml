@@ -1,0 +1,6 @@
+# Complete original SVG archive; no expanded copies or bitmap conversion.
+[theme]
+archive = "/assets/icons/chameleon/breeze-round-chameleon-light.zip"
+root = "Breeze-Round-Chameleon Light Icons"
+aliases = "/assets/icons/chameleon/aliases.toml"
+fallback = "breeze"

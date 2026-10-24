@@ -1,0 +1,6 @@
+# Complete original SVG archive; no expanded copies or bitmap conversion.
+[theme]
+archive = "/assets/icons/chameleon/chameleon-symbolic-dark.zip"
+root = "Chameleon-Symbolic-Dark-Icons"
+aliases = "/assets/icons/chameleon/aliases.toml"
+fallback = "breeze-chameleon-dark"

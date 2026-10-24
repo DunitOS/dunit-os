@@ -1371,7 +1371,7 @@ pub extern "C" fn _start() -> ! {
                         Err(error) => {
                             app.status = error;
                             app.error = true;
-                            libdunit::println("gui_settings: theme rejected; previous settings retained");
+                            libdunit::println(&alloc::format!("gui_settings: theme rejected; previous settings retained: {}",error));
                             spots = render(px, &font, &app);
                             continue;
                         }

@@ -207,14 +207,12 @@ struct Icons {
 }
 
 /// The file manager uses the same SVG decoder and legacy fallback as the shell.
-fn read_theme_icon(theme: &str, name: &str) -> Option<Vec<u8>> {
-    let theme = if theme.is_empty() { "breeze" } else { theme };
-    let dir = alloc::format!("/assets/icons/{}/", theme);
-    match dunit_image::icon(&dir, name, ICON as u32) {
+fn read_theme_icon(theme: &mut Option<dunit_image::IconTheme>, name: &str) -> Option<Vec<u8>> {
+    match theme.as_mut()?.icon(name, ICON as u32) {
         Ok(image) => Some(image.rgba()),
         Err(dunit_image::Error::Missing) => None,
         Err(error) => {
-            libdunit::println(&alloc::format!("gui_files: image rejected {}{} {:?}", dir, name, error));
+            libdunit::println(&alloc::format!("gui_files: image rejected {} {:?}", name, error));
             None
         }
     }
@@ -223,15 +221,22 @@ fn read_theme_icon(theme: &str, name: &str) -> Option<Vec<u8>> {
 impl Icons {
     /// Load the six mimetype icons from `theme` (already resolved: the
     /// `[files] icon_theme` override, else the shared `[desktop] icon_theme`).
-    fn load(theme: &str) -> Icons {
-        Icons {
-            folder: read_theme_icon(theme, "mime_folder"),
-            text: read_theme_icon(theme, "mime_text"),
-            exec: read_theme_icon(theme, "mime_exec"),
-            image: read_theme_icon(theme, "mime_image"),
-            archive: read_theme_icon(theme, "mime_archive"),
-            unknown: read_theme_icon(theme, "mime_unknown"),
-        }
+    fn load(name: &str) -> Icons {
+        let mut theme = match dunit_image::IconTheme::open(name) {
+            Ok(theme) => Some(theme),
+            Err(error) => {libdunit::println(&alloc::format!("gui_files: icon theme rejected {} {:?}",name,error));None}
+        };
+        let icons = Icons {
+            folder: read_theme_icon(&mut theme, "mime_folder"),
+            text: read_theme_icon(&mut theme, "mime_text"),
+            exec: read_theme_icon(&mut theme, "mime_exec"),
+            image: read_theme_icon(&mut theme, "mime_image"),
+            archive: read_theme_icon(&mut theme, "mime_archive"),
+            unknown: read_theme_icon(&mut theme, "mime_unknown"),
+        };
+        let count = [&icons.folder, &icons.text, &icons.exec, &icons.image, &icons.archive, &icons.unknown].iter().filter(|v|v.is_some()).count();
+        libdunit::println(&alloc::format!("gui_files: icon assets loaded theme={} count={}",name,count));
+        icons
     }
 
     fn get(&self, k: IconKind) -> Option<&[u8]> {
@@ -866,7 +871,7 @@ pub extern "C" fn _start() -> ! {
     let clear_bg = col((fcfg.bg_alpha << 24) | (fcfg.bg & 0x00FF_FFFF));
     let fmt = if fcfg.bg_alpha < 255 { FMT_ARGB8888 } else { FMT_XRGB8888 };
     // Icon theme: the per-app `[files] icon_theme` override, else the shared
-    // `[desktop] icon_theme`. `read_theme_icon` still falls back to "breeze".
+    // `[desktop] icon_theme`; the shared loader resolves the configured source.
     let icon_theme = if fcfg.icon_theme.as_str().is_empty() {
         dwm_settings::load().desktop.icon_theme
     } else {

@@ -147,3 +147,40 @@ fn local_paint_fallback_and_radial_gradient() {
     assert!(p[32 * 64 + 32] & 255 > 240);
     assert!(p[32 * 64] & 255 < 20);
 }
+
+#[test]
+fn editor_metadata_css_and_linked_gradients() {
+    let source = r##"<svg xmlns:i="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 32 32" i:version="1"><metadata><arbitrary>editor data</arbitrary></metadata><i:namedview/><defs><style>.Accent {color:#00ff00;} .Accent {color:#0080ff;}</style><linearGradient id="a"><stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient><linearGradient id="b" href="#a" x2="0" y2="1"/></defs><rect width="16" height="32" class="Accent" fill="currentColor"/><rect x="16" width="16" height="32" fill="url(#b)"/></svg>"##;
+    let p = render(source, 32, 32).unwrap();
+    assert_eq!(p[16 * 32 + 8], 0xff0080ff);
+    assert!((p[2 * 32 + 24] >> 16) & 255 > 220);
+    assert!(p[30 * 32 + 24] & 255 > 220);
+    assert!(render(&svg(r##"<defs><linearGradient id="a" href="#b"/><linearGradient id="b" href="#a"/></defs><rect width="64" height="64" fill="url(#a)"/>"##),32,32).is_err());
+    assert!(render(
+        &svg("<style>path:hover {fill:red;}</style><path d='M0 0L3 3'/ >"),
+        32,
+        32
+    )
+    .is_err());
+    assert!(render(
+        &svg("<rect width='64' height='64' style='mix-blend-mode:multiply'/>"),
+        32,
+        32
+    )
+    .is_err());
+}
+#[test]
+fn gaussian_region_alpha_and_paint_order() {
+    let p=render(&svg(r##"<defs><filter id="b" x="-1" y="-1" width="3" height="3" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2"/></filter></defs><rect x="24" y="24" width="16" height="16" fill="#ff0000" filter="url(#b)"/>"##),64,64).unwrap();
+    assert!(p[32 * 64 + 32] >> 24 > 240);
+    assert!((1..100).contains(&(p[32 * 64 + 21] >> 24)));
+    assert_eq!((p[32 * 64 + 21] >> 16) & 255, 255);
+    assert_eq!(p[0], 0);
+    let source = r##"<rect x="16" y="16" width="32" height="32" fill="#ff0000" stroke="#0000ff" stroke-width="16" style="paint-order:stroke fill markers"/>"##;
+    let p = render(&svg(source), 64, 64).unwrap();
+    assert_eq!(p[32 * 64 + 19], 0xffff0000);
+    assert_eq!(p[32 * 64 + 12], 0xff0000ff);
+    let p=render(&svg(r##"<defs><filter id="b" x="0" y="0" width="1" height="1"><feGaussianBlur stdDeviation="2"/></filter></defs><rect x="24" y="24" width="16" height="16" filter="url(#b)"/>"##),64,64).unwrap();
+    assert_eq!(p[32 * 64 + 23], 0);
+    assert!(p[32 * 64 + 24] >> 24 > 0);
+}

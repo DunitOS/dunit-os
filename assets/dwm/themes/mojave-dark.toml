@@ -46,7 +46,7 @@ anim = true
 anim_ms = 180
 
 [desktop]
-icon_theme = "aqua"
+icon_theme = "breeze-round-chameleon-dark"
 wallpaper = "/assets/wallpapers/mojave.svg"
 
 [widgets]

@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 libdunit = { path = "../libdunit" }
 dunit_svg = { path = "../../runtime/dunit-svg" }
+dunit_icons = { path = "../../runtime/dunit-icons" }

@@ -11,11 +11,18 @@
     "[SVG-TEST] native gradients and straight alpha OK",
     "[SVG-TEST] 13 VFS vectors at 24/74/256px OK",
     "[SVG-TEST] bitmap compatibility, wallpaper and invalid SVG rejection OK",
-    "[EXEC] /app/svg_test returned code=0"
+    "[EXEC] /app/svg_test returned code=0",
+    "[ICON-THEME] breeze-chameleon-dark aliases, sizes, direct path OK",
+    "[ICON-THEME] breeze-chameleon-light aliases, sizes, direct path OK",
+    "[ICON-THEME] breeze-round-chameleon-dark aliases, sizes, direct path OK",
+    "[ICON-THEME] breeze-round-chameleon-light aliases, sizes, direct path OK",
+    "[ICON-THEME] chameleon-symbolic-dark aliases, sizes, direct path OK",
+    "[ICON-THEME] five sequential presets and config roundtrips OK"
   ],
   "forbidden": [
     "[PANIC]",
     "[SVG-TEST] FAIL",
-    "[SVG-TEST] PANIC"
+    "[SVG-TEST] PANIC",
+    "[ICON-THEME] FAIL"
   ]
 }

@@ -15,7 +15,9 @@ pub(crate) fn prop<'a>(node: Node<'a, '_>, name: &str) -> Option<&'a str> {
             .last()
             .map(|(_, v)| v.trim())
     });
-    inline.or_else(|| node.attribute(name))
+    inline
+        .or_else(|| crate::css::property(node, name))
+        .or_else(|| node.attribute(name))
 }
 
 pub(crate) fn opacity(s: Option<&str>) -> Result<f32> {
@@ -31,6 +33,7 @@ pub(crate) struct Style<'a> {
     pub stroke_alpha: f32,
     pub rule: tiny_skia::FillRule,
     pub pen: Stroke,
+    pub stroke_first: bool,
 }
 impl Default for Style<'_> {
     fn default() -> Self {
@@ -42,6 +45,7 @@ impl Default for Style<'_> {
             stroke_alpha: 1.0,
             rule: tiny_skia::FillRule::Winding,
             pen: Stroke::default(),
+            stroke_first: false,
         }
     }
 }
@@ -123,8 +127,40 @@ impl<'a> Style<'a> {
                         .ok_or(Error::Invalid)?,
                 )
             };
-        } else if prop(n, "stroke-dashoffset").is_some() {
-            return Err(Error::Unsupported);
+        } else if let Some(offset) = prop(n, "stroke-dashoffset") {
+            let offset = number(offset)?;
+            if s.pen.dash.is_some() && offset != 0.0 {
+                return Err(Error::Unsupported);
+            }
+        }
+        if let Some(order) = prop(n, "paint-order").filter(|s| *s != "inherit") {
+            if order == "normal" {
+                s.stroke_first = false;
+            } else {
+                let tokens: Vec<_> = order.split_ascii_whitespace().collect();
+                if tokens.is_empty()
+                    || tokens.len() > 3
+                    || tokens
+                        .iter()
+                        .any(|s| !matches!(*s, "fill" | "stroke" | "markers"))
+                {
+                    return Err(Error::Invalid);
+                }
+                for (i, t) in tokens.iter().enumerate() {
+                    if tokens[..i].contains(t) {
+                        return Err(Error::Invalid);
+                    }
+                }
+                let fill = tokens
+                    .iter()
+                    .position(|s| *s == "fill")
+                    .unwrap_or(tokens.len());
+                let stroke = tokens
+                    .iter()
+                    .position(|s| *s == "stroke")
+                    .unwrap_or(tokens.len() + 1);
+                s.stroke_first = stroke < fill;
+            }
         }
         Ok(s)
     }
@@ -186,14 +222,40 @@ fn gradient(
     view: (f32, f32),
     current: &str,
 ) -> Result<Shader<'static>> {
-    let object = match g.attribute("gradientUnits").unwrap_or("objectBoundingBox") {
+    let mut chain = Vec::new();
+    let mut next = g;
+    loop {
+        if chain.contains(&next) || chain.len() >= crate::MAX_DEPTH {
+            return Err(Error::Invalid);
+        }
+        if !matches!(next.tag_name().name(), "linearGradient" | "radialGradient") {
+            return Err(Error::Invalid);
+        }
+        chain.push(next);
+        match next
+            .attribute("href")
+            .or_else(|| next.attribute(("http://www.w3.org/1999/xlink", "href")))
+        {
+            None => break,
+            Some(href) => {
+                let id = href.strip_prefix('#').ok_or(Error::Unsupported)?;
+                next = g
+                    .document()
+                    .descendants()
+                    .find(|n| n.attribute("id") == Some(id))
+                    .ok_or(Error::Invalid)?;
+            }
+        }
+    }
+    let attr = |key| chain.iter().find_map(|n| n.attribute(key));
+    let object = match attr("gradientUnits").unwrap_or("objectBoundingBox") {
         "objectBoundingBox" => true,
         "userSpaceOnUse" => false,
         _ => return Err(Error::Invalid),
     };
     let (ax, ay) = if object { (1.0, 1.0) } else { view };
-    let coordinate = |key, default, axis| length(g.attribute(key).unwrap_or(default), axis);
-    let gt = transform(g.attribute("gradientTransform"))?;
+    let coordinate = |key, default, axis| length(attr(key).unwrap_or(default), axis);
+    let gt = transform(attr("gradientTransform"))?;
     let ts = if object {
         Transform::from_row(
             bounds.width(),
@@ -207,7 +269,7 @@ fn gradient(
     } else {
         gt
     };
-    let spread = match g.attribute("spreadMethod").unwrap_or("pad") {
+    let spread = match attr("spreadMethod").unwrap_or("pad") {
         "pad" => SpreadMode::Pad,
         "repeat" => SpreadMode::Repeat,
         "reflect" => SpreadMode::Reflect,
@@ -216,7 +278,15 @@ fn gradient(
     let mut stops = Vec::new();
     let mut previous = 0.0f32;
     let mut last_color = Color::TRANSPARENT;
-    for stop in g.children().filter(|n| n.is_element()) {
+    let stop_source = chain.iter().find(|n| {
+        n.children()
+            .any(|c| c.is_element() && c.tag_name().name() == "stop")
+    });
+    for stop in stop_source
+        .into_iter()
+        .flat_map(|n| n.children())
+        .filter(|n| n.is_element())
+    {
         if stop.tag_name().name() != "stop" {
             return Err(Error::Unsupported);
         }
@@ -253,12 +323,12 @@ fn gradient(
                 "50%",
                 libm::sqrtf(ax * ax + ay * ay) / core::f32::consts::SQRT_2,
             )?;
-            let fx = if g.attribute("fx").is_some() {
+            let fx = if attr("fx").is_some() {
                 coordinate("fx", "0", ax)?
             } else {
                 cx
             };
-            let fy = if g.attribute("fy").is_some() {
+            let fy = if attr("fy").is_some() {
                 coordinate("fy", "0", ay)?
             } else {
                 cy

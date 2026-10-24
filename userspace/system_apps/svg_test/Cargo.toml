@@ -6,3 +6,4 @@ edition = "2021"
 libdunit = { path = "../../libdunit" }
 dunit_image = { path = "../../dunit_image" }
 dunit_svg = { path = "../../../runtime/dunit-svg" }
+dwm_settings = { path = "../../dwm_settings" }

@@ -1,0 +1,3 @@
+# Icon-only preset: keep the current palette, layout and wallpaper.
+[desktop]
+icon_theme = "chameleon-symbolic-dark"

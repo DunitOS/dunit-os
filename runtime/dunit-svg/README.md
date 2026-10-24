@@ -15,17 +15,24 @@ Supported static profile:
 - Anti-aliased fill/stroke, even-odd winding, caps, joins, numeric dash arrays
   (dash offset on the element defining the dash array), paint and group opacity.
 - Solid colors and linear/radial gradients, stops, bounding-box/user-space units,
-  gradient transforms and pad/repeat/reflect spread; local paint URL fallbacks.
-- Presentation attributes and the supported properties in inline `style`.
+  gradient transforms and pad/repeat/reflect spread; local paint URL fallbacks
+  and bounded local gradient inheritance.
+- Presentation attributes, inline `style`, static class selectors with source-order
+  cascade; paint-order for fill/stroke. Editor namespaces/metadata are inert.
+- Single Gaussian blur over SourceGraphic, object/user filter regions and
+  sRGB/linearRGB processing. Axis-aligned transforms only; sigma at most 32 device
+  pixels, 1 MiPixel scratch surface and 64M convolution channel operations.
 
-Unsupported: text/fonts, external stylesheets/CSS selectors, filters, masks,
-clip paths, nested SVG viewports/symbols, linked images, inherited gradients,
+Unsupported: text/fonts, external stylesheets/complex CSS selectors, filter graphs, masks,
+clip paths, nested SVG viewports/symbols, linked images,
 SMIL/animation, scripts and external references. Unsupported elements or
 properties return an error instead of claiming the document was fully rendered.
-`use` only references local elements and does not accept width/height overrides.
+`use` only references local geometry/groups; its width/height are ignored as required
+for those targets. Referencing svg/symbol viewports is unsupported. Neutral editor
+presentation defaults are accepted; unsupported non-default effects are rejected.
 
 Limits: 1 MiB XML, 4096 XML nodes/draw visits, depth 32, 16384 path segments,
-256 stops per gradient, coordinate magnitudes through 10^7 and 12 MiPixels per
+128 stylesheet rules / 64 KiB stylesheet text, 256 stops per gradient, coordinate magnitudes through 10^7 and 12 MiPixels per
 output. Nested opacity layers have a combined 24 MiPixel budget. DTD/entity
 expansion and processing instructions are disabled. Cycles and invalid geometry
 are rejected. Rendering returns no partial image on error.
