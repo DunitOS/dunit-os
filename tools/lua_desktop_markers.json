@@ -2,11 +2,11 @@
   "run": {
     "config": "limine_test_terminal.conf",
     "cmd": [
-      "exec setup set scripts.enabled true",
-      "exec gui_server"
+      "exec /app/setup set scripts.enabled true",
+      "exec /app/gui_server"
     ],
     "command_actions": {
-      "exec gui_server": [
+      "exec /app/gui_server": [
         {
           "wait_marker": "gui_server: Lua geometry committed",
           "timeout": 100

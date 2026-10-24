@@ -68,6 +68,7 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
     if not default_src.is_file():
         raise RuntimeError(f"missing DWM default config: {default_src}")
     add("/system/share/dwm/default.toml", default_src)
+    add("/system/share/dwm/session.toml", assets / "dwm" / "session.toml")
     for sub in ("apps", "widgets"):
         src_dir = assets / "dwm" / sub
         if src_dir.is_dir():
@@ -101,6 +102,10 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
     # itself. Only packed when --sysroot-dir is given (always, in a normal build).
     if args.sysroot_dir is not None:
         sysroot = Path(args.sysroot_dir)
+        sdk = sysroot / "share" / "dunit-sdk" / "cross"
+        for name, destination in (("profile.json", "/system/share/dunit-sdk/profile.json"),
+                                  ("musl-COPYRIGHT", "/system/share/licenses/musl/COPYRIGHT")):
+            if (sdk / name).is_file(): add(destination, sdk / name)
         inc = sysroot / "include"
         if inc.is_dir():
             for host_path in sorted(p for p in inc.rglob("*") if p.is_file()):
@@ -145,7 +150,7 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                 add(f"/system/tcc/include/{rel}", host_path)
 
     # The on-device compiler itself: /system/bin/tcc (an OS tool, not a bundled
-    # /app application), found by `exec tcc` via the /system/bin exec path.
+    # /app application), resolved by userspace PATH policy; recovery console uses the explicit path.
     if args.tcc_bin is not None:
         tcc_bin = Path(args.tcc_bin)
         if tcc_bin.is_file():

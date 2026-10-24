@@ -9,6 +9,7 @@
  * EEXIST when it already exists (atomic create; mkstemp/tcc rely on it). Uses
  * /persist (writable). */
 #include <dirent.h>
+#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -33,6 +34,18 @@ int main(void)
 	int c1 = count_dir(d);
 	rewinddir(d);
 	int c2 = count_dir(d);
+    rewinddir(d);
+    struct dirent *first=readdir(d);
+    char first_name[256]={0};
+    if(first) snprintf(first_name,sizeof first_name,"%s",first->d_name);
+    long cookie=telldir(d);
+    struct dirent *second=readdir(d);
+    char second_name[256]={0};
+    if(second)snprintf(second_name,sizeof second_name,"%s",second->d_name);
+    seekdir(d,cookie);
+    struct dirent *again=readdir(d);
+    if(first_name[0] && again && !strcmp(again->d_name,second_name)) puts("[DIREXCL] seek cookie OK");
+    else puts("[DIREXCL] seek cookie FAIL");
 	closedir(d);
 	printf("[DIREXCL] rewind c1=%d c2=%d\n", c1, c2);
 	if (c1 > 0 && c1 == c2)

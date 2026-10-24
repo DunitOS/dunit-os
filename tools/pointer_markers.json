@@ -2,10 +2,10 @@
   "run": {
     "config": "limine_test_terminal.conf",
     "cmd": [
-      "exec pointer_test"
+      "exec /app/pointer_test"
     ],
     "command_actions": {
-      "exec pointer_test": [
+      "exec /app/pointer_test": [
         {
           "wait_marker": "[POINTER] WAIT top-left"
         },

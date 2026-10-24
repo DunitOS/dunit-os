@@ -1,0 +1,11 @@
+[package]
+name = "pty_args_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libdunit = { path = "../../libdunit" }
+
+[[bin]]
+name = "pty_args_test"
+path = "src/main.rs"

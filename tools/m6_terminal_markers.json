@@ -1,0 +1,20 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/pty_terminal_test"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[TERMINAL-ABI] child geometry, queue, dup, errors PASS",
+    "[TERMINAL-ABI] native PTY ioctl PASS",
+    "[EXEC] /app/pty_terminal_test returned code=0",
+    "[TERMINAL-ABI] 32768 bytes delivered without loss",
+    "[TERMINAL-ABI] inherited PTY stdout OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[TERMINAL-ABI] FAIL"
+  ]
+}

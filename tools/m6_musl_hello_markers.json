@@ -2,7 +2,7 @@
   "description": "Dunit musl port (M6) — first static program linked against the ported libc. userspace/ctests/musl_hello.c is built with the host compiler against the x86_64-dunit sysroot (toolchains/dunit-musl, built by build-libc.sh), using musl's real crt1 + __libc_start_main + __init_tls + the native SetThreadPointer, and calls write() over the Dunit syscall. /app/musl_hello is launched from the terminal; its stdout is mirrored to serial. Proves the ported musl starts and runs on the Green Tea Kernel. Run: tools/qemu_test.py --build --markers-file tools/m6_musl_hello_markers.json --post-boot-delay 3 --settle 3 --timeout 140 --boot-timeout 90",
   "run": {
     "config": "limine.conf",
-    "cmd": ["exec musl_hello"]
+    "cmd": ["exec /app/musl_hello"]
   },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "the system booted to the terminal", "source": "kernel/src/lib.rs" },

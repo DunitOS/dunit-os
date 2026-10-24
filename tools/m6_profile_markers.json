@@ -1,0 +1,32 @@
+{
+  "description": "Native static profile: atomic exclusive create; reject unsupported flags/actions/attributes/cancellation without side effects; PATH spawn; 100 generations of a three-thread native futex barrier.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/musl_profile",
+      "exec /app/musl_pipe",
+      "exec /app/musl_direxcl"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[MUSL-PROFILE] flags, pipe, spawn refusal/PATH, cancellation refusal, barrier OK",
+    "[EXEC] /app/musl_profile returned code=0",
+    "[PIPE] reader got hello OK",
+    "[PIPE] reader eof OK",
+    "[DIREXCL] rewind OK",
+    "[DIREXCL] excl create OK",
+    "[DIREXCL] excl reject OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[MUSL-PROFILE] FAIL",
+    "[PIPE] FAIL",
+    "reader FAIL",
+    "reader eof FAIL",
+    "[DIREXCL] FAIL",
+    "rewind FAIL",
+    "excl create FAIL",
+    "excl reject FAIL"
+  ]
+}

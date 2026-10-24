@@ -1,0 +1,3137 @@
+{
+  "schema": 1,
+  "upstream": {
+    "repository": "git://repo.or.cz/libc-test.git",
+    "browse": "https://repo.or.cz/libc-test.git",
+    "canonical": "git://nsz.repo.hu:49100/repo/libc-test",
+    "authority": "https://wiki.musl-libc.org/libc-test",
+    "commit": "7b95dfa5f5d5ca4d949221e0228ccc290bacc14e",
+    "license": "MIT; full math vectors have additional licenses and are not vendored"
+  },
+  "inventory_scope": "All src/*/*.c, exactly the root upstream Makefile SRCS expression. Common support sources are explicitly classified. Nested math vector headers are not standalone cases.",
+  "vendored_files": [
+    {
+      "path": "AUTHORS",
+      "sha256": "2ef0cb2715caf396241a4ee9bb0f464424549166154e5fafc74a8d5c1bf75f02"
+    },
+    {
+      "path": "COPYRIGHT",
+      "sha256": "41b8f2e2706012eb534f89e72ff547308cb81dcb9acf077c40a9058a7c06088d"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "9f3be4ecef521fdd89c71dbadf3bdc7d5442cb80b536a74af496cedeb8bc80bc"
+    },
+    {
+      "path": "README",
+      "sha256": "89cf6dcd128dab2af83f39651281aef136af2951230e276b3a72014e31b0adf5"
+    },
+    {
+      "path": "src/common/print.c",
+      "sha256": "efb1ccda4d9de7c83528838eb60357b6e4cf82da14dfaf79c3b68ea866da55d7"
+    },
+    {
+      "path": "src/common/rand.c",
+      "sha256": "7c3ada9f1e3ab094d6bf71021c40f790f81b38f4e609bb69e69fcee1242142aa"
+    },
+    {
+      "path": "src/common/test.h",
+      "sha256": "ed618763ddd503dc076f103c4d03c6f03229900f78b7282cf03feb104b58f85d"
+    },
+    {
+      "path": "src/functional/qsort.c",
+      "sha256": "f38f28778ec58be5beaa6755fdbb0c17e8151925ceec5ab83c0080975ae61e48"
+    },
+    {
+      "path": "src/functional/snprintf.c",
+      "sha256": "9c75c6961a1d154af62609a8a22ec98e2b8ab9b0146f8b2c61483cb4dd6a187d"
+    },
+    {
+      "path": "src/functional/sscanf.c",
+      "sha256": "89135e466cc90e521fbe947fd9d08cb3cb9daf14b6304c87edab52ea4cae63d5"
+    },
+    {
+      "path": "src/functional/string.c",
+      "sha256": "c804cf25cb526bb457820471ce1df87c7971877529e0624785a7a45214df3b56"
+    },
+    {
+      "path": "src/functional/strtod_simple.c",
+      "sha256": "6082f3b00ebbc33767973121c43968802e4b67658ce903a3ec790e4e5f998581"
+    },
+    {
+      "path": "src/functional/strtof.c",
+      "sha256": "7892491e285ddb0857a84c73df9580b634ca2b6616531523c39ba3a83d084f32"
+    },
+    {
+      "path": "src/functional/strtol.c",
+      "sha256": "fdb61137c77a406cee78a0aaf383f5794d519e49a9b6c2bfba9a9452bdb9d1a8"
+    },
+    {
+      "path": "src/functional/swprintf.c",
+      "sha256": "54f6f1daca5fd550eb005881f6aa6acfe5426b8c978fa33864482c9da59ff591"
+    },
+    {
+      "path": "src/functional/tgmath.c",
+      "sha256": "7fb2a0b49aef4f55464cf5dc8c438ff460f16f254d24bdbb3f09773265207f9f"
+    },
+    {
+      "path": "src/functional/udiv.c",
+      "sha256": "f8c55a0096489e1f65d0323e6b82a6a57b8319c76e067c1226d0ec7bf313f119"
+    },
+    {
+      "path": "src/functional/ungetc.c",
+      "sha256": "dbc960a6930ed014e2cea97c212ad7f3b24a22ea5ebdfb277d568f303ecbf006"
+    },
+    {
+      "path": "src/functional/wcstol.c",
+      "sha256": "b57104027fae4287572e0aaad658caedfb9873be11915ff4616504693c8caa87"
+    }
+  ],
+  "cases": [
+    {
+      "path": "src/api/aio.c",
+      "sha256": "a88ea395febf23e796708ce0ffc3dda4020896534807b97c84244023a3b966e7",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/arpa_inet.c",
+      "sha256": "18f48ca48301bc93ee94222a6ca9af4b004dc9b7f30c74faf28b9d72e892a5ae",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/assert.c",
+      "sha256": "468ef9ec2aad6cf9f3423a308ac2abb4516fbcedb67bea4d4eec15e342c51fc0",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/complex.c",
+      "sha256": "88d3e948ffffc01ae310b75ed06e1b966d49ea0a381298efb167c2f5c4c16a3b",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/cpio.c",
+      "sha256": "9a1ed7b6a4e1ff70feedc1b82bdcdb16bfb9dba13552483d9754e137a6e84658",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/ctype.c",
+      "sha256": "e33f67a2a735c295da380f286e9cf1b1aecdce7e5499fa6b6222e1201c2bbeda",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/dirent.c",
+      "sha256": "371b9983c1372a28bd37bbcf8ea16c1d919fecd11f8ce8c4fb7ff0ad81f5a8c5",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/dlfcn.c",
+      "sha256": "f6e6584d49ef5be09449a64ebd07582a5aafa79c336cf54cbd88c457e3d431bb",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/errno.c",
+      "sha256": "0820b96626d49b9091b5f93996e29fabdbf26430e04e4f13b5f1fcee24c18231",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/fcntl.c",
+      "sha256": "5f2d1517f776b5fa8dd18e84db5aaec58e3ef7f05ba037d558e83a896cee0535",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/fenv.c",
+      "sha256": "c3ab57c3a6b760b9606c01b614cb73d694e4d8e3a738df6ec0e7b61e3bdcdb25",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/float.c",
+      "sha256": "40c8b7ffe335063149b919277a08241e279b9fa8d2fda69a919a12628a50ddd3",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/fmtmsg.c",
+      "sha256": "9c83562bb57e6a967dc9da56e959da51f06f639c93894d12b6ec664a626a4d7d",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/fnmatch.c",
+      "sha256": "3b72eb0647b9d166ecbb80f4adbfc59e0f10924cac53c0db1aa15e3c38922aba",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/ftw.c",
+      "sha256": "764a35f6b475ee70decc6a936fedfeb5dc3a5328a9212155314691e2a6bd9b0b",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/glob.c",
+      "sha256": "1086f7fa53911d290eed3869d5a7eaed0eeabb62951c5f59c90ec99a90d73043",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/grp.c",
+      "sha256": "18cc5d30078fc38efaf5888411c40cf8152fce3ba3bb7a699988bc342aca5b64",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/iconv.c",
+      "sha256": "9fde66adba5a4b3d1edf9c76e6d7d6160b6336919a9186d13e52eb956777746e",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/inttypes.c",
+      "sha256": "ac4c989b58ee45fbd86a800239646cee8e3bfd7baa19f01939964e52c2ffc9e1",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/iso646.c",
+      "sha256": "d03f40a4ec27b1eed7896376a2d278c71a013f9dab7db33826c2e5099add322d",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/langinfo.c",
+      "sha256": "6c99fe7bd111dc7b8c572d3525cb6553e3ca44ed45c6422651c4bf551e9a0621",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/libgen.c",
+      "sha256": "584ff348ba833726d72c86aa8b2db90ec846723e293bf6403e2b486a2fe975fc",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/limits.c",
+      "sha256": "f4f4822139326ed2a1e81e1f04632f079cab725393a1af147a6b3a04903121cb",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/locale.c",
+      "sha256": "21819e85243ca9ff887e6fcc8ebf1311fdd024004250f9e0be1ed7e8eafba6e7",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/main.c",
+      "sha256": "bc8bb8e433bf65214540115414c821c904b2a30d60a3ac0424bf9b77a00024b7",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/math.c",
+      "sha256": "f7759018bcd82d37af6378c4afe3828cab1447b21e66179259b8cca433c77a63",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/monetary.c",
+      "sha256": "dcc5029f917c4d1ba5220ff5f9bf205e7b5bbeeff69864e2eb35072755949e37",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/mqueue.c",
+      "sha256": "81ab09c3807f319b17bcf588e3de44d6ae2fa20c6135e34c90b9101ef08c2540",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/ndbm.c",
+      "sha256": "d0976a8c4151209c55ba8868d76df90ac30537019053d78e957cfe141303beba",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/net_if.c",
+      "sha256": "66b89bb66f3929aad8c35c37a4d305450fe9606c7c8c07ab7dada0eb878fc3f8",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/netdb.c",
+      "sha256": "37ab7104297d61d0d7b6894dbe489590249370b83b4aa4a98fd9372287e2eda3",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/netinet_in.c",
+      "sha256": "88e4eff5f738e048fb8e30e692d7079dae9b9aeaadb18ae99a1a9d6b55c5713c",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/netinet_tcp.c",
+      "sha256": "511cb3e1bde6b72448843be411124b7849a8eb44e5ea7df5f19eb86b2dab5b29",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/nl_types.c",
+      "sha256": "1d03520b69f4790e8ad0f693ff8560988edc72efc667fb8a30e627b0b754777c",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/poll.c",
+      "sha256": "10cf47600d124449b52a15609e6f598f74e9adb7a8fbfeddd53266b9f90ed01f",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/pthread.c",
+      "sha256": "54c92891c842c9d2f7456222907b4dafd7e5f962eb863668ed78c391bb5cda8d",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/pwd.c",
+      "sha256": "cd38df95fc8899f08a6195b7b6dccc2bc8c74514ac724cde845f1e6d8c655bdb",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/regex.c",
+      "sha256": "c08cf85621b41c9c2b7ff33d1c60b204e506043cd20fc8ff0fa11f075e85f65f",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sched.c",
+      "sha256": "ac6678e345f120cc64a390a6fee6a2f03c7858599ecfda15654362a5d01f4272",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/search.c",
+      "sha256": "e5cf751cf6ae759e8b8c715a93e9bc12ccf5f80aea9f71c02e00bdc84f83c474",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/semaphore.c",
+      "sha256": "d4b00b500e4e6fe123485414924ba50f1b946ab6552f914e1482d8cc31d43b80",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/setjmp.c",
+      "sha256": "c709a9b5e3d416b9a785cb167654fcbaeef03a07fc697c1ee9f67c59bc15cfea",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/signal.c",
+      "sha256": "0aa51e9df5d0c3d2ca711eb4bc19882c878e3002f4673ee49b25a51d5a395c35",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/spawn.c",
+      "sha256": "9dabbe4e30265543b439d6c25a370eecb8fdb5c3cd2fb6fcc9affce46ee32f32",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/stdarg.c",
+      "sha256": "ed42f5afd69d85a37a618d6e19551f25de7002696769b0035df6891dd7f4f0c5",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/stdbool.c",
+      "sha256": "dbcc81f021ed9f12b66bb50c7a7775c5d824266ecebebf0acf05dcb22e33117b",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/stddef.c",
+      "sha256": "da8a8e8e75c9f29aba08cc98179f79cf16f548aa230102e020bf98f927baa4a6",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/stdint.c",
+      "sha256": "0e2f11c7f6a9ccff833771fb6b80fa30ea02a03d2cfbd5ac281ba6a6411ef2db",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/stdio.c",
+      "sha256": "2b0e1e272c4fa0a3b886e753ab22857d207a8f7d73688955557bedc2eb721aed",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/stdlib.c",
+      "sha256": "b5c6e8247cf367284ca791ff2bd785a3c745ddc69d7bd28626055ee499e0a2bc",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/string.c",
+      "sha256": "66635831d9222144694efc90bb9d620d6e37f413d9e0d15e5b8067861c45e0a2",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/strings.c",
+      "sha256": "e0b2f5bc17d233e6413d8ad55317f9b431204f84fdbb6384c9b65b454bd44b1c",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_ipc.c",
+      "sha256": "d3e611cf7e0e734eb6755d174213cef4d415c0ed305159573c01e3f1c12965e7",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_mman.c",
+      "sha256": "eae5fe1c45704a74b1731baf50ed2c558bf0f02230a2af0e63d06d9ed74b62d8",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_msg.c",
+      "sha256": "dd1da733ed5b541e9270664e2445cbde394daa1022e7fbc0d2fc555795b5fc60",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_resource.c",
+      "sha256": "59f2d5ab7c517960098e368b3e7aeec28ce4c9c00641e39ccf534b8a364ce3b9",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_select.c",
+      "sha256": "464060b8595dcaa5015d3b5c646828f75bab2f3f3687d231d0555d0fa847f275",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_sem.c",
+      "sha256": "b48bffc5f93c59e0528d129e36e07e18b40270218356540136ffaa40bd6c1dbd",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_shm.c",
+      "sha256": "fdf464f590a9438cc26830e13690e17ad09fd8601acf0de5926aec0116ce0d19",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_socket.c",
+      "sha256": "1de03e4ebfd3073e3cd14057a94e3e84e85338cb78c9f7587373c78a453d770f",
+      "status": "deferred",
+      "reason": "Networking group; full classification and native run await M8 network integration.",
+      "owner": "M8 network + M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_stat.c",
+      "sha256": "db51ea9181b4796070452a24b7dc7e41ab836bf022561d233a45e567ac211107",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_statvfs.c",
+      "sha256": "93419c3c935daa6152a3619edabc5f11578fa984a90421aed4d1b346aa151bcb",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_time.c",
+      "sha256": "8ccbb1e1b09a62222bc58649d5a0b630b74f7ce466084ec531308b461d1ba3f0",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_times.c",
+      "sha256": "92e019a41a24fa09d75ff8ae3f449738f2f142b5219ad906957f476e2ab3ee36",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_types.c",
+      "sha256": "d1f1e23361790e78a3d91d58803e596e45fcb9dbecaecdea9fa016ae3166359c",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_uio.c",
+      "sha256": "e70b58b9efde75553d598b37b5111c5d0a778737953e86c03435b60e55d9d314",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_un.c",
+      "sha256": "0eacb81d0afad240b0089d01a0016ee73432fb2129c15014c419887cf9b968cc",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_utsname.c",
+      "sha256": "2c2fe57038018e5183fbe558e8ae41fc9a4ca3ba9d71a32037b30c3137424732",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/sys_wait.c",
+      "sha256": "52453f9f9a599739ccfa4ee1466ff052762804a9b24eb25377e2b87dceb5c4ca",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/syslog.c",
+      "sha256": "93abc79e27985e552a029a3e27b1a16d245fcf5ce3e944f4ab8a234420407c23",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/tar.c",
+      "sha256": "497534052f5ddc32c7ac23bd13f2540e35b42042556c9a2f51b3a05f1cc72e43",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/termios.c",
+      "sha256": "26e4fbe5077adb5afed2d3091b9f82b94bbb3965f5879876b37486c18ceac541",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/tgmath.c",
+      "sha256": "ad9bd173b67875c5f9ad5bb2945a0d59eacdac4aa78011c859c94320510e5a2f",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/time.c",
+      "sha256": "0e827f3c337414b220ace2bf54d5e92679365f44ddd7b1f8d87099bf57a7e15b",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/unistd.c",
+      "sha256": "f377b2604ef86f12f69d8a1a4af2f2c9821b1a464ef3b93dc30051401eb2fa76",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/utmpx.c",
+      "sha256": "cc9eecaa65442647607c9af715dc853dde6ca5b10d5a592180c8e6fb3f922b71",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/wchar.c",
+      "sha256": "863825279037abde76f3c4e3f85bfa5c29a304419d602fb532ffbf179f94db47",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/wctype.c",
+      "sha256": "d57f1248a532524b968ff1106947e2dfd3aa523289d4e5a2a5238b7bb71c6043",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/api/wordexp.c",
+      "sha256": "15f2f6e78983340613d2053bd067b9ad3573f3289e5b9e61effc4fc7419e2e89",
+      "status": "deferred",
+      "reason": "Compile-only API conformance suite; requires option-group generation and separate compile-result accounting.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/fdfill.c",
+      "sha256": "af01ca5924ea127f3e1b29dd36192aa7921dd322244d4b7bac66aa683c3baa4f",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/memfill.c",
+      "sha256": "daac33444ee587ac2307038e65b01d7fa3fe39a2e6419482830aca7e3baf00f7",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/mtest.c",
+      "sha256": "45fe53589079766e0665dbaebc60d48050210d429d3097359355bfcd1edcb0d7",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/path.c",
+      "sha256": "abef95abe2bccd267bb3008d538f0cdc943a120c1ea215eb846cde50ab8bafcb",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/print.c",
+      "sha256": "efb1ccda4d9de7c83528838eb60357b6e4cf82da14dfaf79c3b68ea866da55d7",
+      "status": "support",
+      "reason": "Unmodified upstream diagnostic/random harness, linked to included cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/rand.c",
+      "sha256": "7c3ada9f1e3ab094d6bf71021c40f790f81b38f4e609bb69e69fcee1242142aa",
+      "status": "support",
+      "reason": "Unmodified upstream diagnostic/random harness, linked to included cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/runtest.c",
+      "sha256": "53a4d8b22f07651aac3f2fb436211c2cf12d33a0536bdee9e82c9d2b44f9dd22",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/setrlim.c",
+      "sha256": "ba0708a30386d0a4815ac141d8f5041d4eedb7c42e376231b48087733857a0d5",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/utf8.c",
+      "sha256": "d8f014046c23c2076929b21fd8c812f6c0efbb710e4c4dd969bf529143a98ff9",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/common/vmfill.c",
+      "sha256": "9ab68e8151176c657685636e8d1d223ecd532440cd1e566fa5d7c6359f301ad4",
+      "status": "deferred",
+      "reason": "Additional upstream harness helper, not needed by selected cases; integrate with its dependent cases.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/argv.c",
+      "sha256": "be05bf2430b1be467dd41ff8543723ce9470330a10560f4250672421fd3a736b",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/basename.c",
+      "sha256": "0d2212004b7851e0eea56b2ca103369d91c3f399a7a5906f20cde90e2417791e",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/clocale_mbfuncs.c",
+      "sha256": "726389a23bfceb466e9ea90ea125f3a652ab9eac60293db480b365bc3d64944c",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/clock_gettime.c",
+      "sha256": "2e042cdcd00cdb9b32cf94eb6309484138c2799960617d7cdf382343f71d856d",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/crypt.c",
+      "sha256": "d25b9d533b304f9bbae0c8eae8212196e431fdbeb18e805aebf667741235aafe",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/dirname.c",
+      "sha256": "d5068ad577633aa072d247bdaf31ab92f222e75f6c66ae2cca03db7acfd8ce05",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/dlopen.c",
+      "sha256": "c7a0ce9f0b8544144fcc785e9cfc505eaa85506b4856bd967287025a892b8462",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/dlopen_dso.c",
+      "sha256": "3ea1bb48a6c4d517fe3a52e3ab14908303d303546ce958cd9435d0aea5aae4c9",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/env.c",
+      "sha256": "ce70dd5c72e9f402863d343a3177d12465ae7695bdeb6e05a51f82f88a907d64",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/fcntl.c",
+      "sha256": "a0cb2d46a8377d995af334d9a21efc975d377f701d54b47fe44aa6e712287358",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/fdopen.c",
+      "sha256": "2fea2615fc62e3b283dac70c7b54479d41795a5f939626cfe4d109b54c84f70e",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/fnmatch.c",
+      "sha256": "c91a6b7dce4cd09f52b0fb55ccb8408ef2d8194320732a2e58725929940809e3",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/fscanf.c",
+      "sha256": "c82068858288b72d7bf3b82ac20f0773658a139d1b091b08bff1767baf8512e3",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/fwscanf.c",
+      "sha256": "bb1f982692b2bc8285058b0d20711285a824345590fdaf27a4db9f03712a9755",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/iconv_open.c",
+      "sha256": "9040a11c1cd037af09dbd8b9a459fe97b6b5d0b11fac9d281a8f7e59d15b3386",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/inet_pton.c",
+      "sha256": "59907245422d8f7d167658b03912b19eca793040ed7eac17ee0a30604ea6125b",
+      "status": "deferred",
+      "reason": "Networking group; full classification and native run await M8 network integration.",
+      "owner": "M8 network + M6 libc validation"
+    },
+    {
+      "path": "src/functional/ipc_msg.c",
+      "sha256": "86caed98c76a29b31193997312b54acc081426495dc66a4670bd06578242606e",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/ipc_sem.c",
+      "sha256": "2edf8722619a41dda6702f7f137d715c80619b6218b81695bbabc573fcda385e",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/ipc_shm.c",
+      "sha256": "cb54251d88c869287b02d03164c902c78df71dd5bc69e4bdffc7cfc142cfa1bf",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/mbc.c",
+      "sha256": "7f6ad74c723f2910491b1ff456579466254942f7726853c235e1af4b58d5caa2",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/memstream.c",
+      "sha256": "99276afe20af32fad98bf10b3c8720b55b54017e2c8749041fd68e5d0c048d65",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/mntent.c",
+      "sha256": "e571778b35935c5c28dc9dedace603050fe9b231322244bee9156bced944b5c7",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/popen.c",
+      "sha256": "cd11975f2612f44f51e7c86fa0f086416e46ebddf0609d96c64fc0711fdc08a3",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/pthread_cancel-points.c",
+      "sha256": "c3dab750cfd2f64d60bcc86b3edb14b47a552f89f50fba5b829632bf1c2413c0",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/pthread_cancel.c",
+      "sha256": "1cd812e5a9d99fc8cbaee1d9eaa03d205273dd10addf99c49f42b39f5b4aa08e",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/pthread_cond.c",
+      "sha256": "ff927892b30330e90560d5625b46b475bde13c49709a9a4a153bb4e53f49c0b9",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/pthread_mutex.c",
+      "sha256": "f3c55b9b50098243d82e80a92a38d97d346c4cf71af1ff8d52c95e1892d3e1ac",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/pthread_mutex_pi.c",
+      "sha256": "7bdbd63abce3377067d6cff6cbf1a0da44ddc1b9bb71e931b1e42897f277b5a0",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/pthread_robust.c",
+      "sha256": "a01f5e85f830fc493e231bef6246a295731cdf197873ac430d2c0c81f3fbbcc1",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/pthread_tsd.c",
+      "sha256": "d200d49851c7de60049af62ea6c4ef11d430a594920706618c6376aa5a5c47f6",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/qsort.c",
+      "sha256": "f38f28778ec58be5beaa6755fdbb0c17e8151925ceec5ab83c0080975ae61e48",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/random.c",
+      "sha256": "9f59f3b6069494d19001b75dc2989d6770c67eb3c6bed232f45c8219b8590ef8",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/search_hsearch.c",
+      "sha256": "1135c75d7ef2fe5003dc162d587812fe9b72debc665e032db026e285b1525e32",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/search_insque.c",
+      "sha256": "955765757cae749700035e1d14158776bb60b6ac136218436c98c15a4a24411c",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/search_lsearch.c",
+      "sha256": "82fd53942b1b1fb94fe3c15c5639a243a079575733c7f085f9aea8c430bb9d58",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/search_tsearch.c",
+      "sha256": "8dad75a9530718f9ccb11c7615692f1b2a55dca4bff56b116f600f96d9616646",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/sem_init.c",
+      "sha256": "04e86db0d63d62fc394cf61d683b9d05a9052273913d5ea0c5f083c3cdfdcd26",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/sem_open.c",
+      "sha256": "2d0d398e4125de62121ed2174f8dba93d94c780e3dc44920789c338a2eb037d3",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/setjmp.c",
+      "sha256": "de9320694b8a6bdb2d2145eb7650590184240578dc1a3656a923fb95c096cccf",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/snprintf.c",
+      "sha256": "9c75c6961a1d154af62609a8a22ec98e2b8ab9b0146f8b2c61483cb4dd6a187d",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/socket.c",
+      "sha256": "0d4bf1f5a6030c378dddfa5efd24bdd10a8488bdde76cdddb06532c346b6eb2e",
+      "status": "deferred",
+      "reason": "Networking group; full classification and native run await M8 network integration.",
+      "owner": "M8 network + M6 libc validation"
+    },
+    {
+      "path": "src/functional/spawn.c",
+      "sha256": "c03e1b90a6bf95ea126ed536afd7777efb894a85497fc184595d5ed3e959cb2c",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/sscanf.c",
+      "sha256": "89135e466cc90e521fbe947fd9d08cb3cb9daf14b6304c87edab52ea4cae63d5",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/sscanf_long.c",
+      "sha256": "80e5b2271e111211ef5133ede862549474ee045721e0ce286b5273fac2b49fcf",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/stat.c",
+      "sha256": "1c95b10e9cc5c4f444c592f4f61c22e9da9b12c052e662b66c35e8834e63f862",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strftime.c",
+      "sha256": "a43f6f34638dd40a25b37d721efc914bff4d22d5f8eae4f6f7245984b48cd693",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string.c",
+      "sha256": "c804cf25cb526bb457820471ce1df87c7971877529e0624785a7a45214df3b56",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string_memcpy.c",
+      "sha256": "0efeabd24ed30a6eb05df80dd85c8cfad122cbe36f2ce8181571850c9c50ed21",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string_memmem.c",
+      "sha256": "b5da056eee27482fa9371354a3fe45695970b653c795fc6bdec4d207fb972f86",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string_memset.c",
+      "sha256": "6e16f2b27f603d3978070c8d6cdb3a1c6d08b5ed4f0ae8fd2e1219af3592ce7c",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string_strchr.c",
+      "sha256": "a443ecea4adecefa2085a98437fe908825b8d1e5f35bcdf4f2a94eba6c0ce505",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string_strcspn.c",
+      "sha256": "e1ecb338a60c021c0f6da29c006b1ee1b70bba9cef2c72cc20e0c2e7717bdd6a",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/string_strstr.c",
+      "sha256": "26bae147b913e78a531f1be98b60653f89aca3c2979209a79792691035769650",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strptime.c",
+      "sha256": "af24cbeb224b18937c7396ce38710df72f7e35ba896dc5603de2119d16cffe8c",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strtod.c",
+      "sha256": "68b1d17ffa5208b6085f13df463feef4b76ba8d6a378280c4cf6b4beeaa84bc9",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strtod_long.c",
+      "sha256": "bc456a6c096a0a719c19e8b0711ffb131f3193cd6f8b7040c5fda7b538e0f2e3",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strtod_simple.c",
+      "sha256": "6082f3b00ebbc33767973121c43968802e4b67658ce903a3ec790e4e5f998581",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strtof.c",
+      "sha256": "7892491e285ddb0857a84c73df9580b634ca2b6616531523c39ba3a83d084f32",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strtol.c",
+      "sha256": "fdb61137c77a406cee78a0aaf383f5794d519e49a9b6c2bfba9a9452bdb9d1a8",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/strtold.c",
+      "sha256": "759de4dc8da3c415f972327acbc266b681a89a3f6f2b1e02e3f4d867d08c6ff8",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/swprintf.c",
+      "sha256": "54f6f1daca5fd550eb005881f6aa6acfe5426b8c978fa33864482c9da59ff591",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/tgmath.c",
+      "sha256": "7fb2a0b49aef4f55464cf5dc8c438ff460f16f254d24bdbb3f09773265207f9f",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/time.c",
+      "sha256": "692ff88135501d14dd4aec2d8aeb18aa58a0dfbe8d13315b68d82fbe12ebb5b2",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/tls_align.c",
+      "sha256": "533c12959f53f741eaf07d0e22476f19b772f4a906817da0724e6737f5c57cc3",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/tls_align_dlopen.c",
+      "sha256": "4957ecb257e8c4582ce425d0ae1f21677bd8f37447b4951a8d1159f20a5f5b68",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/tls_align_dso.c",
+      "sha256": "9ec8d7183da68df535f93cd4080b431a041629a02557e85bd0fd5e18d2e909c7",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/tls_init.c",
+      "sha256": "13e3a2b4181277554082e48f5504d6107b6b173cba6752d874d9c5f5e9ffa887",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/tls_init_dlopen.c",
+      "sha256": "2fe80011405bbe4ab58a300dca5012dc5c481a2570ddd942715a6b1d5cea9ab8",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/tls_init_dso.c",
+      "sha256": "fa06bd727e163535542cf0887d27d5e09bd2937ac23590118a0d807b892517a4",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/tls_local_exec.c",
+      "sha256": "93c13c54d8b26ccd580240d7a11b47a701f22ac227a731b9392d842a6e3fb81f",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/functional/udiv.c",
+      "sha256": "f8c55a0096489e1f65d0323e6b82a6a57b8319c76e067c1226d0ec7bf313f119",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/ungetc.c",
+      "sha256": "dbc960a6930ed014e2cea97c212ad7f3b24a22ea5ebdfb277d568f303ecbf006",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/utime.c",
+      "sha256": "5d61cd0fe8c71e5418f55a7f21a64d48a07ff3c8cbe90f364910f40dcd53216d",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/vfork.c",
+      "sha256": "8d93cb5d4073a099197859bcdcf30afe72f9bf2266748c844dcecc24e05208d7",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/wcsstr.c",
+      "sha256": "d4e4089e0ba33c964f7a2954ca2acf848b815a9254322002d14779d065534d94",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/wcstol.c",
+      "sha256": "b57104027fae4287572e0aaad658caedfb9873be11915ff4616504693c8caa87",
+      "status": "included",
+      "reason": "Original ISO C functional case; separate native process and unchanged upstream assertions.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/functional/wordexp.c",
+      "sha256": "e3e310de1a73bc30273ac5f4711492817a2f26a5750795c9a3f0be42645871c9",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/math/acos.c",
+      "sha256": "16a6bb14e4907dfacdee418c7a4cab27d5ffbb9e0c4d0db90a93958bbab94d83",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/acosf.c",
+      "sha256": "c3e05d196a990612c6cc280ec0bdb5d1c61575390867c7056127177dc2e7c5d5",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/acosh.c",
+      "sha256": "f2bc8aa388a7c95e8172003b96b09cbdee428b3d1b81211b0bc4cbd5f4d2c912",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/acoshf.c",
+      "sha256": "2b147b387475f0e9bceef24627d0bd83cdde8df11a5f65da7ac4d90421d51fce",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/acoshl.c",
+      "sha256": "222513753d37965a244d17e8e1317b26992f20c984843ef8ddadb43ca00b0755",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/acosl.c",
+      "sha256": "527956625da7fc003b7e50b4305c5a563183924953e0ab250548f31a2698efe1",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/asin.c",
+      "sha256": "a07d88a493585adcabf36210f66a59fb44cbc83ec418c143ef9ebb3d3e5a5a78",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/asinf.c",
+      "sha256": "3546c78549a32deb92f2470323925eb15d3f339dfd53f5018f666dc67b668a2d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/asinh.c",
+      "sha256": "79986782e56207ca873510d9fc46fe429c6c0a770140722169c4e5fdf1b3c076",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/asinhf.c",
+      "sha256": "2ffce96162cc4fbe69801ce9b34ab613358bb435989014eda429e1a172f27bed",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/asinhl.c",
+      "sha256": "4857218ae3ff84a193b8fb50748609aba66f1b221996ebb2b26c64ba0d48888d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/asinl.c",
+      "sha256": "f63bf5826e13d4a1ff939da8c684b6db3982fd016e9911b2f3f1010347802a71",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atan.c",
+      "sha256": "abe7e7de2fa0926cfb0a0305c4c2d383d137d33c034b22b4c74bff48a502cfb0",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atan2.c",
+      "sha256": "e1a6fb848d22f678283fd667d91918d341e0feee158591b60e59296e64ab6989",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atan2f.c",
+      "sha256": "1d0ccb371f23afe8f9b0205419e98a1b97bdd4069439908593513d6fe6c610c8",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atan2l.c",
+      "sha256": "aaa7f32ff2f78eb631e314df23366b2b82ccdf3c2fc5fbd7f96d23c522b9a177",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atanf.c",
+      "sha256": "7eab052b8603f64c28da0a2c81f4a1edd3c90277cae315622a2388ca785cc90b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atanh.c",
+      "sha256": "5c21c23e0fb923c03653afb1486242c2ccc4c2bc231917278e861b6297ca57c1",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atanhf.c",
+      "sha256": "0eebc648da525adfe24c11f4f85cf591c6601aa360a850bade8c87c27f1fed20",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atanhl.c",
+      "sha256": "d2c498b6083f4e24c25a96bc1bec9145f73905d6c070cd7208682522f68cbf33",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/atanl.c",
+      "sha256": "b3df73161f6622e0ed24d543ed6d3e0feb5f57c8eba35d1504e256d099b377b6",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cbrt.c",
+      "sha256": "bdac4f50c70edf687d1e7c2fe33db60a0147931d0cda067c36e412689a0cafb2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cbrtf.c",
+      "sha256": "e9ee989e3da5c36402aa77853bc4d0d83253b7893764ee17d68954cf46c9a43e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cbrtl.c",
+      "sha256": "c097bcc6153fd43f5211b5404015200b7dbb46f1cfbc747b8786013179dc6b77",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ceil.c",
+      "sha256": "ead4d7c27b3dab3508472c382f05b2cdfe961cf30222e5fd12f071408374bed8",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ceilf.c",
+      "sha256": "db879ba7b1d6664bbf9ec4de5d7ee54337b4bb345054d2eb20538921f7e5b942",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ceill.c",
+      "sha256": "4dc4cff2ff3b6dfb5fb51538af632ea820209d87227a9dace775d38a3a16b1dd",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/copysign.c",
+      "sha256": "6be2e243e93b0e5a264436335ffe9cc470330ad377beb76221b7cbe30fb46027",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/copysignf.c",
+      "sha256": "f71f363354e1cf9f66f79f15f39e96fd6de46b5061cea1291880a2cf79eb8667",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/copysignl.c",
+      "sha256": "389fdaf8b58e6eddad91f911dd911d0a3c628036f602abc7878e64df2c2b68be",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cos.c",
+      "sha256": "bba6f0f357237080a44b66f1c6d3fc89ffbb8674349170a48a940b3d5cf7edc4",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cosf.c",
+      "sha256": "0c528ee5cb5097ada190288c383bd060648e0372d6fe4b1f9e9b6aec6785c3e8",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cosh.c",
+      "sha256": "9f0a910a354c8b7f197f3692824a8bbeb25effee8fc1cf9b27abbc625adbafc2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/coshf.c",
+      "sha256": "bac61adef0d4ca0900d409fee95ed2bfcd65e262978811d92987a833618fc12f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/coshl.c",
+      "sha256": "b8cf0333be49f7604b57f4a59c2e37c08736e46b798a275d0439686b64021817",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/cosl.c",
+      "sha256": "2861c24911b3eb05a0e19541f3b14b76b783cc55324007dde40a246d3ee58787",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/drem.c",
+      "sha256": "24c2633ef10e0b6521a26114fa4be712cba29571b60770e983d9571aadbb2b88",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/dremf.c",
+      "sha256": "0ebe896c11dd45cc5054630ac67588aa547ff72948cda31575673539a4c8456c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/erf.c",
+      "sha256": "781ba1cae072b7a5b6498ff1b976a14bb9e74e5481be8d73c33fd2381397df8d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/erfc.c",
+      "sha256": "9915a4397fb8e42c534e009a29cf0c043764ae55535c0f42cd13aa32a58dc86a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/erfcf.c",
+      "sha256": "0930bb99465ec3b6354d5e1b0d976f2a103d862b8c33d39da65ac45f58f76d82",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/erfcl.c",
+      "sha256": "6a4861648e2b04f9aa76afad1ee0f1b8a2d54db702c49122083d0581439fafd9",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/erff.c",
+      "sha256": "4fdcd3b694e3c49203eb59ee5a07f5cba8daba51516965fffbd7ba3a39b64cfb",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/erfl.c",
+      "sha256": "fb9a358b6b8e12a3b5b8ba826672a93b56f072527027d00ff026853b5fa26e44",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp.c",
+      "sha256": "f7dc47fbbb970eb6563b2a44f097ac9695e5c44ae5bb8ac05d0cc526d8db8897",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp10.c",
+      "sha256": "e4228ef02fb3eae781970856be7a4abcbc1d4f9d717ff2a977410d1b88e8bb81",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp10f.c",
+      "sha256": "930afc28703efa343f484907e98ddab2898027cefd8f33e36f4cd15dec21e08c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp10l.c",
+      "sha256": "17d71a623c554a5cecaebdc950b22d6bab3255e994d09c66778ecfb1a13686b7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp2.c",
+      "sha256": "0497e4b776ad6a7782a40e21f609d67e9f4048f10e6d404159469efa7f717f8d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp2f.c",
+      "sha256": "00a8c9f1df3911e0dd664739888a394e682a6d48e7d5bb005820ec81b08dccd7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/exp2l.c",
+      "sha256": "772bc09a7813860e09c8a1f88e69c4d9efca1f2804f351ad14ed4db1460fe578",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/expf.c",
+      "sha256": "caab809dd5deeb4914788a35e5af7e1eb8815b46debe9d71f133b8eaf32fad25",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/expl.c",
+      "sha256": "65aa75291ff3ddc296dde1d93934913c6abd6d81d5af67dbb8bde2d67291627c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/expm1.c",
+      "sha256": "d33c4f9a40da8bfc689234aad5ff279d00ad76451a7fa4495c9fbe0d7aa87cdb",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/expm1f.c",
+      "sha256": "7d6323b50698dd7728065a314e9e6a7101873ae935cc1ea0143bf738c65987fb",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/expm1l.c",
+      "sha256": "a4883cf0cafe403d69b601c3cd7935590bcf01fa904508262cd9a5771fd36d91",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fabs.c",
+      "sha256": "6219120fde2871772a24a8828af2a18e7e05dc36640fa05c3c9dd5e88a054f0b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fabsf.c",
+      "sha256": "02f5d51b9ccadfde9d7c9dc60e59f07f8d9f705fdec3712c67835dbbfd118044",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fabsl.c",
+      "sha256": "275121dd3de97d00f7e93a3dd6f4f0b4ea6b3080e7302ec6980ff4c639bf7bf5",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fdim.c",
+      "sha256": "cc560d3fb59ecf2919b6b7c026478c1ecc1aed3c1d5b14fb67f48c5ff461f7d7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fdimf.c",
+      "sha256": "3b6def864370ced09082079cb5c2d0269e527c3e11f912bb505a8850e9003438",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fdiml.c",
+      "sha256": "7927c0b4233df2c21fef34c811292d148c73a07c390347c5b454b885debfaa8f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fenv.c",
+      "sha256": "80bb9d0972756c8334e237e888aac8ffb3e25e294b5c28319f54644e0323188f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/floor.c",
+      "sha256": "2f0f0c9fe7d42fbe9580c7fc3c5359fbfcb5d18b414fedc3d8e0546618762870",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/floorf.c",
+      "sha256": "ed0fc15c47a375a6b6ff43a0895492061249ceebc43f2d7d30381d3bf8481847",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/floorl.c",
+      "sha256": "0441fb3ad62e96e0b08d049f3d108f60b8dfff9fb535c53874eadf36a28d0b33",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fma.c",
+      "sha256": "f780674a6367cf387bf4fba82f04399bd17615f51ab222e176808da7ba904448",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmaf.c",
+      "sha256": "a9986572cc7a8fcf6a56a88ca10a57867be22fad2442b9b484489badb21498d3",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmal.c",
+      "sha256": "d061e49f12822c9adba55a05dcc14bae235258f6584d9251c0f673b719c96a7d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmax.c",
+      "sha256": "1561e6c60538486771ed7014f322d9dcb71a9e618010edd0c81b1ee78221891b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmaxf.c",
+      "sha256": "fee58d33683c7b8c1a874b810062e1e5b7d9b6225f2784d23d404e6b35c6858a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmaxl.c",
+      "sha256": "850d9fd97f70d70f59a5b3e25717d1a73859e8164d22c1931d9cc535c88ab4cf",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmin.c",
+      "sha256": "57d95903bb6835735c12a3657fcad1feb5f7b02b9920927167ed0118a0811888",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fminf.c",
+      "sha256": "9c92c6f4b8a7e7dc6251270eee76043e6cf3b979aa5abc5728a8d620b676503a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fminl.c",
+      "sha256": "de95283695c41183e8a25a745ccd111af1e45643d502a0ee1b67f505e83b22c7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmod.c",
+      "sha256": "c13f1fb216f30ea23e8450be1dce7cd124cb8e188f758c87274893f4cc6609a2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmodf.c",
+      "sha256": "0fe9cc5fa031f86df978cef3988f4303938d66cf061669c58c6446240abc52b9",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fmodl.c",
+      "sha256": "e7c3eaa6ea60627c86a3055c0754d398ef0d44f458eaed7dd0d819b0ba528a2d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/fpclassify.c",
+      "sha256": "953ab9c8b0ca454de912ac89d80d5e840b3b92064abd7d94a6018e2ca1d2516b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/frexp.c",
+      "sha256": "ea576955c0cc1c8ac111cd96f07860ea8fa57c53fc8f2e6152003e626a69846a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/frexpf.c",
+      "sha256": "e9136ff7cf90023d22e2661d4b585cae065f4833fda7cde5f30617f8e3e95a3e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/frexpl.c",
+      "sha256": "7d944e9bff86526e828b03ba28d41b163e31abbca14ee4e2d53230f11f88941d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/hypot.c",
+      "sha256": "aecc8c85d7655473bee6f3de166b4421c885701d1ca230db34ebc0c77d7f64d0",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/hypotf.c",
+      "sha256": "e3470a1451575bbfdca7457e4b7a0713ba94b52fb2c34a3ae623e7eab8b4b45e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/hypotl.c",
+      "sha256": "4cbc7faaf2719fbee89e9f5934db602c3f657207b1d43a34fcfb39b18a1040ba",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ilogb.c",
+      "sha256": "b3117081338e82717720b8bc2dcbd5b2d22589e4fcf3abbc0b0b366b2c91e62f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ilogbf.c",
+      "sha256": "c82ff55761045b8ed97c28e25e6642780ba3b7c836527240c2c0a781e739e168",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ilogbl.c",
+      "sha256": "7044b510d7892b16d1d9a8eb6dbf9a6882fa025e295d931b7641563d0789b68d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/isless.c",
+      "sha256": "a8375abfc13c49a05834c5454a424c3954fe7acc03c7e1091a8ac2edba20571a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/j0.c",
+      "sha256": "d5d667291e2eee9d8ce258ba7ca003d1b3ab198dadea11217c7d2fbddb6133a6",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/j0f.c",
+      "sha256": "f95bcee540fd0b8eab48a9215632c33e67a670418ab300e46e8e964ef79a5041",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/j1.c",
+      "sha256": "aeba170aed0531d2b9a1a6ffd961a060f143a8fce33e154d7491f725417e8389",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/j1f.c",
+      "sha256": "6cad2da5cafa9bc17f07a979d29d9afd5a7bfbc5093f63027516d1505a1513cc",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/jn.c",
+      "sha256": "c69f519301b5be68aa452f7a85b4896b1b360a054738d209cec2cf43c55eb86e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/jnf.c",
+      "sha256": "61fe1c98a65f163ebc14cd965fd2283f16b99b40ba838ccbebe2a6edca91f547",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ldexp.c",
+      "sha256": "ff74a95f1305ec9fb19b8b280516c6191a6c8d6efd4b0e8b094ad5e8ac84f375",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ldexpf.c",
+      "sha256": "4adec466e57c8e21fe98dfac7dcfdfea03a3cfa96590d368c3f5395564f4c2f6",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ldexpl.c",
+      "sha256": "36adb216d58dbb4c9524f0040722c2aa81b97618500914f03b9d8c03b49514e4",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lgamma.c",
+      "sha256": "f3583afce8735a485f0acac55b88ebb6fcddfcb2eea0b3c5b85ae7a6e18e8142",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lgamma_r.c",
+      "sha256": "88e6d3bf89ccafb65abc38bf4ffe59d3945f36ecf8840b610931312a836c66af",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lgammaf.c",
+      "sha256": "dbca3ff6a32ea9101d37936e6925fe98e6fc469f6cc7a9925931389bd35f02cf",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lgammaf_r.c",
+      "sha256": "a6e562e9721901964d835099166d74763bc02acc8d04ebd53ba0df4b3f0fbc98",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lgammal.c",
+      "sha256": "16f55d8ff8fb583e1e8b00d1e9e3668d517e72f385ae354d10c0a9d2687736db",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lgammal_r.c",
+      "sha256": "9efc0e068fc9456f75f59fa58c484008cd94e63b4eca58365c460ff8c818e4b5",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/llrint.c",
+      "sha256": "587bcf109db56abbafa2db2f0937d930755a7b96ea963d7c41e90256522d670f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/llrintf.c",
+      "sha256": "f732ddd3271c32ff5b7f684f1b15f43c98667d1742573b82bca2d7fa6fcaf88a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/llrintl.c",
+      "sha256": "15dfa01a374e27861a866f1a96cf9eab7682a624dd8372e5ad67ab98355dd898",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/llround.c",
+      "sha256": "afa343aa2295a2ff708afc7c5e587a72fd03dff25e75ad3743c9ffcf2507eb4d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/llroundf.c",
+      "sha256": "2da0ad08296340fbd0755bda2909e3b48973f6a8e0d863c1351ce99b4edab3db",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/llroundl.c",
+      "sha256": "b8cc0a752a0cc9913441af4cd02bdca27c521bda1c6f367ec8c0b12015d9b59f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log.c",
+      "sha256": "b2e6242a52f00b235369b0057a0eea5a284afe9b9c725a218e55cc9302c7c466",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log10.c",
+      "sha256": "e54cee051bb941e9cc88a864e6a2e067239cc06288e4c4447939d1f7214cea95",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log10f.c",
+      "sha256": "7e96bb77486f7d04ebc266c8978c7474c0943c7615c79eb4726ea7a1f920b6c8",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log10l.c",
+      "sha256": "29eade30cb436586da7bdf549f68f6f49bcf7b3a6df4949d7097ce55ba74543b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log1p.c",
+      "sha256": "a4fd09d7f26ce0143f813ec8f04ed585d20de1e03e603541126ec794ecedb479",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log1pf.c",
+      "sha256": "de670d908556ac8db5d5ec98e46eb2ebf5eb60fe843adb4ec6b0d32c9c288fca",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log1pl.c",
+      "sha256": "957548f2610940f9189fe124cd0925a6c12672b07f2c342c26594119d75d3a88",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log2.c",
+      "sha256": "856c93f2ecf2c9644d6633030bca878e23df07772f7471504f2040454859564f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log2f.c",
+      "sha256": "decc2f798de486c6f3dddf2286610217cfb9229dad65e0b1e7d15178b2fbe046",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/log2l.c",
+      "sha256": "b9c6bffbcaf37c1be14454d9d742da029310ab663b4f94aa15734b7faa3f0c1e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/logb.c",
+      "sha256": "d2054e17281babffd0a1751074228d67b29df36e8fcfb3e8b08e03fb52cc403d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/logbf.c",
+      "sha256": "2d308e39ee5fd0b8532d5aff594157e713c6d0f674793c2c86442fe2577b6480",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/logbl.c",
+      "sha256": "97b5f918c8ec8b6a3ef9373e2e74f26a9067ab11c679946f98cbc963ffa0a807",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/logf.c",
+      "sha256": "fdc175d2fddb21fdbbb43ed548d97952278e977c1c43078cac36a6ec084e2077",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/logl.c",
+      "sha256": "39c10410b9ee01e57744cc14e6b36af915266a2b4ba1da71d2cc987e7b740f2c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lrint.c",
+      "sha256": "09171f45d6b2bcfab547d9f076a1c59bcf3934d676345e8ddf56ea18467a2445",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lrintf.c",
+      "sha256": "4cf097b6c90f5bfae000ac33ad46f06abbb0cc9f2f6600103f13250233a7083d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lrintl.c",
+      "sha256": "94d308500f79efb5fd8f2979367cc50427e3a02a8c171908593bb1c66d2bcbbc",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lround.c",
+      "sha256": "f50284613d0a5c6a0efcbfaeffd99dbdd65302ba385b23dacc5359caf6c67374",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lroundf.c",
+      "sha256": "5651ff978c984a9e7222fa37affcb6663a7071f4c4940c2bece4fd2396ca2302",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/lroundl.c",
+      "sha256": "b384d76077c17f8df22d65dc3626cf4585270e25c94805f3b08a7514b8a1e2cf",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/modf.c",
+      "sha256": "7800b8e55a2e048447a9c7543dcda506efb6bd48363cbf4eb032b9df3ac78bda",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/modff.c",
+      "sha256": "67e4d23c4e0ceed32f1df7a0f27abf2ef7c5213e6f3c50ce558d7792ff4c8235",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/modfl.c",
+      "sha256": "a93770d681e436970a7ab5b50ef5d4cfb3fa8e23ef0016c5e84324edf2b603fc",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nearbyint.c",
+      "sha256": "321cd37e3aa80055278f704ab1b924424faaa8df7f48b17a7622652fccac00a4",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nearbyintf.c",
+      "sha256": "28890e59332742e940edc6e38c41b3481e5fcc3e10084723417acf790c51aea2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nearbyintl.c",
+      "sha256": "e4531280e0b5a120d78d4aa2938de31c58467cee37b991ad7f85a4ae7894bb32",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nextafter.c",
+      "sha256": "674e52aeabd933a34b115643b1561f4479962ecb568ddf91ecb38284d297958c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nextafterf.c",
+      "sha256": "becb23a45a49270db8958a46b1ce5f2d9071a2481b46018230962b3998e36071",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nextafterl.c",
+      "sha256": "8a0defab785938c2823c3d4f506d48c58f686e201e709deaa1906d48aea32fbf",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nexttoward.c",
+      "sha256": "a01173e1b63bad611f0c1c8c555f254d6ce5512b5e9092cceed455709d7a5257",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nexttowardf.c",
+      "sha256": "01bd4295227c178a83ceefab88a499640df0fa0462eb4db9620535e85139017e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/nexttowardl.c",
+      "sha256": "29f11f76a225326bc0c0c857f8efa5f579a70328e80ba61a3cdd3b8216b62a67",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/pow.c",
+      "sha256": "6c4dc2812c42592cb8030532ded21908d685baa97df9967ef3c52cc3d12a68ab",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/pow10.c",
+      "sha256": "9e4d0eae3a6824c4b692d691e1d570ff9524310468266eb8e0d243fdf9eaf95c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/pow10f.c",
+      "sha256": "1147d0929645bdb43557f4cf56b72d31eedac05185a69f3efe048cb5308a3086",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/pow10l.c",
+      "sha256": "0cc3d356adf538dcdeb2a515881ed91e3164daa6cea6054490864aa59ebeea1e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/powf.c",
+      "sha256": "bc1d46abbe248da44373bba8d88e0f8075d722ac8ec2a4ce394712cbd7f61183",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/powl.c",
+      "sha256": "ee542d66c6c900a27a43063c8f203a8f247a83838f410be238f7963532aa41c7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/remainder.c",
+      "sha256": "82cbf5498ada149222d3dbe0f44677d4a18c319c9f6c03c2fb22332ad42a7bb2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/remainderf.c",
+      "sha256": "9170f559574adc7627af495d8f707bb144195d0dbdaf16f6c6ba14b91233a538",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/remainderl.c",
+      "sha256": "c356cff25dbe1bee8bf0b77922c4cc0d47951da25de3dea746ae8654f99ef86e",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/remquo.c",
+      "sha256": "365950456375e8197dcab1b74009b049c738376f3e7415499b2572db4f59863c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/remquof.c",
+      "sha256": "e8b6992941ade4e5390ffab324748a2a0b374b4fdeb727823704fb9f1aae5e1b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/remquol.c",
+      "sha256": "8e371479f92c81e4b079f015ba4326541be2a10d64c15f4ee2dff692cd86383b",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/rint.c",
+      "sha256": "39674695823fe0050ac7135c676904372ef0491f2417422fef3adbf327394ab7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/rintf.c",
+      "sha256": "feff9f18752b14beb3f8af43587c4b3d5c630817978004f50b8f455a62730e7d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/rintl.c",
+      "sha256": "956e38eb667cc81721d44d0e8400c6b47648bf40be5f7eb44e69d0ccfc124de1",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/round.c",
+      "sha256": "a3ea431dc4d804e198e9908fa05f435430cfa8a99f0016245824e15a9cfdfce2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/roundf.c",
+      "sha256": "c6ebc5aeba1a8a047d8be859568688214ec3cbbb18c1f3f95a7051d1f1f9f7c9",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/roundl.c",
+      "sha256": "da8bce29436feaa8f8a7c6126a892b6edf48d9b39e11afee6eeab16a724af7ef",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalb.c",
+      "sha256": "ad430254fcd57e7c573759af29680ff3a80a70dadaa997a6c621989491cd7124",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalbf.c",
+      "sha256": "cb9af21bf430fee7cb750f4674eeed2951b3ea4f69e6c11aca3968e984d52acf",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalbln.c",
+      "sha256": "27992427c6504d09c4e9cd335383509decce71160613631341151d964d7bba5a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalblnf.c",
+      "sha256": "091bf092f8c14fcce4a5d21e76b1b712b57d73a0d587f8bfade83f089f677819",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalblnl.c",
+      "sha256": "1642529473bcb863644e8b551e763091a5c89caf6813b3422521313989aca4d7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalbn.c",
+      "sha256": "e658b07d92849a447685418a2f708bac4fc5cf9166246752044b73e0273e46e6",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalbnf.c",
+      "sha256": "88056b9f0c51ea3d87107ee767daf1c3615c829f2d80273871c35d493714b5c7",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/scalbnl.c",
+      "sha256": "c62d4da7c8338c2b9cfc234ef9a1ec4ef9b260072bf7baa92953e354ca7651a5",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sin.c",
+      "sha256": "b77e9659c4ca19d7ec4117b6b15fd86cc8aadee6fc681bdb87c5c6debe097f48",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sincos.c",
+      "sha256": "32a33cd1a94e9c34286902cbc24158360d86a7e3183eebae4e91f3cd73a67348",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sincosf.c",
+      "sha256": "75fa2d76f6928d731e4dc7308bf570102a4a2df83d6900cf34b8703c298fdd96",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sincosl.c",
+      "sha256": "151299e2f1d0e50d1bd950bc293c60f0bc0845d02e14dc2b79d9b0ac7ef59fdb",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sinf.c",
+      "sha256": "5247ca97afd8891944d4e3823f22721fd701e25a7ec4163c7c20ed41d161b986",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sinh.c",
+      "sha256": "ea8abb5ffb25204bb2b0adf4efc34de5357ec2ff0d0572634194d2d7bb2978f3",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sinhf.c",
+      "sha256": "1f9f3740a1d8deeea64ebbf28e0920f57900a551134aaf73451d30ec330d8ac2",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sinhl.c",
+      "sha256": "d8dca95596a3e97d943b5323d5d8a486eb3efee74b91bb283618c9e3238136d1",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sinl.c",
+      "sha256": "d864f69f5ca2456aaf5d1b32c574a9a5d7783214d9288c27dc148da6ce7e8625",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sqrt.c",
+      "sha256": "8e2b1f4ecae97773edd9870ec845c6de0cc30c80bf94392775502c92d0f715d9",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sqrtf.c",
+      "sha256": "3da56a97e5ff88591f07fe6cde7a13220a5af73eee638bf9db7b4a4946ef62d8",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/sqrtl.c",
+      "sha256": "9b51f708c4ef0431597f6530d64d35b7e650029bf79675d9ac314b4f3beb7617",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tan.c",
+      "sha256": "74269bd74c5490d375edcbed743b56a9c1a24ab648d9cbb9509123e89f5abe57",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tanf.c",
+      "sha256": "234361d59676ad9341fd5880beb37b54aa8069babb4e9dec77428af245b76faa",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tanh.c",
+      "sha256": "cfb1315a7723f85550487450d4582b5f1984a2861dc4517195cc63b6c2ab2691",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tanhf.c",
+      "sha256": "9b43aada7e953236b07d37569a9e3462d2984fbdde892a4df42a5fb2aec18b04",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tanhl.c",
+      "sha256": "691ae77848613ef1c6bdc46fba2b35ac157235f893823bdd3d096b4ffb7f9e8f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tanl.c",
+      "sha256": "5595363a2c81bfdd2b45771310d0b5abbb20283812e37a6a4b416e49fe856a5d",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tgamma.c",
+      "sha256": "35a8c7d121d6e64b7a4cd40af2748a7a9b47f2fb6b7c16ce5b04cf764d581c75",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tgammaf.c",
+      "sha256": "8e05a46479fbc32bde5b20b2156669942e2e20efba25217c8be83d97e655dcb1",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/tgammal.c",
+      "sha256": "cf7d9b7f5815a886a3ade22ef5f2af491e7e7fd9d211bee11b0f344a460cb8fd",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/trunc.c",
+      "sha256": "c1731e22c624ccb791132fdec22edac27d7714c5b5b9343e97ea1e807b2c1994",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/truncf.c",
+      "sha256": "ac814e787c5e9544f94f491479132aeee8eed607daf7513e6402a1cd8a93198a",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/truncl.c",
+      "sha256": "7782f4db0ec2cd78a2e4621bdebe3322b52fd7d523eeace9c25db4035831c198",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/y0.c",
+      "sha256": "8db412c42d7fa435eeb4a7b8f33a9689bb09ea750a5655fd21912e1811786c96",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/y0f.c",
+      "sha256": "fd95a009cb4c88f84a1d71e3155708abfe11771cc783be233bcd58364d12e301",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/y1.c",
+      "sha256": "31bb13ec2163d74847a7969b7ce9cbbcc1300a90ac1b98b72061ed1cbab5c36f",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/y1f.c",
+      "sha256": "5c19d580788317f9faa05ba46b1bc795ef2386244135accb1f33a4f4e73807a1",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/yn.c",
+      "sha256": "a9663b9e727f081e2157377e8ce8aaa58347adf01961116ea2b60ec8ad1d49c0",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/math/ynf.c",
+      "sha256": "8a18caed08d881e595d2cb140164f8fc7dd2991c45568984f99261c99e2ea70c",
+      "status": "deferred",
+      "reason": "Full floating-point vector suite and fenv/rounding assessment not integrated; selected tgmath case is not a substitute.",
+      "owner": "M6 libm validation"
+    },
+    {
+      "path": "src/musl/pleval.c",
+      "sha256": "096dcb5e09b4bee16d77a5523007a69b6993f98d1560ee8fe0b266fde7981498",
+      "status": "deferred",
+      "reason": "Additional functional case not yet dependency-reviewed/integrated/run; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/daemon-failure.c",
+      "sha256": "ee9a7d342da754c7288581dbde0936a0e189a0df45f35ba6323edd14deeccaa0",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/dn_expand-empty.c",
+      "sha256": "e8480034a80e015212f74d2636ee5836af1bc0ecf01798c296ecc8254199e2bf",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/dn_expand-ptr-0.c",
+      "sha256": "654e335e4f215053ce7e23915c7b4a5fde45c08b3be7b5167675193fa571439d",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/execle-env.c",
+      "sha256": "96a498eef49184d66ddb80cae923d0ad111e0185f428cf48d2423f373a6b3b7a",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/fflush-exit.c",
+      "sha256": "82bea3efb0f938bbfb08d06219adf8a588a287d8aefc920b320a56f606cf4722",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/fgets-eof.c",
+      "sha256": "714867abf791cd09b3931398828600249fdb4f20ef37d3f260691ec94f2b41c7",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/fgetwc-buffering.c",
+      "sha256": "11c4e77e50f2def251fb5473e2c1eafe92ca9a631397f7dea6a744224c1dcd22",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/flockfile-list.c",
+      "sha256": "b42cd72dbf2c9b47d9c352a9441804b04c243d03cc8fc1549a8dd84edd7455fb",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/fpclassify-invalid-ld80.c",
+      "sha256": "24891d34067311b18090cab72afcac685714b65305a9095c2416719efed6ae9d",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/ftello-unflushed-append.c",
+      "sha256": "e237f6586ba3ff401841d2ffd604f39d7f200b56efaf90336aa458daa9b3b582",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/getpwnam_r-crash.c",
+      "sha256": "afa7d547ac4232f4589beae4a6c1b133fa352320ff280e2d22d5d7f07b63d31f",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/getpwnam_r-errno.c",
+      "sha256": "dd0df5077cea70d404b521b32f30d95ce825805dcc2ad4851907f61f9a595fe7",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/iconv-roundtrips.c",
+      "sha256": "7e1131dec069414a66e90f3786a71dc55a1a357d90da01e3da248690eaf87c8b",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/inet_ntop-v4mapped.c",
+      "sha256": "f96471ef46ae6f315e28a24e5715240c6a47ec8c3d19d7341529b011d366bfbe",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/inet_pton-empty-last-field.c",
+      "sha256": "3f2f33fb1f08def6753cf639cb40240273386ef5eea905ec6ad8c2a5db88a513",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/iswspace-null.c",
+      "sha256": "395499f85e544ab96cda42150570e29b9613742d10e7ecb8ef371180410df27c",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/lrand48-signextend.c",
+      "sha256": "a1993bc320e305adacd15254877523ea5e4a6f5ca246d58882d21da4fde69672",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/lseek-large.c",
+      "sha256": "94aa5e917c9ee908562cdf8cf104c05c5949b17099bde16730d636ec86b62ea5",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/malloc-0.c",
+      "sha256": "36f474d20c215dadae4a902b3408da0cd47674e4188231c6a47143908a8b2f44",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/malloc-brk-fail.c",
+      "sha256": "3492e04eed21b8120fcc2f11f6b71488b064d1b6148409054a0c9dd9fa5c1afc",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/malloc-oom.c",
+      "sha256": "addf8528b5342ae1786cbc6de5f5ff73547518c16058ec1cdd70ea3b325ceaf9",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/mbsrtowcs-overflow.c",
+      "sha256": "66a09745accdb8a79ca2c95802c21fff3215bf44dacdbac5c70f7942d4146313",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/memmem-oob-read.c",
+      "sha256": "3e85b72629df80c33b3c69af9ac2911d860fbca00dec78f4a020957790468624",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/memmem-oob.c",
+      "sha256": "a68aac59c901b691705914be72400c4d7cfc2ff00697cb91328c900dbf480a75",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/mkdtemp-failure.c",
+      "sha256": "20e562982d0d4caf954210386fe96256518c25795e09e84190fd6e82e8f813cc",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/mkstemp-failure.c",
+      "sha256": "eb09ebd997d4c4d073a28974f4b5ad09fefc00b2852328452b8c272ea80daf31",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/printf-1e9-oob.c",
+      "sha256": "afc44da6194c52803835ab740b83a191dc6b43f1d63e1bce2eb17a523a390125",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/printf-fmt-g-round.c",
+      "sha256": "c22682cb0219af9bcb94060569cb8fb6fdb1b371e3a2ea710ff8f2377d8b8fe0",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/printf-fmt-g-zeros.c",
+      "sha256": "06b312bb3bf32df951ed826a6d642be9c7bd8f130d0acf9f0a928bd49201a71c",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/printf-fmt-n.c",
+      "sha256": "dce2fc083a551c0a175b3aa22ab38ceec5e015c7b4926e09832bc68ec78d1549",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/pthread-robust-detach.c",
+      "sha256": "6b19a8d6e669d4d6906b547f40f19f3af60659ad0235ccef249b40fdbbbc14fc",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_atfork-errno-clobber.c",
+      "sha256": "7f9b91d115013fa3f4d08bc2d785dc42f3183b2b15c7d3163da38bb2fadebb11",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_cancel-sem_wait.c",
+      "sha256": "fcb44acdb0b80fcf99aa0c68880b094eab57d7846d48e4907c26113a93bcc2b1",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_cond-smasher.c",
+      "sha256": "ba0ee4385a7d4eac9c1b7b7160ded9f253fac04b6852d875acdb118da22709e0",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_cond_wait-cancel_ignored.c",
+      "sha256": "c6e8b67c9869ea53b3ba0d1a0cc2b124ff2b2c8ec148288c0d520ac2a6eaa58a",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_condattr_setclock.c",
+      "sha256": "440484d752bd8ebf0410365a9bf51fa13a68b70f7fc1f63fe7d90b9dc9162782",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_create-oom.c",
+      "sha256": "3023db056b70e0d2f138b9cb3abe4d6595a57f7b4869e3e4bdefadcf415ca83f",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_exit-cancel.c",
+      "sha256": "f2c2c6a2931ebb4ac7608dbdfe3cdca803c6a7cae3790c4e87d5ab01c8f229e8",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_exit-dtor.c",
+      "sha256": "079de9e8009ef1bfdfaae065ca8e1fdfbdb92ef3ccb72d3a3ccc5230496fe35b",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_once-deadlock.c",
+      "sha256": "fe0240f3f6d1059ad6c9c99ab67c692c4688e2634e1dffe0bb742106e900a335",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/pthread_rwlock-ebusy.c",
+      "sha256": "7de5dd564594166338d1fe2c51ab65629ec440e5b3fa349a978759101633aa5c",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/putenv-doublefree.c",
+      "sha256": "4e24fea11109050a193bb7c020c2af735fc626a157053613cb703314fdbf5aa7",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/raise-race.c",
+      "sha256": "447a714e14b4929ffd65c157bb07b5181c7066b82e6aa19ccc5fd5864802be73",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/regex-backref-0.c",
+      "sha256": "d05a792876c05872fdacc0effe590f8bc727ff9d77705c7d91ab87190c1acc93",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/regex-bracket-icase.c",
+      "sha256": "733f5a7ad7b501a1840c6e4921ce0c5f269755849fb464ec37f7712e9c9e7f02",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/regex-ere-backref.c",
+      "sha256": "bfec345d22773124d1d68f7bf2ffb3f68fc2d1223944e258f1b528a7aba7b827",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/regex-escaped-high-byte.c",
+      "sha256": "40147c05e016eaf8f1a6e0a5ffd795c476d171741f6bf87e7f02ce06ffc5cccc",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/regex-negated-range.c",
+      "sha256": "5eed8d24ac32a019caba2990bd3a2411560bd5abdfc6b8494b7b92d127d92112",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/regexec-nosub.c",
+      "sha256": "f758134f90e448afc462a65ad372ebc7b1b25eb71028423773828e28784fd227",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/rewind-clear-error.c",
+      "sha256": "70b89ee4378dc9cb8a8921c5d8bbc3f0976cba2ebb369792a83c9b349bbec434",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/rlimit-open-files.c",
+      "sha256": "1dbb2fc1cf940eefd293205abd9b88ff572fae9a3277e66a274bf2cfe9119f0a",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/scanf-bytes-consumed.c",
+      "sha256": "cb36c8cde00eeae5a8297878ed9a20d73db6fa6e4f4031a57e9763ca16f1392e",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/scanf-match-literal-eof.c",
+      "sha256": "6d6767d216c1202e6df506af64bb4f83fc37e02b5223f1a02d60e4b55c249596",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/scanf-nullbyte-char.c",
+      "sha256": "23dfe567f42138592ce5960694411206d3f12fe2c1575cb3b39c4fb1789e516d",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/sem_close-unmap.c",
+      "sha256": "e170e7fd920d852b63bcef744fe8c71c9bdc59879fe6bc4744faf1936c73cf6c",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/setenv-oom.c",
+      "sha256": "9e85cf1ad68c3f246178656b63a3458e4c188310cbf0461b87a5878e706f11dc",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/setvbuf-unget.c",
+      "sha256": "5011ffa8c1dd1b75e1a35469472b0d8eb7d2f890f5405d00a21d98837d96015b",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/sigaltstack.c",
+      "sha256": "18601ae861286c53018bfcc8222b901da1eea7bc0ee22db995627872aedbed9a",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/sigprocmask-internal.c",
+      "sha256": "7fa8ff56229bb87b9fa2c49c2eebae080e2e7f169819296763ed13ede8b572c6",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/sigreturn.c",
+      "sha256": "615c11891d77499465ed1917a5d800bb14f915a7d7df407a1c195c161586b2e4",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/sscanf-eof.c",
+      "sha256": "b676ebef55cebe8672fcd59cb1a2fba6c0b6e1626473537e7ea0240ae85fe15f",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/statvfs.c",
+      "sha256": "731f670d932ff0a2dbe1b777942dd08cebeb00911f2e31194ca943cde3c1d17f",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/strverscmp.c",
+      "sha256": "0f53fe7d16647f7a5c7469f766ac5405f1200b52a3f496c71c88d77b651ad435",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/syscall-sign-extend.c",
+      "sha256": "4513aef9bc852c7f55da3622f2d05b70cfdc61848893f38830946aa0005ce604",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/tls_get_new-dtv.c",
+      "sha256": "080fcc0d93ee7e6d3fb8904128f33ffa1ca09e6ee42a8e8d3f33259126b039c0",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/tls_get_new-dtv_dso.c",
+      "sha256": "870fca1d4fb1ceabd1b15fdb86ee94e09b4045cd30df3aba9f676d479609983e",
+      "status": "deferred",
+      "reason": "Thread/TLS/synchronization or loader coverage requires dedicated native harness and resource/timeout contract.",
+      "owner": "M6 process/thread validation"
+    },
+    {
+      "path": "src/regression/uselocale-0.c",
+      "sha256": "c3e85759a9966376f1963692f99dbfbb236e4dc4841d4113c14cdc98f7fe65d0",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/wcsncpy-read-overflow.c",
+      "sha256": "6611f4212d9bbb44c8bc9e588611da6408e686fa32384eba45190db5d540dbe8",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    },
+    {
+      "path": "src/regression/wcsstr-false-negative.c",
+      "sha256": "83eb48996028964b8d5022e41facc27878f16dee747c77b61e4a3ff0d3184090",
+      "status": "deferred",
+      "reason": "Unmodified regression not yet selected, dependency-reviewed or run natively; no pass or unsupported-feature claim.",
+      "owner": "M6 libc validation"
+    }
+  ]
+}

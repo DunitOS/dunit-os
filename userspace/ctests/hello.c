@@ -77,10 +77,15 @@ int main(int argc, char **argv, char **envp) {
     char **p = envp;
     while (*p) p++;
     unsigned long *aux = (unsigned long *)(p + 1);
+    unsigned long phdr=0, phent=0, phnum=0, entry=0;
     int saw_pagesz = 0, saw_null = 0;
     for (int i = 0; i < 64; i++) {
         unsigned long a_type = aux[2 * i], a_val = aux[2 * i + 1];
         if (a_type == 0) { saw_null = 1; break; }     /* AT_NULL */
+        if(a_type==3)phdr=a_val;
+        if(a_type==4)phent=a_val;
+        if(a_type==5)phnum=a_val;
+        if(a_type==9)entry=a_val;
         if (a_type == 6 && a_val == 4096) saw_pagesz = 1; /* AT_PAGESZ */
     }
     if (!saw_pagesz || !saw_null) {
@@ -89,6 +94,16 @@ int main(int argc, char **argv, char **envp) {
     }
     puts1("[C-ABI-TEST] auxv ok (AT_PAGESZ=4096)\n");
 
+    struct elf_phdr { unsigned type, flags; unsigned long offset, address, physical, filesz, memsz, align; };
+    if(!phdr || phent!=sizeof(struct elf_phdr) || !phnum || phnum>256 || !entry) {
+        puts1("[C-ABI-TEST] FAIL: program header metadata\n");return 1;
+    }
+    const struct elf_phdr *headers=(const struct elf_phdr *)phdr;
+    int executable_entry=0;
+    for(unsigned long n=0;n<phnum;n++)if(headers[n].type==1 && (headers[n].flags&1) &&
+        entry>=headers[n].address && entry-headers[n].address<headers[n].filesz) executable_entry=1;
+    if(!executable_entry){puts1("[C-ABI-TEST] FAIL: entry not in program headers\n");return 1;}
+    puts1("[C-ABI-TEST] program headers OK\n");
     puts1("[C-ABI-TEST] OK\n");
     return 0;
 }

@@ -1,0 +1,17 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/musl_persist verify"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[DUNITFS] auto-mounted",
+    "[LIBC-DURABLE] verified bytes=131072 hash=b4c071280fb62325"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[LIBC-DURABLE] FAIL"
+  ]
+}

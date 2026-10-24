@@ -53,9 +53,12 @@ static void test_memfs_cap(void)
 	memset(buf, 'A', sizeof buf);
 	long total = 0;
 	int hit = 0;
-	for (long i = 0; i < 4096; i++) {
+	/* POSIX write may return a short transfer; keep issuing writes until
+	 * the bound is actually crossed, rather than assuming 64 KiB/call. */
+	for (long i = 0; i < 16384; i++) {
 		long w = write(fd, buf, sizeof buf);
 		if (w < 0) { hit = (errno == EFBIG); break; }
+		if (w == 0) break;
 		total += w;
 	}
 	close(fd);

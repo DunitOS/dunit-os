@@ -1,21 +1,21 @@
 {
   "run": {
     "cmd": [
-      "exec setup",
-      "exec setup get theme.desktop",
-      "exec setup set effects.anim_ms 180",
-      "exec setup get effects.anim_ms",
-      "exec setup set effects.anim_ms 99999",
-      "exec setup get effects.anim_ms",
-      "exec setup check",
-      "exec lua_spike",
-      "exec setup import /assets/dwm/themes/macos-light.toml",
-      "exec setup get theme.title_focused",
-      "exec setup set scripts.enabled true",
-      "exec setup get scripts.enabled"
+      "exec /app/setup",
+      "exec /app/setup get theme.desktop",
+      "exec /app/setup set effects.anim_ms 180",
+      "exec /app/setup get effects.anim_ms",
+      "exec /app/setup set effects.anim_ms 99999",
+      "exec /app/setup get effects.anim_ms",
+      "exec /app/setup check",
+      "exec /app/lua_spike",
+      "exec /app/setup import /assets/dwm/themes/macos-light.toml",
+      "exec /app/setup get theme.title_focused",
+      "exec /app/setup set scripts.enabled true",
+      "exec /app/setup get scripts.enabled"
     ],
     "command_actions": {
-      "exec setup": [
+      "exec /app/setup": [
         {
           "wait_marker": "Select:"
         },

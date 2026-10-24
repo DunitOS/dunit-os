@@ -3,7 +3,7 @@
   "run": {
     "config": "limine_test_terminal.conf",
     "cmd": [
-      "exec svg_test"
+      "exec /app/svg_test"
     ]
   },
   "required": [

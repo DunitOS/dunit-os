@@ -2,7 +2,7 @@
   "description": "Executable link between WORKING claims in docs/architecture/current-state.md and the serial markers that prove them. tools/qemu_test.py --markers-file tools/boot_markers.json fails the run if any required marker is missing or any forbidden marker appears. This is the M0 CI budget: a status claim is only allowed to say WORKING if a marker here traces it to a real boot.",
   "run": {
     "config": "limine_test_terminal.conf",
-    "cmd": ["exec runtime_stress", "exec ipc_parent"]
+    "cmd": ["exec /app/runtime_stress", "exec /app/ipc_parent"]
   },
   "required": [
     { "marker": "[KERNEL] START", "claim": "boot/kernel handoff", "source": "kernel/src/lib.rs" },

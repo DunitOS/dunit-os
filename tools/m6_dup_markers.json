@@ -1,6 +1,6 @@
 {
   "description": "dup/dup2 over the native Dunit Dup syscall (82). userspace/ctests/musl_dup.c redirects stdout to a file with dup2 and restores it, checks a dup shares the file offset, and checks closing one of a dup'd pair keeps the other working (VFS refcount). Were ENOSYS before. Run: tools/qemu_test.py --build --markers-file tools/m6_dup_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
-  "run": { "config": "limine.conf", "cmd": ["exec musl_dup"] },
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_dup"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[DUP] all OK", "claim": "dup2 stdout redirect+restore, dup shared offset, and dup VFS refcount all work via the Dunit Dup syscall", "source": "kernel/src/syscall/mod.rs" },

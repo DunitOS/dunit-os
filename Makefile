@@ -41,7 +41,7 @@ LUA_SOURCES = $(addprefix third_party/lua/src/,$(addsuffix .c,$(LUA_UNITS)))
 LUA_FULL_UNITS = $(LUA_UNITS) lcorolib liolib loslib loadlib ldblib lutf8lib linit
 LUA_FULL_SOURCES = $(addprefix third_party/lua/src/,$(addsuffix .c,$(LUA_FULL_UNITS)))
 
-MUSL_CTESTS = dwm_lua_test musl_io musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops
+MUSL_CTESTS = dwm_lua_test musl_io musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops musl_profile musl_terminal musl_native_fd musl_persist musl_thread_stress
 
 # Dunit TinyCC port (M6 capstone): the x86_64-dunit tcc fork lives in the
 # submodule toolchains/dunit-tcc. tools/dunit/build-tcc.sh builds a host-hosted
@@ -52,7 +52,7 @@ TCC_DIR = toolchains/dunit-tcc
 TCC_BIN = $(TCC_DIR)/tcc
 TCC_CTESTS = tcc_hello
 
-USERSPACE_APPS = \
+USERSPACE_APPS = pty_args_test pty_terminal_test \
 	elf_demo fs_test exit_test args_test cwd_test path_test image_demo bmp_viewer color_test \
 	scheduler_test spawn_ready_test yield_child yield_test resumable_child resumable_test \
 	ipc_child ipc_parent runtime_stress input_test pointer_test file_api_test env_test calc \
@@ -179,7 +179,7 @@ userspace:
 			echo "[USERSPACE] WARNING: tcc submodule fetch failed (offline?)"; \
 	fi
 	@if [ -f $(TCC_DIR)/tools/dunit/build-tcc.sh ] && [ -f $(abspath $(MUSL_LIBC)) ]; then set -e; \
-		[ -f $(abspath $(TCC_BIN)) ] || CC=$(CC) $(TCC_DIR)/tools/dunit/build-tcc.sh $(abspath $(MUSL_SYSROOT)); \
+		CC=$(CC) python3 tools/ensure_tcc.py --sysroot $(abspath $(MUSL_SYSROOT)); \
 		for prog in $(TCC_CTESTS); do \
 			echo "  [TCC] $$prog"; \
 			$(abspath $(TCC_BIN)) -B$(abspath $(TCC_DIR)) -L$(abspath $(TCC_DIR)) \
@@ -210,6 +210,9 @@ userspace:
 		$(TCC_DIR)/tools/dunit/build-tcc-dunit.sh $(abspath $(MUSL_SYSROOT)) $(abspath $(BUILD_DIR))/dunit-tcc; \
 		$(abspath $(MUSL_SYSROOT))/bin/x86_64-dunit-strip $(abspath $(BUILD_DIR))/dunit-tcc 2>/dev/null || strip $(abspath $(BUILD_DIR))/dunit-tcc 2>/dev/null || true; \
 	else echo "[USERSPACE] on-device tcc skipped (tcc fork/config/sysroot missing)"; fi
+	python3 tools/libc_test.py build --cc $(abspath $(MUSL_SYSROOT))/bin/dunit-cc --out-dir $(USERSPACE_BUILD_DIR)
+	python3 tools/dunit_sdk.py --sysroot $(MUSL_SYSROOT) --output $(MUSL_SYSROOT)/share/dunit-sdk/cross
+	python3 tools/check_userspace_elf.py $(USERSPACE_BUILD_DIR)/* $(BUILD_DIR)/dunit-lua $(BUILD_DIR)/dunit-luac $(BUILD_DIR)/dunit-tcc
 	@echo "Userspace programs built in $(USERSPACE_BUILD_DIR)/"
 
 iso: $(BUILD_DIR)/kernel.elf userspace

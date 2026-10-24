@@ -2,9 +2,9 @@
   "description": "Official Lua core compatibility plus real dwm_lua CLI/regression children. The C parent validates exact successful policy output and waitpid status for every case; merged PTY diagnostics and absence of policy records are required on failure. Boot smoke intentionally faults test children; runner crashes are detected by the regression parent wait status, rather than forbidding unrelated boot faults.",
   "run": {
     "cmd": [
-      "exec lua_spike",
-      "exec dwm_lua /assets/dwm/scripts/columns.lua 1200 800 3",
-      "exec dwm_lua_test"
+      "exec /app/lua_spike",
+      "exec /app/dwm_lua /assets/dwm/scripts/columns.lua 1200 800 3",
+      "exec /app/dwm_lua_test"
     ]
   },
   "required": [

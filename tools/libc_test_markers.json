@@ -1,0 +1,99 @@
+{
+  "description": "Pinned upstream libc-test subset; no modified assertions. Requires every case return success and no upstream t_error diagnostics.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/libc_test_functional_qsort",
+      "exec /app/libc_test_functional_snprintf",
+      "exec /app/libc_test_functional_sscanf",
+      "exec /app/libc_test_functional_string",
+      "exec /app/libc_test_functional_strtod_simple",
+      "exec /app/libc_test_functional_strtof",
+      "exec /app/libc_test_functional_strtol",
+      "exec /app/libc_test_functional_swprintf",
+      "exec /app/libc_test_functional_tgmath",
+      "exec /app/libc_test_functional_udiv",
+      "exec /app/libc_test_functional_ungetc",
+      "exec /app/libc_test_functional_wcstol"
+    ]
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "terminal boot reached",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/qsort PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/qsort.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/snprintf PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/snprintf.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/sscanf PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/sscanf.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/string PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/string.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/strtod_simple PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/strtod_simple.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/strtof PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/strtof.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/strtol PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/strtol.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/swprintf PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/swprintf.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/tgmath PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/tgmath.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/udiv PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/udiv.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/ungetc PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/ungetc.c"
+    },
+    {
+      "marker": "[LIBC-TEST] functional/wcstol PASS rc=0 status=0",
+      "claim": "Unmodified original case returned zero and upstream t_status remained zero",
+      "source": "tests/libc/upstream/src/functional/wcstol.c"
+    }
+  ],
+  "forbidden": [
+    {
+      "marker": "[PANIC]",
+      "why": "kernel panic",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": " FAIL rc=",
+      "why": "upstream case or t_status failed",
+      "source": "tests/libc/runner.c"
+    }
+  ]
+}

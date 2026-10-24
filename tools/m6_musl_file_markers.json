@@ -2,7 +2,7 @@
   "description": "Dunit musl port (M6) fs: files — the open adapter (POSIX flag + pointer/length translation to the native Open) plus read/write/close. userspace/ctests/musl_file.c opens an existing initrd file read-only and checks its ELF magic, then does a write+read roundtrip in /persist. Run: tools/qemu_test.py --build --markers-file tools/m6_musl_file_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 160 --boot-timeout 100",
   "run": {
     "config": "limine.conf",
-    "cmd": ["exec musl_file"]
+    "cmd": ["exec /app/musl_file"]
   },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "the system booted to the terminal", "source": "kernel/src/lib.rs" },

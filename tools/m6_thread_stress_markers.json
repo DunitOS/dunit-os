@@ -1,0 +1,18 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/musl_thread_stress"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[THREAD-STRESS] cycles=1000 TLS/errno/allocation OK",
+    "[EXEC] /app/musl_thread_stress returned code=0",
+    "[THREAD-STRESS] detached=1000 auto-reap OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[THREAD-STRESS] FAIL"
+  ]
+}

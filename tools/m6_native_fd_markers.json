@@ -1,0 +1,18 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/musl_native_fd"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[NATIVE-FD] flags, shared status, poll sleep/wake, private mmap, spawn pipes PASS",
+    "[EXEC] /app/musl_native_fd returned code=0",
+    "[NATIVE-FD] unlinked open identity PASS"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[NATIVE-FD] FAIL"
+  ]
+}

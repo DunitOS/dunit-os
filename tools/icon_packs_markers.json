@@ -1,6 +1,6 @@
 {
   "description": "Verify all five complete Chameleon packages inside Dunit using native Lua I/O: ZIP directory counts, exact stored lengths and CRC32 over every byte. Expected kernel boot isolation faults are separate; Lua must return zero without traceback.",
-  "run": {"config": "limine_test_terminal.conf", "cmd": ["exec lua /assets/icons/chameleon/verify.lua"], "command_actions": {"exec lua /assets/icons/chameleon/verify.lua": [{"wait_marker": "[ICON-PACKS] verified packs=5 entries=58653", "timeout": 240}, {"wait_marker": "[EXEC] /system/bin/lua returned code=0", "timeout": 10}]}},
+  "run": {"config": "limine_test_terminal.conf", "cmd": ["exec /system/bin/lua /assets/icons/chameleon/verify.lua"], "command_actions": {"exec /system/bin/lua /assets/icons/chameleon/verify.lua": [{"wait_marker": "[ICON-PACKS] verified packs=5 entries=58653", "timeout": 240}, {"wait_marker": "[EXEC] /system/bin/lua returned code=0", "timeout": 10}]}},
   "required": ["[TERM-007] Starting main loop", "[ICON-PACKS] breeze-chameleon-dark.zip", "[ICON-PACKS] breeze-chameleon-light.zip", "[ICON-PACKS] breeze-round-chameleon-dark.zip", "[ICON-PACKS] breeze-round-chameleon-light.zip", "[ICON-PACKS] chameleon-symbolic-dark.zip", "[ICON-PACKS] verified packs=5 entries=58653", "[EXEC] /system/bin/lua returned code=0"],
   "forbidden": ["[PANIC]", "stack traceback:", "[ICON-PACKS] FAIL"]
 }

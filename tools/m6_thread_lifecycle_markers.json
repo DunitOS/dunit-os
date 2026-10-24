@@ -1,0 +1,1 @@
+{"run": {"config": "limine_test_terminal.conf", "cmd": ["exec /app/thread_test"]}, "required": ["thread_test: legacy negative exit and detached auto-reap OK", "thread_test: OK shared=2 xmm=isolated"], "forbidden": ["[PANIC]", "thread_test: FAIL"]}

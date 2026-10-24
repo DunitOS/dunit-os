@@ -3,6 +3,13 @@ assert(_VERSION == 'Lua 5.5')
 for _, name in ipairs({'coroutine', 'debug', 'io', 'math', 'os', 'package', 'string', 'table', 'utf8'}) do
     assert(type(_G[name]) == 'table', name .. ' is missing')
 end
+-- Source-level APIs stay present; unsupported OS mechanisms fail honestly.
+assert(os.execute() == false)
+local executed, execute_error = os.execute('unavailable-command')
+assert(executed == nil and type(execute_error) == 'string')
+assert(not pcall(io.popen, 'unavailable-command', 'r'))
+local dynamic, dynamic_error = package.loadlib('/tmp/unavailable-library', 'entry')
+assert(dynamic == nil and type(dynamic_error) == 'string')
 local co = coroutine.create(function(x) coroutine.yield(x + 1); return x + 2 end)
 local ok, value = coroutine.resume(co, 40)
 assert(ok and value == 41)

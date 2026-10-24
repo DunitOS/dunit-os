@@ -1,0 +1,30 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/musl_native_fd keyboard-parent"
+    ],
+    "command_actions": {
+      "exec /app/musl_native_fd keyboard-parent": [
+        {
+          "wait_marker": "[SPAWN-INPUT] child ready"
+        },
+        {
+          "type_text": "spawn-read-ok"
+        },
+        {
+          "wait_marker": "[SPAWN-INPUT] parent wait OK"
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[SPAWN-INPUT] child read OK",
+    "[SPAWN-INPUT] parent wait OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[NATIVE-FD] FAIL"
+  ]
+}

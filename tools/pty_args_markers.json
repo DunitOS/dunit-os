@@ -1,0 +1,58 @@
+{
+  "description": "Native PATH ownership, sixth-argument PtySpawn argv, empty arguments and dsh quoted path/arguments.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/pty_args_test"
+    ]
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "terminal boot",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[PTY-ARGS] userspace PATH and raw-path-only kernel OK",
+      "claim": "kernel does not search command names; userspace searches configured PATH",
+      "source": "userspace/system_apps/pty_args_test/src/main.rs"
+    },
+    {
+      "marker": "[PTY-ARGS] explicit argv and empty argument OK",
+      "claim": "relative executable with spaces receives all argv, including an empty argument",
+      "source": "userspace/system_apps/pty_args_test/src/main.rs"
+    },
+    {
+      "marker": "[PTY-ARGS] legacy block ignores unused sixth register OK",
+      "claim": "unflagged legacy caller ignores nonzero unused r9",
+      "source": "userspace/system_apps/pty_args_test/src/main.rs"
+    },
+    {
+      "marker": "[PTY-ARGS] dsh quoted executable and arguments OK",
+      "claim": "real dsh parses quotes and forwards argv through nested PTY",
+      "source": "userspace/system_apps/pty_args_test/src/main.rs"
+    },
+    {
+      "marker": "[PTY-ARGS] DONE",
+      "claim": "native test completed",
+      "source": "userspace/system_apps/pty_args_test/src/main.rs"
+    }
+  ],
+  "forbidden": [
+    {
+      "marker": "[PANIC]",
+      "why": "kernel panic",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[PTY-ARGS] FAIL",
+      "why": "argv/path/quote regression",
+      "source": "userspace/system_apps/pty_args_test/src/main.rs"
+    },
+    {
+      "marker": "dsh: PANIC",
+      "why": "shell panic",
+      "source": "userspace/system_apps/dsh/src/main.rs"
+    }
+  ]
+}

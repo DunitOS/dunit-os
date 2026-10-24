@@ -1,6 +1,6 @@
 {
   "description": "Dunit musl port (M6-D) process model — posix_spawn + waitpid over native SpawnArgs/WaitProcess. userspace/ctests/musl_spawn.c spawns /app/musl_child with argv, waits, checks the child printed its args and exited with code 7. Run: tools/qemu_test.py --build --markers-file tools/m6_musl_spawn_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120",
-  "run": { "config": "limine.conf", "cmd": ["exec musl_spawn"] },
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_spawn"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[CHILD] argc=2 argv1=hi", "claim": "posix_spawn launched the child and passed argv through the native SpawnArgs", "source": "userspace/ctests/musl_child.c" },

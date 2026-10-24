@@ -1,6 +1,6 @@
 {
   "description": "Kernel hardening against hostile/buggy userspace (M6.5). userspace/ctests/musl_harden.c drives four checks: SpawnArgs(79) with an unmapped block -> EFAULT (not a ring-0 panic), DrawRect(12) from a non-owner -> EACCES, an unbounded RAM-file write -> EFBIG (not heap OOM-abort), and a child that raises #SS gets killed while the kernel keeps running. Run: tools/qemu_test.py --build --markers-file tools/m6_harden_markers.json --post-boot-delay 3 --settle 4 --cmd-timeout 60 --timeout 260 --boot-timeout 120",
-  "run": { "config": "limine.conf", "cmd": ["exec musl_harden"] },
+  "run": { "config": "limine.conf", "cmd": ["exec /app/musl_harden"] },
   "required": [
     { "marker": "[TERM-007] Starting main loop", "claim": "booted to terminal", "source": "kernel/src/lib.rs" },
     { "marker": "[HARDEN] spawn_badptr EFAULT OK", "claim": "SpawnArgs validates the user block via the page-walking copy helper and returns EFAULT instead of faulting in ring 0", "source": "kernel/src/syscall/mod.rs" },
