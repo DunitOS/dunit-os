@@ -59,6 +59,7 @@ dock_padding = 4
 dock_margin = 0
 
 [desktop]
+icon_theme = "breeze"
 wallpaper = "/assets/wallpapers/wallpaper.bmp"
 
 [widgets]

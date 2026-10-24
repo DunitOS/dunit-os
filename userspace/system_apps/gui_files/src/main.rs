@@ -187,7 +187,7 @@ fn classify(name: &str, is_dir: bool, exec_dir: bool) -> IconKind {
     }
     match ext_of(name) {
         "txt" | "toml" | "md" | "rs" | "cfg" | "conf" | "log" | "json" | "c" | "h" => IconKind::Text,
-        "rgba" | "bmp" | "png" | "jpg" | "jpeg" | "gif" | "ppm" => IconKind::Image,
+        "svg" | "rgba" | "bmp" | "png" | "jpg" | "jpeg" | "gif" | "ppm" => IconKind::Image,
         "zip" | "gz" | "tar" | "xz" | "iso" => IconKind::Archive,
         "" if exec_dir => IconKind::Exec,
         _ => IconKind::Unknown,
@@ -206,60 +206,18 @@ struct Icons {
     unknown: Option<Vec<u8>>,
 }
 
-/// Slurp a 32x32 RGBA icon, or `None` unless it is exactly `ICON*ICON*4` bytes.
-fn read_icon(path: &str) -> Option<Vec<u8>> {
-    let fd = libdunit::open(path, libdunit::OPEN_READ);
-    if fd < 0 {
-        return None;
-    }
-    let fd = fd as usize;
-    let want = (ICON * ICON * 4) as usize;
-    let mut data: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 512];
-    loop {
-        let n = libdunit::read(fd, &mut chunk);
-        if n <= 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..n as usize]);
-        if data.len() > want {
-            break;
-        }
-    }
-    libdunit::close(fd);
-    if data.len() == want {
-        Some(data)
-    } else {
-        None
-    }
-}
-
-/// Build `/assets/icons/<theme>/<name>.rgba` on the stack and load it. An empty
-/// theme name falls back to `breeze` so a bad config still shows icons. Keeps the
-/// icon theme a shared config knob (same `[desktop] icon_theme` the compositor
-/// uses for the dock/launcher).
+/// The file manager uses the same SVG decoder and legacy fallback as the shell.
 fn read_theme_icon(theme: &str, name: &str) -> Option<Vec<u8>> {
-    const PRE: &[u8] = b"/assets/icons/";
-    const SUF: &[u8] = b".rgba";
     let theme = if theme.is_empty() { "breeze" } else { theme };
-    let n = PRE.len() + theme.len() + 1 + name.len() + SUF.len();
-    let mut buf = [0u8; 192];
-    if n > buf.len() {
-        return None;
+    let dir = alloc::format!("/assets/icons/{}/", theme);
+    match dunit_image::icon(&dir, name, ICON as u32) {
+        Ok(image) => Some(image.rgba()),
+        Err(dunit_image::Error::Missing) => None,
+        Err(error) => {
+            libdunit::println(&alloc::format!("gui_files: image rejected {}{} {:?}", dir, name, error));
+            None
+        }
     }
-    let mut o = 0;
-    buf[o..o + PRE.len()].copy_from_slice(PRE);
-    o += PRE.len();
-    buf[o..o + theme.len()].copy_from_slice(theme.as_bytes());
-    o += theme.len();
-    buf[o] = b'/';
-    o += 1;
-    buf[o..o + name.len()].copy_from_slice(name.as_bytes());
-    o += name.len();
-    buf[o..o + SUF.len()].copy_from_slice(SUF);
-    o += SUF.len();
-    let path = core::str::from_utf8(&buf[..o]).ok()?;
-    read_icon(path)
 }
 
 impl Icons {

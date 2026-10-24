@@ -2709,11 +2709,15 @@ fn validate_wallpaper_bmp(data: &[u8]) -> bool {
         && data.get(28).copied() == Some(24)
 }
 
-/// Load + pre-scale the wallpaper into an XRGB8888 buffer sized `bw*bh`
-/// (nearest-neighbor, bottom-up BGR source). `None` if the file is absent or
-/// not a valid 1600x900 24-bit BMP — the caller keeps the gradient backdrop.
-/// Full brightness (unlike the legacy 46% dim) so the image reads as intended.
-fn load_wallpaper(path: &str, bw: usize, bh: usize) -> Option<Vec<u32>> {
+/// Rasterize SVG at the framebuffer size, or scale the legacy wallpaper BMP.
+/// Invalid/missing assets leave the configured fallback backdrop in place.
+fn load_wallpaper(path: &str, bw: usize, bh: usize, background: u32) -> Option<Vec<u32>> {
+    if path.ends_with(".svg") {
+        let mut image = image_result(path, dunit_image::load(path, bw as u32, bh as u32))?;
+        for pixel in &mut image.pixels { *pixel = blend(background, *pixel); }
+        libdunit::println(&alloc::format!("gui_server: SVG wallpaper rendered {}x{}", bw, bh));
+        return Some(image.pixels);
+    }
     let data = read_binary(path, 8 * 1024 * 1024)?;
     if !validate_wallpaper_bmp(&data) {
         return None;
@@ -2739,47 +2743,22 @@ fn load_wallpaper(path: &str, bw: usize, bh: usize) -> Option<Vec<u32>> {
     Some(out)
 }
 
-/// Launcher-icon side length (px) of the embedded Breeze-Chameleon RGBA assets.
-/// Every `*.rgba` under `/assets/icons/breeze/` is `ICON_W`×`ICON_H`, straight
-/// alpha, `R,G,B,A` byte order (see `assets/icons/breeze/NOTICE.md`).
-const ICON_W: usize = 32;
-const ICON_H: usize = 32;
-
-/// Load a launcher icon *by convention* — `<dir><app>.rgba` — into packed ARGB,
-/// or `None` when no such asset ships (the dock then falls back to the app
-/// initial). `dir` is the configured icon-theme directory (e.g.
-/// `/assets/icons/breeze/`, ending in `/`), so the theme is a config knob, not a
-/// constant. `app` is the registry entry's icon stem; adding an app to the config
-/// registry picks up its icon automatically if the file exists. The path is
-/// assembled on the stack to keep the compositor's no-heap-`String` style.
-fn load_app_icon(app: &str, dir: &str) -> Option<Vec<u32>> {
-    const SUFFIX: &[u8] = b".rgba";
-    let prefix = dir.as_bytes();
-    let mut buf = [0u8; 160];
-    let n = prefix.len() + app.len() + SUFFIX.len();
-    if n > buf.len() {
-        return None;
-    }
-    buf[..prefix.len()].copy_from_slice(prefix);
-    buf[prefix.len()..prefix.len() + app.len()].copy_from_slice(app.as_bytes());
-    buf[prefix.len() + app.len()..n].copy_from_slice(SUFFIX);
-    let path = core::str::from_utf8(&buf[..n]).ok()?;
-    load_icon_rgba(path)
+/// Resolve SVG at the configured dock size; bitmap fallback retains its own size.
+fn resolve_app_icon(icon: &str, dir: &str, side: u32) -> Option<dunit_image::Image> {
+    if icon.is_empty() { return None; }
+    let result = if icon.contains('/') { dunit_image::load(icon, side, side) }
+        else { dunit_image::icon(dir, icon, side) };
+    image_result(icon, result)
 }
 
-/// Resolve one registry entry's icon spec to packed ARGB. A spec containing '/'
-/// is an absolute VFS path loaded verbatim (`load_icon_rgba`); otherwise it is a
-/// stem resolved against the active icon-theme directory as `<dir><stem>.rgba`
-/// (`load_app_icon`). An empty spec, or a missing/mis-sized asset, yields `None`
-/// so the dock/menu cell falls back to the app's label initial.
-fn resolve_app_icon(icon: &str, dir: &str) -> Option<Vec<u32>> {
-    if icon.is_empty() {
-        return None;
-    }
-    if icon.as_bytes().contains(&b'/') {
-        load_icon_rgba(icon)
-    } else {
-        load_app_icon(icon, dir)
+fn image_result(path: &str, result: Result<dunit_image::Image, dunit_image::Error>) -> Option<dunit_image::Image> {
+    match result {
+        Ok(image) => Some(image),
+        Err(dunit_image::Error::Missing) => None,
+        Err(error) => {
+            libdunit::println(&alloc::format!("gui_server: image rejected {} {:?}", path, error));
+            None
+        }
     }
 }
 
@@ -2801,31 +2780,9 @@ fn icon_dir<'a>(theme: &str, buf: &'a mut [u8; 160]) -> &'a str {
     core::str::from_utf8(&buf[..n]).unwrap_or(FALLBACK)
 }
 
-/// Load a straight-alpha `R,G,B,A` icon (`ICON_W`×`ICON_H`) from the VFS into
-/// packed ARGB8888, ready for `blend`. `None` if the file is absent or shorter
-/// than one full icon — a mis-sized asset falls back to the dock initial.
-fn load_icon_rgba(path: &str) -> Option<Vec<u32>> {
-    let need = ICON_W * ICON_H * 4;
-    let data = read_binary(path, need + 16)?;
-    if data.len() < need {
-        return None;
-    }
-    let mut out: Vec<u32> = Vec::with_capacity(ICON_W * ICON_H);
-    let mut i = 0;
-    while i + 3 < need {
-        let r = data[i] as u32;
-        let g = data[i + 1] as u32;
-        let b = data[i + 2] as u32;
-        let a = data[i + 3] as u32;
-        out.push((a << 24) | (r << 16) | (g << 8) | b);
-        i += 4;
-    }
-    Some(out)
-}
-
 /// Alpha-blend a packed-ARGB icon (`src`, `sw`×`sh`) into the back buffer,
-/// resampled to `dw`×`dh` at `(dx,dy)`. The Breeze source assets are 32×32; dock
-/// buttons grow them (~46 px on hover) and launcher-menu rows shrink them (~22 px),
+/// resampled to `dw`×`dh` at `(dx,dy)`. SVG caches carry their render dimensions;
+/// legacy Breeze sources are 32×32. Dock and launcher cells use different sizes,
 /// so a nearest-neighbor pick visibly aliases. Instead we resample with alpha in
 /// mind: bilinear when enlarging (both axes ≥ source), box-average when shrinking.
 /// Both paths interpolate in PREMULTIPLIED alpha — RGB is weighted by each texel's
@@ -3181,7 +3138,7 @@ fn run_desktop_session(
 
     // Desktop wallpaper: loaded + pre-scaled once (XRGB8888, framebuffer-sized).
     // Path comes from `[desktop] wallpaper`; absent/invalid → gradient fallback.
-    let mut wallpaper: Option<Vec<u32>> = load_wallpaper(cfg.settings.desktop.wallpaper.as_str(), bw, bh);
+    let mut wallpaper: Option<Vec<u32>> = load_wallpaper(cfg.settings.desktop.wallpaper.as_str(), bw, bh, theme.desktop);
     if wallpaper.is_some() {
         libdunit::println("gui_server: wallpaper loaded (config [desktop] wallpaper)");
     } else {
@@ -3194,13 +3151,13 @@ fn run_desktop_session(
     // is a stem resolved against it, or an absolute VFS path when it contains
     // '/'. A missing/mis-sized asset leaves the slot `None` and that cell falls
     // back to the app's label initial.
-    let mut app_icons: Vec<Option<Vec<u32>>> = Vec::with_capacity(apps.apps.len());
+    let mut app_icons: Vec<Option<dunit_image::Image>> = Vec::with_capacity(apps.apps.len());
     let mut icon_count = 0usize;
     {
         let mut dbuf = [0u8; 160];
         let dir = icon_dir(cfg.settings.desktop.icon_theme.as_str(), &mut dbuf);
         for entry in apps.apps.iter() {
-            let icon = resolve_app_icon(entry.icon.as_str(), dir);
+            let icon = resolve_app_icon(entry.icon.as_str(), dir, (ly.dock_w + 6).max(32) as u32);
             if icon.is_some() {
                 icon_count += 1;
             }
@@ -3208,7 +3165,8 @@ fn run_desktop_session(
         }
     }
     if icon_count > 0 {
-        libdunit::println("gui_server: launcher icons loaded (Breeze-Chameleon)");
+        libdunit::println(&alloc::format!("gui_server: icon assets loaded theme={} count={} raster={}px",
+            cfg.settings.desktop.icon_theme.as_str(), icon_count, (ly.dock_w + 6).max(32)));
     } else {
         libdunit::println("gui_server: launcher icons absent — initials fallback");
     }
@@ -3216,7 +3174,8 @@ fn run_desktop_session(
     // Brand logo for the app-menu wordmark: a 32x32 straight-alpha RGBA with a
     // circular mask baked in (path from `[desktop] logo`). `None` when the asset
     // is missing/mis-sized → the wordmark draws its flat accent mark instead.
-    let mut logo: Option<Vec<u32>> = load_icon_rgba(cfg.settings.desktop.logo.as_str());
+    let mut logo = image_result(cfg.settings.desktop.logo.as_str(),
+        dunit_image::load(cfg.settings.desktop.logo.as_str(), 32, 32));
     if logo.is_some() {
         libdunit::println("gui_server: wordmark logo loaded (circular)");
     } else {
@@ -3629,13 +3588,14 @@ fn run_desktop_session(
                 }
                 // Re-seed the config-driven assets (wallpaper + icon theme) and the
                 // registry-derived state (icons per entry, dock hover slots).
-                wallpaper = load_wallpaper(ncfg.settings.desktop.wallpaper.as_str(), bw, bh);
-                logo = load_icon_rgba(ncfg.settings.desktop.logo.as_str());
+                wallpaper = load_wallpaper(ncfg.settings.desktop.wallpaper.as_str(), bw, bh, theme.desktop);
+                logo = image_result(ncfg.settings.desktop.logo.as_str(),
+                    dunit_image::load(ncfg.settings.desktop.logo.as_str(), 32, 32));
                 let mut dbuf = [0u8; 160];
                 let dir = icon_dir(ncfg.settings.desktop.icon_theme.as_str(), &mut dbuf);
                 app_icons.clear();
                 for entry in apps.apps.iter() {
-                    app_icons.push(resolve_app_icon(entry.icon.as_str(), dir));
+                    app_icons.push(resolve_app_icon(entry.icon.as_str(), dir, (ly.dock_w + 6).max(32) as u32));
                 }
                 dock_hover = alloc::vec![0u8; apps.dock.len()];
                 if current_ws >= apps.workspaces {
@@ -4929,7 +4889,7 @@ fn run_desktop_session(
                 (panx + (panw - logo_sz) / 2, pany + 8)
             };
             if let Some(lg) = logo.as_ref() {
-                blit_icon(&mut back, bw, bh, lg, ICON_W, ICON_H, lgx, lgy, logo_sz, logo_sz);
+                blit_icon(&mut back, bw, bh, &lg.pixels, lg.width, lg.height, lgx, lgy, logo_sz, logo_sz);
             } else {
                 fill_rrect(&mut back, bw, bh, lgx, lgy, logo_sz, logo_sz, logo_sz / 2, RR_ALL, 0xFF00_0000 | (theme.launcher & 0x00FF_FFFF));
                 fill_rrect(&mut back, bw, bh, lgx + logo_sz / 3, lgy + logo_sz / 3, logo_sz / 3, logo_sz / 3, logo_sz / 6, RR_ALL, 0xFF00_0000 | (theme.panel & 0x00FF_FFFF));
@@ -4999,7 +4959,7 @@ fn run_desktop_session(
                 let sx = panx + (panw - total) / 2;
                 if let Some(ic) = icon {
                     let iy = pany + (ly.panel_h - isz) / 2;
-                    blit_icon(&mut back, bw, bh, ic, ICON_W, ICON_H, sx, iy, isz, isz);
+                    blit_icon(&mut back, bw, bh, &ic.pixels, ic.width, ic.height, sx, iy, isz, isz);
                 }
                 let baseline = pany + ly.panel_h / 2 + 5;
                 draw_text_ttf(&mut back, bw, bh, f, sx + iw + gap, baseline, px, title, theme.title_text_focused & 0x00FF_FFFF);
@@ -5096,7 +5056,7 @@ fn run_desktop_session(
                 let pad = 4;
                 let dw = (cw - 2 * pad).max(1);
                 let dh = (ch - 2 * pad).max(1);
-                blit_icon(&mut back, bw, bh, icon, ICON_W, ICON_H, cx0 + pad, cy0 + pad, dw, dh);
+                blit_icon(&mut back, bw, bh, &icon.pixels, icon.width, icon.height, cx0 + pad, cy0 + pad, dw, dh);
             } else {
                 let tx = cx0 + (cw - GLYPH_W * 3) / 2;
                 let ty = cy0 + (ch - 5 * 3) / 2;
@@ -5164,7 +5124,7 @@ fn run_desktop_session(
                 if let Some(icon) = app_icons.get(ri).and_then(|s| s.as_ref()) {
                     let isz = (ih - 8).clamp(8, 22);
                     let icy = iy + (ih - isz) / 2;
-                    blit_icon(&mut back, bw, bh, icon, ICON_W, ICON_H, ix + 6, icy, isz, isz);
+                    blit_icon(&mut back, bw, bh, &icon.pixels, icon.width, icon.height, ix + 6, icy, isz, isz);
                     text_x = ix + 6 + isz + 6;
                 }
                 let label = apps.apps.get(ri).map(|a| a.label.as_str()).unwrap_or("");
@@ -5199,7 +5159,7 @@ fn run_desktop_session(
                 let app = wins[wi].app as usize;
                 let isz = tile - 12;
                 if let Some(ic) = app_icons.get(app).and_then(|s| s.as_ref()) {
-                    blit_icon(&mut back, bw, bh, ic, ICON_W, ICON_H, tx + 6, ty + 6, isz, isz);
+                    blit_icon(&mut back, bw, bh, &ic.pixels, ic.width, ic.height, tx + 6, ty + 6, isz, isz);
                 } else {
                     let lbl = apps.apps.get(app).map(|a| a.label.as_str()).unwrap_or("?");
                     draw_text_3x5(&mut back, bw, bh, tx + 8, ty + isz / 2 - 6, 3, theme.panel_text, lbl.as_bytes());

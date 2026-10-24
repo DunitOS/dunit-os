@@ -1,0 +1,558 @@
+{
+  "run": {
+    "config": "limine_dwm.conf",
+    "actions": [
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 94,
+          "y": 18,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 150
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_settings: surface presented OK",
+        "timeout": 30
+      },
+      {
+        "delay_ms": 1500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-theme-ui/base.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 43,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 96,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 150
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_settings: page 5",
+        "timeout": 15
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-theme-ui/themes.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 126,
+          "y": 32,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 150
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_settings: theme saved /assets/dwm/themes/macos-light.toml",
+        "timeout": 15
+      },
+      {
+        "delay_ms": 1800
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-theme-ui/light.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 126,
+          "y": 72,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 150
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "delay_ms": 1800
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-theme-ui/dark.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 126,
+          "y": 112,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 150
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "delay_ms": 1800
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-theme-ui/nord.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 101,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 18,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 150
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_files: surface presented OK",
+        "timeout": 20
+      },
+      {
+        "delay_ms": 2000
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-theme-ui/files-nord.ppm"
+        }
+      }
+    ]
+  },
+  "required": [
+    "gui_server: desktop ready",
+    "gui_settings: surface presented OK",
+    "gui_files: surface presented OK",
+    "gui_settings: page 5",
+    "gui_settings: theme saved /assets/dwm/themes/macos-light.toml",
+    "gui_settings: theme saved /assets/dwm/themes/mojave-dark.toml",
+    "gui_settings: theme saved /assets/dwm/themes/nord.toml",
+    "gui_server: SVG wallpaper rendered 1920x1080",
+    "gui_server: icon assets loaded theme=aqua count=7 raster=74px"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "gui_settings: theme import failed",
+    "gui_settings: theme rejected; previous settings retained",
+    "gui_settings: save failed",
+    "gui_settings: PANIC",
+    "gui_server: PANIC",
+    "gui_server: image rejected",
+    "gui_files: image rejected"
+  ],
+  "description": "Production SVG wallpaper and Aqua icons, real pointer theme switching and the file manager. Native SVG is loaded from VFS and cached; no build-time rasterization."
+}

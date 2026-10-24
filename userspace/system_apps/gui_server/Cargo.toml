@@ -10,6 +10,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dunit_image = { path = "../../dunit_image" }
 libdunit = { path = "../../libdunit" }
 gui_protocol_v1 = { path = "../../../protocols/gui-v1" }
 dwm_settings = { path = "../../dwm_settings" }

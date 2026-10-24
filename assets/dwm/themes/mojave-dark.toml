@@ -46,7 +46,8 @@ anim = true
 anim_ms = 180
 
 [desktop]
-wallpaper = "/assets/wallpapers/mojave.bmp"
+icon_theme = "aqua"
+wallpaper = "/assets/wallpapers/mojave.svg"
 
 [widgets]
 enabled = false

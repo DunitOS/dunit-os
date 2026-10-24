@@ -1,0 +1,21 @@
+{
+  "description": "Execute the same no_std SVG renderer and shared VFS loader inside Dunit. Check gradient/alpha pixels, every shipped vector at three sizes, existing RGBA fallback, SVG wallpaper and rejected active content. Kernel boot deliberately faults isolation/thread-test children; require svg_test exit code zero and its own failure/panic markers absent rather than forbidding those expected boot faults.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec svg_test"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[SVG-TEST] native gradients and straight alpha OK",
+    "[SVG-TEST] 13 VFS vectors at 24/74/256px OK",
+    "[SVG-TEST] bitmap compatibility, wallpaper and invalid SVG rejection OK",
+    "[EXEC] /app/svg_test returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SVG-TEST] FAIL",
+    "[SVG-TEST] PANIC"
+  ]
+}

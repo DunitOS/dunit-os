@@ -25,7 +25,7 @@ Green Tea explicitly restores the left dock and legacy window controls.
 
 Themes and layout changes are session RAM only, matching existing settings
 storage. The original wallpaper source is `assets/wallpapers/mojave.svg`; the
-shipped BMP is rendered from it for the existing bitmap loader.
+SVG is rendered by the userspace SVG loader at the active screen size.
 
 # Lua stale-libc correction
 

@@ -1,0 +1,8 @@
+[package]
+name = "svg_test"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+libdunit = { path = "../../libdunit" }
+dunit_image = { path = "../../dunit_image" }
+dunit_svg = { path = "../../../runtime/dunit-svg" }

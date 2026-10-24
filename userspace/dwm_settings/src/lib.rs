@@ -340,10 +340,10 @@ impl ConfigStr {
 /// config may point any of them elsewhere in the VFS.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Desktop {
-    /// Wallpaper BMP (1600x900, 24-bit) painted as the compositor backdrop.
+    /// Wallpaper SVG or legacy 24-bit BMP painted as the compositor backdrop.
     pub wallpaper: ConfigStr,
     /// Icon theme directory name under `/assets/icons/<name>/`; dock/launcher and
-    /// the file-manager mimetypes resolve `<name>/<key>.rgba` from it.
+    /// the file-manager mimetypes prefer `<name>/<key>.svg`, then legacy `.rgba`.
     pub icon_theme: ConfigStr,
     /// TrueType font every GUI app loads for text (falls back to the embedded
     /// copy when the path is missing or unparseable).
@@ -915,7 +915,7 @@ pub struct AppEntry {
     pub name: String,
     /// ELF to spawn (resolved by `libdunit::spawn` against /app). Defaults to `id`.
     pub exec: String,
-    /// Icon: a stem resolved as `<icon_theme>/<icon>.rgba`, or an absolute VFS
+    /// Icon: a stem resolved as SVG (then legacy RGBA), or an absolute VFS
     /// path if it contains a '/'. Defaults to `id`.
     pub icon: String,
     /// 1-4 char dock/menu initials fallback when no icon renders. Derived from
