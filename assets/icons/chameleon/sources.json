@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/L4ki/Breeze-Chameleon-Icons",
+  "revision": "39ca2a55ba5289a96b2e744cd3670e020fb7e217",
+  "themes": [
+    {
+      "id": "breeze-chameleon-dark",
+      "directory": "Breeze Chameleon Dark",
+      "page": "https://store.kde.org/p/1281798/"
+    },
+    {
+      "id": "breeze-chameleon-light",
+      "directory": "Breeze Chameleon Light",
+      "page": "https://store.kde.org/p/1298508/"
+    },
+    {
+      "id": "breeze-round-chameleon-dark",
+      "directory": "Breeze-Round-Chameleon Dark Icons",
+      "page": "https://store.kde.org/p/1608771"
+    },
+    {
+      "id": "breeze-round-chameleon-light",
+      "directory": "Breeze-Round-Chameleon Light Icons",
+      "page": "https://www.pling.com/p/1608766/"
+    },
+    {
+      "id": "chameleon-symbolic-dark",
+      "directory": "Chameleon-Symbolic-Dark-Icons",
+      "page": "https://store.kde.org/p/2320235"
+    }
+  ]
+}

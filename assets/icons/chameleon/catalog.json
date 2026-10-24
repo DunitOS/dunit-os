@@ -1,0 +1,72 @@
+{
+  "repository": "https://github.com/L4ki/Breeze-Chameleon-Icons",
+  "revision": "39ca2a55ba5289a96b2e744cd3670e020fb7e217",
+  "packaging": "Complete upstream theme trees in standard ZIP/DEFLATE; original bytes and paths.",
+  "themes": [
+    {
+      "id": "breeze-chameleon-dark",
+      "directory": "Breeze Chameleon Dark",
+      "page": "https://store.kde.org/p/1281798/",
+      "archive": "breeze-chameleon-dark.zip",
+      "entries": 16230,
+      "files": 16227,
+      "svg": 16205,
+      "unpacked_bytes": 62493071,
+      "archive_bytes": 23279314,
+      "sha256": "f60974451db5d8b86eb04262713cbd963f41d7aa90b2a4eeceffe539df7702cd",
+      "crc32": "ce01d3bb"
+    },
+    {
+      "id": "breeze-chameleon-light",
+      "directory": "Breeze Chameleon Light",
+      "page": "https://store.kde.org/p/1298508/",
+      "archive": "breeze-chameleon-light.zip",
+      "entries": 14616,
+      "files": 14613,
+      "svg": 14588,
+      "unpacked_bytes": 61412531,
+      "archive_bytes": 22887219,
+      "sha256": "409e3d7697a729c49dbc57e3d444196044501f8c7b4877d0976ae4f79eb7c883",
+      "crc32": "933cc325"
+    },
+    {
+      "id": "breeze-round-chameleon-dark",
+      "directory": "Breeze-Round-Chameleon Dark Icons",
+      "page": "https://store.kde.org/p/1608771",
+      "archive": "breeze-round-chameleon-dark.zip",
+      "entries": 14159,
+      "files": 14156,
+      "svg": 14122,
+      "unpacked_bytes": 52944168,
+      "archive_bytes": 20046758,
+      "sha256": "26b17db0283b50d21325b8692e877911c83c598ee7fc7cbda79d902e0ff81552",
+      "crc32": "25947914"
+    },
+    {
+      "id": "breeze-round-chameleon-light",
+      "directory": "Breeze-Round-Chameleon Light Icons",
+      "page": "https://www.pling.com/p/1608766/",
+      "archive": "breeze-round-chameleon-light.zip",
+      "entries": 13585,
+      "files": 13582,
+      "svg": 13545,
+      "unpacked_bytes": 52626490,
+      "archive_bytes": 20165482,
+      "sha256": "0ce7820adeb61f6cd4cd7b996f34995603049dff80db7db2355ba28b1fb34b23",
+      "crc32": "477efcff"
+    },
+    {
+      "id": "chameleon-symbolic-dark",
+      "directory": "Chameleon-Symbolic-Dark-Icons",
+      "page": "https://store.kde.org/p/2320235",
+      "archive": "chameleon-symbolic-dark.zip",
+      "entries": 63,
+      "files": 60,
+      "svg": 58,
+      "unpacked_bytes": 760203,
+      "archive_bytes": 233851,
+      "sha256": "5661b26e5dd72a0cfc794230fb97c754ff5bb78d2a661a7273439e20f266c1f2",
+      "crc32": "49656950"
+    }
+  ]
+}
