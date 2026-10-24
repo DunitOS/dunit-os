@@ -1015,6 +1015,7 @@ fn resize_surface(
     }
     let handle = libdunit::handle_create_shared(bytes);
     if handle <= 0 {
+        libdunit::println(&alloc::format!("gui_settings: resize create bytes={} errno={}", bytes, handle));
         return None;
     }
     let handle = handle as u32;
@@ -1028,13 +1029,13 @@ fn resize_surface(
         libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
     );
     if duplicate <= 0 {
-        libdunit::handle_close(handle);
+        libdunit::shared_buffer::release(handle, mapping as usize, bytes);
         return None;
     }
     let remote = libdunit::handle_transfer(duplicate as u32, compositor);
     if remote <= 0 {
         libdunit::handle_close(duplicate as u32);
-        libdunit::handle_close(handle);
+        libdunit::shared_buffer::release(handle, mapping as usize, bytes);
         return None;
     }
     let mut announcement = [0u8; 16];
@@ -1088,7 +1089,7 @@ fn resize_surface(
             app.height = previous.1;
             app.scroll_x = previous.2;
             app.scroll_y = previous.3;
-            libdunit::handle_close(handle);
+            libdunit::shared_buffer::release(handle, mapping as usize, bytes);
             return None;
         }
     }
@@ -1293,6 +1294,7 @@ pub extern "C" fn _start() -> ! {
             let width = u32::from_le_bytes([rx[32], rx[33], rx[34], rx[35]]);
             let height = u32::from_le_bytes([rx[36], rx[37], rx[38], rx[39]]);
             let token = u64_at(&rx, 24);
+            let previous_bytes = app.width as usize * app.height as usize * 4;
             if let Some((new_buf, new_px)) = resize_surface(
                 compositor,
                 &font,
@@ -1303,7 +1305,7 @@ pub extern "C" fn _start() -> ! {
                 next_buffer,
                 &mut serial,
             ) {
-                libdunit::handle_close(buf);
+                libdunit::shared_buffer::release(buf, px as usize, previous_bytes);
                 buf = new_buf;
                 px = new_px;
                 next_buffer += 1;
@@ -1409,6 +1411,6 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
-    libdunit::handle_close(buf);
+    libdunit::shared_buffer::release(buf, px as usize, app.width as usize * app.height as usize * 4);
     libdunit::exit(0)
 }

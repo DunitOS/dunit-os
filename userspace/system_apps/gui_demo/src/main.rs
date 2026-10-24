@@ -219,7 +219,6 @@ fn render(px: *mut u8, w: u32, h: u32, font: &Font, pal: &Palette, clear_bg: Col
 #[allow(clippy::too_many_arguments)]
 fn resize_surface(
     compositor: u32,
-    old_buf: u32,
     font: &Font,
     pal: &Palette,
     clear_bg: Color,
@@ -230,23 +229,23 @@ fn resize_surface(
     token: u64,
     serial: &mut u64,
 ) -> Option<(u32, *mut u8)> {
-    let bytes = (new_w * new_h * 4) as usize;
+    let bytes = (new_w as usize).checked_mul(new_h as usize)?.checked_mul(4)?;
+    if new_w == 0 || new_h == 0 || bytes > 64 * 1024 * 1024 { return None; }
     let nb = libdunit::handle_create_shared(bytes);
     if nb <= 0 {
+        libdunit::println(&alloc::format!("gui_demo: resize create bytes={} errno={}", bytes, nb));
         return None;
     }
     let nb = nb as u32;
     let mapped = libdunit::handle_map(nb, 0, bytes);
     if mapped <= 0 {
+        libdunit::println(&alloc::format!("gui_demo: resize map bytes={} errno={}", bytes, mapped));
         libdunit::handle_close(nb);
         return None;
     }
     let npx = mapped as usize as *mut u8;
     render(npx, new_w, new_h, font, pal, clear_bg);
 
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &ack);
 
     let dup = libdunit::handle_dup(
         nb,
@@ -258,9 +257,14 @@ fn resize_surface(
         -1
     };
     if ch <= 0 {
-        libdunit::handle_close(nb);
+        if dup > 0 { libdunit::handle_close(dup as u32); }
+        libdunit::shared_buffer::release(nb, mapped as usize, bytes);
         return None;
     }
+    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
+    *serial += 1;
+    libdunit::ipc_send(compositor, &ack);
+
     let mut ann = [0u8; 16];
     ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
     ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
@@ -285,7 +289,6 @@ fn resize_surface(
     *serial += 1;
     libdunit::ipc_send(compositor, &commit);
 
-    libdunit::handle_close(old_buf);
     Some((nb, npx))
 }
 
@@ -358,7 +361,7 @@ pub extern "C" fn _start() -> ! {
         libdunit::println("gui_demo: FAIL map buffer");
         libdunit::exit(3);
     }
-    let px = mapped as usize as *mut u8;
+    let mut px = mapped as usize as *mut u8;
     let mut cur_buf = buf;
     let mut cur_w = W;
     let mut cur_h = H;
@@ -464,14 +467,16 @@ pub extern "C" fn _start() -> ! {
                 let ack = Request::AckConfigure { configure: tok }.encode(SURFACE, serial);
                 serial += 1;
                 libdunit::ipc_send(compositor, &ack);
-            } else if let Some((nb, _npx)) = resize_surface(
-                compositor, cur_buf, &font, &pal, clear_bg, fmt, nw, nh, next_obj, tok,
+            } else if let Some((nb, npx)) = resize_surface(
+                compositor, &font, &pal, clear_bg, fmt, nw, nh, next_obj, tok,
                 &mut serial,
             ) {
                 // The demo surface is static content (the toast is the feedback),
                 // so we never re-render after the resize — resize_surface already
                 // painted the fresh buffer; we only track the new cap + geometry.
+                libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
                 cur_buf = nb;
+                px = npx;
                 cur_w = nw;
                 cur_h = nh;
                 next_obj += 1;
@@ -504,7 +509,7 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
-    libdunit::handle_close(cur_buf);
+    libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
     libdunit::exit(0)
 }
 

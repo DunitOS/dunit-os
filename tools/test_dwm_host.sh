@@ -13,3 +13,5 @@ do
     rustc --edition=2021 --test "$source" -o "$test_dir/regression"
     "$test_dir/regression"
 done
+
+bash tools/test_dwm_config_host.sh

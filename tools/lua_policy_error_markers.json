@@ -1,0 +1,38 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup set scripts.enabled true",
+      "exec /app/setup set scripts.layout \"/assets/dwm/scripts/tests/failure.lua\"",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 100
+        },
+        {
+          "wait_marker": "gui_server: Lua policy rejected:",
+          "timeout": 30
+        },
+        {
+          "wait_marker": "gui_server: Lua fallback notification queued=1",
+          "timeout": 30
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "gui_server: desktop ready",
+    "gui_server: Lua policy rejected:",
+    "floating fallback restored=",
+    "gui_server: Lua fallback notification queued=1"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "gui_server: PANIC",
+    "gui_server: FAIL"
+  ]
+}

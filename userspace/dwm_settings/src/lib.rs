@@ -4,8 +4,8 @@
 //! `load()` reads `/system/share/dwm/default.toml` from the (embedded) VFS and
 //! overlays any recognised keys onto the built-in Green Tea baseline. A missing
 //! or unparseable file is not fatal — the baseline is the last-known-good
-//! default, so the desktop always comes up. Unknown keys are ignored so newer
-//! configs stay loadable on older builds.
+//! default, so the desktop always comes up. Loaders reject malformed or unknown
+//! settings with diagnostics and preserve last-known-good on live reload.
 //!
 //! The parser is a deliberately tiny TOML subset: `# ` / `//` comments, blank
 //! lines, `[section]` headers (recorded but not required), and `key = "value"`
@@ -16,6 +16,8 @@
 extern crate alloc;
 
 mod preserve;
+mod validation;
+pub use validation::{validate, ConfigError};
 mod overlay;
 pub use overlay::{apply_overlay, edit, load_overlay, value};
 
@@ -348,8 +350,8 @@ pub struct Desktop {
     /// Icon theme name under `/assets/icons/<name>/`, or absolute theme manifest.
     /// Shared loader resolves archive/index.theme/aliases or flat SVG/RGBA files.
     pub icon_theme: ConfigStr,
-    /// TrueType font every GUI app loads for text (falls back to the embedded
-    /// copy when the path is missing or unparseable).
+    /// TrueType font every GUI app loads for text; load failure is diagnosed by
+    /// each consumer rather than silently substituting another font.
     pub font: ConfigStr,
     /// Brand logo blitted into the app-menu wordmark, a 32x32 straight-alpha
     /// `R,G,B,A` raster (circular mask baked into the alpha). Absent/mis-sized →
@@ -963,30 +965,13 @@ impl AppEntry {
 }
 
 impl Applications {
-    /// The built-in baseline: the exact set the compositor used to hardcode in
-    /// `LAUNCH_APPS`/`app_title`/`WS_COUNT` (the last-known-good default).
+    /// An empty, inert model for failed configuration reads. Application
+    /// identities and default lists are loaded from the packaged TOML document.
     pub fn baseline() -> Applications {
-        let apps = alloc::vec![
-            AppEntry::new("gui_client", "Window", "WIN"),
-            AppEntry::new("gui_calc", "Calculator", "CALC"),
-            AppEntry::new("gui_stat", "System Monitor", "STAT"),
-            AppEntry::new("gui_files", "Files", "FILE"),
-            AppEntry::new("gui_terminal", "Terminal", "TERM"),
-            AppEntry::new("gui_settings", "Settings", "SET"),
-        ];
-        Applications {
-            dock: alloc::vec![0, 1, 2, 3, 4, 5],
-            launcher: alloc::vec![0, 1, 2, 3, 4, 5],
-            // Clean-boot baseline: NO autostart. Matches `default.toml`'s empty
-            // `[startup]`, so a missing/garbage config falls back to the same
-            // windowless desktop rather than resurrecting hardcoded test windows.
-            startup: alloc::vec![],
-            workspaces: 5,
-            apps,
-            // Never self-exercise on the real desktop; only test.toml sets this.
-            self_test: false,
-        }
+        Applications { apps: Vec::new(), dock: Vec::new(), launcher: Vec::new(),
+            startup: Vec::new(), workspaces: 1, self_test: false }
     }
+
 }
 
 /// The whole resolved desktop configuration: scalar `settings` (theme/layout/
@@ -1006,7 +991,7 @@ impl Config {
         Config {
             settings: Settings::defaults(),
             apps: Applications::baseline(),
-            valid: true,
+            valid: false,
         }
     }
 }
@@ -1041,15 +1026,30 @@ pub fn save(settings: &Settings) -> bool {
 /// fails: an absent/unreadable/garbage file yields the pure baseline.
 pub fn load() -> Settings {
     let mut settings = Settings::defaults();
-    let Some(text) = read_file(CONFIG_PATH) else {
-        return settings;
+    let text = match read_file_checked(CONFIG_PATH) {
+        Ok(text) => text,
+        Err(libdunit::ENOENT) => return settings,
+        Err(errno) => {
+            libdunit::println(&alloc::format!("dwm_settings: warning could not read complete configuration errno={}", errno));
+            return settings;
+        }
     };
+    if let Err(error) = validate(&text) {
+        config_warning(&error);
+        return settings;
+    }
     settings.from_file = true;
     parse_into(&text, &mut settings);
     settings
 }
 
-/// Overlay a TOML document onto `settings`. Public for headless unit exercise.
+fn config_warning(error: &ConfigError) {
+    libdunit::println(&alloc::format!("dwm_settings: warning line={} field={} reason={}; configuration rejected",
+        error.line, error.field, error.reason));
+}
+
+/// Low-level scalar parser used by checked edits. Loaders validate the complete
+/// document first; callers accepting untrusted documents must use validate().
 pub fn parse_into(text: &str, settings: &mut Settings) {
     let mut section = String::new();
     for raw in text.lines() {
@@ -1123,17 +1123,36 @@ pub fn load_config() -> Config {
     let mut settings = Settings::defaults();
     let text = match read_file_checked(CONFIG_PATH) {
         Ok(text) => text,
-        Err(libdunit::ENOENT) => return Config::defaults(),
-        Err(_) => {
+        Err(libdunit::ENOENT) => match read_file_checked("/assets/dwm/default.toml") {
+            Ok(text) => text,
+            Err(errno) => {
+                libdunit::println(&alloc::format!("dwm_settings: warning canonical desktop configuration unavailable errno={}", errno));
+                return Config::defaults();
+            }
+        },
+        Err(errno) => {
+            libdunit::println(&alloc::format!("dwm_settings: warning could not read complete configuration errno={}", errno));
             let mut config = Config::defaults();
             config.valid = false;
             return config;
         }
     };
+    if let Err(error) = validate(&text) {
+        config_warning(&error);
+        let mut config = Config::defaults();
+        config.valid = false;
+        return config;
+    }
     settings.from_file = true;
     parse_into(&text, &mut settings);
 
     let (mut apps, saw_apps) = parse_apps(&text);
+    if !saw_apps {
+        match read_file_checked("/assets/dwm/default.toml") {
+            Ok(default) if validate(&default).is_ok() => { apps = parse_apps(&default).0; }
+            _ => libdunit::println("dwm_settings: warning canonical application registry unavailable"),
+        }
+    }
 
     // Schema-version gate. A document from a NEWER build (version > ours) may use
     // keys/semantics we cannot honour, so it is rejected here → the reload path
@@ -1251,7 +1270,7 @@ fn parse_apps(text: &str) -> (Applications, bool) {
     }
 
     if apps.is_empty() {
-        // No registry in the file — fall back to the built-in desktop.
+        // Caller resolves an omitted registry from the canonical data document.
         return (Applications::baseline(), false);
     }
 
@@ -1730,15 +1749,21 @@ fn config_path(dir: &str, name: &str) -> String {
 
 /// Overlay a single-line TOML color array (`["#...", ...]`) onto `out`, element
 /// by element; a malformed entry leaves that slot at its baseline.
-fn parse_color_array_into(rhs: &str, out: &mut [u32]) {
-    for (i, s) in parse_str_array(rhs).iter().enumerate() {
-        if i >= out.len() {
-            break;
-        }
-        if let Some(c) = parse_color(s) {
-            out[i] = c;
+
+fn read_standalone(path: &str) -> Option<String> {
+    match read_file_checked(path) {
+        Ok(text) => Some(text),
+        Err(libdunit::ENOENT) => None,
+        Err(errno) => {
+            libdunit::println(&alloc::format!("dwm_settings: warning path={} read errno={}; defaults retained", path, errno));
+            None
         }
     }
+}
+
+fn standalone_warning(path: &str, error: &ConfigError) {
+    libdunit::println(&alloc::format!("dwm_settings: warning path={} line={} field={} reason={}; previous values retained",
+        path, error.line, error.field, error.reason));
 }
 
 /// Per-terminal config (`apps/gui_terminal.toml`, table `[terminal]`). Mirrors
@@ -1784,13 +1809,9 @@ impl TerminalCfg {
     /// Load `apps/<app_id>.toml`, overlaying `[terminal]` onto the baseline.
     pub fn load(app_id: &str) -> Self {
         let mut c = Self::baseline();
-        if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
-            c.from_file = true;
-            // Pass 1: a named `theme` sets the whole base palette...
-            c.apply_theme(&text);
-            // Pass 2: ...then explicit `fg/bg/ansi*` keys override it, so a theme
-            // plus a single tweak composes regardless of key order in the file.
-            c.parse(&text);
+        let path = config_path(APPS_DIR, app_id);
+        if let Some(text) = read_standalone(&path) {
+            if let Err(error) = c.apply(&text) { standalone_warning(&path, &error); }
         }
         c
     }
@@ -1825,50 +1846,28 @@ impl TerminalCfg {
         }
     }
 
-    fn parse(&mut self, text: &str) {
-        let mut section = String::new();
-        for raw in text.lines() {
-            let line = strip_comment(raw).trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                section.clear();
-                section.push_str(name.trim());
-                continue;
-            }
-            if section != "terminal" {
-                continue;
-            }
-            let Some(eq) = line.find('=') else { continue };
-            let key = line[..eq].trim();
-            let rhs = line[eq + 1..].trim();
+    /// Apply a complete checked document atomically. On error, keep all prior
+    /// values (including theme/palette and from_file) intact.
+    pub fn apply(&mut self, text: &str) -> Result<(), ConfigError> {
+        let mut candidate = *self;
+        candidate.apply_theme(text);
+        validation::table(text, "terminal", |key, input| {
             match key {
-                "prompt" => self.prompt.set(unquote(rhs)),
-                "font" => self.font.set(unquote(rhs)),
-                // `theme` is resolved in pass 1 (apply_theme); ignore it here so a
-                // later explicit color key wins over the preset, not vice versa.
-                "theme" => {}
-                "fg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.fg = c;
-                    }
-                }
-                "bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.bg = c;
-                    }
-                }
-                "bg_alpha" => {
-                    if let Some(n) = parse_uint(rhs) {
-                        self.bg_alpha = n.min(255);
-                    }
-                }
-                "ansi" => parse_color_array_into(rhs, &mut self.ansi),
-                "ansi_bright" => parse_color_array_into(rhs, &mut self.ansi_bright),
-                _ => {}
+                "prompt" => { candidate.prompt.set(validation::config_string(input)?); }
+                "font" => { candidate.font.set(validation::config_string(input)?); }
+                "fg" => { candidate.fg = validation::color(input)?; }
+                "bg" => { candidate.bg = validation::color(input)?; }
+                "bg_alpha" => { candidate.bg_alpha = validation::uint(input, 255)?; }
+                "ansi" => { candidate.ansi = validation::colors(input)?; }
+                "ansi_bright" => { candidate.ansi_bright = validation::colors(input)?; }
+                "theme" => { term_theme::by_name(validation::config_string(input)?).ok_or("unknown terminal theme")?; }
+                _ => return Err("unknown setting"),
             }
-        }
+            Ok(())
+        })?;
+        candidate.from_file = true;
+        *self = candidate;
+        Ok(())
     }
 }
 
@@ -1909,76 +1908,35 @@ impl FilesCfg {
 
     pub fn load(app_id: &str) -> Self {
         let mut c = Self::from_theme(load().theme);
-        if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
-            c.from_file = true;
-            c.parse(&text);
+        let path = config_path(APPS_DIR, app_id);
+        if let Some(text) = read_standalone(&path) {
+            if let Err(error) = c.apply(&text) { standalone_warning(&path, &error); }
         }
         c
     }
 
-    fn parse(&mut self, text: &str) {
-        let mut section = String::new();
-        for raw in text.lines() {
-            let line = strip_comment(raw).trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                section.clear();
-                section.push_str(name.trim());
-                continue;
-            }
-            if section != "files" {
-                continue;
-            }
-            let Some(eq) = line.find('=') else { continue };
-            let key = line[..eq].trim();
-            let rhs = line[eq + 1..].trim();
+    /// Apply a complete checked document atomically. On error, keep all prior
+    /// values (including theme/palette and from_file) intact.
+    pub fn apply(&mut self, text: &str) -> Result<(), ConfigError> {
+        let mut candidate = *self;
+        validation::table(text, "files", |key, input| {
             match key {
-                "icon_theme" => self.icon_theme.set(unquote(rhs)),
-                "bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.bg = c;
-                    }
-                }
-                "header_bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.header_bg = c;
-                    }
-                }
-                "status_bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.status_bg = c;
-                    }
-                }
-                "accent" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.accent = c;
-                    }
-                }
-                "label" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.label = c;
-                    }
-                }
-                "muted" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.muted = c;
-                    }
-                }
-                "sel_bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.sel_bg = c;
-                    }
-                }
-                "bg_alpha" => {
-                    if let Some(n) = parse_uint(rhs) {
-                        self.bg_alpha = n.min(255);
-                    }
-                }
-                _ => {}
+                "bg" => { candidate.bg = validation::color(input)?; }
+                "header_bg" => { candidate.header_bg = validation::color(input)?; }
+                "status_bg" => { candidate.status_bg = validation::color(input)?; }
+                "accent" => { candidate.accent = validation::color(input)?; }
+                "label" => { candidate.label = validation::color(input)?; }
+                "muted" => { candidate.muted = validation::color(input)?; }
+                "sel_bg" => { candidate.sel_bg = validation::color(input)?; }
+                "icon_theme" => { candidate.icon_theme.set(validation::config_string(input)?); }
+                "bg_alpha" => { candidate.bg_alpha = validation::uint(input, 255)?; }
+                _ => return Err("unknown setting"),
             }
-        }
+            Ok(())
+        })?;
+        candidate.from_file = true;
+        *self = candidate;
+        Ok(())
     }
 }
 
@@ -2034,81 +1992,36 @@ impl CalcCfg {
     /// Load `apps/<app_id>.toml`, overlaying `[calc]` onto the baseline.
     pub fn load(app_id: &str) -> Self {
         let mut c = Self::from_theme(load().theme);
-        if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
-            c.from_file = true;
-            c.parse(&text);
+        let path = config_path(APPS_DIR, app_id);
+        if let Some(text) = read_standalone(&path) {
+            if let Err(error) = c.apply(&text) { standalone_warning(&path, &error); }
         }
         c
     }
 
-    fn parse(&mut self, text: &str) {
-        let mut section = String::new();
-        for raw in text.lines() {
-            let line = strip_comment(raw).trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                section.clear();
-                section.push_str(name.trim());
-                continue;
-            }
-            if section != "calc" {
-                continue;
-            }
-            let Some(eq) = line.find('=') else { continue };
-            let key = line[..eq].trim();
-            let rhs = line[eq + 1..].trim();
+    /// Apply a complete checked document atomically. On error, keep all prior
+    /// values (including theme/palette and from_file) intact.
+    pub fn apply(&mut self, text: &str) -> Result<(), ConfigError> {
+        let mut candidate = *self;
+        validation::table(text, "calc", |key, input| {
             match key {
-                "font" => self.font.set(unquote(rhs)),
-                "bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.bg = c;
-                    }
-                }
-                "display_bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.display_bg = c;
-                    }
-                }
-                "text" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.text = c;
-                    }
-                }
-                "muted" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.muted = c;
-                    }
-                }
-                "btn" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.btn = c;
-                    }
-                }
-                "btn_fn" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.btn_fn = c;
-                    }
-                }
-                "btn_op" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.btn_op = c;
-                    }
-                }
-                "btn_eq" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.btn_eq = c;
-                    }
-                }
-                "bg_alpha" => {
-                    if let Some(n) = parse_uint(rhs) {
-                        self.bg_alpha = n.min(255);
-                    }
-                }
-                _ => {}
+                "bg" => { candidate.bg = validation::color(input)?; }
+                "display_bg" => { candidate.display_bg = validation::color(input)?; }
+                "text" => { candidate.text = validation::color(input)?; }
+                "muted" => { candidate.muted = validation::color(input)?; }
+                "btn" => { candidate.btn = validation::color(input)?; }
+                "btn_fn" => { candidate.btn_fn = validation::color(input)?; }
+                "btn_op" => { candidate.btn_op = validation::color(input)?; }
+                "btn_eq" => { candidate.btn_eq = validation::color(input)?; }
+                "font" => { candidate.font.set(validation::config_string(input)?); }
+                "bg_alpha" => { candidate.bg_alpha = validation::uint(input, 255)?; }
+                _ => return Err("unknown setting"),
             }
-        }
+            Ok(())
+        })?;
+        candidate.from_file = true;
+        *self = candidate;
+        Ok(())
     }
 }
 
@@ -2156,66 +2069,33 @@ impl DemoCfg {
     /// Load `apps/<app_id>.toml`, overlaying `[demo]` onto the baseline.
     pub fn load(app_id: &str) -> Self {
         let mut c = Self::from_theme(load().theme);
-        if let Some(text) = read_file(&config_path(APPS_DIR, app_id)) {
-            c.from_file = true;
-            c.parse(&text);
+        let path = config_path(APPS_DIR, app_id);
+        if let Some(text) = read_standalone(&path) {
+            if let Err(error) = c.apply(&text) { standalone_warning(&path, &error); }
         }
         c
     }
 
-    fn parse(&mut self, text: &str) {
-        let mut section = String::new();
-        for raw in text.lines() {
-            let line = strip_comment(raw).trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                section.clear();
-                section.push_str(name.trim());
-                continue;
-            }
-            if section != "demo" {
-                continue;
-            }
-            let Some(eq) = line.find('=') else { continue };
-            let key = line[..eq].trim();
-            let rhs = line[eq + 1..].trim();
+    /// Apply a complete checked document atomically. On error, keep all prior
+    /// values (including theme/palette and from_file) intact.
+    pub fn apply(&mut self, text: &str) -> Result<(), ConfigError> {
+        let mut candidate = *self;
+        validation::table(text, "demo", |key, input| {
             match key {
-                "font" => self.font.set(unquote(rhs)),
-                "bg" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.bg = c;
-                    }
-                }
-                "text" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.text = c;
-                    }
-                }
-                "muted" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.muted = c;
-                    }
-                }
-                "btn" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.btn = c;
-                    }
-                }
-                "accent" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.accent = c;
-                    }
-                }
-                "bg_alpha" => {
-                    if let Some(n) = parse_uint(rhs) {
-                        self.bg_alpha = n.min(255);
-                    }
-                }
-                _ => {}
+                "bg" => { candidate.bg = validation::color(input)?; }
+                "text" => { candidate.text = validation::color(input)?; }
+                "muted" => { candidate.muted = validation::color(input)?; }
+                "btn" => { candidate.btn = validation::color(input)?; }
+                "accent" => { candidate.accent = validation::color(input)?; }
+                "font" => { candidate.font.set(validation::config_string(input)?); }
+                "bg_alpha" => { candidate.bg_alpha = validation::uint(input, 255)?; }
+                _ => return Err("unknown setting"),
             }
-        }
+            Ok(())
+        })?;
+        candidate.from_file = true;
+        *self = candidate;
+        Ok(())
     }
 }
 
@@ -2247,50 +2127,29 @@ impl WidgetCfg {
     /// the baseline — the caller decides whether "no file" means "not present".
     pub fn load(name: &str) -> Self {
         let mut c = Self::baseline();
-        if let Some(text) = read_file(&config_path(WIDGETS_DIR, name)) {
-            c.from_file = true;
-            c.parse(&text);
+        let path = config_path(WIDGETS_DIR, name);
+        if let Some(text) = read_standalone(&path) {
+            if let Err(error) = c.apply(&text) { standalone_warning(&path, &error); }
         }
         c
     }
 
-    fn parse(&mut self, text: &str) {
-        let mut section = String::new();
-        for raw in text.lines() {
-            let line = strip_comment(raw).trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                section.clear();
-                section.push_str(name.trim());
-                continue;
-            }
-            if section != "widget" {
-                continue;
-            }
-            let Some(eq) = line.find('=') else { continue };
-            let key = line[..eq].trim();
-            let rhs = line[eq + 1..].trim();
+    /// Apply a complete checked document atomically. On error, keep all prior
+    /// values (including theme/palette and from_file) intact.
+    pub fn apply(&mut self, text: &str) -> Result<(), ConfigError> {
+        let mut candidate = *self;
+        validation::table(text, "widget", |key, input| {
             match key {
-                "enabled" => {
-                    if let Some(b) = parse_bool(rhs) {
-                        self.enabled = b;
-                    }
-                }
-                "accent" => {
-                    if let Some(c) = parse_color(unquote(rhs)) {
-                        self.accent = c;
-                    }
-                }
-                "corner" => {
-                    if let Some(n) = parse_uint(rhs) {
-                        self.corner = n as i32;
-                    }
-                }
-                _ => {}
+                "enabled" => { candidate.enabled = parse_bool(input).ok_or("expected a boolean")?; }
+                "accent" => { candidate.accent = validation::color(input)?; }
+                "corner" => { candidate.corner = validation::uint(input, 3)? as i32; }
+                _ => return Err("unknown setting"),
             }
-        }
+            Ok(())
+        })?;
+        candidate.from_file = true;
+        *self = candidate;
+        Ok(())
     }
 }
 

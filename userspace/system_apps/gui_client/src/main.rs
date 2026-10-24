@@ -88,14 +88,13 @@ fn u64_at(p: &[u8], off: usize) -> u64 {
 /// a FRESH kernel buffer of `new_w*new_h`, render into it, then replay the
 /// buffer half of the handshake with a NEW object id (the compositor's freshness
 /// gate rejects a re-used id). Returns the new `(handle, mapped ptr, ok-button
-/// rect)` on success; the OLD buffer handle is closed. `serial` advances so
+/// rect)` on success; the caller releases the OLD mapping and handle on success. `serial` advances so
 /// every request keeps a unique, increasing client serial. This is the client
 /// half of maximize/fullscreen/restore — identical for every resizing app.
 #[allow(clippy::too_many_arguments)]
 fn resize_surface(
     compositor: u32,
     id: u32,
-    old_buf: u32,
     font: &Font,
     st: UiState,
     new_w: u32,
@@ -104,14 +103,17 @@ fn resize_surface(
     token: u64,
     serial: &mut u64,
 ) -> Option<(u32, *mut u8, (i32, i32, i32, i32))> {
-    let bytes = (new_w * new_h * 4) as usize;
+    let bytes = (new_w as usize).checked_mul(new_h as usize)?.checked_mul(4)?;
+    if new_w == 0 || new_h == 0 || bytes > 64 * 1024 * 1024 { return None; }
     let nb = libdunit::handle_create_shared(bytes);
     if nb <= 0 {
+        libdunit::println(&alloc::format!("gui_client: resize create bytes={} errno={}", bytes, nb));
         return None;
     }
     let nb = nb as u32;
     let mapped = libdunit::handle_map(nb, 0, bytes);
     if mapped <= 0 {
+        libdunit::println(&alloc::format!("gui_client: resize map bytes={} errno={}", bytes, mapped));
         libdunit::handle_close(nb);
         return None;
     }
@@ -119,9 +121,6 @@ fn resize_surface(
     let btn = render_window(npx, font, id, st, new_w, new_h);
 
     // ACK the new configure token so the compositor accepts our next COMMIT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    send_env(compositor, id, &ack);
 
     // Transfer the fresh buffer (read-only) and announce {handle, size, object}.
     let dup = libdunit::handle_dup(
@@ -134,9 +133,14 @@ fn resize_surface(
         -1
     };
     if ch <= 0 {
-        libdunit::handle_close(nb);
+        if dup > 0 { libdunit::handle_close(dup as u32); }
+        libdunit::shared_buffer::release(nb, mapped as usize, bytes);
         return None;
     }
+    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
+    *serial += 1;
+    send_env(compositor, id, &ack);
+
     let mut ann = [0u8; 16];
     ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
     ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
@@ -158,8 +162,7 @@ fn resize_surface(
     *serial += 1;
     send_env(compositor, id, &commit);
 
-    // Release the old backing buffer; the compositor now blits the new one.
-    libdunit::handle_close(old_buf);
+    // The caller releases its previous mapping only after adopting this result.
     Some((nb, npx, btn))
 }
 
@@ -411,8 +414,9 @@ pub extern "C" fn _start() -> ! {
                 continue;
             }
             if let Some((nb, npx, nbtn)) = resize_surface(
-                compositor, id, cur_buf, &font, st, new_w, new_h, next_obj, tok, &mut serial,
+                compositor, id, &font, st, new_w, new_h, next_obj, tok, &mut serial,
             ) {
+                libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
                 cur_buf = nb;
                 px = npx;
                 cur_w = new_w;
@@ -465,7 +469,7 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
-    libdunit::handle_close(cur_buf);
+    libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
     libdunit::exit(0)
 }
 

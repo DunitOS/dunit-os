@@ -758,12 +758,11 @@ fn draw_confirm(s: &mut Surface, font: &Font, files: &Files) {
 /// a FRESH kernel buffer of `new_w*new_h`, re-read the directory at the new cell
 /// cap, render into the new buffer, then replay the buffer half of the handshake
 /// with a NEW object id (the compositor's freshness gate rejects a re-used id).
-/// Returns the new `(handle, mapped ptr)`; the OLD buffer handle is closed.
+/// Returns the new `(handle, mapped ptr)`; the caller releases the OLD mapping and handle on success.
 /// `serial` advances so every request keeps a unique, increasing client serial.
 #[allow(clippy::too_many_arguments)]
 fn resize_surface(
     compositor: u32,
-    old_buf: u32,
     font: &Font,
     files: &mut Files,
     icons: &Icons,
@@ -774,28 +773,23 @@ fn resize_surface(
     token: u64,
     serial: &mut u64,
 ) -> Option<(u32, *mut u8)> {
-    let bytes = (new_w * new_h * 4) as usize;
+    let bytes = (new_w as usize).checked_mul(new_h as usize)?.checked_mul(4)?;
+    if new_w == 0 || new_h == 0 || bytes > 64 * 1024 * 1024 { return None; }
     let nb = libdunit::handle_create_shared(bytes);
     if nb <= 0 {
+        libdunit::println(&alloc::format!("gui_files: resize create bytes={} errno={}", bytes, nb));
         return None;
     }
     let nb = nb as u32;
     let mapped = libdunit::handle_map(nb, 0, bytes);
     if mapped <= 0 {
+        libdunit::println(&alloc::format!("gui_files: resize map bytes={} errno={}", bytes, mapped));
         libdunit::handle_close(nb);
         return None;
     }
     let npx = mapped as usize as *mut u8;
-    // Adopt the new geometry and re-cap the listing to the new grid, then paint.
-    files.w = new_w as i32;
-    files.h = new_h as i32;
-    files.reload();
-    render(npx, font, files, icons, mode);
 
     // ACK the new configure token so the compositor accepts our next COMMIT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &ack);
 
     // Transfer the fresh buffer (read-only) and announce {handle, size, object}.
     let dup = libdunit::handle_dup(
@@ -808,9 +802,20 @@ fn resize_surface(
         -1
     };
     if ch <= 0 {
-        libdunit::handle_close(nb);
+        if dup > 0 { libdunit::handle_close(dup as u32); }
+        libdunit::shared_buffer::release(nb, mapped as usize, bytes);
         return None;
     }
+    // Adopt the new geometry and re-cap the listing to the new grid, then paint.
+    files.w = new_w as i32;
+    files.h = new_h as i32;
+    files.reload();
+    render(npx, font, files, icons, mode);
+
+    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
+    *serial += 1;
+    libdunit::ipc_send(compositor, &ack);
+
     let mut ann = [0u8; 16];
     ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
     ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
@@ -836,8 +841,7 @@ fn resize_surface(
     *serial += 1;
     libdunit::ipc_send(compositor, &commit);
 
-    // Release the old backing buffer; the compositor now blits the new one.
-    libdunit::handle_close(old_buf);
+    // The caller releases its previous mapping only after adopting this result.
     Some((nb, npx))
 }
 
@@ -1017,9 +1021,10 @@ pub extern "C" fn _start() -> ! {
                 serial += 1;
                 libdunit::ipc_send(compositor, &ack);
             } else if let Some((nb, npx)) = resize_surface(
-                compositor, cur_buf, &font, &mut files, &icons, &mode, nw, nh, next_obj, tok,
+                compositor, &font, &mut files, &icons, &mode, nw, nh, next_obj, tok,
                 &mut serial,
             ) {
+                libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
                 cur_buf = nb;
                 px = npx;
                 cur_w = nw;
@@ -1205,7 +1210,7 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
-    libdunit::handle_close(cur_buf);
+    libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
     libdunit::exit(0)
 }
 

@@ -8,6 +8,35 @@ const MAX_DIMENSION: u32 = 16_384;
 const MAX_WINDOWS: usize = 64;
 const MAX_DURATION_MS: u32 = 2000;
 
+/// Records a submitted topology before attempting runner startup. Failures do
+/// not clear it: only a changed input or explicit settings reload retries.
+pub struct Requests {
+    snapshot: Option<(Vec<u32>, u32, u32, usize)>,
+}
+
+impl Requests {
+    pub const fn new() -> Self {
+        Self { snapshot: None }
+    }
+    pub fn reset(&mut self) {
+        self.snapshot = None;
+    }
+    pub fn begin(&mut self, ids: &[u32], width: u32, height: u32, workspace: usize) -> bool {
+        if self.snapshot.as_ref().is_some_and(|(old, w, h, ws)| {
+            old.as_slice() == ids && *w == width && *h == height && *ws == workspace
+        }) {
+            return false;
+        }
+        self.snapshot = Some((ids.to_vec(), width, height, workspace));
+        true
+    }
+    pub fn ids(&self) -> &[u32] {
+        self.snapshot
+            .as_ref()
+            .map_or(&[], |(ids, _, _, _)| ids.as_slice())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
@@ -297,6 +326,27 @@ pub use runtime::{Engine, Poll};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_requests_retry_only_after_changed_input_or_reload() {
+        let mut requests = Requests::new();
+        assert!(requests.begin(&[10, 20], 800, 600, 0));
+        // Startup failure, timeout, or rejected output leaves the recorded
+        // request intact. Repeated frames must not restart or notify again.
+        for _ in 0..1000 {
+            assert!(!requests.begin(&[10, 20], 800, 600, 0));
+        }
+        assert_eq!(requests.ids(), &[10, 20]);
+        assert!(requests.begin(&[10, 20], 801, 600, 0));
+        assert!(requests.begin(&[10, 20], 801, 601, 0));
+        assert!(requests.begin(&[10, 20], 801, 601, 1));
+        assert!(requests.begin(&[20, 10], 801, 601, 1));
+        assert!(requests.begin(&[20], 801, 601, 1));
+        requests.reset();
+        assert!(requests.begin(&[20], 801, 601, 1));
+        assert!(requests.begin(&[], 801, 601, 1));
+        assert!(!requests.begin(&[], 801, 601, 1));
+    }
 
     #[test]
     fn complete_policy_with_crlf_and_zero_windows() {

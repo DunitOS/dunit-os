@@ -19,10 +19,7 @@ menu_hover       = "#45475A"
 title_text_focused   = "#EAF2EC"
 title_text_unfocused = "#A8B4AC"
 
-# Compositor geometry, in pixels. `max_windows` is a safety cap on how many
-# client windows may be composited at once, not a pixel count. Non-numeric
-# values are ignored and keep the built-in baseline.
-
+# Compositor effects; invalid values reject the preset with a diagnostic.
 [effects]
 corner_radius    = 8
 shadow           = 7
@@ -37,13 +34,12 @@ anim             = true
 anim_ms          = 140
 
 # Asset paths — everything the desktop loads by path, so it is fully config-
-# driven (no hardcoded asset locations). `wallpaper` is a 1600x900 24-bit BMP
-# painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
+# driven (no hardcoded asset locations). `wallpaper` accepts SVG or 24-bit BMP
+# and is painted as the backdrop (load failure → diagnostic/gradient fallback). `icon_theme` is a
 # theme name under /assets/icons/<name>/, or absolute manifest path. The shared
 # loader resolves theme.toml, ZIP/index.theme and aliases (or flat SVG/RGBA files
 # for Aqua/legacy Breeze). `font` is the TrueType font
-# every GUI app renders text with (missing/unparseable → the app's embedded
-# fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
+# every GUI app renders text with (missing/unparseable → explicit load failure). Paths must exist in the VFS; assets under /assets/ are embedded.
 
 [layout]
 dock_tile_alpha = 255

@@ -107,7 +107,7 @@ pub extern "C" fn _start() -> ! {
         } else {
             libdunit::println("gui_server: FAIL shared buffer map");
         }
-        libdunit::handle_close(buf as u32);
+        libdunit::shared_buffer::release(buf as u32, if mapped > 0 { mapped as usize } else { 0 }, 4096);
     } else {
         libdunit::println("gui_server: FAIL shared buffer create");
     }
@@ -174,7 +174,7 @@ pub extern "C" fn _start() -> ! {
                 libdunit::println("gui_server: FAIL peer spawn");
             }
         }
-        libdunit::handle_close(xbuf as u32);
+        libdunit::shared_buffer::release(xbuf as u32, if mapped > 0 { mapped as usize } else { 0 }, 4096);
     }
 
     // 6) Framebuffer output path (M3 item 3, first slice): as the display master,
@@ -292,7 +292,7 @@ fn run_compositor_cycle(server: &mut Server, conn: gui_protocol_v1::server::Conn
     }
 
     let ok = drive_protocol(server, conn, bytes, W, H, FMT_XRGB8888, SURFACE, BUFFER, pixels);
-    libdunit::handle_close(buf);
+    libdunit::shared_buffer::release(buf, mapped as usize, bytes);
     ok
 }
 
@@ -490,7 +490,7 @@ fn present_damaged_frame(
     }
 
     let ok = drive_damage(server, conn, surface, token, w, h, fmt, BUFFER2, dx, dy, dw, dh, pixels);
-    libdunit::handle_close(buf);
+    libdunit::shared_buffer::release(buf, mapped as usize, bytes);
     ok
 }
 
@@ -643,7 +643,7 @@ fn drive_reconfigure(
 
     let data = unsafe { core::slice::from_raw_parts(pixels, bytes) };
     let ok = presented && libdunit::fb_present(data, W2, H2, 100, 100) == 0;
-    libdunit::handle_close(buf);
+    libdunit::shared_buffer::release(buf, mapped as usize, bytes);
     if ok {
         libdunit::println("gui_server: client resized to 96x48 OK");
     } else {
@@ -793,15 +793,24 @@ fn handle_client_payload(
         // Игнорируем размер, названный клиентом (payload[8..12]) — он недоверенный.
         // Мапим буфер и берём ИСТИННУЮ длину backing-объекта из ядра: только она
         // задаёт безопасную границу для последующего блита.
-        let mapped = libdunit::handle_map(handle, 0, 0);
-        if mapped > 0 {
-            let real_len = libdunit::handle_shared_len(handle);
-            if real_len > 0 {
-                c.buf_ptr = mapped as usize as *const u8;
-                c.buf_size = real_len as usize;
-                c.mapped_handle = handle;
-            }
+        // Query length before mapping so every successful mapping has an exact
+        // release range, including rejected announcements. Re-announcing our
+        // current capability is not a new owned reference.
+        if handle == c.mapped_handle { return; }
+        let real_len = libdunit::handle_shared_len(handle);
+        if real_len <= 0 {
+            libdunit::handle_close(handle);
+            return;
         }
+        let mapped = libdunit::handle_map(handle, 0, real_len as usize);
+        if mapped <= 0 {
+            libdunit::handle_close(handle);
+            return;
+        }
+        libdunit::shared_buffer::release(c.mapped_handle, c.buf_ptr as usize, c.buf_size);
+        c.buf_ptr = mapped as usize as *const u8;
+        c.buf_size = real_len as usize;
+        c.mapped_handle = handle;
         return;
     }
     // "Reload settings" signal from a trusted-enough client (gui_settings): the
@@ -1116,7 +1125,7 @@ fn serve_two_clients() -> bool {
 
     for c in clients.iter() {
         if c.mapped_handle != 0 {
-            libdunit::handle_close(c.mapped_handle);
+            libdunit::shared_buffer::release(c.mapped_handle, c.buf_ptr as usize, c.buf_size);
         }
         let mut status = libdunit::WaitStatus::empty();
         for _ in 0..50 {
@@ -3460,7 +3469,7 @@ fn run_desktop_session(
     let mut reload_requested = pending_reload;
     let mut scripts = cfg.settings.scripts;
     let mut lua_engine = lua_policy::Engine::new();
-    let mut lua_snapshot: Option<(Vec<u32>, u32, u32, usize)> = None;
+    let mut lua_requests = lua_policy::Requests::new();
     let mut lua_ease_out = false;
     let mut lua_expected: Vec<(u32, u32, u32)> = Vec::new();
     // Client-posted notification texts collected by `pump_clients` this tick
@@ -3522,7 +3531,7 @@ fn run_desktop_session(
                     return true;
                 }
                 lua_engine.cancel();
-                lua_snapshot = None;
+                lua_requests.reset();
                 lua_expected.clear();
                 scripts = ncfg.settings.scripts;
                 lua_ease_out = false;
@@ -3633,7 +3642,7 @@ fn run_desktop_session(
         // client is skipped so a still-spawning child is never reaped early). On a
         // reap, free ALL of it: the protocol connection + its surfaces/buffers
         // (`disconnect_peer`), the compositor's shared-buffer mapping
-        // (`handle_close`), the `ClientState` (this is what lifts the spawn
+        // (`vm_unmap` + `handle_close`), the `ClientState` (this is what lifts the spawn
         // ceiling), and the `Win` with full z/drag/focus index fixup.
         {
             let mut ci = 0;
@@ -3650,7 +3659,7 @@ fn run_desktop_session(
                 }
                 server.disconnect_peer(clients[ci].conn);
                 if clients[ci].mapped_handle != 0 {
-                    libdunit::handle_close(clients[ci].mapped_handle);
+                    libdunit::shared_buffer::release(clients[ci].mapped_handle, clients[ci].buf_ptr as usize, clients[ci].buf_size);
                 }
                 clients.remove(ci);
                 reap_windows_of(
@@ -4532,6 +4541,7 @@ fn run_desktop_session(
         // workspace or configuration changes start a new request; frame rendering
         // never waits for the VM. A dragged tiled window becomes floating until
         // the next settings reload, so policy cannot fight the pointer.
+        let mut lua_failure = None;
         if scripts.enabled {
             let ids: Vec<u32> = wins
                 .iter()
@@ -4546,25 +4556,19 @@ fn run_desktop_session(
                 .collect();
             let width = (bw as i32 - ins.left - ins.right).max(1) as u32;
             let height = (bh as i32 - ins.top - ins.bottom).max(1) as u32;
-            let changed = lua_snapshot.as_ref().map_or(true, |(old, ow, oh, ws)| {
-                *ow != width || *oh != height || *ws != current_ws || *old != ids
-            });
+            let changed = lua_requests.begin(&ids, width, height, current_ws);
             if changed {
                 lua_expected.clear();
                 lua_engine.cancel();
                 if !ids.is_empty() {
                     if let Err(reason) = lua_engine.start(&scripts, width, height, ids.len()) {
-                        libdunit::println(&alloc::format!(
-                            "gui_server: Lua policy rejected: {}",
-                            reason
-                        ));
+                        lua_failure = Some(reason);
                     }
                 }
-                lua_snapshot = Some((ids, width, height, current_ws));
             }
             match lua_engine.poll() {
                 lua_policy::Poll::Ready(policy) => {
-                    let (ids, _, _, _) = lua_snapshot.as_ref().unwrap();
+                    let ids = lua_requests.ids();
                     // Reject the WHOLE result if any cell cannot contain its
                     // decorations. Never apply an early rectangle then fail late.
                     let fits = policy
@@ -4610,19 +4614,38 @@ fn run_desktop_session(
                             if lua_ease_out { "ease_out" } else { "linear" }
                         ));
                     } else {
-                        libdunit::println(
-                            "gui_server: Lua policy rejected: cell smaller than window decorations",
-                        );
+                        lua_failure = Some("cell smaller than window decorations");
                     }
                 }
                 lua_policy::Poll::Failed(reason) => {
-                    libdunit::println(&alloc::format!(
-                        "gui_server: Lua policy rejected: {}",
-                        reason
-                    ));
+                    lua_failure = Some(reason);
                 }
                 lua_policy::Poll::Pending => {}
             }
+        }
+
+        if let Some(reason) = lua_failure {
+            lua_engine.cancel();
+            lua_expected.clear();
+            lua_ease_out = false;
+            let mut restored = 0usize;
+            for win in wins.iter_mut().filter(|w| w.alive) {
+                if win.state == WinState::Tiled {
+                    win.motion = None;
+                    set_window_state(server, clients, win, WinState::Floating,
+                        bw, bh, &ly, &ins);
+                    restored += 1;
+                }
+            }
+            // Keep lua_requests: this topology has already failed. Re-attempt
+            // only on topology/workspace/geometry change or explicit reload,
+            // so a persistent syntax/quota error cannot create a toast storm.
+            libdunit::println(&alloc::format!(
+                "gui_server: Lua policy rejected: {}; floating fallback restored={}", reason, restored));
+            let message = alloc::format!("Lua layout failed: {}. Floating layout restored.", reason);
+            notify_post(&mut notifs, &notifications, animation_now, &message);
+            libdunit::println(&alloc::format!("gui_server: Lua fallback notification queued={}",
+                u8::from(notifs.iter().any(|toast| toast.text == message))));
         }
 
         for win in wins.iter_mut() {
@@ -4718,7 +4741,7 @@ fn run_desktop_session(
                     if let Some(mw) = mon_w {
                         let px = ly.title_font_px as f32;
                         let ram_pct = if whave && wst.pmm_total_bytes > 0 {
-                            (wst.pmm_used_bytes * 100 / wst.pmm_total_bytes) as u32
+                            wst.memory_used_percent()
                         } else {
                             0
                         };
@@ -4981,7 +5004,7 @@ fn run_desktop_session(
             if tray_h {
                 if let Some(f) = font.as_ref() {
                     let ram_pct = if have && stats.pmm_total_bytes > 0 {
-                        (stats.pmm_used_bytes * 100 / stats.pmm_total_bytes) as u32
+                        stats.memory_used_percent()
                     } else {
                         0
                     };

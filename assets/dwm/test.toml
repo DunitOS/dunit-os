@@ -7,9 +7,9 @@
 # Selected by boot-smoke-tests (limine_test_gui.conf / terminal.conf).
 #
 # Loaded by gui_server at desktop start from /system/share/dwm/default.toml
-# (embedded in the kernel MemFS). Unknown keys are ignored for forward
-# compatibility; a missing or unparseable file falls back to the built-in
-# Green Tea defaults baked into gui_server (the last-known-good baseline).
+# (loaded from initrd into MemFS). Unknown or invalid values are diagnosed and
+# rejected. Missing files use dwm_settings defaults; an invalid live reload
+# preserves the complete previous configuration.
 #
 # Colors are #RRGGBB or #AARRGGBB (alpha defaults to opaque). Geometry is in
 # pixels.
@@ -44,8 +44,8 @@ title_text_focused   = "#EAF2EC"
 title_text_unfocused = "#A8B4AC"
 
 # Compositor geometry, in pixels. `max_windows` is a safety cap on how many
-# client windows may be composited at once, not a pixel count. Non-numeric
-# values are ignored and keep the built-in baseline.
+# client windows may be composited at once, not a pixel count. Malformed or
+# out-of-range values reject the document with a diagnostic.
 [layout]
 title_h          = 26
 border           = 2
@@ -63,7 +63,7 @@ ws_w             = 22
 max_windows      = 8
 # Point sizes for the compositor's TTF text. `title_font_px` sizes window-title
 # and system-tray text; `panel_font_px` sizes the taskbar-button labels. Were
-# hardcoded 14.0 / 13.0. Clamped to 6..=64 on load.
+# hardcoded 14.0 / 13.0. Accepted range: 6..=64.
 title_font_px    = 14
 panel_font_px    = 13
 
@@ -89,8 +89,8 @@ anim_ms          = 140
 # painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
 # directory name under /assets/icons/<name>/; the compositor dock/launcher and
 # the file manager resolve <name>/<key>.rgba from it. `font` is the TrueType font
-# every GUI app renders text with (missing/unparseable → the app's embedded
-# fallback copy). Paths must exist in the VFS; assets under /assets/ are embedded.
+# every GUI app renders text with (missing/unparseable → explicit load failure).
+# Paths must exist in the VFS; assets under /assets/ come from initrd.
 [desktop]
 wallpaper        = "/assets/wallpapers/wallpaper.bmp"
 icon_theme       = "breeze"
@@ -219,7 +219,7 @@ name  = "Settings"
 label = "SET"
 
 # Pinned dock icons, left-edge strip, top-to-bottom. Ids resolve to registry
-# entries; unknown ids are dropped. Omit this table to pin the whole registry.
+# entries; unknown ids reject the document. Omit to pin the whole registry.
 [dock]
 entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
 
@@ -249,8 +249,8 @@ entries = ["gui_client", "gui_client", "gui_terminal", "gui_files", "gui_calc", 
 # maximize its windows).
 self_test = true
 
-# Virtual workspace count (the panel switcher lays out this many pips). Clamped
-# to 1..=9 on load.
+# Virtual workspace count (the panel switcher lays out this many pips). Accepted
+# range: 1..=9; invalid values reject the document.
 [workspaces]
 count = 5
 

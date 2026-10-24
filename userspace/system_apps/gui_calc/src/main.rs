@@ -616,7 +616,6 @@ fn render(px: *mut u8, w: u32, h: u32, font: &Font, calc: &Calc, pal: &Palette, 
 #[allow(clippy::too_many_arguments)]
 fn resize_surface(
     compositor: u32,
-    old_buf: u32,
     font: &Font,
     calc: &Calc,
     pal: &Palette,
@@ -628,23 +627,23 @@ fn resize_surface(
     token: u64,
     serial: &mut u64,
 ) -> Option<(u32, *mut u8)> {
-    let bytes = (new_w * new_h * 4) as usize;
+    let bytes = (new_w as usize).checked_mul(new_h as usize)?.checked_mul(4)?;
+    if new_w == 0 || new_h == 0 || bytes > 64 * 1024 * 1024 { return None; }
     let nb = libdunit::handle_create_shared(bytes);
     if nb <= 0 {
+        libdunit::println(&alloc::format!("gui_calc: resize create bytes={} errno={}", bytes, nb));
         return None;
     }
     let nb = nb as u32;
     let mapped = libdunit::handle_map(nb, 0, bytes);
     if mapped <= 0 {
+        libdunit::println(&alloc::format!("gui_calc: resize map bytes={} errno={}", bytes, mapped));
         libdunit::handle_close(nb);
         return None;
     }
     let npx = mapped as usize as *mut u8;
     render(npx, new_w, new_h, font, calc, pal, clear_bg);
 
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &ack);
 
     let dup = libdunit::handle_dup(
         nb,
@@ -656,9 +655,14 @@ fn resize_surface(
         -1
     };
     if ch <= 0 {
-        libdunit::handle_close(nb);
+        if dup > 0 { libdunit::handle_close(dup as u32); }
+        libdunit::shared_buffer::release(nb, mapped as usize, bytes);
         return None;
     }
+    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
+    *serial += 1;
+    libdunit::ipc_send(compositor, &ack);
+
     let mut ann = [0u8; 16];
     ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
     ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
@@ -683,7 +687,6 @@ fn resize_surface(
     *serial += 1;
     libdunit::ipc_send(compositor, &commit);
 
-    libdunit::handle_close(old_buf);
     Some((nb, npx))
 }
 
@@ -861,9 +864,10 @@ pub extern "C" fn _start() -> ! {
                 serial += 1;
                 libdunit::ipc_send(compositor, &ack);
             } else if let Some((nb, npx)) = resize_surface(
-                compositor, cur_buf, &font, &calc, &pal, clear_bg, fmt, nw, nh, next_obj, tok,
+                compositor, &font, &calc, &pal, clear_bg, fmt, nw, nh, next_obj, tok,
                 &mut serial,
             ) {
+                libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
                 cur_buf = nb;
                 px = npx;
                 cur_w = nw;
@@ -899,6 +903,6 @@ pub extern "C" fn _start() -> ! {
         }
     }
 
-    libdunit::handle_close(cur_buf);
+    libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
     libdunit::exit(0)
 }
