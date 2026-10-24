@@ -76,8 +76,8 @@ Multitasking and Memory
 Terminal and Shell
 ------------------
 **Console**: VGA framebuffer terminal using a Linux-style 8x16 bitmap console font.  
-**Shell (dsh)**: Command history (Up/Down arrows), tab autocomplete, pipes (`|`), and path execution (`/system/bin`, `/app`).  
-**dufetch**: Displays hardware specifications, memory statistics, and the ASCII logo.  
+**Shell (dsh)**: Command history (Up/Down arrows), tab autocomplete and quoted argv/path execution; search order is data in `/assets/exec-path` (default `/system/bin:/app`, no implicit cwd).
+**dufetch**: Displays available runtime statistics (memory, uptime, display), cwd/PID and the ASCII logo; OS/kernel identity still awaits its native source contract.
 **calc**: Command-line mathematical expression calculator.  
 **bmp_viewer**: Renders BMP image files directly to the framebuffer.  
 **fsck_dunit**: Filesystem consistency check and diagnostic utility.  
@@ -93,7 +93,7 @@ Desktop Environment (DWM)
 Storage and Filesystems
 -----------------------
 **Block Drivers**: Native AHCI SATA and VirtIO block device support with GPT partitioning.  
-**Filesystems**: Ramdisk (MemFS) for `/app` and `/assets`, and a custom extent-based DunitFS.  
+**Filesystems**: The root filesystem is MemFS populated from an external initrd. DunitFS v2 is mounted on `/persist`; installing the OS does not make DunitFS the root filesystem.
 **Disk Installation**: The `install.dunit` command installs the operating system to physical drives or USB media, creating an EFI System Partition and a persistent `/persist` filesystem that survives reboots.  
 
 C Runtime and Toolchain
@@ -107,7 +107,7 @@ build/dunit-sysroot/bin/dunit-cc -O2 -o build/userspace/hello hello.c
 
 On-device compilation via Tiny C Compiler (`tcc`):
 ```text
-exec tcc /assets/tcc/hello.c -o /tmp/hello
+exec /system/bin/tcc /assets/tcc/hello.c -o /tmp/hello
 exec /tmp/hello
 ```
 
@@ -117,7 +117,10 @@ Current Limitations
 This is an experimental hobby operating system under active development. Current omissions:  
 Multi-core (SMP) — execution is currently single-core (UP)  
 Networking stack (TCP/IP) and audio subsystem  
-Dynamic linking (`.so` shared libraries)  
+Dynamic linking (`.so` shared libraries), signals and a secure entropy service
+The current C profile is static; unsupported semantics return explicit errors.
+
+The milestone order is M6 (musl/toolchain), M7 (SDK), M8 (network), M9 (applications), M10 (browser). See the [roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) and [M6 results](docs/m6-readiness.md) for acceptance status and remaining decisions.
 
 License
 =======

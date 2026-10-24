@@ -1,6 +1,6 @@
 # Dunit OS / Green Tea Kernel — техническое ревью и roadmap
 
-> Восстановлено из `4e97ddad6aa82ca02fef8d5d4f95c613182c2bc3` (12 октября 2026), статусы сверены с `4ac6113` 24 октября 2026. Структура M7 SDK → M8 network → M9 apps → M10 browser и решения §31 сохранены. `[x]` — выполненный конкретный пункт; `[~]` — частично; `[ ]` — не выполнено. Закрытая задача не означает закрытый milestone: нужны его acceptance gates.
+> Восстановлено из `4e97ddad6aa82ca02fef8d5d4f95c613182c2bc3` (12 октября 2026), исходные статусы сверены с `4ac6113` 24 октября 2026; ниже добавлены проверенные результаты доведения M6. Структура M7 SDK → M8 network → M9 apps → M10 browser и решения §31 сохранены. `[x]` — выполненный конкретный пункт; `[~]` — частично; `[ ]` — не выполнено. Закрытая задача не означает закрытый milestone: нужны его acceptance gates.
 
 ### Источник восстановления и граница подтверждённого
 
@@ -37,20 +37,19 @@ M7–M10 не закрываются наличием прототипов ил�
 | M0–M3 | ABI manifests, preemption/threads/TLS/futex/handles, protocol tests и userspace compositor; исходный GUI-smoke прошёл на `4ac6113`. |
 | M4 | Рабочие desktop/apps, setup/Settings, TOML/Lua, темы/SVG/Chameleon, pointer/mode switch до 3K; session/config persistence через reboot остаётся открытым. |
 | M5 | DunitFS v2/fsck/installer/init/profiles — рабочая база; MemFS root и незавершённые user profiles не позволяют закрыть installed-system milestone. |
-| M6 | Static C, pthread/condvar, dup и on-device TinyCC подтверждены; musl pipe regression, file-actions, POSIX gaps, wall clock/secure entropy и release gates открыты. |
+| M6 | Static C, pthread/condvar, dup и on-device TinyCC подтверждены; native pipe/fd actions/poll/ioctl, boot-UTC clock, libc-test subset и 1000 join + 1000 detached проверены; secure entropy, broader POSIX и release gates открыты. |
 | M7 | План SDK восстановлен полностью. Есть UI/runtime и тематические assets, но нет единого wait-set, cargo dunit/Component, полного widget поведения, clipboard/DnD и C GUI SDK. |
 | M8 | Packet networking ещё нет; reboot/poweroff уже есть, остальные platform services открыты. |
 | M9–M10 | Полировка имеющихся GUI начата; rock, SDK-приложения и браузер не закрыты. |
 
-Свежая проверка `tools/qemu_test.py` использует неизменённые contracts
+Историческая проверка базы `4ac6113` через `tools/qemu_test.py` использовала неизменённые contracts
 `m6_musl_hello`, `m6_musl_thread`, `m6_cond`, `m6_pipe`, `m6_dup`,
 `m6_tcc_full`, `lua_system`, `svg` (17 команд, включая interactive Lua
 и полную пересборку Lua исходников через on-device TCC).
 Все required markers, **кроме двух pipe success markers**, получены.
 Итог общего audit-прогона — **FAIL**, единственный forbidden marker:
 `[PIPE] FAIL pipe`; его нельзя выдавать за зелёный M6.
-Это зафиксированная неисправность текущей базы, а не изменение кода в этом
-восстановлении. Отдельный свежий production GUI-прогон
+Это зафиксированная неисправность той базы. В M6-доведении ниже она исправлена и перепроверена; исторический FAIL не удаляется. Отдельный свежий production GUI-прогон
 `tools/svg_ui_markers.json` **прошёл**: смена пресетов, 7 shell icons и 6 Files icons, без запрещённых markers.
 ABI generator check: **85 syscalls + 25 errno + 7 rights**, все outputs
 согласованы с kernel. Наличие файлов тестов без результата не использовалось
@@ -168,7 +167,7 @@ root@dunit:~#
 - **Рабочая база:** ELF parser/loader, W^X flags, user stack и `argc/argv/envp` (`kernel/src/elf/mod.rs:209`, `:391`). Userspace faults завершают процесс, не kernel.
 - **Реализовано после исходного среза:** anonymous private `mmap`, `munmap`, `mprotect`, guard pages и shared VM object с физическими страницами и refcount. `[VM-TEST] OK` проверяет aliasing между процессами, page fault на guard page, partial unmap и освобождение frame после teardown.
 - **Не реализовано:** file-backed `mmap`, demand paging и COW. В текущем `sys_mmap` допустимы только private anonymous mappings; `musl_mmap` и соответствующих marker contracts из потерянной линии в `main` нет.
-- **Не реализовано:** `fork` и process-image `exec`. Dunit-native `spawn`/`posix_spawn` работают с argv/env; file-actions/attributes в текущем musl backend игнорируются — это открытое нарушение M6.1, а не поддерживаемая redirection.
+- **Не реализовано:** `fork` и process-image `exec`. Dunit-native `spawn`/`posix_spawn` работают с argv/env; file-actions open/close/dup2/chdir поддержаны атомарным native spawn contract, остальные attributes явно отклоняются.
 - **Исправлено (M1):** все `static mut` singletons ядра убраны (OnceCell/UnsafeCell-newtype/атомики/IrqSafeSpinLock); на UP это корректно. VFS/DunitFS/PMM под IRQ-free синглтонами (единственный async-источник — таймерный IRQ — их не трогает).
 
 ### 4.3 Планировщик, threads, TLS и синхронизация
@@ -545,7 +544,7 @@ Green Tea Kernel native syscalls and objects
 - [x] Собрать из fork `crt1.o`, `crti.o`, `crtn.o`, `libc.a` и public headers в staging sysroot.
 - [x] Не смешивать host headers/libraries с Dunit sysroot; сборка с найденным host `/usr/include` должна падать.
 - [x] Создать команды `x86_64-dunit-cc`, `x86_64-dunit-ar`, `x86_64-dunit-strip` и SDK manifest с ABI/libc versions.
-- [ ] Добавить CMake toolchain file, Meson cross file и Autoconf cache только после стабильного прямого compiler flow. **Статус:** прямой flow (`dunit-cc`) стабилен и собирает корректный Dunit-ELF; cross-файлы делаются в M7 SDK — кросс-режим CMake требует настройки toolchain-файла.
+- [x] Добавить CMake toolchain file, Meson cross file и Autoconf cache после стабильного прямого compiler flow. **Проверено:** генератор `tools/dunit_sdk.py`, `tools/test_m6_tools.py` (включая пути с пробелами/кавычками), native ELF gate. Это cross-files и provenance, а не весь M7 SDK.
 
 Предлагаемый sysroot:
 
@@ -579,7 +578,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 - [x] Сохранить upstream generic implementations там, где они не зависят от Linux semantics.
 - [x] Не размазывать `#ifdef __dunit__` по всему дереву: вводить небольшие backend interfaces и Dunit translation units.
-- [~] Аудировать прямые `SYS_*`, Linux ioctls/paths, cancellation и структуры. **Готово:** native adapters, generated ABI и negative/hardening tests. **Открыто:** текущий `src/process/posix_spawn.c` молча игнорирует `fa/attr`; исправления/аудит из `7b41043` и `cb665c5` не входят в нынешний `main`. Полный M6.5 audit не закрыт.
+- [~] Аудировать прямые `SYS_*`, Linux ioctls/paths, cancellation и структуры. **Готово:** native adapters, generated ABI и negative/hardening tests. **Исправлено:** native spawn-actions open/close/dup2/chdir атомарны, неподдержанные attributes явно отклоняются; ioctl/fcntl имеют native adapters. system/popen явно ENOSYS. Полный broad-POSIX audit не закрыт; границы и inventory в `docs/m6-readiness.md` и `docs/libc-test.md`.
 - [x] Генерировать `bits/alltypes.h` и public ABI types только после утверждения их размеров. **Готово:** `alltypes.h.in` upstream-stock, размеры ABI-типов — стандартный x86_64 LP64 (`off_t`/`time_t` 64-бит, `struct stat` 152, `termios` 60, `dirent` 280) и согласованы с адаптерами (аудит M6.5).
 - [x] Dunit-specific public functions помещать в отдельные headers/namespace, не загрязнять POSIX имена. **Готово:** ноль Dunit-имён в public `include/`; адаптеры (`__dunit_*`) в reserved `__`-namespace, публичные символы остаются POSIX-именами (аудит M6.5).
 
@@ -598,7 +597,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 - [x] Реализовать anonymous/private `mmap`, `munmap`, `mprotect`; alignment 4 KiB, zero-fill, partial unmap и запрет W+X проверены `[VM-TEST] OK`.
 - [x] Адаптировать allocator musl без требования Linux `brk`; optional hints вроде `madvise` могут быть no-op только если контракт это разрешает.
-- [~] Добавить realtime clock и time conversion. **Готово:** monotonic ClockGetTime/sleep. **Осталось:** настоящий wall clock, источник и validity; сейчас CLOCK_REALTIME и CLOCK_MONOTONIC возвращают uptime (`sys_clock_gettime`), RTC не подключён.
+- [x] Добавить realtime clock и time conversion. **Проверено:** CLOCK_REALTIME = валидный UTC timestamp Limine + monotonic, без timestamp — явная ошибка; `m6_musl_time_markers.json`, clock host test. Отдельный RTC driver не заявляется.
 - [~] Добавить entropy interface для guards/криптографии. **Готово:** `AT_RANDOM` в ELF initial stack. **Осталось:** secure entropy API и доказанный источник — `kernel/src/elf/mod.rs` использует bootstrap TSC seed; его нельзя считать CSPRNG для TLS.
 
 **Результат:** стабильные `malloc/calloc/realloc/free`, clocks и random seed. **Готовность:** allocator переживает fragmentation/OOM и возвращает корректный `errno`; protection faults детерминированны. **Тесты:** allocator stress, zero/huge allocations, map/unmap/protect boundaries, OOM, monotonicity, entropy availability. **Риски:** VM leaks, use-after-unmap, executable writable memory.
@@ -608,7 +607,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 - [x] Покрыть `open/read/write/close/seek`, `stat/fstat`, cwd, directories, rename/unlink/mkdir и `fsync`. Плюс `ftruncate` (Seek=80, Fstat=81, Truncate=84), `access` (Stat-based), `O_EXCL`/`mkstemp` и `rewinddir`.
 - [x] Переводить POSIX open/mode flags и Dunit metadata через проверяемый adapter; не передавать public musl structs в kernel.
 - [x] Реализовать buffered `FILE`, standard streams и terminal capability query.
-- [x] Определить Dunit paths для users, configuration, temporary files, DNS и account database; не копировать Linux FHS автоматически. **Текущая политика путей:** `/system` — read-mostly образ ОС (бинарники, библиотеки, read-only ассеты); `/persist` — DunitFS, пользовательские данные и конфигурация (writable, переживает ребут); `/tmp` — MemFS, временные файлы (не переживают ребут); `/app`, `/assets` — данные образа initrd, загруженные в runtime MemFS (это ещё не enforced read-only disk root). DNS и account database не определяются до M8 (сеть) — Linux FHS намеренно не копируется.
+- [x] Определить Dunit paths для users, configuration, temporary files, DNS и account database; не копировать Linux FHS автоматически. **Текущая политика путей:** `/system` — read-mostly образ ОС (бинарники, библиотеки, read-only ассеты); `/persist` — DunitFS, пользовательские данные и конфигурация (writable, переживает ребут); `/tmp` — MemFS, временные файлы (не переживают ребут); `/app`, `/assets` — данные образа initrd, загруженные в runtime MemFS (это ещё не enforced read-only disk root). DNS отложен до M8 (сеть); account database/ownership остаётся отдельным несетевым gate — Linux FHS намеренно не копируется.
 - [~] Загружать C programs и libc artifacts с installed root. **Готово:** они в initrd/sysroot, `include_bytes!` C-программ в kernel нет. **Осталось:** настоящий installed disk root вместо MemFS.
 
 **Результат:** C utility работает с DunitFS после установки. **Готовность:** create/write/fsync/reboot/read с тем же hash; stdio error/EOF semantics проходят тесты. **Тесты:** large/empty/sparse-policy files, Unicode bytes in paths, disk-full, rename atomicity, corrupted storage, terminal redirection. **Риски:** несоответствие `stat/dirent`, неполный fsync contract, скрытые fixed paths musl.
@@ -617,7 +616,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 - [x] Спроектировать `spawn/exec-image/wait/kill` с arguments, environment, cwd и явным inheritance handles. (SpawnArgs=79 с argv/env, WaitProcess=16, KillProcess=18; привилегии наследуются только через kernel-spawn, не через posix_spawn.)
 - [x] Переписать musl `posix_spawn` backend на прямой Dunit spawn contract, не эмулировать его через Linux `clone/vfork`.
-- [~] Реализовать pipes, descriptor duplication и spawn redirection. **Готово:** Pipe=83, Dup=82, kernel pipe object/restart и рабочий dup2 stdout redirection (`tools/m6_dup_markers.json`). **Не проходит:** свежий `tools/m6_pipe_markers.json` даёт `[PIPE] FAIL pipe`: текущий musl mapping не направляет pipe/pipe2 в Pipe=83, возвращается ENOSYS. **Осталось:** end-to-end musl pipe/EOF, inheritance и `posix_spawn` open/dup2/close/chdir file-actions; текущий backend их игнорирует. Успешный `dup2` в самом процессе не доказывает spawn file-actions.
+- [x] Реализовать pipes, descriptor duplication и spawn redirection. **Проверено:** native Pipe/Fcntl/Poll, shared status и CLOEXEC; `m6_pipe`, `m6_dup`, `m6_profile`, `m6_native_fd` проверяют EOF/nonblock/ordered spawn actions и неизменность родительских fd/cwd. Неподдержанные attributes отклоняются до публикации ребёнка.
 - [x] Возвращать `ENOSYS` для `fork`, пока нет корректных COW, multithreaded semantics и `pthread_atfork`.
 
 **Результат:** C parent запускает C child и получает exit status. **Готовность:** spawn file actions, environment replacement и pipe redirection работают без fd leaks. **Тесты:** missing executable, permission denial, child fault, concurrent children, inherited/closed handles. **Риски:** deadlocks при spawn, неявная передача privileged handles, попытка приложений обойти отсутствие fork.
@@ -629,7 +628,7 @@ src/mman/, src/fs/        native VM/VFS mappings
 - [x] Реализовать thread create/exit/join/detach и безопасное освобождение stack/TLS после завершения.
 - [x] Реализовать Dunit `wait_on_word/wake` с atomic compare-and-block, timeout и защитой от lost wakeups; не копировать Linux futex ABI.
 - [x] Адаптировать musl pthread create/join, mutex, condvar, rwlock, once и per-thread `errno`.
-- [~] Сначала запретить asynchronous cancellation; cancellation points включать только вместе с формально определённой interruption model. **Готово:** async cancellation инертна (SIGCANCEL недоставляем — `rt_sigaction`/`tkill` → `ENOSYS`; native `__timedwait` оборачивает ожидание в `PTHREAD_CANCEL_DISABLE`). **Осталось (позже, M6-F):** включение cancellation points вместе с signal/interruption-моделью.
+- [~] Сначала запретить asynchronous cancellation; cancellation points включать только вместе с формально определённой interruption model. **Готово:** pthread_cancel и asynchronous cancellation явно возвращают ENOTSUP без побочных эффектов (`m6_profile_markers.json`); native waits не обещают interruption. **Осталось (позже, M6-F):** включение cancellation points вместе с signal/interruption-моделью.
 
 **Результат:** настоящий pthread subset поверх native Dunit threads. **Готовность:** уникальный TLS/errno у каждого потока, blocked mutex не расходует CPU, join/detach не течёт. **Тесты:** TLS isolation, 1000 create/join cycles, mutex/condvar contention, timeout race, owner death policy, preemption stress, allocator under threads. **Риски:** ABI-зависимый layout musl TCB, lost wakeups, освобождение живого TLS, scheduler/VM lock inversion.
 
@@ -676,13 +675,23 @@ src/mman/, src/fs/        native VM/VFS mappings
 
 - [x] Добавить self-checking libc ELF: существующая конвенция `userspace/ctests/` + `tools/m6_*_markers.json` покрывает startup, stdio, malloc, files, clocks, spawn, базовые pthread/condvar. Barrier/прочие отсутствующие тесты из старой ветки не включены в этот `[x]`.
 - [x] Запускать все kernel/OS тесты только через `tools/qemu_test.py`; каждый тест выдаёт стабильный serial marker и exit status.
-- [ ] Подключить релевантный subset `libc-test`; unsupported cases перечислять с причиной и владельцем, а не молча исключать. **Статус:** QA-углубление, не capability-gate — покрытие возможностей уже даёт per-feature suite; подключение upstream `libc-test` — отдельная задача.
+- [x] Подключить релевантный subset `libc-test`; unsupported cases перечислять с причиной и владельцем. **Проверено:** 12 неизменённых upstream cases, pinned commit/hashes, полный inventory 435 cases; `tools/libc_test_markers.json`, `docs/libc-test.md`. Это subset, не заявление о прохождении всей libc-test.
 - [~] Добавить negative tests: invalid pointers, invalid UTF-8-neutral path bytes, bad fds, OOM, interrupted waits, child crash. **Готово:** invalid pointers/bad fds/OOM/child-crash покрыты (musl_harden, fault_child, nx_child, musl_reap/slow_child). **Осталось (позже, M6-F):** interrupted waits — нужна signal/interruption-модель.
-- [~] Проверять ELF статически: target machine, program headers, executable stack, unexpected `NEEDED`/`INTERP`, unresolved symbols. **Готово:** fork-CI (`dunit-build`) + ручная проверка `readelf` (ET_EXEC, нет INTERP/DYNAMIC, entry в crt1). **Осталось:** вынести в автоматический гейт qemu_test.
+- [x] Проверять ELF статически: target machine, headers, executable stack, unexpected DYNAMIC/INTERP, unresolved symbols. **Проверено:** `tools/check_userspace_elf.py` в Makefile до initrd; включая explicit RW/NX GNU_STACK для TCC и запрет W+X.
 - [~] Для каждого ABI/libc change пересобирать sysroot и C apps. **Готово:** `tools/ensure_musl_sysroot.py` проверяет fingerprint исходников/компилятора; исправлено повторное использование старой libc после правок fork (Lua I/O regression). **Осталось:** previous-release binary compatibility suite и замороженный ABI release contract.
 - [~] Разделить gates: single-thread static, filesystem/persistence, pthread/preemption, network, dynamic. **Готово:** раздельные marker-suite single-thread static / filesystem+persistence / pthread+preemption. **Осталось:** network (M8) и dynamic (позже) gates.
 
 **Общий результат M6:** native Dunit-linked C programs и SDK без Linux kernel ABI. **Критерий завершения:** reproducible `x86_64-dunit` sysroot; static hello/args/env/file/malloc/spawn/thread suites проходят в QEMU; persistence case переживает power cycle; unsupported POSIX surface документирован. **Главные риски:** скрытые Linux assumptions, слишком ранняя заморозка ABI, некорректный TLS, попытка одновременно реализовать signals/fork/ldso. **Меры:** static-first, capability profiles, узкий adapter, фазовые test gates и контролируемый upstream delta.
+
+Проверка доведения M6 (2026-10-24): исходные pipe FAIL исправлены;
+core-suite прошёл отдельно; итоговый один regression-прогон подтвердил
+40 полных контрактов / 73 команды / 175 required markers / 0 forbidden. Native
+1000 join + 1000 detached подтвердили TLS/errno/malloc/yield и reclamation;
+DunitFS 128 KiB write/fsync/остановка VM/повторная загрузка/readback подтвердил
+hash `b4c071280fb62325`. Полный список доказательств и незакрытых gates:
+[docs/m6-readiness.md](docs/m6-readiness.md). В текущем ABI generator check:
+88 syscalls + 25 errno + 7 rights. Secure entropy, signals/interruption,
+dynamic tier и disk-backed system root этим не закрываются.
 
 ### M7 — Dunit SDK (should-have после M6; блокирует M8–M10)
 
@@ -695,7 +704,7 @@ SDK — слой, на котором пишутся прикладные про
 
 #### M7.1. wait-set — единый примитив ожидания (ПЕРВЫЙ пункт; изменение `abi/*.abi` → Решение человека)
 
-Сегодня каждый класс объектов ждётся отдельно: IPC → WaitEvent(33), память → FutexWait(41), ребёнок → WaitProcess(16). Poll(87) был в потерянной линии, но отсутствует в текущем ABI 0–84. Единого wait-set нет; этот пункт остаётся входом в event loop SDK и M8.7.
+Сегодня каждый класс объектов ждётся отдельно: IPC → WaitEvent(33), память → FutexWait(41), ребёнок → WaitProcess(16). Native Poll(87) восстановлен и проверен для file/pipe/PTY; он не объединяет IPC/timer/process в один wait-set. Единого wait-set нет; этот пункт остаётся входом в event loop SDK и M8.7.
 
 - [ ] Спроектировать wait-set: регистрация интереса к набору {IPC endpoint, timer/deadline, file/pipe readiness, process handle, позже socket} + блокирующее ожидание с таймаутом; readiness-edge и отмена.
 - [ ] Добавить syscall(ы) **только через `abi/syscalls.abi` + регенерацию** (это изменение ABI — **Решение человека**, см. раздел в конце).
