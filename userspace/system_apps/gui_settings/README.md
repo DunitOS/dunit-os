@@ -9,7 +9,10 @@ GUI Settings is a compositor-launched gui-v1 client, separate from the terminal
   hexadecimal colors.
 - Effects: blur, gradient, animations, corner radius, shadow and animation duration.
 - Desktop geometry: panel height, title height and dock width.
-- Display: the existing resolution presets and keep-boot-mode choice.
+- Display: keep-boot-mode and resolution presets through 3072×1920, including
+  2560×1440, 2560×1600 and 2880×1800. Actual availability depends on the display
+  backend and video memory. Bochs/QEMU can grow beyond the boot framebuffer;
+  fixed Limine/GOP backends retain their boot mode.
 - Window behavior: enable/disable the Lua window policy, choose a discovered
   layout script, and adjust its runner timeout from 50 to 5000 milliseconds.
 - Themes: discover regular `.toml` files in `desktop.themes`, validate a complete

@@ -996,12 +996,14 @@ fn serve_two_clients() -> bool {
         // empties so re-entries start clean.
         let mut pn = pending_notifies;
         let mut baseline = Some(boot_display);
+        let mut pointer = PointerSession::default();
         while run_desktop_session(
             &mut server,
             &mut clients,
             core::mem::take(&mut pn),
             baseline.take(),
             core::mem::take(&mut bringup_reload),
+            &mut pointer,
         ) {}
         return false;
     }
@@ -1102,12 +1104,14 @@ fn serve_two_clients() -> bool {
     // bring-up (serve_two_clients / resize_one_client); re-entries pass None/false
     // because the config file is authoritative by then.
     let mut baseline = Some(boot_display);
+    let mut pointer = PointerSession::default();
     while run_desktop_session(
         &mut server,
         &mut clients,
         core::mem::take(&mut pn),
         baseline.take(),
         core::mem::take(&mut bringup_reload),
+        &mut pointer,
     ) {}
 
     for c in clients.iter() {
@@ -3008,6 +3012,14 @@ fn apply_display_mode(d: &settings::Display) {
     }
 }
 
+/// Pointer edges and client capture survive framebuffer/session recreation.
+#[derive(Default)]
+struct PointerSession {
+    left: bool,
+    right: bool,
+    captured_pid: Option<u32>,
+}
+
 /// Run one interactive desktop session. Returns `true` when the session asked to
 /// be RE-ENTERED (a live `[display]` change: the caller loops and this function's
 /// head re-applies the new mode, re-queries the framebuffer and rebuilds every
@@ -3019,6 +3031,7 @@ fn run_desktop_session(
     pending_notifies: Vec<alloc::string::String>,
     first_baseline: Option<settings::Display>,
     pending_reload: bool,
+    pointer: &mut PointerSession,
 ) -> bool {
     // Load config FIRST: `[display]` must program the video mode BEFORE we query
     // the framebuffer, so bw/bh and every buffer derived from them size to the
@@ -3371,10 +3384,11 @@ fn run_desktop_session(
     // takes focus — i.e. the startup gui_terminal — so headless keystroke
     // injection lands in the terminal (topmost) rather than a static client.
     let initial_wins = wins.len();
-    let mut prev_left = false;
-    let mut prev_right = false;
+    let mut prev_left = pointer.left;
+    let mut prev_right = pointer.right;
     let mut drag: Option<(usize, i32, i32)> = None; // (win index, off_x, off_y)
-    let mut pressed_win: Option<usize> = None; // window that captured the press
+    let mut pressed_win = pointer.captured_pid.and_then(|pid|
+        wins.iter().position(|w| w.alive && w.pid == pid));
     let mut input_focus: Option<usize> = None; // window under the pointer
     let mut last_lx = i32::MIN;
     let mut last_ly = i32::MIN;
@@ -3546,6 +3560,9 @@ fn run_desktop_session(
                                 minimized: win.minimized, ws: win.ws });
                         }
                     }
+                    pointer.left = prev_left;
+                    pointer.right = prev_right;
+                    pointer.captured_pid = pressed_win.map(|wi| wins[wi].pid);
                     return true;
                 }
                 lua_engine.cancel();

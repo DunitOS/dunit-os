@@ -1,0 +1,590 @@
+{
+  "description": "Real Settings clicks switch from a 1080p boot to 3K, through all new presets and back. Screendump dimensions must match each selected mode. Production GUI uses desktop-ready instead of the kernel terminal marker. Each button is held for 250 ms across session recreation; lower unselected modes are forbidden to catch repeated held-click delivery.",
+  "run": {
+    "config": "limine_dwm.conf",
+    "actions": [
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 94,
+          "y": 18,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_settings: surface presented OK",
+        "timeout": 30
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 43,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 0,
+          "y": 16,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_settings: page 3",
+        "timeout": 15
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 80,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 26,
+          "y": 0,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_server: [display] resolution set to 3072x1920",
+        "timeout": 40
+      },
+      {
+        "delay_ms": 2500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-3k/3072x1920.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 80,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 26,
+          "y": 0,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_server: [display] resolution set to 2880x1800",
+        "timeout": 40
+      },
+      {
+        "delay_ms": 2500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-3k/2880x1800.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 80,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 26,
+          "y": 0,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_server: [display] resolution set to 2560x1600",
+        "timeout": 40
+      },
+      {
+        "delay_ms": 2500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-3k/2560x1600.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 80,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 26,
+          "y": 0,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_server: [display] resolution set to 2560x1440",
+        "timeout": 40
+      },
+      {
+        "delay_ms": 2500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-3k/2560x1440.ppm"
+        }
+      },
+      {
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 40,
+          "interval": 0.01
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 127,
+          "y": 80,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 26,
+          "y": 0,
+          "interval": 0.02
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 250
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "left",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 500
+      },
+      {
+        "wait_marker": "gui_server: [display] resolution set to 1920x1080",
+        "timeout": 40
+      },
+      {
+        "delay_ms": 2500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "/tmp/dunit-3k/1920x1080.ppm"
+        }
+      }
+    ]
+  },
+  "required": [
+    "gui_server: desktop ready",
+    "gui_settings: surface presented OK",
+    "gui_settings: page 3",
+    "gui_server: [display] resolution set to 3072x1920",
+    "[DISPLAY] bochs set_mode 3072x1920",
+    "gui_server: [display] resolution set to 2880x1800",
+    "[DISPLAY] bochs set_mode 2880x1800",
+    "gui_server: [display] resolution set to 2560x1600",
+    "[DISPLAY] bochs set_mode 2560x1600",
+    "gui_server: [display] resolution set to 2560x1440",
+    "[DISPLAY] bochs set_mode 2560x1440",
+    "gui_server: [display] resolution set to 1920x1080",
+    "[DISPLAY] bochs set_mode 1920x1080"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[USER-FAULT]",
+    "gui_server: PANIC",
+    "gui_settings: PANIC",
+    "rejected (-22)",
+    "gui_settings: save failed",
+    "[DISPLAY] bochs set_mode 1600x900",
+    "[DISPLAY] bochs set_mode 1366x768",
+    "[DISPLAY] bochs set_mode 1280x720"
+  ]
+}

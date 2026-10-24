@@ -136,9 +136,10 @@ const INT_SPECS: [IntSpec; NINTS] = [
 /// `<`/`>` walks this list; the CHOSEN mode is policy that lands in `[display]`
 /// (single source of truth) — the compositor applies it on the next session
 /// re-entry, and on a fixed GOP framebuffer the request degrades to a no-op.
-const NRES: usize = 5;
+const NRES: usize = 9;
 const RES_PRESETS: [(u32, u32); NRES] =
-    [(0, 0), (1280, 720), (1366, 768), (1600, 900), (1920, 1080)];
+    [(0, 0), (1280, 720), (1366, 768), (1600, 900), (1920, 1080),
+     (2560, 1440), (2560, 1600), (2880, 1800), (3072, 1920)];
 
 // --- Settings field accessors (index -> field), read + mutable variants ------
 
