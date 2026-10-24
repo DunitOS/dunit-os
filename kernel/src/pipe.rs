@@ -137,3 +137,13 @@ pub fn write(id: u64, data: &[u8]) -> PipeWrite {
     pipe.buf.extend(data.iter().take(n).copied());
     PipeWrite::Wrote(n)
 }
+
+/// Non-consuming readiness under the same registry lock as I/O.
+pub fn readiness(id: u64, write: bool) -> (bool, bool) {
+    let registry = REGISTRY.lock();
+    match registry.pipes.get(&id) {
+        Some(pipe) if write => (pipe.read_refs != 0 && pipe.buf.len() < PIPE_CAPACITY, pipe.read_refs == 0),
+        Some(pipe) => (!pipe.buf.is_empty() || pipe.write_refs == 0, pipe.write_refs == 0),
+        None => (false, true),
+    }
+}

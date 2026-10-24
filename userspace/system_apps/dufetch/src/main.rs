@@ -147,9 +147,9 @@ fn render() {
 
     // Memory (from real PMM stats)
     info.push(format!(
-        "{}Memory{}: {}{} KiB / {} KiB{}",
+        "{}Memory{}: {}{} KiB / {} KiB ({}%){}",
         C_LABEL, C_RESET, C_VALUE,
-        s.pmm_used_bytes / 1024, s.pmm_total_bytes / 1024,
+        s.pmm_used_bytes / 1024, s.pmm_total_bytes / 1024, s.memory_used_percent(),
         C_RESET
     ));
 

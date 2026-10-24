@@ -231,11 +231,13 @@ pub trait FileSystem: Send {
 pub struct OpenFile {
     fs: *mut dyn FileSystem,
     handle: FileHandle,
+    flags: OpenFlags,
+    refs: usize,
 }
 
 impl OpenFile {
-    pub fn new(fs: *mut dyn FileSystem, handle: FileHandle) -> Self {
-        Self { fs, handle }
+    pub fn new(fs: *mut dyn FileSystem, handle: FileHandle, flags: OpenFlags) -> Self {
+        Self { fs, handle, flags, refs: 1 }
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -243,6 +245,7 @@ impl OpenFile {
     }
 
     pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        if self.flags.append() { self.seek(0, 2)?; }
         unsafe { (&mut *self.fs).write(self.handle, buf) }
     }
 
@@ -344,11 +347,12 @@ impl VirtualFileSystem {
 
     pub fn open_at(&mut self, cwd: &str, path: &str, flags: OpenFlags) -> Result<FileDescriptor> {
         let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
-        let handle = unsafe { (&mut *fs).open(relative_path, flags)? };
+        let fs_flags = OpenFlags::from_bits(flags.bits() & !OpenFlags::APPEND.bits());
+        let handle = unsafe { (&mut *fs).open(relative_path, fs_flags)? };
 
         let fd = self.next_fd;
         self.next_fd += 1;
-        self.open_files.insert(fd, OpenFile::new(fs, handle));
+        self.open_files.insert(fd, OpenFile::new(fs, handle, flags));
 
         Ok(fd)
     }
@@ -389,13 +393,35 @@ impl VirtualFileSystem {
         open_file.stat()
     }
 
-    pub fn close(&mut self, fd: FileDescriptor) -> Result<()> {
-        self.open_files
-            .remove(&fd)
-            .ok_or(VfsError::InvalidDescriptor)?;
+    /// Each process owns one reference per distinct open description; dup fds
+    /// in that process are counted by its fd table. Child inheritance retains.
+    pub fn retain(&mut self, fd: FileDescriptor) -> Result<()> {
+        let file = self.open_files.get_mut(&fd).ok_or(VfsError::InvalidDescriptor)?;
+        file.refs = file.refs.checked_add(1).ok_or(VfsError::IoError)?;
         Ok(())
     }
-
+    pub fn close(&mut self, fd: FileDescriptor) -> Result<()> {
+        let file = self.open_files.get_mut(&fd).ok_or(VfsError::InvalidDescriptor)?;
+        file.refs -= 1;
+        if file.refs == 0 { self.open_files.remove(&fd); }
+        Ok(())
+    }
+    pub fn set_append(&mut self, fd: FileDescriptor, append: bool) -> Result<()> {
+        let file = self.open_files.get_mut(&fd).ok_or(VfsError::InvalidDescriptor)?;
+        let bits = file.flags.bits() & !OpenFlags::APPEND.bits();
+        file.flags = OpenFlags::from_bits(bits | if append { OpenFlags::APPEND.bits() } else { 0 });
+        Ok(())
+    }
+    /// Eager private-map input. Save and restore the shared offset even when
+    /// the backing filesystem reports an error; no userspace-visible seek.
+    pub fn read_at(&mut self, fd: FileDescriptor, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        if offset > i64::MAX as u64 { return Err(VfsError::InvalidPath); }
+        let saved = self.seek(fd, 0, 1)?;
+        self.seek(fd, offset as i64, 0)?;
+        let result = self.read(fd, buf);
+        self.seek(fd, saved as i64, 0)?;
+        result
+    }
     pub fn fsync(&mut self, fd: FileDescriptor) -> Result<()> {
         let open_file = self
             .open_files
@@ -575,7 +601,6 @@ static ROOT_MEMFS: RootMemFsCell = RootMemFsCell(UnsafeCell::new(MemFs::empty())
 struct VfsPathBufferCell(UnsafeCell<[u8; 256]>);
 unsafe impl Sync for VfsPathBufferCell {}
 static VFS_PATH_BUFFER: VfsPathBufferCell = VfsPathBufferCell(UnsafeCell::new([0; 256]));
-const GUI_SHORTCUTS_CONFIG: &[u8] = b"super+q=close_window\nsuper+enter=open_terminal\n";
 
 fn serial_log(msg: &str) {
     crate::serial::serial_write(msg);
@@ -628,18 +653,6 @@ pub fn init() -> Result<()> {
 
         // Kernel-seeded writable nodes that are not shipped in the archive.
         let _ = memfs.mkdir("/persist");
-        ensure_parent_dirs(memfs, "/cfg/gui/shortcuts.conf");
-        memfs.add_file("/cfg/gui/shortcuts.conf", GUI_SHORTCUTS_CONFIG.to_vec());
-
-        // Writable window/session store (M4): pre-created empty so gui_server
-        // can rewrite it at runtime. RAM-only until DunitFS v2 provides a
-        // persistent user-config partition, so geometry survives a
-        // reload/reconnect within a boot, not across boots.
-        ensure_parent_dirs(memfs, "/system/share/dwm/session.toml");
-        memfs.add_file(
-            "/system/share/dwm/session.toml",
-            b"# DWM window session store (auto-written by gui_server).\n".to_vec(),
-        );
 
         vfs.mount("/", memfs)?;
         serial_log("[MEMFS] mounted as /\r\n");

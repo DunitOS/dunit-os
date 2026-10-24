@@ -17,6 +17,8 @@ const BASE_DIRS: [&str; 8] = [
 const MAX_MEMFS_FILE_SIZE: usize = 16 * 1024 * 1024;
 
 struct MemNode {
+    id: usize,
+    linked: bool,
     path: String,
     file_type: FileType,
     data: MemData,
@@ -71,7 +73,7 @@ impl MemData {
 }
 
 struct OpenMemHandle {
-    path: String,
+    node_id: usize,
     offset: usize,
     flags: OpenFlags,
 }
@@ -135,6 +137,8 @@ impl MemFs {
         }
 
         self.nodes.push(MemNode {
+            id: self.next_handle.fetch_add(1, Ordering::SeqCst),
+            linked: true,
             path: String::from(clean),
             file_type: FileType::Device,
             data: MemData::Owned(Vec::new()),
@@ -154,7 +158,7 @@ impl MemFs {
             directories: BASE_DIRS.len() as u64,
             ..MemFsStats::default()
         };
-        for node in self.nodes.iter() {
+        for node in self.nodes.iter().filter(|node| node.linked) {
             match node.file_type {
                 FileType::File => {
                     stats.files += 1;
@@ -179,7 +183,9 @@ impl MemFs {
 
     fn node_index(&self, path: &str) -> Option<usize> {
         let clean = Self::clean(path);
-        self.nodes.iter().position(|node| node.path == clean)
+        self.nodes
+            .iter()
+            .position(|node| node.linked && node.path == clean)
     }
 
     fn node_type(&self, path: &str) -> Option<FileType> {
@@ -262,7 +268,7 @@ impl FileSystem for MemFs {
                 self.open_handles.push((
                     handle,
                     OpenMemHandle {
-                        path: String::from(Self::clean(path)),
+                        node_id: self.nodes[nidx].id,
                         offset,
                         flags,
                     },
@@ -281,9 +287,13 @@ impl FileSystem for MemFs {
             return Err(VfsError::PermissionDenied);
         }
 
-        let path = self.open_handles[hidx].1.path.clone();
+        let node_id = self.open_handles[hidx].1.node_id;
         let offset = self.open_handles[hidx].1.offset;
-        let nidx = self.node_index(&path).ok_or(VfsError::NotFound)?;
+        let nidx = self
+            .nodes
+            .iter()
+            .position(|node| node.id == node_id)
+            .ok_or(VfsError::InvalidDescriptor)?;
 
         if self.nodes[nidx].file_type != FileType::File {
             return Err(VfsError::IsADirectory);
@@ -310,8 +320,12 @@ impl FileSystem for MemFs {
             return Err(VfsError::PermissionDenied);
         }
 
-        let path = self.open_handles[hidx].1.path.clone();
-        let nidx = self.node_index(&path).ok_or(VfsError::NotFound)?;
+        let node_id = self.open_handles[hidx].1.node_id;
+        let nidx = self
+            .nodes
+            .iter()
+            .position(|node| node.id == node_id)
+            .ok_or(VfsError::InvalidDescriptor)?;
 
         if self.nodes[nidx].file_type != FileType::File {
             return Err(VfsError::IsADirectory);
@@ -341,7 +355,14 @@ impl FileSystem for MemFs {
         let idx = self
             .handle_index(handle)
             .ok_or(VfsError::InvalidDescriptor)?;
-        self.open_handles.remove(idx);
+        let node_id = self.open_handles.remove(idx).1.node_id;
+        if !self
+            .open_handles
+            .iter()
+            .any(|(_, handle)| handle.node_id == node_id)
+        {
+            self.nodes.retain(|node| node.id != node_id || node.linked);
+        }
         Ok(())
     }
 
@@ -349,16 +370,20 @@ impl FileSystem for MemFs {
         let hidx = self
             .handle_index(handle)
             .ok_or(VfsError::InvalidDescriptor)?;
-        let path = self.open_handles[hidx].1.path.clone();
-        let nidx = self.node_index(&path).ok_or(VfsError::NotFound)?;
+        let node_id = self.open_handles[hidx].1.node_id;
+        let nidx = self
+            .nodes
+            .iter()
+            .position(|node| node.id == node_id)
+            .ok_or(VfsError::InvalidDescriptor)?;
         if self.nodes[nidx].file_type != FileType::File {
             return Err(VfsError::IsADirectory);
         }
         let size = self.nodes[nidx].data.len() as i64;
         let base = match whence {
-            0 => 0,                                      // SEEK_SET
+            0 => 0,                                       // SEEK_SET
             1 => self.open_handles[hidx].1.offset as i64, // SEEK_CUR
-            2 => size,                                   // SEEK_END
+            2 => size,                                    // SEEK_END
             _ => return Err(VfsError::InvalidPath),
         };
         let new = base.checked_add(offset).ok_or(VfsError::InvalidPath)?;
@@ -373,8 +398,16 @@ impl FileSystem for MemFs {
         let hidx = self
             .handle_index(handle)
             .ok_or(VfsError::InvalidDescriptor)?;
-        let path = self.open_handles[hidx].1.path.clone();
-        self.stat(&path)
+        let node_id = self.open_handles[hidx].1.node_id;
+        let node = self
+            .nodes
+            .iter()
+            .find(|node| node.id == node_id)
+            .ok_or(VfsError::InvalidDescriptor)?;
+        Ok(FileStat {
+            file_type: node.file_type,
+            size: node.data.len(),
+        })
     }
 
     fn ftruncate_handle(&mut self, handle: FileHandle, len: u64) -> Result<()> {
@@ -384,8 +417,12 @@ impl FileSystem for MemFs {
         if !self.open_handles[hidx].1.flags.can_write() {
             return Err(VfsError::PermissionDenied);
         }
-        let path = self.open_handles[hidx].1.path.clone();
-        let nidx = self.node_index(&path).ok_or(VfsError::NotFound)?;
+        let node_id = self.open_handles[hidx].1.node_id;
+        let nidx = self
+            .nodes
+            .iter()
+            .position(|node| node.id == node_id)
+            .ok_or(VfsError::InvalidDescriptor)?;
         if self.nodes[nidx].file_type != FileType::File {
             return Err(VfsError::IsADirectory);
         }
@@ -406,7 +443,7 @@ impl FileSystem for MemFs {
             for base_dir in BASE_DIRS.iter() {
                 entries.push(DirEntry::new(base_dir, FileType::Directory));
             }
-            for node in self.nodes.iter() {
+            for node in self.nodes.iter().filter(|node| node.linked) {
                 if Self::is_direct_child("", &node.path) && !Self::is_base_dir(&node.path) {
                     entries.push(DirEntry::new(Self::basename(&node.path), node.file_type));
                 }
@@ -418,7 +455,7 @@ impl FileSystem for MemFs {
             return Err(VfsError::NotADirectory);
         }
 
-        for node in self.nodes.iter() {
+        for node in self.nodes.iter().filter(|node| node.linked) {
             if Self::is_direct_child(clean, &node.path) {
                 entries.push(DirEntry::new(Self::basename(&node.path), node.file_type));
             }
@@ -439,7 +476,7 @@ impl FileSystem for MemFs {
                 }
             }
 
-            for node in self.nodes.iter() {
+            for node in self.nodes.iter().filter(|node| node.linked) {
                 if Self::is_direct_child("", &node.path) && !Self::is_base_dir(&node.path) {
                     if count < entries.len() {
                         entries[count] = DirEntry::new(Self::basename(&node.path), node.file_type);
@@ -454,7 +491,7 @@ impl FileSystem for MemFs {
             return Err(VfsError::NotADirectory);
         }
 
-        for node in self.nodes.iter() {
+        for node in self.nodes.iter().filter(|node| node.linked) {
             if Self::is_direct_child(clean, &node.path) {
                 if count < entries.len() {
                     entries[count] = DirEntry::new(Self::basename(&node.path), node.file_type);
@@ -479,6 +516,8 @@ impl FileSystem for MemFs {
         }
 
         self.nodes.push(MemNode {
+            id: self.next_handle.fetch_add(1, Ordering::SeqCst),
+            linked: true,
             path: String::from(clean),
             file_type: FileType::File,
             data: MemData::Owned(Vec::new()),
@@ -499,6 +538,8 @@ impl FileSystem for MemFs {
         }
 
         self.nodes.push(MemNode {
+            id: self.next_handle.fetch_add(1, Ordering::SeqCst),
+            linked: true,
             path: String::from(clean),
             file_type: FileType::Directory,
             data: MemData::Owned(Vec::new()),
@@ -519,8 +560,16 @@ impl FileSystem for MemFs {
         if self.nodes[idx].file_type != FileType::File {
             return Err(VfsError::IsADirectory);
         }
-        self.nodes.remove(idx);
-        self.open_handles.retain(|(_, handle)| handle.path != clean);
+        let node_id = self.nodes[idx].id;
+        if self
+            .open_handles
+            .iter()
+            .any(|(_, handle)| handle.node_id == node_id)
+        {
+            self.nodes[idx].linked = false;
+        } else {
+            self.nodes.remove(idx);
+        }
         Ok(())
     }
 
@@ -539,7 +588,11 @@ impl FileSystem for MemFs {
         // Reject non-empty directories (any node living beneath this path).
         let mut prefix = String::from(clean);
         prefix.push('/');
-        if self.nodes.iter().any(|node| node.path.starts_with(prefix.as_str())) {
+        if self
+            .nodes
+            .iter()
+            .any(|node| node.linked && node.path.starts_with(prefix.as_str()))
+        {
             return Err(VfsError::DirectoryNotEmpty);
         }
         self.nodes.remove(idx);
@@ -580,27 +633,15 @@ impl FileSystem for MemFs {
         if is_dir {
             // Re-home every descendant: "<old>/<rest>" -> "<new>/<rest>".
             for node in self.nodes.iter_mut() {
-                if node.path.starts_with(&old_slash) {
+                if node.linked && node.path.starts_with(&old_slash) {
                     let mut moved = String::from(new_clean);
                     moved.push_str(&node.path[old_clean.len()..]);
                     node.path = moved;
                 }
             }
-            for (_, handle) in self.open_handles.iter_mut() {
-                if handle.path.starts_with(&old_slash) {
-                    let mut moved = String::from(new_clean);
-                    moved.push_str(&handle.path[old_clean.len()..]);
-                    handle.path = moved;
-                }
-            }
         }
-
-        // Fix up any handle that referred to the renamed node itself.
-        for (_, handle) in self.open_handles.iter_mut() {
-            if handle.path == old_clean {
-                handle.path = String::from(new_clean);
-            }
-        }
+        // Open descriptors refer to stable node identities, so renaming a name
+        // never invalidates or retargets an existing open description.
         Ok(())
     }
 

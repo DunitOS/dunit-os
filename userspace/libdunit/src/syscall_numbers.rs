@@ -87,3 +87,6 @@ pub const SYSCALL_FSTAT: usize = 81;
 pub const SYSCALL_DUP: usize = 82;
 pub const SYSCALL_PIPE: usize = 83;
 pub const SYSCALL_TRUNCATE: usize = 84;
+pub const SYSCALL_FCNTL: usize = 86;
+pub const SYSCALL_POLL: usize = 87;
+pub const SYSCALL_IOCTL: usize = 88;

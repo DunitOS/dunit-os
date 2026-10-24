@@ -45,6 +45,12 @@ static volatile struct limine_firmware_type_request firmware_type_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_boot_time_request boot_time_request = {
+    .id = LIMINE_BOOT_TIME_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile LIMINE_REQUESTS_START_MARKER;
 
@@ -77,4 +83,9 @@ struct limine_memmap_response *get_memmap_response(void) {
 
 struct limine_firmware_type_response *get_firmware_type_response(void) {
     return firmware_type_request.response;
+}
+
+int64_t hal_boot_epoch_seconds(void) {
+    if (!boot_time_request.response) return -1;
+    return boot_time_request.response->boot_time;
 }

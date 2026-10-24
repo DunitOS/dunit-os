@@ -73,7 +73,7 @@ impl<'a> ElfParser<'a> {
             return Err(ElfError::InvalidMagic);
         }
 
-        let header = unsafe { core::ptr::read(data.as_ptr() as *const ElfHeader) };
+        let header = unsafe { core::ptr::read_unaligned(data.as_ptr() as *const ElfHeader) };
 
         if header.magic != ELF_MAGIC {
             return Err(ElfError::InvalidMagic);
@@ -107,7 +107,14 @@ impl<'a> ElfParser<'a> {
         let phnum = self.header.phnum as usize;
         let phentsize = self.header.phentsize as usize;
 
-        if phoff + (phnum * phentsize) > self.data.len() {
+        if phentsize != core::mem::size_of::<ProgramHeader>() || phoff % 8 != 0 {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        let end = phnum
+            .checked_mul(phentsize)
+            .and_then(|size| phoff.checked_add(size))
+            .ok_or(ElfError::InvalidProgramHeader)?;
+        if end > self.data.len() {
             return Err(ElfError::InvalidProgramHeader);
         }
 
@@ -146,8 +153,9 @@ impl<'a> Iterator for ProgramHeaderIterator<'a> {
             return None;
         }
 
-        let ph =
-            unsafe { core::ptr::read(self.data.as_ptr().add(ph_offset) as *const ProgramHeader) };
+        let ph = unsafe {
+            core::ptr::read_unaligned(self.data.as_ptr().add(ph_offset) as *const ProgramHeader)
+        };
 
         self.index += 1;
         Some(ph)
@@ -164,10 +172,13 @@ const MAX_EXEC_ARGS: usize = 16;
 const MAX_EXEC_ARG_LEN: usize = 128;
 
 // SysV auxiliary-vector types the initial stack carries (static-first subset).
+const AT_PHDR: u64 = 3;
+const AT_PHENT: u64 = 4;
+const AT_PHNUM: u64 = 5;
 const AT_PAGESZ: u64 = 6;
+const AT_ENTRY: u64 = 9;
 const AT_SECURE: u64 = 23;
 const AT_RANDOM: u64 = 25;
-const EXEC_ENV: [&str; 3] = ["PATH=/app", "SHELL=dunit", "CWD=/"];
 
 const PAGE_SIZE: usize = 4096;
 
@@ -218,8 +229,8 @@ pub fn prepare_process_elf(pid: ProcessId, data: &[u8], argv: &[String]) -> Resu
     prepare_process_elf_env(pid, data, argv, &[])
 }
 
-/// Like [`prepare_process_elf`] but appends `extra_env` (spawner-supplied
-/// `KEY=VALUE` entries) after the base [`EXEC_ENV`]. The exec ABI already carries
+/// Like [`prepare_process_elf`] with spawner-supplied `KEY=VALUE` entries.
+/// Environment defaults and command search are userspace policy. The exec ABI already carries
 /// an `envp` array (see [`prepare_initial_stack`]); this is the generic hook a
 /// spawner uses to hand a child extra environment (e.g. a terminal passing its
 /// configured `PROMPT` to the shell) without the kernel knowing any app specifics.
@@ -229,9 +240,27 @@ pub fn prepare_process_elf_env(
     argv: &[String],
     extra_env: &[&str],
 ) -> Result<(), ElfError> {
+    prepare_process_elf_env_impl(pid, data, argv, extra_env, true)
+}
+/// Prepare memory/argv/TLS without publishing a schedulable child. SpawnArgs
+/// applies the entire descriptor transaction before the final ready transition.
+pub fn prepare_process_elf_env_suspended(
+    pid: ProcessId,
+    data: &[u8],
+    argv: &[String],
+    extra_env: &[&str],
+) -> Result<(), ElfError> {
+    prepare_process_elf_env_impl(pid, data, argv, extra_env, false)
+}
+fn prepare_process_elf_env_impl(
+    pid: ProcessId,
+    data: &[u8],
+    argv: &[String],
+    extra_env: &[&str],
+    publish: bool,
+) -> Result<(), ElfError> {
     let parser = ElfParser::new(data)?;
-    let mut env: alloc::vec::Vec<&str> = EXEC_ENV.to_vec();
-    env.extend_from_slice(extra_env);
+    let env = extra_env;
     let prepared = crate::process::with_process_mut(pid, |process| {
         if load_into_process_address_space(&parser, process).is_err() {
             crate::memory::serial_write("[ELF-TEST] process load failed\r\n");
@@ -243,7 +272,7 @@ pub fn prepare_process_elf_env(
             return Err(crate::process::ProcessError::InvalidUserContext);
         }
 
-        let initial_stack = match prepare_initial_stack(process, argv, &env) {
+        let initial_stack = match prepare_initial_stack(process, &parser, argv, &env) {
             Ok(stack) => stack,
             Err(_) => {
                 crate::memory::serial_write("[ELF-TEST] argv stack setup failed\r\n");
@@ -260,11 +289,13 @@ pub fn prepare_process_elf_env(
         process.entry_argc = initial_stack.argc;
         process.entry_argv = initial_stack.argv;
         process.entry_envp = initial_stack.envp;
-        process.state = crate::process::ProcessState::Ready;
+        process.state = crate::process::ProcessState::Prepared;
         Ok(())
     });
 
-    if prepared.is_err() || crate::process::mark_process_prepared_as_ready(pid).is_err() {
+    if prepared.is_err()
+        || (publish && crate::process::mark_process_prepared_as_ready(pid).is_err())
+    {
         return Err(ElfError::InvalidProgramHeader);
     }
 
@@ -312,6 +343,7 @@ struct InitialStack {
 /// above `envp`. `envp` is intentionally minimal for now.
 fn prepare_initial_stack(
     process: &mut Process,
+    parser: &ElfParser,
     argv: &[String],
     env: &[&str],
 ) -> Result<InitialStack, ElfError> {
@@ -342,9 +374,50 @@ fn prepare_initial_stack(
     fill_random(&mut random);
     let random_ptr = write_stack_bytes(process, &mut sp, &random)?;
 
-    // Auxiliary vector (static-first subset). AT_PHDR/AT_ENTRY (for TLS from
-    // program headers) are added when the libc port needs them.
-    let auxv: [(u64, u64); 3] = [
+    // Use the actual mapped table when a LOAD contains it. musl derives its
+    // static TLS template from these records, rather than the kernel's TCB.
+    let table_start = parser.header.phoff;
+    let table_size = parser.header.phnum as u64 * parser.header.phentsize as u64;
+    let table_end = table_start
+        .checked_add(table_size)
+        .ok_or(ElfError::InvalidProgramHeader)?;
+    let mut phdr_address = None;
+    let mut has_phdr_segment = false;
+    for ph in parser.program_headers()? {
+        has_phdr_segment |= ph.p_type == 6; // PT_PHDR
+        if ph.p_type == PT_LOAD
+            && ph.p_offset <= table_start
+            && ph
+                .p_offset
+                .checked_add(ph.p_filesz)
+                .is_some_and(|end| end >= table_end)
+        {
+            phdr_address = Some(
+                ph.p_vaddr
+                    .checked_add(table_start - ph.p_offset)
+                    .ok_or(ElfError::InvalidProgramHeader)?,
+            );
+        }
+    }
+    let phdr_address = match phdr_address {
+        Some(address) => address,
+        None if !has_phdr_segment => {
+            // Header-less LOAD layouts are valid static ET_EXECs. With no
+            // PT_PHDR load-bias record, absolute vaddrs remain valid when the
+            // exact header table is copied into the bounded initial stack.
+            write_stack_bytes(
+                process,
+                &mut sp,
+                &parser.data[table_start as usize..table_end as usize],
+            )? as u64
+        }
+        None => return Err(ElfError::InvalidProgramHeader),
+    };
+    let auxv: [(u64, u64); 7] = [
+        (AT_PHDR, phdr_address),
+        (AT_PHENT, parser.header.phentsize as u64),
+        (AT_PHNUM, parser.header.phnum as u64),
+        (AT_ENTRY, parser.entry_point()),
         (AT_PAGESZ, PAGE_SIZE as u64),
         (AT_SECURE, 0),
         (AT_RANDOM, random_ptr as u64),
@@ -519,7 +592,8 @@ fn install_initial_tls(parser: &ElfParser, process: &mut Process) -> Result<(), 
             return Err(ElfError::InvalidProgramHeader);
         }
         let start = ph.p_offset as usize;
-        let end = start.checked_add(ph.p_filesz as usize)
+        let end = start
+            .checked_add(ph.p_filesz as usize)
             .ok_or(ElfError::InvalidProgramHeader)?;
         if end > parser.data.len() || ph.p_memsz == 0 || ph.p_memsz > 1024 * 1024 {
             return Err(ElfError::InvalidProgramHeader);
@@ -531,7 +605,8 @@ fn install_initial_tls(parser: &ElfParser, process: &mut Process) -> Result<(), 
         tls = Some((&parser.data[start..end], ph.p_memsz as usize, align));
     }
     if let Some((image, mem_size, align)) = tls {
-        process.install_tls_template(image, mem_size, align)
+        process
+            .install_tls_template(image, mem_size, align)
             .map_err(|_| ElfError::InvalidProgramHeader)?;
     }
     Ok(())

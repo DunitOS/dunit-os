@@ -1278,7 +1278,7 @@ pub extern "C" fn kernel_main(
             let mut input = command::NoExecInput;
             match command::run_foreground_exec(
                 "/",
-                "init",
+                "/app/init",
                 process::ProcessOutputSink::SerialOnly,
                 &mut input,
             ) {

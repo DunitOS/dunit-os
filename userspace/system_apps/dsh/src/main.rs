@@ -13,12 +13,13 @@
 //! through the libdunit filesystem syscalls (resolved against this process's
 //! cwd by the kernel); the system verbs read the read-only counters exposed by
 //! `get_system_stats` (syscall 26). No kernel-internal APIs, no hardcoded
-//! policy: pure userspace. Any other name is run as `/app/<name>` on a private
+//! policy: pure userspace. Any other name is resolved through PATH on a private
 //! inner pty whose stdio we bridge until it exits (see `spawn_external`).
 
 use core::panic::PanicInfo;
 
 extern crate alloc;
+mod command_line;
 
 use alloc::format;
 use alloc::string::String;
@@ -110,7 +111,7 @@ fn split_cmd(line: &str) -> (&str, &str) {
 
 /// Dispatch one command line. FS verbs go through libdunit syscalls (resolved
 /// against this process's cwd by the kernel); system verbs read `get_system_stats`.
-/// Anything else is executed as `/app/<name>` on a bridged inner pty.
+/// External commands use the userspace PATH resolver and preserve argument words.
 fn run(line: &str) {
     let line = line.trim();
     if line.is_empty() {
@@ -149,24 +150,11 @@ fn run(line: &str) {
         "lspci" | "usb" | "blk" | "lsblk" | "ahci" | "devs" | "blkread" | "blkwrite"
         | "mkfs.dunit" | "mount.dunit" | "install.dunit" => run_diag(line),
         "exit" => libdunit::exit(0),
-        // `exec <name>` runs /app/<name> — the same verb kernel Terminal Mode
-        // uses to launch a program, so muscle memory carries over 1:1.
         "exec" => {
-            let (name, _) = split_cmd(rest);
-            if name.is_empty() {
-                out("exec: missing operand\n");
-            } else {
-                let path = format!("/app/{}", name);
-                if !spawn_external(&path) {
-                    out(&format!("dsh: command not found: {}\n", name));
-                }
-            }
+            run_external(rest);
         }
         _ => {
-            let path = format!("/app/{}", cmd);
-            if !spawn_external(&path) {
-                out(&format!("dsh: command not found: {}\n", cmd));
-            }
+            run_external(line);
         }
     }
 }
@@ -179,7 +167,19 @@ fn cmd_help() {
     out("hardware:   lspci  usb  devs  blk  lsblk  ahci  blkread  blkwrite\n");
     out("disk/fs:    mkfs.dunit  mount.dunit  install.dunit\n");
     out("control:    clear  help  exit  poweroff  shutdown\n");
-    out("any other name (or `exec <name>`) runs /app/<name> on a bridged pty\n");
+    out("external: name [args] or exec name [args]; PATH search, explicit paths, quoted arguments\n");
+}
+
+fn run_external(line: &str) {
+    let words = match command_line::words(line) {
+        Ok(words) if !words.is_empty() => words,
+        Ok(_) => { out("exec: missing operand\n"); return; }
+        Err(error) => { out(&format!("dsh: {}\n", error)); return; }
+    };
+    let args: Vec<&str> = words.iter().map(|word| word.as_str()).collect();
+    if !spawn_external(args[0], &args) {
+        out(&format!("dsh: command not found: {}\n", args[0]));
+    }
 }
 
 fn cmd_echo(rest: &str) {
@@ -331,12 +331,8 @@ fn tree_recurse(dir: &str, depth: usize) {
     }
 }
 
-fn cmd_uname(rest: &str) {
-    if rest == "-a" {
-        out("Dunit OS 1.0.0 Green Tea x86_64 kernel=monolithic-rust-hal\n");
-    } else {
-        out("Dunit OS\n");
-    }
+fn cmd_uname(_rest: &str) {
+    out("uname: system identity interface is not configured\n");
 }
 
 fn cmd_uptime() {
@@ -443,13 +439,15 @@ fn run_diag(line: &str) {
 /// the GUI terminal behave "just like a clean terminal" WITHOUT the kernel pty
 /// (a raw byte mechanism) growing any line discipline of its own. Returns false
 /// if the program could not be spawned (so the caller can print "not found").
-fn spawn_external(path: &str) -> bool {
+fn spawn_external(path: &str, argv: &[&str]) -> bool {
     let inner = libdunit::pty_create();
     if inner < 0 {
         return false;
     }
     let inner = inner as u32;
-    let child = libdunit::pty_spawn(path, inner);
+    let path_environment = libdunit::getenv("PATH").map(|path| format!("PATH={}", path));
+    let env: Vec<&str> = path_environment.iter().map(|s| s.as_str()).collect();
+    let child = libdunit::process::pty_spawn_args(path, inner, argv, &env);
     if child < 0 {
         libdunit::pty_close(inner);
         return false;

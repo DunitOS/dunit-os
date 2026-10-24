@@ -52,8 +52,10 @@ def load_manifest() -> list[tuple[int, str]]:
         out.append((int(num), name))
     out.sort()
     nums = [n for n, _ in out]
-    if nums != list(range(len(nums))):
-        raise SystemExit(f"manifest numbers must be contiguous from 0: {nums}")
+    # Reserved historical syscall numbers remain holes, never fake callable
+    # variants. The manifest must stay sorted and unique, beginning at zero.
+    if not nums or nums[0] != 0 or nums != sorted(set(nums)):
+        raise SystemExit(f"manifest numbers must be sorted, unique and start at 0: {nums}")
     return out
 
 

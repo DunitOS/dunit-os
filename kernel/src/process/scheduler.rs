@@ -46,7 +46,12 @@ impl Scheduler {
 
             let pid = self.ready_queue[self.cursor];
             if Some(pid) == excluded {
-                self.ready_queue.remove(self.cursor);
+                // Exclusion is a choice for this dispatch, not a dequeue. A
+                // ready yielding thread must remain available for the next
+                // dispatch even when every peer is currently blocked.
+                if super::is_pid_runnable(pid) {
+                    self.cursor = (self.cursor + 1) % self.ready_queue.len();
+                } else { self.ready_queue.remove(self.cursor); }
                 checked += 1;
                 continue;
             }
@@ -111,4 +116,9 @@ pub fn pick_next_candidate_excluding(pid: ProcessId) -> Option<ProcessId> {
 
 pub fn ready_len() -> usize {
     with_scheduler(|scheduler| scheduler.len()).unwrap_or(0)
+}
+
+/// True only when work can run; queue length can include stale state entries.
+pub fn has_ready_tasks() -> bool {
+    with_scheduler(|scheduler| scheduler.ready_queue.iter().any(|pid| super::is_pid_runnable(*pid))).unwrap_or(false)
 }

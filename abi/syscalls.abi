@@ -92,3 +92,7 @@
 82	Dup
 83	Pipe
 84	Truncate
+# 85 reserved: historical DisplayOwner; do not reuse.
+86	Fcntl
+87	Poll
+88	Ioctl

@@ -1211,8 +1211,8 @@ pub fn run_command(out: &mut dyn ShellSink, cwd: &mut String, line: &str) -> She
 
     match trimmed {
         "help" => cmd_help(out),
-        "uname" => out.write_str("Dunit OS\n"),
-        "uname -a" => out.write_str("Dunit OS 1.0.0 Green Tea x86_64 kernel=monolithic-rust-hal\n"),
+        "uname" => out.write_str("uname: system identity interface is not configured\n"),
+        "uname -a" => out.write_str("uname: system identity interface is not configured\n"),
         "date" => out.write_str("date: RTC unavailable\n"),
         "whoami" => out.write_str("root (kernel terminal)\n"),
         "uptime" => cmd_uptime(out),

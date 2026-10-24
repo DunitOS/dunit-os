@@ -1,3 +1,6 @@
+mod native_fd;
+mod terminal_ioctl;
+mod spawn_actions;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -94,6 +97,9 @@ pub enum Syscall {
     Dup = 82,
     Pipe = 83,
     Truncate = 84,
+    Fcntl = 86,
+    Poll = 87,
+    Ioctl = 88,
 }
 
 impl Syscall {
@@ -185,6 +191,9 @@ impl Syscall {
             82 => Some(Syscall::Dup),
             83 => Some(Syscall::Pipe),
             84 => Some(Syscall::Truncate),
+            86 => Some(Syscall::Fcntl),
+            87 => Some(Syscall::Poll),
+            88 => Some(Syscall::Ioctl),
             _ => None,
         }
     }
@@ -350,7 +359,6 @@ const SMOKE_APPEND_A: &[u8] = b"A";
 const SMOKE_APPEND_B: &[u8] = b"B";
 #[cfg(feature = "boot-smoke-tests")]
 const SMOKE_STDOUT_DATA: &[u8] = b"[STDOUT-TEST] hello from userspace\n";
-const EXEC_PATH: &str = "/app";
 
 #[cfg(feature = "boot-smoke-tests")]
 static SYSCALL_SMOKE_OK: AtomicBool = AtomicBool::new(false);
@@ -620,7 +628,7 @@ pub extern "C" fn syscall_handler(
     arg2: u64,
     arg3: u64,
     arg4: u64,
-    _arg5: u64,
+    arg5: u64,
 ) -> i64 {
     let syscall = match Syscall::from_u64(syscall_num) {
         Some(s) => s,
@@ -638,7 +646,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Write => sys_write(arg0 as u32, arg1 as *const u8, arg2 as usize),
         Syscall::Open => sys_open(arg0 as *const u8, arg1 as usize, arg2 as u32),
         Syscall::Close => sys_close(arg0 as u32),
-        Syscall::Mmap => sys_mmap(arg0 as usize, arg1 as usize, arg2 as u32, arg3 as u32),
+        Syscall::Mmap => sys_mmap(arg0 as usize, arg1 as usize, arg2 as u32, arg3 as u32, arg4 as i64, arg5),
         Syscall::SendMessage => sys_send_message(arg0 as u32, arg1 as *const u8, arg2 as usize),
         Syscall::ReceiveMessage => sys_receive_message(arg0 as *mut u8, arg1 as usize),
         Syscall::GetFramebuffer => sys_get_framebuffer(arg0 as *mut FbInfo),
@@ -674,7 +682,13 @@ pub extern "C" fn syscall_handler(
         Syscall::Stat => sys_stat(arg0 as *const u8, arg1 as usize, arg2 as *mut UserFileStat),
         Syscall::ThreadCreate => sys_thread_create(arg0, arg1, arg2),
         Syscall::ThreadJoin => sys_thread_join(arg0, arg1 as *mut WaitStatus),
-        Syscall::ThreadExit => sys_exit(arg0 as i32),
+        Syscall::ThreadExit => {
+            if arg0 >> 32 == 1 && crate::process::request_thread_auto_reap().is_err() {
+                EINVAL
+            } else {
+                sys_exit(arg0 as i32)
+            }
+        },
         Syscall::GetTid => crate::process::current_tid().map(|tid| tid.0 as i64).unwrap_or(0),
         Syscall::WaitEvent => sys_wait_event(arg0),
         Syscall::Munmap => sys_munmap(arg0 as usize, arg1 as usize),
@@ -721,6 +735,7 @@ pub extern "C" fn syscall_handler(
             arg2 as u32,
             arg3 as *const u8,
             arg4 as usize,
+            arg5 as usize,
         ),
         Syscall::PtyRead => sys_pty_read(arg0 as u32, arg1 as *mut u8, arg2 as usize),
         Syscall::PtyWrite => sys_pty_write(arg0 as u32, arg1 as *const u8, arg2 as usize),
@@ -742,13 +757,13 @@ pub extern "C" fn syscall_handler(
         Syscall::SetTidAddress => sys_set_tid_address(arg0),
         Syscall::ClockGetTime => sys_clock_gettime(arg0, arg1 as *mut u64),
         Syscall::Rmdir => sys_rmdir(arg0 as *const u8, arg1 as usize),
-        Syscall::SpawnArgs => sys_spawn_args(
-            arg0 as *const u8,
-            arg1 as usize,
-            arg2 as *const u8,
-            arg3 as usize,
-            arg4 as usize,
+        Syscall::SpawnArgs => spawn_actions::spawn(
+            arg0 as *const u8, arg1 as usize, arg2 as *const u8,
+            arg3 as usize, arg4 as usize, arg5 as usize,
         ),
+        Syscall::Fcntl => native_fd::fcntl(arg0 as u32, arg1 as u32, arg2),
+        Syscall::Poll => native_fd::poll(arg0 as *mut u8, arg1 as usize, arg2),
+        Syscall::Ioctl => terminal_ioctl::ioctl(arg0 as u32, arg1 as u32, arg2 as *mut u8, arg3 as usize),
         Syscall::TerminalDiag => sys_terminal_diag(
             arg0 as *const u8,
             arg1 as usize,
@@ -758,7 +773,7 @@ pub extern "C" fn syscall_handler(
         Syscall::Seek => sys_seek(arg0 as u32, arg1 as i64, arg2 as u32),
         Syscall::Fstat => sys_fstat(arg0 as u32, arg1 as *mut UserFileStat),
         Syscall::Dup => sys_dup(arg0 as u32, arg1 as i64),
-        Syscall::Pipe => sys_pipe(arg0 as *mut u32),
+        Syscall::Pipe => sys_pipe(arg0 as *mut u32, 0),
         Syscall::Truncate => sys_truncate(arg0 as u32, arg1 as i64),
     }
 }
@@ -1005,7 +1020,7 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     match crate::process::get_fd(fd).map(|entry| entry.target) {
         Some(crate::process::FdTarget::Stdin) => {
             // PTY slave? Drain the master→slave ring before the legacy path.
-            if let Some(current) = crate::process::current_process().map(|p| p.pid) {
+            if let Some(current) = crate::process::get_fd(fd).and_then(|entry| entry.terminal.as_ref().map(|endpoint| endpoint.id)) {
                 let mut pty_buf = Vec::new();
                 pty_buf.resize(count, 0);
                 match crate::pty::slave_read_stdin(current, &mut pty_buf) {
@@ -1040,7 +1055,7 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
         }
         Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => return EBADF,
         Some(crate::process::FdTarget::Pipe { id, write: false }) => {
-            return sys_pipe_read(id, buf, count);
+            return sys_pipe_read(id, buf, count, crate::process::get_fd(fd).map(|entry| entry.status() & 64 != 0).unwrap_or(false));
         }
         Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // read on write end
         Some(crate::process::FdTarget::Vfs(_)) => {}
@@ -1070,7 +1085,8 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     bytes_read as i64
 }
 
-fn sys_pipe(fds: *mut u32) -> i64 {
+fn sys_pipe(fds: *mut u32, flags: u32) -> i64 {
+    if flags & !(64 | 128) != 0 { return EINVAL; }
     if let Err(error) = validate_user_range(fds as u64, 2 * core::mem::size_of::<u32>()) {
         return error;
     }
@@ -1093,6 +1109,10 @@ fn sys_pipe(fds: *mut u32) -> i64 {
             return process_error_to_errno(error);
         }
     };
+    for fd in [read_fd, write_fd] {
+        if let Some(entry) = crate::process::get_fd(fd) { entry.set_status(entry.status() | (flags & 64)); }
+        if flags & 128 != 0 { let _ = crate::process::current_process_mut().map(|process| process.set_cloexec(fd, true)); }
+    }
     let out = [read_fd, write_fd];
     let bytes = unsafe {
         core::slice::from_raw_parts(out.as_ptr() as *const u8, core::mem::size_of::<[u32; 2]>())
@@ -1105,7 +1125,7 @@ fn sys_pipe(fds: *mut u32) -> i64 {
     0
 }
 
-fn sys_pipe_read(id: u64, buf: *mut u8, count: usize) -> i64 {
+fn sys_pipe_read(id: u64, buf: *mut u8, count: usize, nonblocking: bool) -> i64 {
     let mut kbuf = Vec::new();
     kbuf.resize(count, 0);
     match crate::pipe::read(id, &mut kbuf) {
@@ -1118,6 +1138,7 @@ fn sys_pipe_read(id: u64, buf: *mut u8, count: usize) -> i64 {
             n as i64
         }
         crate::pipe::PipeRead::Eof => 0,
+        crate::pipe::PipeRead::WouldBlock if nonblocking => EAGAIN,
         crate::pipe::PipeRead::WouldBlock => match crate::process::pipe_block_current(id) {
             Ok(()) => USER_CONTEXT_RETURN_MAGIC,
             Err(error) => process_error_to_errno(error),
@@ -1125,7 +1146,7 @@ fn sys_pipe_read(id: u64, buf: *mut u8, count: usize) -> i64 {
     }
 }
 
-fn sys_pipe_write(id: u64, data: &[u8]) -> i64 {
+fn sys_pipe_write(id: u64, data: &[u8], nonblocking: bool) -> i64 {
     match crate::pipe::write(id, data) {
         crate::pipe::PipeWrite::Wrote(n) => {
             // New data — wake any reader blocked on an empty pipe.
@@ -1133,6 +1154,7 @@ fn sys_pipe_write(id: u64, data: &[u8]) -> i64 {
             n as i64
         }
         crate::pipe::PipeWrite::Broken => EPIPE,
+        crate::pipe::PipeWrite::WouldBlock if nonblocking => EAGAIN,
         crate::pipe::PipeWrite::WouldBlock => match crate::process::pipe_block_current(id) {
             Ok(()) => USER_CONTEXT_RETURN_MAGIC,
             Err(error) => process_error_to_errno(error),
@@ -1266,32 +1288,19 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
     };
 
     match crate::process::get_fd(fd).map(|entry| entry.target) {
-        Some(crate::process::FdTarget::Stdout) => {
-            write_stdio("STDOUT", &data);
-            // PTY slave? Route stdout to its master instead of the console.
-            let routed = crate::process::current_process()
-                .map(|p| p.pid)
-                .map(|pid| crate::pty::slave_write_stdout(pid, &data))
-                .unwrap_or(false);
-            if !routed {
-                write_terminal_foreground(&data);
+        Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => {
+            let tag = if matches!(crate::process::get_fd(fd).map(|entry| entry.target), Some(crate::process::FdTarget::Stderr)) { "STDERR" } else { "STDOUT" };
+            let routed = crate::process::get_fd(fd).and_then(|entry| entry.terminal.as_ref()).and_then(|endpoint| crate::pty::slave_write_stdout(endpoint.id, &data));
+            match routed {
+                Some(Ok(0)) => return EAGAIN,
+                Some(Ok(count)) => { write_stdio(tag, &data[..count]); return count as i64; }
+                Some(Err(())) => return EPIPE,
+                None => { write_stdio(tag, &data); write_terminal_foreground(&data); return data.len() as i64; }
             }
-            return data.len() as i64;
-        }
-        Some(crate::process::FdTarget::Stderr) => {
-            write_stdio("STDERR", &data);
-            let routed = crate::process::current_process()
-                .map(|p| p.pid)
-                .map(|pid| crate::pty::slave_write_stdout(pid, &data))
-                .unwrap_or(false);
-            if !routed {
-                write_terminal_foreground(&data);
-            }
-            return data.len() as i64;
         }
         Some(crate::process::FdTarget::Stdin) => return EBADF,
         Some(crate::process::FdTarget::Pipe { id, write: true }) => {
-            return sys_pipe_write(id, &data);
+            return sys_pipe_write(id, &data, crate::process::get_fd(fd).map(|entry| entry.status() & 64 != 0).unwrap_or(false));
         }
         Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // write on read end
         Some(crate::process::FdTarget::Vfs(_)) => {}
@@ -1318,7 +1327,8 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
         Err(error) => return error,
     };
 
-    let flags = match open_flags_from_u32(flags) {
+    let descriptor_flags = flags & (64 | 128);
+    let flags = match open_flags_from_u32(flags & !(64 | 128)) {
         Ok(flags) => flags,
         Err(error) => return error,
     };
@@ -1337,7 +1347,15 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
     };
 
     match crate::process::open_vfs_fd(vfs_fd) {
-        Ok(fd) => fd as i64,
+        Ok(fd) => {
+            if let Some(entry) = crate::process::get_fd(fd) {
+                entry.set_status((flags.bits() & (1 | 2 | 16)) | (descriptor_flags & 64));
+            }
+            if descriptor_flags & 128 != 0 {
+                let _ = crate::process::current_process_mut().map(|process| process.set_cloexec(fd, true));
+            }
+            fd as i64
+        },
         Err(error) => {
             if let Some(vfs) = crate::fs::vfs::get_vfs() {
                 let _ = vfs.close(vfs_fd);
@@ -1544,28 +1562,10 @@ fn sys_rename(
 }
 
 fn sys_close(fd: u32) -> i64 {
-    if !is_valid_fd_number(fd) {
-        return EBADF;
-    }
-
-    let entry = match crate::process::get_fd(fd) {
-        Some(entry) => *entry,
-        None => return EBADF,
-    };
-
-    match entry.target {
-        crate::process::FdTarget::Stdin
-        | crate::process::FdTarget::Stdout
-        | crate::process::FdTarget::Stderr => EOPNOTSUPP,
-        crate::process::FdTarget::Vfs(_) | crate::process::FdTarget::Pipe { .. } => {
-            // Drop this process fd; the fd layer tells us whether that was the
-            // last reference (close the VFS file / wake the pipe's other end).
-            match crate::process::drop_fd(fd) {
-                Ok(cleanup) => apply_fd_cleanup(cleanup),
-                Err(error) => return process_error_to_errno(error),
-            }
-            0
-        }
+    if !is_valid_fd_number(fd) { return EBADF; }
+    match crate::process::drop_fd(fd) {
+        Ok(cleanup) => { apply_fd_cleanup(cleanup); 0 }
+        Err(error) => process_error_to_errno(error),
     }
 }
 
@@ -1590,7 +1590,7 @@ fn sys_fsync(fd: u32) -> i64 {
     }
 
     let entry = match crate::process::get_fd(fd) {
-        Some(entry) => *entry,
+        Some(entry) => entry.clone(),
         None => return EBADF,
     };
 
@@ -1787,39 +1787,22 @@ fn write_terminal_foreground(data: &[u8]) {
     }
 }
 
-fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32) -> i64 {
-    const PROT_READ: u32 = 1 << 0;
-    const PROT_WRITE: u32 = 1 << 1;
-    const PROT_EXEC: u32 = 1 << 2;
-    const MAP_PRIVATE: u32 = 1 << 1;
-    const MAP_ANONYMOUS: u32 = 1 << 5;
-    const MAP_GUARD: u32 = 1 << 6;
-
-    if length == 0 {
-        return EINVAL;
-    }
-    if prot & !(PROT_READ | PROT_WRITE | PROT_EXEC) != 0
+fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32, fd: i64, offset: u64) -> i64 {
+    const MAP_PRIVATE: u32 = 2;
+    const MAP_ANONYMOUS: u32 = 32;
+    const MAP_GUARD: u32 = 64;
+    if length == 0 || prot & !7 != 0 || prot & 6 == 6
         || flags & !(MAP_PRIVATE | MAP_ANONYMOUS | MAP_GUARD) != 0
-        || flags & (MAP_PRIVATE | MAP_ANONYMOUS) != (MAP_PRIVATE | MAP_ANONYMOUS)
-        || prot & (PROT_WRITE | PROT_EXEC) == (PROT_WRITE | PROT_EXEC)
-    {
-        return EINVAL;
+        || flags & MAP_PRIVATE == 0 || addr & 4095 != 0 { return EINVAL; }
+    if flags & MAP_ANONYMOUS == 0 {
+        return native_fd::map_file(addr, length, prot, flags, fd, offset);
     }
-    if addr != 0 && (addr & 0xFFF) != 0 {
-        return EINVAL;
-    }
-
+    // Anonymous legacy callers use only four arguments; fd/offset registers
+    // are deliberately ignored rather than interpreting uninitialized values.
     match crate::process::current_process_mut() {
-        Some(process) => {
-            match process.map_anonymous(
-                addr, length, prot & PROT_WRITE != 0, prot & PROT_EXEC != 0,
-                flags & MAP_GUARD != 0, prot != 0,
-            )
-            {
-                Ok(mapped) => mapped as i64,
-                Err(error) => process_error_to_errno(error),
-            }
-        }
+        Some(process) => process.map_anonymous(addr, length, prot & 2 != 0,
+            prot & 4 != 0, flags & MAP_GUARD != 0, prot != 0)
+            .map(|mapped| mapped as i64).unwrap_or_else(process_error_to_errno),
         None => EINVAL,
     }
 }
@@ -1896,9 +1879,8 @@ fn sys_set_tid_address(addr: u64) -> i64 {
     crate::process::current_tid().map(|tid| tid.0 as i64).unwrap_or(0)
 }
 
-/// Write the current time as `[tv_sec, tv_nsec]` (two u64) to `out`. Dunit has
-/// no RTC yet, so both CLOCK_REALTIME (0) and CLOCK_MONOTONIC (1) report the
-/// monotonic time since boot (documented — not wall-clock, never faked as such).
+/// CLOCK_REALTIME uses bootloader UTC, CLOCK_MONOTONIC elapsed PIT time.
+/// Missing wall-clock metadata returns an explicit error.
 fn sys_clock_gettime(clock_id: u64, out: *mut u64) -> i64 {
     if clock_id > 1 {
         return EINVAL;
@@ -1907,7 +1889,9 @@ fn sys_clock_gettime(clock_id: u64, out: *mut u64) -> i64 {
         return error;
     }
     let ns = crate::clock::monotonic_ns();
-    let ts: [u64; 2] = [ns / 1_000_000_000, ns % 1_000_000_000];
+    let ts: [u64; 2] = if clock_id == 0 {
+        match crate::clock::realtime() { Some((sec, nsec)) => [sec, nsec], None => return EOPNOTSUPP }
+    } else { [ns / 1_000_000_000, ns % 1_000_000_000] };
     let bytes = unsafe {
         core::slice::from_raw_parts(ts.as_ptr() as *const u8, core::mem::size_of_val(&ts))
     };
@@ -2454,78 +2438,11 @@ fn sys_get_mouse_state(out: *mut u8) -> i64 {
     0
 }
 
-/// Spawn an ELF with an explicit argv + env (the native backend for musl's
-/// posix_spawn). `block` is the argv and env strings concatenated, each
-/// NUL-terminated; the first `argv_count` are argv, the rest are env. Returns
-/// the child pid (Ready/scheduled); the parent reaps it via WaitProcess.
-fn sys_spawn_args(
-    path: *const u8,
-    path_len: usize,
-    block: *const u8,
-    block_len: usize,
-    argv_count: usize,
-) -> i64 {
-    let path = match copy_string_from_user_len(path, path_len, MAX_USER_PATH) {
-        Ok(path) => path,
-        Err(error) => return error,
-    };
-
-    let mut strings: Vec<String> = Vec::new();
-    if block_len > 0 {
-        // Copy the argv+env block through the validated user-copy helper rather
-        // than a raw from_raw_parts: it walks the page tables (PRESENT|USER) so
-        // an in-range-but-unmapped pointer returns EFAULT instead of faulting
-        // the kernel in ring 0 (which would panic the whole system).
-        let bytes = match copy_buffer_from_user(block, block_len) {
-            Ok(bytes) => bytes,
-            Err(error) => return error,
-        };
-        for piece in bytes.split(|&b| b == 0) {
-            strings.push(String::from_utf8_lossy(piece).into_owned());
-        }
-        // A trailing NUL yields a final empty element; drop it.
-        if strings.last().map(|s| s.is_empty()).unwrap_or(false) {
-            strings.pop();
-        }
-    }
-    if argv_count == 0 || argv_count > strings.len() {
-        return EINVAL;
-    }
-    let argv: Vec<String> = strings[..argv_count].to_vec();
-    let env_refs: Vec<&str> = strings[argv_count..].iter().map(|s| s.as_str()).collect();
-
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
-        None => return EINVAL,
-    };
-    let resolved = match resolve_exec_path(&cwd, &path) {
-        Ok(resolved) => resolved,
-        Err(error) => return error,
-    };
-    let data = match read_vfs_file(&cwd, &resolved) {
-        Ok(data) => data,
-        Err(error) => return vfs_error_to_errno(error),
-    };
-    if crate::elf::ElfParser::new(&data).is_err() {
-        return EIO;
-    }
-    // posix_spawn (userspace) children are NEVER privileged — this is the
-    // sandbox boundary: a user program cannot hand its children system-control.
-    let pid = match crate::process::create_user_process_record(resolved.clone(), true, false) {
-        Ok(pid) => pid,
-        Err(error) => return process_error_to_errno(error),
-    };
-    if crate::elf::prepare_process_elf_env(pid, &data, &argv, &env_refs).is_err() {
-        let _ = crate::process::autoreap_process(pid, "spawn-args-prepare-failed");
-        return EIO;
-    }
-    pid.0 as i64
-}
-
 fn spawn_process_from_user(
     path: *const u8,
     path_len: usize,
     extra_env: &[&str],
+    explicit_argv: Option<&[String]>,
 ) -> Result<crate::process::ProcessId, i64> {
     let path = copy_string_from_user_len(path, path_len, MAX_USER_PATH)?;
 
@@ -2553,8 +2470,9 @@ fn spawn_process_from_user(
         .rsplit('/')
         .find(|part| !part.is_empty())
         .unwrap_or(resolved.as_str());
-    let argv = [String::from(argv0)];
-    if crate::elf::prepare_process_elf_env(pid, &data, &argv, extra_env).is_err() {
+    let default_argv = [String::from(argv0)];
+    let argv = explicit_argv.unwrap_or(&default_argv);
+    if crate::elf::prepare_process_elf_env(pid, &data, argv, extra_env).is_err() {
         syscall_log(format_args!(
             "[SPAWN] prepare failed pid={} path={}\n",
             pid.0, resolved
@@ -2571,7 +2489,7 @@ fn spawn_process_from_user(
 }
 
 fn sys_spawn_process(path: *const u8, path_len: usize) -> i64 {
-    match spawn_process_from_user(path, path_len, &[]) {
+    match spawn_process_from_user(path, path_len, &[], None) {
         Ok(pid) => pid.0 as i64,
         Err(error) => error,
     }
@@ -2593,39 +2511,55 @@ fn sys_pty_create() -> i64 {
 /// point at an optional NUL-separated block of `KEY=VALUE` entries handed to the
 /// child on top of the base exec environment (the terminal uses this to pass its
 /// configured `PROMPT` to the shell). Returns the child pid.
+/// Bit 63 of block length opts into the sixth argument as argv count. Otherwise
+/// r9 is ignored: older syscall5 wrappers did not initialize it. In argv mode,
+/// NUL-terminated argv strings precede environment strings, including empty args.
 fn sys_pty_spawn(
     path: *const u8,
     path_len: usize,
     id: u32,
     env_ptr: *const u8,
     env_len: usize,
+    argv_count: usize,
 ) -> i64 {
     let master = match crate::process::current_process() {
         Some(process) => process.pid,
         None => return EINVAL,
     };
-    // Copy the optional env block (NUL-separated `KEY=VALUE`) from userspace and
-    // split it into owned strings, dropping empties and non-UTF-8 fragments.
-    let env_owned: Vec<String> = if !env_ptr.is_null() && env_len > 0 {
-        match copy_buffer_from_user(env_ptr, env_len) {
-            Ok(bytes) => bytes
-                .split(|&b| b == 0)
-                .filter(|s| !s.is_empty())
-                .filter_map(|s| core::str::from_utf8(s).ok().map(String::from))
-                .collect(),
-            Err(error) => return error,
-        }
-    } else {
-        Vec::new()
+    let argv_format = env_len & (1usize << 63) != 0;
+    let env_len = env_len & !(1usize << 63);
+    let argv_count = if argv_format { argv_count } else { 0 };
+    if env_len > MAX_USER_COPY || argv_count > 1024 || (argv_format && argv_count == 0) {
+        return EINVAL;
+    }
+    let bytes = match copy_buffer_from_user(env_ptr, env_len) {
+        Ok(bytes) => bytes,
+        Err(error) => return error,
     };
-    let env_refs: Vec<&str> = env_owned.iter().map(|s| s.as_str()).collect();
-    let child = match spawn_process_from_user(path, path_len, &env_refs) {
+    if argv_count > 0 && bytes.last() != Some(&0) { return EINVAL; }
+    let mut pieces: Vec<&[u8]> = if bytes.is_empty() { Vec::new() }
+        else { bytes.split(|&b| b == 0).collect() };
+    if bytes.last() == Some(&0) { pieces.pop(); }
+    if argv_count > pieces.len() { return EINVAL; }
+    let mut strings: Vec<String> = Vec::new();
+    for piece in pieces {
+        match core::str::from_utf8(piece) {
+            Ok(string) => strings.push(String::from(string)),
+            Err(_) => return EINVAL,
+        }
+    }
+    let env_refs: Vec<&str> = strings[argv_count..].iter().map(|s| s.as_str()).collect();
+    let argv = if argv_count == 0 { None } else { Some(&strings[..argv_count]) };
+    let child = match spawn_process_from_user(path, path_len, &env_refs, argv) {
         Ok(pid) => pid,
         Err(error) => return error,
     };
-    if !crate::pty::attach_slave(id, master, child) {
-        let _ = crate::process::autoreap_process(child, "pty-attach-failed");
-        return EINVAL;
+    let endpoint = match crate::pty::attach_slave(id, master) {
+        Some(endpoint) => endpoint,
+        None => { let _ = crate::process::autoreap_process(child, "pty-attach-failed"); return EINVAL; }
+    };
+    if crate::process::with_process_mut(child, |process| { process.bind_terminal(endpoint); Ok(()) }).is_err() {
+        let _ = crate::process::autoreap_process(child, "pty-bind-failed"); return EINVAL;
     }
     child.0 as i64
 }
@@ -2864,23 +2798,12 @@ fn sys_kill_process(pid: u32) -> i64 {
 
 fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, i64> {
     let vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
-    if path.contains('/') {
-        let normalized = vfs.normalize_at(cwd, path).map_err(vfs_error_to_errno)?;
-        let stat = vfs.stat_at("/", &normalized).map_err(vfs_error_to_errno)?;
-        if stat.file_type == crate::fs::vfs::FileType::Directory {
-            return Err(EISDIR);
-        }
-        return Ok(normalized);
-    }
-
-    let mut candidate = String::from(EXEC_PATH);
-    candidate.push('/');
-    candidate.push_str(path);
-    let stat = vfs.stat_at("/", &candidate).map_err(vfs_error_to_errno)?;
+    let normalized = vfs.normalize_at(cwd, path).map_err(vfs_error_to_errno)?;
+    let stat = vfs.stat_at("/", &normalized).map_err(vfs_error_to_errno)?;
     if stat.file_type == crate::fs::vfs::FileType::Directory {
         return Err(EISDIR);
     }
-    Ok(candidate)
+    Ok(normalized)
 }
 
 fn read_vfs_file(cwd: &str, path: &str) -> Result<Vec<u8>, crate::fs::vfs::VfsError> {

@@ -66,6 +66,11 @@ extern "C" fn quick_worker(arg: usize) -> ! {
     libdunit::thread_exit(arg as i32);
 }
 
+extern "C" fn detached_worker(_: usize) -> ! {
+    libdunit::syscall1(libdunit::SYSCALL_THREAD_EXIT, (1usize << 32) | 23);
+    fail("detached exit returned");
+}
+
 fn join(tid: u32, expected: i32) {
     let mut status = libdunit::WaitStatus::empty();
     for _ in 0..128 {
@@ -127,6 +132,23 @@ pub extern "C" fn _start() -> ! {
         join(tid as u32, 7);
     }
     if QUICK_COUNT.load(Ordering::SeqCst) != 24 { fail("repeated lifecycle"); }
+    let legacy_negative = libdunit::thread_create(quick_worker, top_a, (-7i32) as usize);
+    if legacy_negative <= 0 { fail("negative exit create"); }
+    join(legacy_negative as u32, -7);
+    if libdunit::syscall1(libdunit::SYSCALL_THREAD_EXIT, 1usize << 32) != libdunit::EINVAL {
+        fail("auto-reap main");
+    }
+    let detached = libdunit::thread_create(detached_worker, top_a, 0);
+    if detached <= 0 { fail("detached create"); }
+    let mut reaped = false;
+    for _ in 0..128 {
+        let result = libdunit::thread_join(detached as u32, &mut libdunit::WaitStatus::empty());
+        if result == libdunit::ENOENT { reaped = true; break; }
+        if result != libdunit::EAGAIN { fail("detached status retained"); }
+        let _ = libdunit::yield_now();
+    }
+    if !reaped { fail("auto-reap timeout"); }
+    libdunit::println("thread_test: legacy negative exit and detached auto-reap OK");
     let top_c = unsafe { (core::ptr::addr_of_mut!(STACK_C) as *mut u8).add(STACK_BYTES) };
     if libdunit::thread_create(unjoined_worker, top_c, 0) <= 0 { fail("orphan create"); }
     libdunit::println("thread_test: OK shared=2 xmm=isolated");

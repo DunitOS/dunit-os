@@ -2,6 +2,7 @@ pub use crate::interrupts::InterruptFrame;
 
 extern "C" {
     pub fn hal_init();
+    pub fn hal_boot_epoch_seconds() -> i64;
     pub fn hal_init_gdt();
     pub fn hal_init_idt();
     pub fn syscall_init();

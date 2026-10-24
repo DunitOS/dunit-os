@@ -1,12 +1,14 @@
 //! Monotonic clock and deadline interface. PIT is the first clock source;
 //! callers depend on this interface rather than PIT registers or IRQ0.
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 pub const TICKS_PER_SECOND: u64 = 100;
 const PIT_DIVISOR: u16 = 11_931;
+static BOOT_EPOCH_SECONDS: AtomicI64 = AtomicI64::new(-1);
 static MONOTONIC_TICKS: AtomicU64 = AtomicU64::new(0);
 
 pub fn init_pit() {
+    BOOT_EPOCH_SECONDS.store(unsafe { crate::hal::hal_boot_epoch_seconds() }, Ordering::Relaxed);
     unsafe {
         crate::hal::hal_outb(0x43, 0x36);
         crate::hal::hal_outb(0x40, PIT_DIVISOR as u8);
@@ -46,4 +48,12 @@ impl Deadline {
     pub fn tick(self) -> u64 {
         self.0
     }
+}
+
+/// Bootloader UTC epoch plus monotonic timebase; absence is explicit.
+pub fn realtime() -> Option<(u64, u64)> {
+    let epoch = BOOT_EPOCH_SECONDS.load(Ordering::Relaxed);
+    if epoch < 0 { return None; }
+    let ns = monotonic_ns();
+    Some(((epoch as u64).checked_add(ns / 1_000_000_000)?, ns % 1_000_000_000))
 }

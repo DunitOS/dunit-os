@@ -4,11 +4,12 @@ mod terminal_stdin;
 use terminal_stdin::TerminalStdin;
 
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use core::cell::UnsafeCell;
 
 use crate::handle::{
@@ -61,7 +62,7 @@ fn alloc_shared_vm_object(length: usize) -> Result<u64, ProcessError> {
     let length = length.checked_add(USER_PAGE_SIZE - 1)
         .map(|value| value & !(USER_PAGE_SIZE - 1))
         .ok_or(ProcessError::InvalidMemoryRange)?;
-    if length == 0 || length > 16 * 1024 * 1024 {
+    if length == 0 || length > 64 * 1024 * 1024 {
         return Err(ProcessError::InvalidMemoryRange);
     }
     let pmm = get_pmm().ok_or(ProcessError::OutOfMemory)?;
@@ -143,6 +144,7 @@ enum WaitKey {
     /// the pipe is empty with writers still open; writers block when it is full
     /// with readers still open.
     Pipe(u64),
+    Poll,
 }
 
 #[derive(Clone, Copy)]
@@ -189,6 +191,7 @@ pub struct ProcessRecord {
     pub pid: ProcessId,
     /// None for a process/main thread; Some(pid) for an additional thread.
     pub owner: Option<ProcessId>,
+    thread_auto_reap: bool,
     pub parent: Option<ProcessId>,
     pub state: ProcessState,
     pub status: Option<ProcessExitStatus>,
@@ -335,7 +338,6 @@ pub struct Process {
     /// make several process fds share one VFS open file (and its offset); the
     /// VFS close only fires when the last of them is closed.
     vfs_fd_refs: BTreeMap<crate::fs::vfs::FileDescriptor, u32>,
-    next_fd: ProcessFd,
     next_mmap_addr: usize,
     shared_owned: Vec<u64>,
     shared_pages: BTreeMap<usize, u64>,
@@ -399,7 +401,6 @@ impl Process {
             entry_envp: 0,
             fd_table: BTreeMap::new(),
             vfs_fd_refs: BTreeMap::new(),
-            next_fd: FIRST_PROCESS_FD,
             next_mmap_addr: USER_MMAP_BASE,
             shared_owned: Vec::new(),
             shared_pages: BTreeMap::new(),
@@ -443,7 +444,6 @@ impl Process {
             entry_envp: 0,
             fd_table: BTreeMap::new(),
             vfs_fd_refs: BTreeMap::new(),
-            next_fd: FIRST_PROCESS_FD,
             next_mmap_addr: USER_MMAP_BASE,
             shared_owned: Vec::new(),
             shared_pages: BTreeMap::new(),
@@ -540,7 +540,7 @@ impl Process {
         // posix_spawn-file-actions concern that does not exist yet).
         for (_, entry) in &fds {
             if let FdTarget::Pipe { id, write } = entry.target {
-                let _ = crate::pipe::release(id, write);
+                if crate::pipe::release(id, write) { wake_pipe_waiters(id); }
             }
         }
         let refs = core::mem::take(&mut self.vfs_fd_refs);
@@ -619,43 +619,90 @@ impl Process {
         oldfd: ProcessFd,
         newfd: Option<ProcessFd>,
     ) -> Result<(ProcessFd, FdCleanup), ProcessError> {
-        let entry = *self.fd_table.get(&oldfd).ok_or(ProcessError::InvalidFd)?;
+        let mut entry = self.fd_table.get(&oldfd).ok_or(ProcessError::InvalidFd)?.clone();
         match newfd {
             Some(nf) if nf == oldfd => Ok((nf, FdCleanup::None)),
             Some(nf) => {
+                if nf >= MAX_PROCESS_FD { return Err(ProcessError::InvalidFd); }
+                entry.cloexec = false;
+                self.retain_target(entry.target);
                 let cleanup = match self.fd_table.remove(&nf) {
                     Some(old) => self.release_target(old.target),
                     None => FdCleanup::None,
                 };
                 self.fd_table.insert(nf, entry);
-                self.retain_target(entry.target);
                 Ok((nf, cleanup))
             }
             None => {
+                entry.cloexec = false;
+                let target = entry.target;
                 let pfd = self.allocate_fd(entry)?;
-                self.retain_target(entry.target);
+                self.retain_target(target);
                 Ok((pfd, FdCleanup::None))
             }
         }
     }
 
     pub fn allocate_fd(&mut self, entry: FdEntry) -> Result<ProcessFd, ProcessError> {
-        for _ in FIRST_PROCESS_FD..MAX_PROCESS_FD {
-            let fd = self.next_fd;
-            self.next_fd += 1;
-            if self.next_fd >= MAX_PROCESS_FD {
-                self.next_fd = FIRST_PROCESS_FD;
-            }
-
+        self.allocate_fd_from(entry, 0)
+    }
+    pub fn allocate_fd_from(&mut self, entry: FdEntry, minimum: u32) -> Result<ProcessFd, ProcessError> {
+        if minimum >= MAX_PROCESS_FD { return Err(ProcessError::InvalidFd); }
+        for fd in minimum..MAX_PROCESS_FD {
             if !self.fd_table.contains_key(&fd) {
                 self.fd_table.insert(fd, entry);
                 return Ok(fd);
             }
         }
-
         Err(ProcessError::FdTableFull)
     }
-
+    pub fn duplicate_from(&mut self, oldfd: u32, minimum: u32, cloexec: bool) -> Result<u32, ProcessError> {
+        let mut entry = self.fd_table.get(&oldfd).ok_or(ProcessError::InvalidFd)?.clone();
+        entry.cloexec = cloexec;
+        let target = entry.target;
+        let fd = self.allocate_fd_from(entry, minimum)?;
+        self.retain_target(target);
+        Ok(fd)
+    }
+    pub fn bind_terminal(&mut self, endpoint: Arc<crate::pty::Endpoint>) {
+        for entry in self.fd_table.values_mut() {
+            if matches!(entry.target, FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr) {
+                entry.terminal = Some(endpoint.clone());
+            }
+        }
+    }
+    pub fn snapshot_fds(&self) -> Vec<(u32, FdEntry)> {
+        self.fd_table.iter().map(|(&fd, entry)| (fd, entry.clone())).collect()
+    }
+    pub fn set_cloexec(&mut self, fd: u32, value: bool) -> Result<(), ProcessError> {
+        self.fd_table.get_mut(&fd).ok_or(ProcessError::InvalidFd)?.cloexec = value;
+        Ok(())
+    }
+    pub fn install_fd(&mut self, fd: u32, entry: FdEntry) -> Result<FdCleanup, ProcessError> {
+        if fd >= MAX_PROCESS_FD { return Err(ProcessError::InvalidFd); }
+        self.retain_target(entry.target);
+        let cleanup = self.fd_table.remove(&fd).map(|old| self.release_target(old.target)).unwrap_or(FdCleanup::None);
+        self.fd_table.insert(fd, entry);
+        Ok(cleanup)
+    }
+    /// Adds a freshly opened VFS object at an exact descriptor, consuming its
+    /// existing global reference (unlike an inherited reference).
+    pub fn place_open_vfs_fd(&mut self, fd: u32, entry: FdEntry) -> Result<FdCleanup, ProcessError> {
+        self.install_fd(fd, entry)
+    }
+    pub fn inherit_fds(&mut self, entries: &[(u32, FdEntry)]) -> Result<(), ProcessError> {
+        self.cleanup_fds();
+        for (fd, entry) in entries {
+            if let FdTarget::Vfs(vfs_fd) = entry.target {
+                if !self.vfs_fd_refs.contains_key(&vfs_fd) {
+                    crate::fs::vfs::get_vfs().ok_or(ProcessError::InvalidFd)?
+                        .retain(vfs_fd).map_err(|_| ProcessError::InvalidFd)?;
+                }
+            }
+            self.install_fd(*fd, entry.clone())?;
+        }
+        Ok(())
+    }
     pub fn get_fd(&self, fd: ProcessFd) -> Option<&FdEntry> {
         self.fd_table.get(&fd)
     }
@@ -1370,41 +1417,25 @@ impl ProcessOutputSink {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Descriptor flags are per-fd; status belongs to the shared open description.
+#[derive(Debug, Clone)]
 pub struct FdEntry {
     pub target: FdTarget,
+    pub cloexec: bool,
+    pub terminal: Option<Arc<crate::pty::Endpoint>>,
+    status: Arc<AtomicU32>,
 }
-
 impl FdEntry {
-    pub const fn stdin() -> Self {
-        Self {
-            target: FdTarget::Stdin,
-        }
+    pub fn new(target: FdTarget, status: u32) -> Self {
+        Self { target, cloexec: false, terminal: None, status: Arc::new(AtomicU32::new(status)) }
     }
-
-    pub const fn stdout() -> Self {
-        Self {
-            target: FdTarget::Stdout,
-        }
-    }
-
-    pub const fn stderr() -> Self {
-        Self {
-            target: FdTarget::Stderr,
-        }
-    }
-
-    pub const fn vfs(fd: crate::fs::vfs::FileDescriptor) -> Self {
-        Self {
-            target: FdTarget::Vfs(fd),
-        }
-    }
-
-    pub const fn pipe(id: u64, write: bool) -> Self {
-        Self {
-            target: FdTarget::Pipe { id, write },
-        }
-    }
+    pub fn stdin() -> Self { Self::new(FdTarget::Stdin, 1) }
+    pub fn stdout() -> Self { Self::new(FdTarget::Stdout, 2) }
+    pub fn stderr() -> Self { Self::new(FdTarget::Stderr, 2) }
+    pub fn vfs(fd: crate::fs::vfs::FileDescriptor) -> Self { Self::new(FdTarget::Vfs(fd), 3) }
+    pub fn pipe(id: u64, write: bool) -> Self { Self::new(FdTarget::Pipe { id, write }, if write { 2 } else { 1 }) }
+    pub fn status(&self) -> u32 { self.status.load(Ordering::SeqCst) }
+    pub fn set_status(&self, status: u32) { self.status.store(status, Ordering::SeqCst); }
 }
 
 pub fn allocate_pid() -> ProcessId {
@@ -1572,6 +1603,7 @@ pub fn provide_terminal_stdin(pid: ProcessId, data: &[u8]) -> Result<(), Process
         let stdin = &mut *TERMINAL_STDIN.0.get();
         stdin.provide(data);
     }
+    wake_poll_waiters();
     Ok(())
 }
 
@@ -1677,6 +1709,7 @@ pub fn insert_process_record(
     table.push(ProcessRecord {
         pid,
         owner: None,
+        thread_auto_reap: false,
         parent,
         state,
         status: None,
@@ -1772,6 +1805,7 @@ pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<Thread
         table.push(ProcessRecord {
             pid: ProcessId(tid.0),
             owner: Some(owner),
+            thread_auto_reap: false,
             parent: None,
             state: ProcessState::Ready,
             status: None,
@@ -1798,6 +1832,47 @@ pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<Thread
     serial_write_u64(owner.0);
     crate::memory::serial_write("\r\n");
     Ok(tid)
+}
+
+/// Opt-in is only valid for an additional thread; called before ThreadExit.
+pub fn request_thread_auto_reap() -> Result<(), ProcessError> {
+    let entity = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
+    let _irq = InterruptGuard::new();
+    let table = process_table_mut();
+    let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
+    if table[index].owner.is_none() { return Err(ProcessError::InvalidUserContext); }
+    table[index].thread_auto_reap = true;
+    Ok(())
+}
+
+/// HAL has returned and the syscall stack is reset: the dead thread's stack
+/// can now be freed. Keep only the join status unless exit explicitly detached.
+fn release_finished_thread(entity: ProcessId) -> Result<(), ProcessError> {
+    let (owner, tls) = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
+        let record = &mut table[index];
+        let owner = record.owner.ok_or(ProcessError::InvalidUserContext)?;
+        let tls = record.process.as_mut().and_then(|thread| thread.tls_allocation.take());
+        (owner, tls)
+    };
+    if let Some((base, length)) = tls {
+        with_process_mut(owner, |process| process.unmap_range(base, length))?;
+    }
+    let finished = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
+        let finished = table[index].process.take();
+        if table[index].thread_auto_reap {
+            crate::process::scheduler::remove(entity);
+            table.remove(index);
+        }
+        finished
+    };
+    drop(finished);
+    Ok(())
 }
 
 pub fn wait_thread(tid: ThreadId) -> Result<ProcessExitStatus, ProcessError> {
@@ -2059,8 +2134,46 @@ pub fn pipe_block_current(id: u64) -> Result<(), ProcessError> {
     Ok(())
 }
 
+/// Poll restarts the original syscall after an actual readiness notification
+/// or its absolute deadline. No userspace sleep/rescan loop is involved.
+pub fn poll_block_current(deadline_ns: u64) -> Result<(), ProcessError> {
+    let _irq = InterruptGuard::new();
+    let entity = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
+    let table = process_table_mut();
+    let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
+    let record = &mut table[index];
+    let process = record.process.as_mut().ok_or(ProcessError::ProcessNotPrepared)?;
+    if record.state != ProcessState::Running || process.is_kernel { return Err(ProcessError::NotRunnable); }
+    unsafe { crate::hal::syscall_restart_user_context(&mut process.context); }
+    record.state = ProcessState::Blocked;
+    process.state = ProcessState::Blocked;
+    let tick_ns = 1_000_000_000 / crate::clock::TICKS_PER_SECOND;
+    let deadline = if deadline_ns == u64::MAX { None } else {
+        Some(deadline_ns.saturating_add(tick_ns - 1) / tick_ns)
+    };
+    WAIT_QUEUE.lock().push(WaitEntry { entity, key: WaitKey::Poll, deadline });
+    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
+    PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
+    Ok(())
+}
+pub fn wake_poll_waiters() {
+    let _irq = InterruptGuard::new();
+    let mut queue = WAIT_QUEUE.lock();
+    let mut index = 0;
+    while index < queue.len() {
+        if queue[index].key == WaitKey::Poll { wake_entry(queue.remove(index)); }
+        else { index += 1; }
+    }
+}
+pub fn terminal_input_ready() -> bool {
+    let owner = TERMINAL_STDIN_WAITING_PID.load(Ordering::SeqCst);
+    owner != 0 && current_pid().map(|pid| pid.0) == Some(owner)
+        && unsafe { (&*TERMINAL_STDIN.0.get()).is_ready() }
+}
+
 /// Wake every process blocked on the pipe end `id`.
 pub fn wake_pipe_waiters(id: u64) {
+    wake_poll_waiters();
     let _irq = InterruptGuard::new();
     let mut queue = WAIT_QUEUE.lock();
     let mut index = 0;
@@ -2848,7 +2961,9 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                 status,
             };
             mark_process_finished(exit);
-            if !is_thread {
+            if is_thread {
+                release_finished_thread(next_pid)?;
+            } else {
                 cleanup_owned_threads(next_pid);
                 unsafe { crate::memory::vmm::switch_to_root_frame(previous_root); }
                 with_process_mut(next_pid, |finished| {

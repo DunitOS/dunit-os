@@ -72,8 +72,11 @@ subset `AT_PAGESZ` (4096), `AT_SECURE` (0) and `AT_RANDOM` (→ 16 bytes).
 A libc `crt1` re-aligns itself (musl's `_start` does `and $-16,%rsp`), so the
 `8 mod 16` convention serves both a no-libc Rust `_start` and a libc crt1 — no
 separate `rsp` 0-mod-16 switch is needed, and the auxv is the piece a crt1 reads
-after the envp NULL. `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY` (for TLS from
-program headers) are added when the libc port needs them.
+after the envp NULL. `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY` describe the
+ELF headers and entry for static C TLS. A mapped table is reused; static layouts
+without a PT_PHDR/load-backed table receive a bounded exact copy on the initial
+stack. Invalid PT_PHDR declarations are rejected. The argc/argv/env layout and
+register convention are unchanged; consumers skip unknown auxv types.
 
 ## ELF contract (current)
 
@@ -102,13 +105,22 @@ value. `crt0.s` is the seed the eventual Dunit musl `crt1` generalises. Test:
 - [x] Process-entry ABI + ELF contract documented (current shape above).
 - [x] **ABI v0 conformance gate: freestanding C program (own crt0) reads args/env, raw syscalls, errno, exit — verified (M6.3).**
 - [x] **Process-entry auxv** (`AT_PAGESZ`/`AT_SECURE`/`AT_RANDOM`/`AT_NULL`), verified from C (`c_hello` walks envp→auxv). Stack is now musl-crt1-ready; crt1 self-aligns, so no `rsp` 0-mod-16 switch needed (M6.3).
-- [ ] `AT_PHDR`/`AT_ENTRY` auxv entries for TLS-from-program-headers, when the libc port needs them.
+- [x] `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY` for static TLS, checked by C entry and native musl thread stress.
 - [ ] Scalar widths/alignment for `time_t`/`off_t`/`ino_t`/`pid_t`/pointers, versioned wire structs (M6.3).
 - [x] M6.2 `dunit-musl` fork repo created (`github.com/DunitOS/dunit-musl`, musl v1.2.6+67 `b1efda5b`, MIT) and wired here as the `toolchains/dunit-musl` submodule, with provenance (`UPSTREAM.md`), porting plan (`PORTING.md`) and CI.
 - [x] M6.4 `x86_64-dunit` sysroot — `toolchains/dunit-musl/tools/dunit/build-libc.sh` produces a static `libc.a` + crt objects + headers; `make userspace` builds it once and links the `MUSL_CTESTS` against it. (A packaged `dunit-cc` wrapper is still a convenience TODO.)
 - [x] M6.2 libc port — **`build:`/`syscall:`/`crt`/`fs:`(write+files)/`vm:` landed and verified on the kernel.** Static musl programs run over the Dunit ABI: `musl_hello` (crt1 + `__init_tls` + native `SetThreadPointer` + `write`), `musl_stdio` (`printf` via `__stdio_write` → native `Write`), `musl_malloc` (mallocng over native `Mmap`), `musl_file` (`open`/read/write/close via a native-`Open` flag/arg adapter, incl. a write+read roundtrip in `/persist`). Unmapped Linux syscalls return documented `-ENOSYS` sentinels (M6.1). See `userspace/ctests/musl_*.c` and `tools/m6_musl_*_markers.json`.
 - [x] M6.2 libc port — **`thread:` works.** The native `__clone` + per-thread `SetThreadPointer` trampoline, a futex dispatcher onto `FutexWait`/`FutexWake`, `exit`→`ThreadExit` vs `exit_group`→`Exit`, and a new kernel **`SetTidAddress`** (75) clear-child-tid primitive (zeroes the registered word + `futex_wake` on thread exit) that releases musl's thread-list lock. `musl_thread` runs two pthreads with a contended mutex and joins them (counter=10000). **The static C acceptance suite `hello`/`stdio`/`malloc`/`file`/`thread` is complete.**
 - [x] M6.2 libc port — **`fs:` surface complete.** Beyond open/read/write/close: buffered stdio read+write (`__stdio_read`/`__stdio_write`/`readv`/`writev` over native `Read`/`Write`), `stat` (native `Stat` → `struct stat`), directory iteration (`opendir`/`readdir`), `getcwd`/`chdir`, file management (`mkdir`/`rmdir`/`unlink`/`rename`/`fsync`), and clocks/sleep (`clock_gettime`/`nanosleep` over native `ClockGetTime`/`Sleep`, monotonic since boot). A `dunit-cc` wrapper + `x86_64-dunit-cc`/`-ar`/`-strip` + an SDK manifest package the sysroot. Verified by the `musl_*` suite (11 programs).
-- [ ] M6.2 libc port — `signal:`/`network:`/`ldso:` stay documented `ENOSYS`; packaging (`dunit-cc` wrapper, upstream diff/version table). `AT_PHDR` auxv only when a program uses `__thread` TLS variables.
+- [ ] M6.2 libc port — `signal:`/`network:`/`ldso:` stay documented `ENOSYS`; packaging (`dunit-cc` wrapper, upstream diff/version table). Static `__thread`/`_Thread_local` uses the published program-header auxv.
 
 See `DUNIT_OS_TECHNICAL_ROADMAP.md` §M6 for the full plan.
+
+### ThreadExit v1 detached reclamation (M6, approved 2026-10-24)
+
+`ThreadExit=31` decodes arg0 high32 exactly `1` as opt-in auto-reap;
+low32 is the signed exit code. Legacy i32 calls retain joinable status.
+The opt-in is valid only for an additional thread (main returns EINVAL).
+All dead threads release their kernel stack and kernel-allocated TLS after HAL
+returns; joinable status survives until ThreadJoin=30. Auto-reap deletes that
+status as well, so it must not have a joiner. No syscall number was added.

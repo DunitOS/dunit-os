@@ -1,6 +1,9 @@
 #![no_std]
 
 extern crate alloc;
+pub mod shared_buffer;
+pub mod process;
+mod exec_path;
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::{self, null_mut};
@@ -286,6 +289,15 @@ pub struct SystemStats {
     /// Timer frequency in Hz (kernel `clock::TICKS_PER_SECOND`), so callers can
     /// turn `uptime_ticks` into wall time without hardcoding the tick rate.
     pub uptime_hz: u64,
+}
+
+impl SystemStats {
+    /// PMM allocated pages / usable pages, including kernel reservations.
+    /// This is physical allocation, not the separate kernel heap occupancy.
+    pub fn memory_used_percent(&self) -> u32 {
+        if self.pmm_total_bytes == 0 { return 0; }
+        ((self.pmm_used_bytes as u128 * 100 / self.pmm_total_bytes as u128).min(100)) as u32
+    }
 }
 
 #[repr(C)]
@@ -1223,6 +1235,10 @@ pub fn kill(pid: u32) -> isize {
 }
 
 pub fn spawn(path: &str) -> isize {
+    let path = match process::resolve_program(path) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
     syscall2(SYSCALL_SPAWN_PROCESS, path.as_ptr() as usize, path.len())
 }
 
@@ -1245,20 +1261,26 @@ pub fn pty_spawn(path: &str, id: u32) -> isize {
 /// places them on the child's `envp` (readable via [`getenv`]). Used by the
 /// terminal to pass its configured `PROMPT` to the shell without hardcoding it.
 pub fn pty_spawn_env(path: &str, id: u32, env: &[&str]) -> isize {
+    let path = match process::resolve_program(path) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
     let mut block: Vec<u8> = Vec::new();
-    for (i, entry) in env.iter().enumerate() {
+    let environment = process::environment(env);
+    for (i, entry) in environment.iter().enumerate() {
         if i > 0 {
             block.push(0);
         }
         block.extend_from_slice(entry.as_bytes());
     }
-    syscall5(
+    syscall6(
         SYSCALL_PTY_SPAWN,
         path.as_ptr() as usize,
         path.len(),
         id as usize,
         block.as_ptr() as usize,
         block.len(),
+        0,
     )
 }
 
