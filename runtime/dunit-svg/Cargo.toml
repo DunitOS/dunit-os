@@ -1,0 +1,10 @@
+[package]
+name = "dunit_svg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tiny-skia = { version = "0.12", default-features = false, features = ["no-std-float"] }
+roxmltree = { version = "0.21", default-features = false }
+svgtypes = { version = "0.16", default-features = false, features = ["libm"] }
+libm = "0.2"

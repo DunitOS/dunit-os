@@ -1,0 +1,8 @@
+[package]
+name = "dunit_image"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libdunit = { path = "../libdunit" }
+dunit_svg = { path = "../../runtime/dunit-svg" }
