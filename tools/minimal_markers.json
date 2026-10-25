@@ -1,0 +1,6 @@
+{
+  "description": "Boot the actual Minimal release image and execute a shipped terminal utility. Composition is checked separately from the ISO archive.",
+  "run": {"cmd": ["exec /app/dufetch"]},
+  "required": ["[TERM-007] Starting main loop", "[BOOT] Starting terminal mode", "/app/dufetch returned code=0", "[PROCESS-RUN] VFS handles clean"],
+  "forbidden": ["[PANIC]", "[USER-FAULT]", "dufetch: PANIC", "[GUI] launching /app/init", "gui_server: desktop ready"]
+}

@@ -1,0 +1,41 @@
+{
+  "name": "dwm",
+  "boot_config": "limine_dwm.conf",
+  "apps": [
+    "init",
+    "gui_server",
+    "gui_client",
+    "gui_demo",
+    "gui_shbuf_peer",
+    "gui_terminal",
+    "gui_files",
+    "gui_calc",
+    "gui_settings",
+    "gui_stat",
+    "dsh",
+    "dufetch",
+    "calc",
+    "fsck_dunit",
+    "setup",
+    "bmp_viewer"
+  ],
+  "assets": [
+    "exec-path",
+    "dwm/**/*",
+    "fonts/**/*",
+    "icons/**/*",
+    "wallpapers/**/*",
+    "images/logo.*",
+    "tcc/**/*",
+    "legal/**/*"
+  ],
+  "desktop": true,
+  "toolchain": true,
+  "services": [
+    "gui-server.toml"
+  ],
+  "c_apps": [
+    "dwm_lua"
+  ],
+  "installer_esp_mib": 128
+}

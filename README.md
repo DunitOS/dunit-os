@@ -96,6 +96,18 @@ initrd. Persistent files live on `/persist`. A user desktop profile at
 `/persist/config/dwm.toml` overrides `/system/share/dwm/default.toml`; keeping it
 across reboots requires a persistent `/persist` mount.
 
+## Choose an image
+
+New releases come in two editions:
+
+- `dunit_dwm.iso` includes the graphical desktop, apps, Lua and the on-device
+  C toolchain.
+- `dunit_minimal.iso` boots straight to the terminal. It includes `dsh`,
+  `dufetch`, `calc` and `fsck_dunit`, without DWM, desktop assets or the toolchain.
+
+Both use the same kernel and native application ABI. The Minimal image keeps
+an installer payload so it can still be installed from the live terminal.
+
 ## Build and try it
 
 You'll need 64-bit Linux, `git`, `gcc`, `nasm`, `lld`, `xorriso`, `python3`,
@@ -109,8 +121,12 @@ rustup component add rust-src
 ./build_iso.sh
 ```
 
-The ISO is written to `build/microkernel.iso`. You can also build the graphical
-image with `make iso-dwm`, or a BIOS/UEFI disk image with `make disk-image`.
+The script builds both `build/dunit_dwm.iso` and `build/dunit_minimal.iso`.
+Use `make iso-dwm` or `make iso-minimal` to build just one, or `make iso-release`
+for both. `make disk-image` creates a BIOS/UEFI disk image.
+
+See the [image build guide](docs/build-images.md) for composition, testing and
+release details.
 
 To build and check the desktop in QEMU:
 

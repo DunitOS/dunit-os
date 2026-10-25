@@ -46,7 +46,7 @@ fi
 # Обновление Makefile с правильным линкером
 sed -i.bak "s|/usr/bin/ld\.lld[^[:space:]]*|$(command -v $LINKER)|g" Makefile
 
-echo "==> Сборка ISO образа..."
-make iso
+echo "==> Сборка Dunit DWM и Dunit Minimal..."
+make iso-release
 
-echo "==> ISO образ создан: build/microkernel.iso"
+echo "==> ISO образы созданы: build/dunit_dwm.iso и build/dunit_minimal.iso"

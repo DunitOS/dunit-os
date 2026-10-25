@@ -1,0 +1,5 @@
+{
+  "description": "Boot the actual production DWM release profile through init and its compositor service.",
+  "required": ["[GUI] launching /app/init", "gui_server: shell font loaded (TTF)", "gui_server: desktop ready"],
+  "forbidden": ["[PANIC]", "[USER-FAULT]", "gui_server: FAIL", "gui_server: shell rejected", "CRITICAL"]
+}

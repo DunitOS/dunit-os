@@ -1,0 +1,17 @@
+{
+  "name": "minimal",
+  "boot_config": "limine_minimal.conf",
+  "apps": [
+    "dsh",
+    "dufetch",
+    "calc",
+    "fsck_dunit"
+  ],
+  "assets": [
+    "exec-path"
+  ],
+  "desktop": false,
+  "toolchain": false,
+  "services": [],
+  "installer_esp_mib": 64
+}

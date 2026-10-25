@@ -1,4 +1,4 @@
-.PHONY: all clean hal kernel userspace iso disk-image run run-gui run-dwm iso-dwm
+.PHONY: all clean hal kernel userspace iso disk-image run run-gui run-dwm iso-dwm iso-minimal iso-release
 
 CC = gcc
 AS = nasm
@@ -19,7 +19,12 @@ QEMU_ACCEL ?= -enable-kvm -cpu host -machine q35,accel=kvm
 QEMU_VGA ?= -device VGA,vgamem_mb=32,edid=on,xres=1920,yres=1080
 QEMU_EXTRA ?= -no-reboot
 QEMU_MEM ?= 512M
-LIMINE_CONFIG ?= limine.conf
+LIMINE_CONFIG ?= $(shell python3 tools/image_profile.py $(IMAGE_PROFILE) --field boot_config)
+# Release names are stable; microkernel.iso remains the internal test artifact.
+IMAGE_PROFILE ?= full
+ISO_PATH ?= build/microkernel.iso
+WITH_DESKTOP := $(shell python3 tools/image_profile.py $(IMAGE_PROFILE) --field desktop)
+WITH_TOOLCHAIN := $(shell python3 tools/image_profile.py $(IMAGE_PROFILE) --field toolchain)
 
 HAL_DIR = hal
 KERNEL_DIR = kernel
@@ -58,6 +63,12 @@ USERSPACE_APPS = pty_args_test pty_terminal_test \
 	ipc_child ipc_parent runtime_stress input_test pointer_test file_api_test env_test calc \
 	stdin_test fault_pf fault_ud dtop \
 	preempt_child preempt_test kill_target thread_test wait_test vm_test vm_peer vm_guard_fault vm_protect_fault tls_test futex_test handle_test gui_server gui_shbuf_peer gui_client gui_demo gui_calc gui_stat gui_files pty_echo pty_test dsh_calc_test dsh dufetch gui_terminal gui_settings setup init init_probe fsck_dunit abi_test svg_test
+ifneq ($(IMAGE_PROFILE),full)
+USERSPACE_APPS := $(shell python3 tools/image_profile.py $(IMAGE_PROFILE) --field apps)
+MUSL_CTESTS :=
+TCC_CTESTS :=
+endif
+
 USERSPACE_CARGO_FLAGS = --release --target ../../../userspace/x86_64-unknown-none.json \
 	-Z build-std=core,alloc -Z build-std-features=compiler-builtins-mem -Z json-target-spec
 
@@ -148,6 +159,7 @@ userspace:
 		(cd $(USERSPACE_DIR)/system_apps/$$app && $(CARGO) build $(USERSPACE_CARGO_FLAGS)); \
 		cp $(USERSPACE_DIR)/system_apps/$$app/target/x86_64-unknown-none/release/$$app $(USERSPACE_BUILD_DIR)/$$app; \
 	done
+ifneq ($(WITH_TOOLCHAIN),false)
 	@echo "[USERSPACE] building c_hello (freestanding C, Dunit ABI v0 conformance)"
 	$(CC) -ffreestanding -nostdlib -nostartfiles -static -no-pie -fno-pic -m64 \
 		-fno-stack-protector -fno-asynchronous-unwind-tables -fcf-protection=none \
@@ -213,6 +225,9 @@ userspace:
 	python3 tools/libc_test.py build --cc $(abspath $(MUSL_SYSROOT))/bin/dunit-cc --out-dir $(USERSPACE_BUILD_DIR)
 	python3 tools/dunit_sdk.py --sysroot $(MUSL_SYSROOT) --output $(MUSL_SYSROOT)/share/dunit-sdk/cross
 	python3 tools/check_userspace_elf.py $(USERSPACE_BUILD_DIR)/* $(BUILD_DIR)/dunit-lua $(BUILD_DIR)/dunit-luac $(BUILD_DIR)/dunit-tcc
+else
+	python3 tools/check_userspace_elf.py $(USERSPACE_BUILD_DIR)/*
+endif
 	@echo "Userspace programs built in $(USERSPACE_BUILD_DIR)/"
 
 iso: $(BUILD_DIR)/kernel.elf userspace
@@ -225,15 +240,18 @@ iso: $(BUILD_DIR)/kernel.elf userspace
 		echo "[ISO] building Limine host tool"; \
 		$(CC) -O2 -o limine/limine limine/limine.c; \
 	fi
-	python3 tools/install_disk.py $(BUILD_DIR)/installer-esp.img --esp-image-only --no-build --config $(LIMINE_CONFIG) --yes-i-know-this-erases-the-disk
+	python3 tools/install_disk.py $(BUILD_DIR)/installer-esp.img --esp-image-only --no-build --config $(LIMINE_CONFIG) --profile $(IMAGE_PROFILE) --yes-i-know-this-erases-the-disk
+	rm -rf $(ISO_DIR)
 	mkdir -p $(ISO_DIR)/boot/limine
 	cp $(BUILD_DIR)/kernel.elf $(ISO_DIR)/boot/
 	cp $(BUILD_DIR)/initrd.img $(ISO_DIR)/boot/
 	cp $(BUILD_DIR)/installer-esp.img $(ISO_DIR)/boot/
 	cp $(BUILD_DIR)/installer-bios.bin $(ISO_DIR)/boot/
 	cp $(LIMINE_CONFIG) $(ISO_DIR)/boot/limine/limine.conf
+ifneq ($(WITH_DESKTOP),false)
 	test -f assets/gui/background.png && cp assets/gui/background.png $(ISO_DIR)/boot/background.png || true
 	test -f assets/boot/limine.png && cp assets/boot/limine.png $(ISO_DIR)/boot/limine.png || true
+endif
 	cp limine/limine-bios.sys $(ISO_DIR)/boot/limine/
 	cp limine/limine-bios-cd.bin $(ISO_DIR)/boot/limine/
 	cp limine/limine-uefi-cd.bin $(ISO_DIR)/boot/limine/
@@ -243,14 +261,14 @@ iso: $(BUILD_DIR)/kernel.elf userspace
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		--efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		$(ISO_DIR) -o $(BUILD_DIR)/microkernel.iso 2>/dev/null || \
+		$(ISO_DIR) -o $(ISO_PATH) 2>/dev/null || \
 	xorriso -as mkisofs -b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		--efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		"$$(pwd)/$(ISO_DIR)" -o "$$(pwd)/$(BUILD_DIR)/microkernel.iso"
-	./limine/limine bios-install $(BUILD_DIR)/microkernel.iso
-	@echo "ISO created at $(BUILD_DIR)/microkernel.iso using $(LIMINE_CONFIG)"
+		"$$(pwd)/$(ISO_DIR)" -o "$$(pwd)/$(ISO_PATH)"
+	./limine/limine bios-install $(ISO_PATH)
+	@echo "ISO created at $(ISO_PATH) using $(LIMINE_CONFIG)"
 
 iso-test-terminal:
 	$(MAKE) iso LIMINE_CONFIG=limine_test_terminal.conf
@@ -259,10 +277,18 @@ iso-test-gui:
 	$(MAKE) iso LIMINE_CONFIG=limine_test_gui.conf
 
 iso-dwm:
-	$(MAKE) iso LIMINE_CONFIG=limine_dwm.conf
+	$(MAKE) iso IMAGE_PROFILE=dwm LIMINE_CONFIG=$(shell python3 tools/image_profile.py dwm --field boot_config) ISO_PATH=$(BUILD_DIR)/dunit_dwm.iso
+
+iso-minimal:
+	$(MAKE) iso IMAGE_PROFILE=minimal LIMINE_CONFIG=$(shell python3 tools/image_profile.py minimal --field boot_config) ISO_PATH=$(BUILD_DIR)/dunit_minimal.iso
+
+# Recursive builds intentionally run sequentially: staging and kernel are shared.
+iso-release:
+	$(MAKE) iso-dwm
+	$(MAKE) iso-minimal
 
 disk-image: all userspace
-	python3 tools/install_disk.py $(BUILD_DIR)/dunit-disk.img --no-build --yes-i-know-this-erases-the-disk
+	python3 tools/install_disk.py $(BUILD_DIR)/dunit-disk.img --config $(LIMINE_CONFIG) --profile $(IMAGE_PROFILE) --no-build --yes-i-know-this-erases-the-disk
 
 grub-iso: $(BUILD_DIR)/kernel.elf
 	rm -rf $(BUILD_DIR)/iso_grub
@@ -273,16 +299,16 @@ grub-iso: $(BUILD_DIR)/kernel.elf
 	@echo "GRUB ISO created at $(BUILD_DIR)/os.iso"
 
 run: iso
-	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(BUILD_DIR)/microkernel.iso -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on
+	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(ISO_PATH) -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on
 
 run-gui: iso-test-gui
-	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(BUILD_DIR)/microkernel.iso -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on
+	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(ISO_PATH) -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on
 
 run-dwm: iso-dwm
-	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(BUILD_DIR)/microkernel.iso -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on
+	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(BUILD_DIR)/dunit_dwm.iso -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on
 
 run-terminal: iso
-	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(BUILD_DIR)/microkernel.iso -m $(QEMU_MEM) -serial stdio -nographic $(QEMU_USB_INPUT) -boot menu=on
+	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(ISO_PATH) -m $(QEMU_MEM) -serial stdio -nographic $(QEMU_USB_INPUT) -boot menu=on
 
 clean:
 	rm -rf $(BUILD_DIR)

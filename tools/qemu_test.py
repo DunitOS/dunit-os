@@ -291,17 +291,18 @@ def load_markers(markers_file: str | None,
     return required, forbidden, run_defaults
 
 
-def build_iso(config: str) -> Path:
+def build_iso(config: str, variant: str | None = None) -> Path:
     """Build the ISO via the Makefile. Returns the ISO path."""
     if shutil.which("make") is None:
         raise RuntimeError("`make` not found; cannot --build")
-    print(f"[qemu_test] building ISO (LIMINE_CONFIG={config}) ...", file=sys.stderr)
+    selection = f"variant={variant}" if variant else f"LIMINE_CONFIG={config}"
+    print(f"[qemu_test] building ISO ({selection}) ...", file=sys.stderr)
     subprocess.run(
-        ["make", "iso", f"LIMINE_CONFIG={config}"],
+        (["make", f"iso-{variant}"] if variant else ["make", "iso", f"LIMINE_CONFIG={config}"]),
         cwd=REPO_ROOT,
         check=True,
     )
-    iso = REPO_ROOT / "build" / "microkernel.iso"
+    iso = REPO_ROOT / "build" / (f"dunit_{variant}.iso" if variant else "microkernel.iso")
     if not iso.is_file():
         raise RuntimeError("build succeeded but ISO not found")
     return iso
@@ -505,7 +506,7 @@ def run(args: argparse.Namespace) -> RunResult:
 
     is_disk = False
     if args.build:
-        image = build_iso(args.config)
+        image = build_iso(args.config, args.variant)
     elif args.build_disk:
         image = build_disk(args.config, workdir)
         is_disk = True
@@ -755,6 +756,8 @@ def main() -> int:
                      help="build the ISO with `make iso` before booting (needs xorriso)")
     src.add_argument("--build-disk", action="store_true",
                      help="build a raw bootable disk image and boot it (no xorriso needed)")
+    parser.add_argument("--variant", choices=("dwm", "minimal"),
+                        help="build a release variant with --build, using its own profile and boot config")
     parser.add_argument("--config", default="limine_test_terminal.conf",
                         help="LIMINE_CONFIG for --build (default: terminal test config)")
     parser.add_argument("--cmd", action="append", metavar="COMMAND",
@@ -806,6 +809,8 @@ def main() -> int:
                         help="serial substring that must NOT appear (repeatable); merged with --markers-file")
     args = parser.parse_args()
 
+    if args.variant and not args.build:
+        parser.error("--variant requires --build; use --iso to test an existing release image")
     if (not args.build and not args.build_disk and not args.iso and not args.disk
             and not (REPO_ROOT / "build" / "microkernel.iso").is_file()):
         parser.error("no image: pass --build, --build-disk, --iso, or --disk")

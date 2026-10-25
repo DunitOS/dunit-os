@@ -22,6 +22,8 @@ by the paths and recreated by the kernel; they are not stored.
 from __future__ import annotations
 
 import argparse
+import json
+from image_profile import load_profile
 import os
 from pathlib import Path
 import struct
@@ -44,117 +46,124 @@ def dwm_default_source(assets_dir: Path, config: str | None) -> Path:
 
 def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
     entries: dict[str, bytes] = {}
+    profile = load_profile(getattr(args, "profile", "full"))
 
     def add(vfs_path: str, host_path: Path) -> None:
         entries[vfs_path] = host_path.read_bytes()
 
     userspace = Path(args.userspace_dir)
-    for source in sorted(userspace.iterdir()):
+    sources = (sorted(userspace.iterdir()) if profile["apps"] is None else
+               [userspace / name for name in profile["apps"] + profile.get("c_apps", [])])
+    for source in sources:
         if source.is_file():
             add(f"/app/{source.name}", source)
+        elif profile["apps"] is not None:
+            raise RuntimeError(f"missing required {profile['name']} application: {source}")
+    entries["/system/share/dunit-image.json"] = (json.dumps(profile, sort_keys=True) + "\n").encode()
 
     assets = Path(args.assets_dir)
     excludes = {e.strip("/") for e in args.exclude}
-    for host_path in sorted(p for p in assets.rglob("*") if p.is_file()):
+    selected_assets = {p for pattern in profile["assets"] for p in assets.glob(pattern) if p.is_file()}
+    for host_path in sorted(selected_assets):
         rel = host_path.relative_to(assets).as_posix()
         if rel in excludes:
             continue
         add(f"/assets/{rel}", host_path)
 
-    # DWM system config tree read by gui_server at /system/share/dwm. default.toml
-    # is selected per-config (clean vs smoke); apps/* and widgets/* are globbed
-    # generically so no application name is hardcoded in the packer.
-    default_src = dwm_default_source(assets, args.config)
-    if not default_src.is_file():
-        raise RuntimeError(f"missing DWM default config: {default_src}")
-    add("/system/share/dwm/default.toml", default_src)
-    add("/system/share/dwm/session.toml", assets / "dwm" / "session.toml")
-    for sub in ("apps", "widgets"):
-        src_dir = assets / "dwm" / sub
-        if src_dir.is_dir():
-            for host_path in sorted(src_dir.glob("*.toml")):
-                add(f"/system/share/dwm/{sub}/{host_path.name}", host_path)
-            # Smoke palettes are explicit fixtures, just like test.toml and
-            # test service manifests. Production apps inherit the live theme.
-            if args.config is not None and os.path.basename(args.config) in SMOKE_CONFIGS:
-                for host_path in sorted((src_dir / "test").glob("*.toml")):
+    if profile["desktop"]:
+        # DWM system config tree read by gui_server at /system/share/dwm. default.toml
+        # is selected per-config (clean vs smoke); apps/* and widgets/* are globbed
+        # generically so no application name is hardcoded in the packer.
+        default_src = dwm_default_source(assets, args.config)
+        if not default_src.is_file():
+            raise RuntimeError(f"missing DWM default config: {default_src}")
+        add("/system/share/dwm/default.toml", default_src)
+        add("/system/share/dwm/session.toml", assets / "dwm" / "session.toml")
+        for sub in ("apps", "widgets"):
+            src_dir = assets / "dwm" / sub
+            if src_dir.is_dir():
+                for host_path in sorted(src_dir.glob("*.toml")):
                     add(f"/system/share/dwm/{sub}/{host_path.name}", host_path)
+                # Smoke palettes are explicit fixtures, just like test.toml and
+                # test service manifests. Production apps inherit the live theme.
+                if args.config is not None and os.path.basename(args.config) in SMOKE_CONFIGS:
+                    for host_path in sorted((src_dir / "test").glob("*.toml")):
+                        add(f"/system/share/dwm/{sub}/{host_path.name}", host_path)
 
-    # init service manifests read by /app/init at /system/services. The top-level
-    # services/*.toml are the production services (e.g. gui-server.toml); they ship
-    # on EVERY config. services/test/*.toml are test-only fixtures (e.g.
-    # init-probe.toml, which exits non-zero to exercise init's restart policy) and
-    # ship ONLY for the smoke configs, mirroring the SMOKE_CONFIGS test/default
-    # selection used for the DWM toml above — the production desktop never sees them.
+    # Release profiles name their services explicitly. Developer smoke images
+    # retain the existing production services plus their test-only fixtures.
     if args.services_dir is not None:
         services = Path(args.services_dir)
-        for host_path in sorted(services.glob("*.toml")):
+        manifests = (sorted(services.glob("*.toml")) if profile["services"] is None else
+                     [services / name for name in profile["services"]])
+        for host_path in manifests:
             add(f"/system/services/{host_path.name}", host_path)
         smoke = args.config is not None and os.path.basename(args.config) in SMOKE_CONFIGS
-        if smoke:
+        if smoke and profile["name"] == "full":
             test_dir = services / "test"
             if test_dir.is_dir():
                 for host_path in sorted(test_dir.glob("*.toml")):
                     add(f"/system/services/{host_path.name}", host_path)
 
-    # Dunit sysroot for the on-device C toolchain (tcc). Headers + libc.a + crt
-    # go under /system so /app/tcc can compile and link C programs on the device
-    # itself. Only packed when --sysroot-dir is given (always, in a normal build).
-    if args.sysroot_dir is not None:
-        sysroot = Path(args.sysroot_dir)
-        sdk = sysroot / "share" / "dunit-sdk" / "cross"
-        for name, destination in (("profile.json", "/system/share/dunit-sdk/profile.json"),
-                                  ("musl-COPYRIGHT", "/system/share/licenses/musl/COPYRIGHT")):
-            if (sdk / name).is_file(): add(destination, sdk / name)
-        inc = sysroot / "include"
-        if inc.is_dir():
-            for host_path in sorted(p for p in inc.rglob("*") if p.is_file()):
-                rel = host_path.relative_to(inc).as_posix()
-                add(f"/system/include/{rel}", host_path)
-        lib = sysroot / "lib"
-        for name in ("libc.a", "crt1.o", "crti.o", "crtn.o"):
-            p = lib / name
-            if p.is_file():
-                add(f"/system/lib/{name}", p)
-                # crt also under /system/tcc so tcc finds them via -B/CONFIG_TCCDIR
-                if name != "libc.a":
-                    add(f"/system/tcc/{name}", p)
+    if profile["toolchain"]:
+        # Dunit sysroot for the on-device C toolchain (tcc). Headers + libc.a + crt
+        # go under /system so /app/tcc can compile and link C programs on the device
+        # itself. Only packed when --sysroot-dir is given (always, in a normal build).
+        if args.sysroot_dir is not None:
+            sysroot = Path(args.sysroot_dir)
+            sdk = sysroot / "share" / "dunit-sdk" / "cross"
+            for name, destination in (("profile.json", "/system/share/dunit-sdk/profile.json"),
+                                      ("musl-COPYRIGHT", "/system/share/licenses/musl/COPYRIGHT")):
+                if (sdk / name).is_file(): add(destination, sdk / name)
+            inc = sysroot / "include"
+            if inc.is_dir():
+                for host_path in sorted(p for p in inc.rglob("*") if p.is_file()):
+                    rel = host_path.relative_to(inc).as_posix()
+                    add(f"/system/include/{rel}", host_path)
+            lib = sysroot / "lib"
+            for name in ("libc.a", "crt1.o", "crti.o", "crtn.o"):
+                p = lib / name
+                if p.is_file():
+                    add(f"/system/lib/{name}", p)
+                    # crt also under /system/tcc so tcc finds them via -B/CONFIG_TCCDIR
+                    if name != "libc.a":
+                        add(f"/system/tcc/{name}", p)
 
-    # System Lua is a normal executable; its complete source SDK permits a real
-    # on-device rebuild through the same TCC, with no shell/command-size tricks.
-    if args.lua_bin is not None:
-        add("/system/bin/lua", Path(args.lua_bin))
-    if args.luac_bin is not None:
-        add("/system/bin/luac", Path(args.luac_bin))
-    if args.lua_dir is not None:
-        source = Path(args.lua_dir)
-        for path in sorted(source.iterdir()):
-            if path.suffix in (".c", ".h"):
-                add(f"/system/src/lua/{path.name}", path)
-    if args.lua_config is not None:
-        add("/system/src/lua/dunit-config.h", Path(args.lua_config))
-    if args.lua_build_rsp is not None:
-        add("/system/src/lua/build.rsp", Path(args.lua_build_rsp))
+        # System Lua is a normal executable; its complete source SDK permits a real
+        # on-device rebuild through the same TCC, with no shell/command-size tricks.
+        if args.lua_bin is not None:
+            add("/system/bin/lua", Path(args.lua_bin))
+        if args.luac_bin is not None:
+            add("/system/bin/luac", Path(args.luac_bin))
+        if args.lua_dir is not None:
+            source = Path(args.lua_dir)
+            for path in sorted(source.iterdir()):
+                if path.suffix in (".c", ".h"):
+                    add(f"/system/src/lua/{path.name}", path)
+        if args.lua_config is not None:
+            add("/system/src/lua/dunit-config.h", Path(args.lua_config))
+        if args.lua_build_rsp is not None:
+            add("/system/src/lua/build.rsp", Path(args.lua_build_rsp))
 
-    # tcc's own runtime (libtcc1.a) and compiler headers (stddef.h/stdarg.h/…)
-    # live under /system/tcc = CONFIG_TCCDIR, found by -B/the baked tccdir.
-    if args.tcc_dir is not None:
-        tccd = Path(args.tcc_dir)
-        libtcc1 = tccd / "libtcc1.a"
-        if libtcc1.is_file():
-            add("/system/tcc/libtcc1.a", libtcc1)
-        tinc = tccd / "include"
-        if tinc.is_dir():
-            for host_path in sorted(p for p in tinc.rglob("*") if p.is_file()):
-                rel = host_path.relative_to(tinc).as_posix()
-                add(f"/system/tcc/include/{rel}", host_path)
+        # tcc's own runtime (libtcc1.a) and compiler headers (stddef.h/stdarg.h/…)
+        # live under /system/tcc = CONFIG_TCCDIR, found by -B/the baked tccdir.
+        if args.tcc_dir is not None:
+            tccd = Path(args.tcc_dir)
+            libtcc1 = tccd / "libtcc1.a"
+            if libtcc1.is_file():
+                add("/system/tcc/libtcc1.a", libtcc1)
+            tinc = tccd / "include"
+            if tinc.is_dir():
+                for host_path in sorted(p for p in tinc.rglob("*") if p.is_file()):
+                    rel = host_path.relative_to(tinc).as_posix()
+                    add(f"/system/tcc/include/{rel}", host_path)
 
-    # The on-device compiler itself: /system/bin/tcc (an OS tool, not a bundled
-    # /app application), resolved by userspace PATH policy; recovery console uses the explicit path.
-    if args.tcc_bin is not None:
-        tcc_bin = Path(args.tcc_bin)
-        if tcc_bin.is_file():
-            add("/system/bin/tcc", tcc_bin)
+        # The on-device compiler itself: /system/bin/tcc (an OS tool, not a bundled
+        # /app application), resolved by userspace PATH policy; recovery console uses the explicit path.
+        if args.tcc_bin is not None:
+            tcc_bin = Path(args.tcc_bin)
+            if tcc_bin.is_file():
+                add("/system/bin/tcc", tcc_bin)
 
     return sorted(entries.items())
 
@@ -173,6 +182,7 @@ def pack(entries: list[tuple[str, bytes]]) -> bytes:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=("full", "dwm", "minimal"), default="full")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--userspace-dir", type=Path, required=True)
     parser.add_argument("--assets-dir", type=Path, required=True)

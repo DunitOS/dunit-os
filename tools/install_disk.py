@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from image_profile import load_profile
 import os
 from pathlib import Path
 import re
@@ -111,7 +112,7 @@ def validate_payload(root: Path, config: Path) -> None:
         raise RuntimeError(f"missing install payload: {', '.join(missing)}")
 
 
-def build_initrd(root: Path, config: Path) -> Path:
+def build_initrd(root: Path, config: Path, profile: str = "full") -> Path:
     """Pack userspace ELFs + assets + DWM config into build/initrd.img.
 
     The kernel embeds no application binaries or desktop assets; they ship in
@@ -125,6 +126,7 @@ def build_initrd(root: Path, config: Path) -> Path:
         sys.executable,
         str(root / "tools/pack_initrd.py"),
         "--out", str(out),
+        "--profile", profile,
         "--userspace-dir", str(root / "build/userspace"),
         "--assets-dir", str(root / "assets"),
         "--services-dir", str(root / "services"),
@@ -266,8 +268,11 @@ def format_esp(path: Path, start: int, sectors: int) -> str:
     return f"{path}@@{start * SECTOR_SIZE}"
 
 
-def build_esp_image(path: Path, root: Path, config: Path) -> None:
-    sectors = ESP_SIZE_MIB * 1024 * 1024 // SECTOR_SIZE
+def build_esp_image(path: Path, root: Path, config: Path, profile: str = "full") -> None:
+    # Keep a valid FAT32 volume while avoiding a mostly empty 128 MiB payload
+    # in the Minimal ISO. The in-OS installer derives partition size from it.
+    size_mib = load_profile(profile).get("installer_esp_mib", ESP_SIZE_MIB)
+    sectors = size_mib * 1024 * 1024 // SECTOR_SIZE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as image:
         image.truncate(sectors * SECTOR_SIZE)
@@ -283,7 +288,7 @@ def build_esp_image(path: Path, root: Path, config: Path) -> None:
             str(sectors // 2),
         ]
     )
-    copy_boot_files(root, str(path), config)
+    copy_boot_files(root, str(path), config, profile)
     bios_header = (root / "limine/limine-bios-hdd.h").read_text(encoding="ascii")
     bios_payload = bytes(
         int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})", bios_header)
@@ -313,7 +318,7 @@ def load_installed_module_manifest(root: Path) -> set[str]:
     return modules
 
 
-def copy_boot_files(root: Path, fat_image: str, config: Path) -> None:
+def copy_boot_files(root: Path, fat_image: str, config: Path, profile: str = "full") -> None:
     env = os.environ.copy()
     env["MTOOLS_SKIP_CHECK"] = "1"
     for directory in ("EFI", "EFI/BOOT", "boot", "boot/limine"):
@@ -353,6 +358,8 @@ def copy_boot_files(root: Path, fat_image: str, config: Path) -> None:
         (root / "assets/gui/background.png", "::/boot/background.png"),
         (root / "assets/boot/limine.png", "::/boot/limine.png"),
     ]
+    if not load_profile(profile)["desktop"]:
+        optional = []
     for source, destination in files + [item for item in optional if item[0].is_file()]:
         if not source.is_file():
             raise RuntimeError(f"missing install payload: {source}")
@@ -434,7 +441,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target", type=Path, help="disk image or whole block device")
     parser.add_argument("--image-size-mib", type=int, default=256)
-    parser.add_argument("--config", type=Path, default=Path("limine.conf"))
+    parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--profile", choices=("full", "dwm", "minimal"), default="full")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--esp-image-only", action="store_true")
     parser.add_argument(
@@ -453,7 +461,8 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     target = args.target.expanduser().absolute()
-    config = args.config if args.config.is_absolute() else root / args.config
+    selected_config = args.config or Path(load_profile(args.profile)["boot_config"])
+    config = selected_config if selected_config.is_absolute() else root / selected_config
     block_device = is_block_device(target)
     if str(target).startswith("/dev/") and not block_device:
         raise RuntimeError("target under /dev is not an existing whole block device")
@@ -464,13 +473,13 @@ def main() -> int:
         tools.append("make")
     require_tools(tools)
     if not args.no_build:
-        subprocess.run(["make", "all", "userspace"], cwd=root, check=True)
+        subprocess.run(["make", "all", "userspace", f"IMAGE_PROFILE={args.profile}", f"LIMINE_CONFIG={config}"], cwd=root, check=True)
     validate_payload(root, config)
-    build_initrd(root, config)
+    build_initrd(root, config, args.profile)
     if args.esp_image_only:
         if block_device:
             raise RuntimeError("ESP payload target must be a regular image file")
-        build_esp_image(target, root, config)
+        build_esp_image(target, root, config, args.profile)
         print(f"[INSTALL] ESP payload ready: {target}")
         return 0
     prepare_target(target, args.image_size_mib, block_device)
@@ -478,7 +487,7 @@ def main() -> int:
     ranges = partition_ranges(target)
     set_partition_type_guid(target, 2, DUNIT_SYSTEM_TYPE_GUID)
     fat_image = format_esp(target, *ranges[1])
-    copy_boot_files(root, fat_image, config)
+    copy_boot_files(root, fat_image, config, args.profile)
     format_dunitfs(target, *ranges[2])
     run([str(root / "limine/limine"), "bios-install", str(target)])
     print(f"[INSTALL] complete: {target}")

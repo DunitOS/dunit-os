@@ -28,7 +28,8 @@ jobs:
             git \
             qemu-system-x86 \
             parted \
-            dosfstools
+            dosfstools \
+            ovmf
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@master
@@ -43,12 +44,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             kernel/target
-            userspace/system_apps/plank/target
-            userspace/system_apps/terminal/target
-            userspace/system_apps/file_manager/target
-            userspace/system_apps/text_editor/target
-            userspace/system_apps/settings/target
-            userspace/system_apps/system_monitor/target
+            userspace/system_apps/*/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
@@ -59,8 +55,39 @@ jobs:
           path: limine
           key: limine-v8-binary
 
-      - name: Build ISO
+      - name: Image profile tests
+        run: python3 tools/test_image_profiles.py
+
+      - name: Build DWM and Minimal ISOs
         run: bash build_iso.sh
+
+      - name: Verify release image contents
+        run: |
+          python3 tools/check_image_profile.py build/dunit_dwm.iso dwm
+          python3 tools/check_image_profile.py build/dunit_minimal.iso minimal
+
+      - name: Boot Minimal release image
+        run: |
+          python3 tools/qemu_test.py --iso build/dunit_minimal.iso \
+            --markers-file tools/minimal_markers.json --accel tcg \
+            --boot-timeout 180 --cmd-timeout 60 --timeout 300
+
+      - name: Boot DWM release image
+        run: |
+          python3 tools/qemu_test.py --iso build/dunit_dwm.iso \
+            --markers-file tools/dwm_release_markers.json --accel tcg \
+            --ready-marker 'gui_server: desktop ready' --linger 3 \
+            --boot-timeout 240 --timeout 300
+
+      - name: Boot both release images with UEFI
+        run: |
+          python3 tools/qemu_test.py --iso build/dunit_minimal.iso --uefi \
+            --markers-file tools/minimal_markers.json --accel tcg \
+            --boot-timeout 180 --cmd-timeout 60 --timeout 300
+          python3 tools/qemu_test.py --iso build/dunit_dwm.iso --uefi \
+            --markers-file tools/dwm_release_markers.json --accel tcg \
+            --ready-marker 'gui_server: desktop ready' --linger 3 \
+            --boot-timeout 240 --timeout 300
 
       # --- M0 CI budget: warnings must not grow, boot markers must hold ---
       - name: Compiler-warnings budget
@@ -79,9 +106,25 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}-${{ github.sha }}
+          target_commitish: ${{ github.sha }}
           name: "Dunit OS build #${{ github.run_number }}"
           body: |
             Автосборка из коммита ${{ github.sha }}
             Ветка: ${{ github.ref_name }}
-          files: build/microkernel.iso
+            dunit_dwm.iso — graphical desktop, apps and development tools.
+            dunit_minimal.iso — terminal and base utilities, without DWM.
+          files: |
+            build/dunit_dwm.iso
+            build/dunit_minimal.iso
+          fail_on_unmatched_files: true
+          draft: true
           prerelease: true
+
+      - name: Publish complete two-image release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: build-${{ github.run_number }}-${{ github.sha }}
+        run: |
+          gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | sort' > build/release-assets.json
+          python3 -c 'import json; names=json.load(open("build/release-assets.json")); assert names == ["dunit_dwm.iso", "dunit_minimal.iso"], names'
+          gh release edit "$RELEASE_TAG" --draft=false
