@@ -4,8 +4,7 @@ pub use libdunit::wait_set::{
     Event, Interest, ELAPSED, ERROR, EXITED, HANGUP, INFINITE, READ, WRITE,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Error(pub isize);
+pub use crate::Error;
 
 /// Own the interest/result storage so application code needs no raw pointers.
 /// Drain level-ready sources before waiting again. An IPC interest can also

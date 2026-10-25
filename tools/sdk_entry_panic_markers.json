@@ -1,0 +1,6 @@
+{
+  "description": "SDK-generated panic handler reports failure and exits 101 without a kernel panic",
+  "run": {"config": "limine_test_terminal.conf", "cmd": ["exec /app/sdk_api_test --panic"]},
+  "required": ["[TERM-007] Starting main loop", "[SDK] PANIC:", "SDK entry probe", "[EXEC] /app/sdk_api_test returned code=101"],
+  "forbidden": ["[PANIC]", "[SDKAPI] OK"]
+}

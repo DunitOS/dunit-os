@@ -3,47 +3,24 @@
 
 extern crate alloc;
 
-use alloc::string::String;
-use core::panic::PanicInfo;
-
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    dunit::println!("calc: enter expressions like 2+2 or 7 * 3")?;
+    dunit::println!("calc: type exit to quit, Ctrl+C interrupts while waiting")?;
+    let mut input = dunit::io::BufReader::new(dunit::io::stdin());
     loop {
-        unsafe {
-            core::arch::asm!("pause", options(nomem, nostack));
+        dunit::print!("calc> ")?;
+        let Some(line) = input.read_line()? else {
+            return Ok(());
+        };
+        let expression = line.trim();
+        if expression == "exit" || expression == "quit" {
+            dunit::println!("calc: bye")?;
+            return Ok(());
         }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn _start(
-    argc: usize,
-    argv: libdunit::RawArgv,
-    envp: libdunit::RawEnvp,
-) -> ! {
-    libdunit::init_runtime(argc, argv, envp);
-    libdunit::println("calc: enter expressions like 2+2 or 7 * 3");
-    libdunit::println("calc: type exit to quit, Ctrl+C interrupts while waiting");
-
-    loop {
-        libdunit::print("calc> ");
-        match libdunit::read_line() {
-            Ok(line) => {
-                let input = trim(&line);
-                if input == "exit" || input == "quit" {
-                    libdunit::println("calc: bye");
-                    libdunit::exit(0);
-                }
-                match eval(input) {
-                    Ok(value) => print_i64(value),
-                    Err(msg) => libdunit::println(msg),
-                }
-            }
-            Err(code) => {
-                libdunit::print("calc: read failed ");
-                libdunit::println(libdunit::error_name(code));
-                libdunit::exit(1);
-            }
+        match eval(expression) {
+            Ok(value) => dunit::println!("{}", value)?,
+            Err(message) => dunit::println!("{}", message)?,
         }
     }
 }
@@ -103,27 +80,4 @@ fn skip_spaces(bytes: &[u8], index: &mut usize) {
     while *index < bytes.len() && bytes[*index] == b' ' {
         *index += 1;
     }
-}
-
-fn trim(input: &String) -> &str {
-    let bytes = input.as_bytes();
-    let mut start = 0usize;
-    let mut end = bytes.len();
-    while start < end && bytes[start] == b' ' {
-        start += 1;
-    }
-    while end > start && bytes[end - 1] == b' ' {
-        end -= 1;
-    }
-    unsafe { core::str::from_utf8_unchecked(&bytes[start..end]) }
-}
-
-fn print_i64(value: i64) {
-    if value < 0 {
-        libdunit::print("-");
-        libdunit::print_usize((-value) as usize);
-    } else {
-        libdunit::print_usize(value as usize);
-    }
-    libdunit::print("\n");
 }

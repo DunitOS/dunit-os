@@ -60,6 +60,8 @@ jobs:
           python3 tools/gen_abi.py --check
           cargo test --manifest-path abi/wait-set/Cargo.toml
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
+          cargo test --manifest-path runtime/dunit-macros/Cargo.toml
+          cargo test --manifest-path runtime/dunit/Cargo.toml
 
       - name: Image profile tests
         run: python3 tools/test_image_profiles.py
@@ -112,6 +114,15 @@ jobs:
         run: |
           python3 tools/qemu_test.py --markers-file tools/waitset_markers.json \
             --accel tcg --boot-timeout 180 --cmd-timeout 130 --timeout 300 \
+            --post-boot-delay 3 --settle 4
+
+      - name: Native SDK application APIs (QEMU, TCG)
+        run: |
+          python3 tools/qemu_test.py --markers-file tools/sdk_api_markers.json \
+            --accel tcg --boot-timeout 180 --cmd-timeout 120 --timeout 360 \
+            --post-boot-delay 3 --settle 4
+          python3 tools/qemu_test.py --markers-file tools/sdk_entry_panic_markers.json \
+            --accel tcg --boot-timeout 180 --cmd-timeout 60 --timeout 240 \
             --post-boot-delay 3 --settle 4
 
       - name: Native SDK monitor event loop (QEMU, TCG)

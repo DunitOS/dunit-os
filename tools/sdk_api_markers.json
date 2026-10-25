@@ -1,0 +1,6 @@
+{
+  "description": "Native SDK entry, owned files, buffered streams, monotonic time and child lifecycle",
+  "run": {"config": "limine_test_terminal.conf", "cmd": ["exec /app/sdk_api_test --probe", "exec /app/sdk_api_test --error", "exec /app/dsh_calc_test"]},
+  "required": ["[TERM-007] Starting main loop", "[SDKAPI] entry args env OK", "[SDKAPI] files seek buffered UTF8 drop OK", "[SDKAPI] monotonic sleep deadline OK", "[SDKAPI] children timeout reap cache OK", "[SDKAPI] OK", "[EXEC] /app/sdk_api_test returned code=0", "application failed: ENOENT", "[EXEC] /app/sdk_api_test returned code=1", "[EXEC] /app/dsh_calc_test returned code=0", "calc: bye"],
+  "forbidden": ["[PANIC]", "[SDK] PANIC", "dsh_calc_test: FAIL"]
+}

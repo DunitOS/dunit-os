@@ -162,5 +162,12 @@ Every QEMU run above completed with `Result: OK (completed)` and
 `Markers: OK (marker budget satisfied)`. The code still targets the existing
 UP kernel. Producer notifications may rescan unrelated wait-sets; they do not
 reset deadlines or require a userspace polling loop. Persistent registrations,
-native edge delivery, sockets, Component, entry attributes and cargo tooling
+native edge delivery, sockets, Component, test attributes and cargo tooling
 remain separate unfinished M7 work.
+
+## Next implementation: native application APIs
+
+`#[dunit::main]`, fs/io/process/time/args/env/system wrappers and the `calc`
+migration are described in [Native application API](native-api.md). The native
+ABI remains unchanged in this step; no new application-manifest format or
+privilege mechanism is introduced. Thread/sync and cargo tooling remain open.

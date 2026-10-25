@@ -169,9 +169,11 @@ and [M6 report](docs/m6-readiness.md).
 
 Work on the native Rust SDK has started. It uses `no_std + alloc` over
 `libdunit`, with an event loop that can wait for messages, files, timers and
-child processes together. System Monitor is the first app to use that loop.
-The SDK is still early: app templates, declarative widgets and packaging tools
-are being built. See the [SDK progress and contract](docs/sdk/m7-start.md).
+child processes together. System Monitor uses that loop.
+The SDK also handles files, buffered input, time and child processes. Calculator
+now uses the [native application API](docs/sdk/native-api.md) and a normal Rust
+entry function. App templates, declarative widgets and packaging tools are still
+being built. See the [SDK progress and contract](docs/sdk/m7-start.md).
 
 ## Get involved
 
