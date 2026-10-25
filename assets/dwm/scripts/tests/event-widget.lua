@@ -1,0 +1,5 @@
+local dwm = require('dwm')
+dwm.on('widget::updated', function(event)
+    dwm.widget.set(event.target, {text = 'CPU 42%\n✓', color = 0xffaabbcc})
+    dwm.widget.set(event.target, {text = ''})
+end)

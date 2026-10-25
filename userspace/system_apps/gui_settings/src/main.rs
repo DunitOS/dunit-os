@@ -13,6 +13,8 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
+mod document_editor;
+use document_editor::{Editor, Section};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -30,6 +32,7 @@ const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1" — capability announce
 const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1" — pointer input
 const RELOAD_MAGIC: u32 = 0x3144_4C52; // "RLD1" — "config changed, reload"
 const IN_DOWN: u8 = 2;
+const IN_KEY: u8 = 5;
 const IN_SCROLL: u8 = 6;
 const IN_QUIT: u8 = 9;
 
@@ -238,6 +241,17 @@ enum Action {
     ScriptLayout(i32),
     ScriptTimeout(i32),
     ImportTheme(usize),
+    ImportDesktop(usize),
+    SelectProfile(usize),
+    FocusProfilePath,
+    ImportProfile,
+    EditLine(usize),
+    InsertLine,
+    NewTable,
+    DeleteLine,
+    EditorPage(i32),
+    SaveDocument,
+    RevertDocument,
 }
 
 /// A clickable region and the action it fires.
@@ -266,19 +280,41 @@ struct App {
     scroll_x: i32,
     scroll_y: i32,
     status: &'static str,
+    document_error: String,
     error: bool,
     script_layouts: Vec<String>,
     scripts_directory: String,
     scripts_listing_status: &'static str,
     themes: Vec<String>,
     themes_listing_status: &'static str,
+    editor: Option<Editor>,
+    editor_page: usize,
+    profiles: Vec<String>,
+    profile_path: Editor,
+    profile_focused: bool,
 }
 
 
 impl App {
+    fn editor_section(&self) -> Option<Section> {
+        match self.page {
+            6 => Some(Section::Panels), 7 => Some(Section::Typography),
+            8 => Some(Section::Widgets), 9 => Some(Section::Bindings),
+            10 => Some(Section::Rules), 11 => Some(Section::Scripts), _ => None,
+        }
+    }
+    fn refresh_document(&mut self) {
+        match dwm_settings::load_document() {
+            Ok(text) => { self.editor = Some(Editor::new(text)); self.editor_page = 0; },
+            Err(error) => { self.editor = None; self.status = error.reason; self.error = true; },
+        }
+    }
     fn content_height(&self) -> u32 {
+        if self.editor_section().is_some() { return 720; }
         if self.page == 0 {
             (Y0 + NCOLORS as i32 * (2 * ROW_H + 8) + 24) as u32
+        } else if self.page == 12 {
+            (Y0 + 160 + self.profiles.len() as i32 * 36).max(H as i32) as u32
         } else if self.page == 5 {
             (Y0 + 96 + self.themes.len() as i32 * 40).max(H as i32) as u32
         } else { H }
@@ -312,14 +348,20 @@ impl App {
             height: H,
             scroll_x: 0,
             scroll_y: 0,
-            status: if valid_palette { "Session settings saved in RAM." }
+            status: if valid_palette { "Settings saved to the active desktop profile." }
                 else { "Cannot read palette: using current theme colors. Set desktop.palette in setup." },
             error: !valid_palette,
+            document_error: String::new(),
             script_layouts: Vec::new(),
             scripts_directory: String::new(),
             scripts_listing_status: "",
             themes: Vec::new(),
             themes_listing_status: "",
+            editor: None,
+            editor_page: 0,
+            profiles: Vec::new(),
+            profile_path: Editor::new(String::new()),
+            profile_focused: false,
         };
         app.refresh_scripts();
         app
@@ -355,6 +397,10 @@ impl App {
                 continue;
             }
             let path = alloc::format!("{}/{}", parent.trim_end_matches('/'), name);
+            // Empty drafts cannot return a layout. Keep them off the selector;
+            // the source editor still accepts arbitrary configured script paths.
+            let Some(source) = libdunit::read_binary(&path, 64 * 1024) else { continue; };
+            if source.iter().all(|byte| byte.is_ascii_whitespace()) { continue; }
             let mut candidate = self.s;
             dwm_settings::parse_into(&alloc::format!("[scripts]\nlayout = \"{}\"\n", path), &mut candidate);
             if candidate.scripts.layout.as_str() == path && dwm_settings::roundtrip_ok(&candidate) {
@@ -366,6 +412,27 @@ impl App {
         self.scripts_listing_status = if self.script_layouts.is_empty() {
             "No selectable .lua files in this folder."
         } else { "Folder and runner can be changed in terminal setup." };
+    }
+
+    fn refresh_profiles(&mut self) {
+        self.profiles.clear();
+        let mut entries = alloc::vec![libdunit::DirEntry::empty(); 1024];
+        let count = libdunit::readdir("/assets/dwm", &mut entries);
+        if count < 0 {
+            self.status = "Cannot read bundled profile directory. Enter an absolute profile path.";
+            self.error = true;
+            return;
+        }
+        for entry in entries.iter().take((count as usize).min(entries.len())) {
+            let name = entry.name();
+            if entry.file_type == libdunit::FILE_TYPE_FILE && name.ends_with(".toml")
+                && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) {
+                let path = alloc::format!("/assets/dwm/{}", name);
+                if dwm_settings::load_document_from(&path).is_ok() { self.profiles.push(path); }
+            }
+        }
+        self.profiles.sort_unstable();
+        self.profiles.dedup();
     }
 
     fn refresh_themes(&mut self) {
@@ -411,13 +478,50 @@ impl App {
 
     fn apply(&mut self, act: Action) {
         match act {
-            Action::ImportTheme(_) => {},
+            Action::ImportTheme(_) | Action::ImportDesktop(_) | Action::ImportProfile | Action::SaveDocument => {},
+            Action::SelectProfile(index) => {
+                if let Some(path) = self.profiles.get(index) {
+                    self.profile_path = Editor::new(path.clone()); self.profile_path.select(0);
+                    self.profile_focused = true;
+                    self.status = "Profile selected. Import complete desktop validates before replacing configuration.";
+                    self.error = false;
+                }
+            },
+            Action::FocusProfilePath => {
+                if self.profile_path.lines.is_empty() { self.profile_path.lines.push(String::new()); }
+                self.profile_path.select(0); self.profile_focused = true;
+            },
+            Action::EditLine(index) => if let Some(editor) = &mut self.editor { editor.select(index); },
+            Action::InsertLine | Action::NewTable => {
+                if let Some(section) = self.editor_section() {
+                    if let Some(editor) = &mut self.editor {
+                        if matches!(act, Action::NewTable) { editor.new_table(section); }
+                        else { editor.insert_line(section); }
+                        let rows = editor.rows(section);
+                        self.editor_page = rows.iter().position(|i| Some(*i) == editor.selected).unwrap_or(0) / 12;
+                        self.status = "Draft changed. Apply validates the complete desktop document.";
+                        self.error = false;
+                    }
+                }
+            },
+            Action::DeleteLine => if let Some(editor) = &mut self.editor { editor.remove_line(); },
+            Action::EditorPage(delta) => {
+                if let (Some(section), Some(editor)) = (self.editor_section(), &self.editor) {
+                    self.editor_page = (self.editor_page as i32 + delta).clamp(0,
+                        editor.rows(section).len().saturating_sub(1) as i32 / 12) as usize;
+                }
+            },
+            Action::RevertDocument => self.refresh_document(),
             Action::SelectPage(page) => {
                 self.page = page;
+                self.profile_focused = false;
+                if let Some(editor) = &mut self.editor { editor.selected = None; }
                 self.scroll_x = 0;
                 self.scroll_y = 0;
                 if page == 4 { self.refresh_scripts(); }
                 if page == 5 { self.refresh_themes(); }
+                if page == 12 { self.refresh_profiles(); }
+                if self.editor_section().is_some() && self.editor.is_none() { self.refresh_document(); }
             }
             Action::ScriptsToggle => self.s.scripts.enabled = !self.s.scripts.enabled,
             Action::ScriptTimeout(delta) => {
@@ -440,7 +544,7 @@ impl App {
                 self.scroll_x = self
                     .scroll_x
                     .saturating_add(x)
-                    .clamp(0, W.saturating_sub(self.width) as i32);
+                    .clamp(0, (if self.editor_section().is_some() { 1200u32 } else { W }).saturating_sub(self.width) as i32);
                 self.scroll_y = self.scroll_y.saturating_add(y).clamp(
                     0,
                     self.content_height().saturating_sub(self.height.saturating_sub(FOOTER_H)) as i32,
@@ -567,7 +671,7 @@ fn push_int(s: &mut String, mut v: i32) {
 fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
     // Maintain the full form on small surfaces and expose its clipped portion
     // through scrolling. Large surfaces expand the backdrop without stretching text.
-    let canvas_w = app.width.max(W);
+    let canvas_w = app.width.max(if app.editor_section().is_some() { 1200 } else { W });
     let canvas_h = app.height.saturating_sub(FOOTER_H).max(app.content_height());
     let mut canvas = alloc::vec![0u32; canvas_w as usize * canvas_h as usize];
     let mut surf = Surface::new(&mut canvas, canvas_w as usize, canvas_h as usize);
@@ -594,25 +698,27 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
         col(theme.border_unfocused),
     );
     draw_text(&mut surf, font, 16, 22, 18.0, foreground, "Settings");
-    const PAGES: [&str; 6] = ["Appearance", "Effects", "Desktop geometry", "Display", "Window behavior", "Themes"];
+    const PAGES: [&str; 13] = ["Appearance", "Animations", "Desktop geometry", "Display", "Lua Scripts", "Themes", "Panels", "Typography", "Widgets", "Keybindings", "Window Rules", "Lua event hook", "Desktop profiles"];
     for (page, label) in PAGES.iter().enumerate() {
-        let y = 76 + page as i32 * 40;
+        let y = if page < 6 { 76 + page as i32 * 40 }
+            else { 316 + (page as i32 - 6) * 30 };
+        let nav_height = if page < 6 { 32 } else { 28 };
         if app.page == page {
             surf.fill_rect(
                 8.0,
                 y as f32,
                 (sidebar - 16) as f32,
-                32.0,
+                nav_height as f32,
                 col(theme.taskbtn_focused),
             );
-            surf.fill_rect(8.0, y as f32, 3.0, 32.0, accent);
+            surf.fill_rect(8.0, y as f32, 3.0, nav_height as f32, accent);
         }
         draw_text(&mut surf, font, 18, y + 8, 13.0, foreground, label);
         spots.push(Hotspot {
             x: 8,
             y,
             w: sidebar - 16,
-            h: 32,
+            h: nav_height,
             act: Action::SelectPage(page),
         });
     }
@@ -632,7 +738,8 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
         65,
         12.0,
         foreground,
-        "Changes save and apply to the current desktop.",
+        if app.editor_section().is_some() { "Edit a draft, then Apply to validate and reload." }
+            else { "Changes save and apply to the current desktop." },
     );
     let mut y = Y0;
     if app.page == 0 {
@@ -861,7 +968,102 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
             button(&mut surf, font, theme, content, y, 240, filename);
             spots.push(Hotspot { x: content, y, w: 240, h: ROW_H,
                 act: Action::ImportTheme(index) });
+            button(&mut surf, font, theme, content + 248, y, 120, "Full desktop");
+            spots.push(Hotspot { x: content + 248, y, w: 120, h: ROW_H,
+                act: Action::ImportDesktop(index) });
             y += 40;
+        }
+    }
+    if app.page == 12 {
+        draw_text(&mut surf, font, content, y, 12.0, foreground,
+            "Complete profiles replace panels, widgets, registry, rules and settings.");
+        y += 28;
+        draw_text(&mut surf, font, content, y, 12.0, foreground,
+            "Choose a bundled profile or type any absolute TOML file path.");
+        y += 32;
+        surf.fill_rect(content as f32, y as f32, 390.0, 28.0,
+            col(if app.profile_focused { theme.taskbtn_focused } else { theme.panel }));
+        let path = app.profile_path.lines.first().map(String::as_str).unwrap_or("");
+        let cursor = app.profile_path.cursor.min(path.len());
+        let start = path[..cursor].char_indices().rev().nth(42).map(|p| p.0).unwrap_or(0);
+        let end = path[start..].char_indices().nth(50).map(|p| start + p.0).unwrap_or(path.len());
+        let shown = &path[start..end];
+        let label = if app.profile_focused && cursor <= end {
+            alloc::format!("{}|{}", &shown[..cursor-start], &shown[cursor-start..])
+        } else { String::from(shown) };
+        draw_text(&mut surf, font, content + 4, y + 6, 12.0, foreground, &label);
+        spots.push(Hotspot { x: content, y, w: 390, h: 28, act: Action::FocusProfilePath });
+        y += 40;
+        button(&mut surf, font, theme, content, y, 232, "Import complete desktop");
+        spots.push(Hotspot { x: content, y, w: 232, h: ROW_H, act: Action::ImportProfile });
+        y += 40;
+        for (index, path) in app.profiles.iter().enumerate() {
+            let filename = path.rsplit('/').next().unwrap_or(path);
+            button(&mut surf, font, theme, content, y, 370, filename);
+            spots.push(Hotspot { x: content, y, w: 370, h: ROW_H, act: Action::SelectProfile(index) });
+            y += 36;
+        }
+    }
+    if let Some(section) = app.editor_section() {
+        let hints = match section {
+            Section::Panels => "Panel containers: edge, size, children, autohide and reservation.",
+            Section::Widgets => "Components: kind, children, format, entries, action and class.",
+            Section::Bindings => "Bindings: scancode, modifiers and checked action string.",
+            Section::Rules => "Rules: app matcher, geometry, opacity, floating and animation.",
+            Section::Typography => "Font path and panel/title sizes; values use their original tables.",
+            Section::Scripts => "Layout and event hooks run outside the compositor frame loop.",
+        };
+        draw_text(&mut surf, font, content, y, 12.0, foreground, hints);
+        y += 28;
+        draw_text(&mut surf, font, content, y, 11.0, foreground,
+            "Click a line; type to edit. Arrows/Home/End move; Backspace/Delete erase.");
+        y += 28;
+        for (offset, width, label, act) in [
+            (0, 76, "Apply", Action::SaveDocument),
+            (84, 76, "Revert", Action::RevertDocument),
+            (168, 82, "+ line", Action::InsertLine),
+            (258, 90, "+ table", Action::NewTable),
+            (356, 90, "- line", Action::DeleteLine),
+        ] {
+            if matches!(act, Action::NewTable) && matches!(section, Section::Typography | Section::Scripts) { continue; }
+            button(&mut surf, font, theme, content + offset, y, width, label);
+            spots.push(Hotspot { x: content + offset, y, w: width, h: ROW_H, act });
+        }
+        y += 40;
+        if let Some(editor) = &app.editor {
+            let rows = editor.rows(section);
+            let pages = (rows.len().saturating_sub(1) / 12) + 1;
+            draw_text(&mut surf, font, content, y, 12.0, foreground,
+                &alloc::format!("Page {}/{} — {}", app.editor_page.min(pages - 1) + 1, pages,
+                    if editor.dirty { "unsaved draft" } else { "saved document" }));
+            for (offset, label, delta) in [(270, "<", -1), (310, ">", 1)] {
+                button(&mut surf, font, theme, content + offset, y - 4, 28, label);
+                spots.push(Hotspot { x: content + offset, y: y - 4, w: 28, h: ROW_H,
+                    act: Action::EditorPage(delta) });
+            }
+            y += 32;
+            if rows.is_empty() {
+                draw_text(&mut surf, font, content, y, 12.0, foreground,
+                    "No tables configured. Add a table, then add its fields as lines.");
+            }
+            for &index in rows.iter().skip(app.editor_page.min(pages - 1) * 12).take(12) {
+                let selected = editor.selected == Some(index);
+                if selected { surf.fill_rect(content as f32, (y - 3) as f32, 1000.0, 26.0,
+                    col(theme.taskbtn_focused)); }
+                let line = &editor.lines[index];
+                let start = if selected { line[..editor.cursor].char_indices().rev().nth(100)
+                    .map(|p| p.0).unwrap_or(0) } else { 0 };
+                let end = line[start..].char_indices().nth(120).map(|p| start + p.0).unwrap_or(line.len());
+                let visible = &line[start..end];
+                let display = if selected && editor.cursor >= start && editor.cursor <= end {
+                    let local = editor.cursor - start;
+                    alloc::format!("{} | {}", &visible[..local], &visible[local..])
+                } else { String::from(visible) };
+                draw_text(&mut surf, font, content, y, 13.0, foreground, &display);
+                spots.push(Hotspot { x: content, y: y - 3, w: 1000, h: 26,
+                    act: Action::EditLine(index) });
+                y += 30;
+            }
         }
     }
     drop(surf);
@@ -946,7 +1148,8 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
     } else {
         theme.panel_text
     });
-    for word in app.status.split_whitespace() {
+    let status = if app.document_error.is_empty() { app.status } else { &app.document_error };
+    for word in status.split_whitespace() {
         let candidate = if status_line.is_empty() {
             String::from(word)
         } else {
@@ -1071,7 +1274,7 @@ fn resize_surface(
     let previous = (app.width, app.height, app.scroll_x, app.scroll_y);
     app.width = width;
     app.height = height;
-    app.scroll_x = app.scroll_x.min(W.saturating_sub(width) as i32);
+    app.scroll_x = app.scroll_x.min((if app.editor_section().is_some() { 1200u32 } else { W }).saturating_sub(width) as i32);
     app.scroll_y = app
         .scroll_y
         .min(app.content_height().saturating_sub(height.saturating_sub(FOOTER_H)) as i32);
@@ -1285,8 +1488,18 @@ pub extern "C" fn _start() -> ! {
     //    then repaint our shared buffer so the swatch/value reflects the change.
     let mut serial = 7u64;
     let mut next_buffer = BUFFER + 1;
+    let mut draft_repaint = false;
     loop {
-        let n = libdunit::ipc_recv_blocking(&mut rx, 0);
+        // Drain queued edits before rasterizing the complete source editor.
+        // A burst of keystrokes must not fill the IPC mailbox behind repaints.
+        let n = if draft_repaint {
+            let pending = libdunit::ipc_recv(&mut rx);
+            if pending > 0 { pending } else {
+                spots = render(px, &font, &app);
+                draft_repaint = false;
+                libdunit::ipc_recv_blocking(&mut rx, 0)
+            }
+        } else { libdunit::ipc_recv_blocking(&mut rx, 0) };
         if n >= 48
             && u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]) == gui_protocol_v1::wire::MAGIC
             && u16::from_le_bytes([rx[8], rx[9]]) == 0x8010
@@ -1340,6 +1553,22 @@ pub extern "C" fn _start() -> ! {
             app.apply(Action::Scroll(0, delta.saturating_mul(-32)));
             spots = render(px, &font, &app);
         }
+        if kind == IN_KEY && n >= 17 && app.page == 12 && app.profile_focused {
+            app.profile_path.key(rx[8], rx[16]);
+            app.document_error.clear();
+            app.status = "Path edited. Import complete desktop validates the file before saving.";
+            app.error = false;
+            draft_repaint = true;
+        }
+        if kind == IN_KEY && n >= 17 && app.editor_section().is_some() {
+            app.document_error.clear();
+            if let Some(editor) = &mut app.editor {
+                editor.key(rx[8], rx[16]);
+                app.status = "Draft only. Apply validates and saves; Revert reloads the saved document.";
+                app.error = false;
+                draft_repaint = true;
+            }
+        }
         if kind == IN_DOWN && n >= 16 {
             let lx = i32::from_le_bytes([rx[8], rx[9], rx[10], rx[11]]);
             let ly = i32::from_le_bytes([rx[12], rx[13], rx[14], rx[15]]);
@@ -1351,7 +1580,59 @@ pub extern "C" fn _start() -> ! {
                 }
             }
             if let Some(a) = act {
-                if matches!(a, Action::SelectPage(_) | Action::Scroll(_, _)) {
+                app.document_error.clear();
+                if matches!(a, Action::SaveDocument | Action::ImportDesktop(_) | Action::ImportProfile) {
+                    let import_path = match a {
+                        Action::ImportDesktop(index) => Some(app.themes.get(index).cloned().unwrap_or_default()),
+                        Action::ImportProfile => Some(app.profile_path.lines.first().cloned().unwrap_or_default()),
+                        _ => None,
+                    };
+                    let result = if let Some(path) = &import_path {
+                        dwm_settings::load_document_from(path)
+                            .and_then(|text| {
+                                let config = dwm_settings::validate_document(&text)?;
+                                if !config.valid || config.apps.apps.is_empty() {
+                                    return Err(dwm_settings::ConfigError { line: 0, field: String::new(),
+                                        reason: "Full desktop import requires an application registry. Use theme overlay instead." });
+                                }
+                                if matches!(a,Action::ImportProfile){dwm_settings::save_user_document(&text)}else{dwm_settings::save_document(&text)}
+                            })
+                    } else if let Some(editor) = &app.editor {
+                        dwm_settings::load_document().and_then(|current| {
+                            if current != editor.original {
+                                return Err(dwm_settings::ConfigError { line: 0, field: String::new(),
+                                    reason: "Desktop changed elsewhere. Revert before applying this draft." });
+                            }
+                            dwm_settings::save_document(&editor.text())
+                        })
+                    } else { continue; };
+                    match result {
+                        Err(error) => {
+                            app.status = error.reason; app.error = true;
+                            app.document_error = alloc::format!("{} line {} {}: {}",
+                                import_path.as_deref().unwrap_or("saved desktop"), error.line, error.field, error.reason);
+                            libdunit::println(&alloc::format!("gui_settings: document rejected file={} line={} field={} reason={}",
+                                import_path.as_deref().unwrap_or("saved desktop"), error.line, error.field, error.reason));
+                        },
+                        Ok(()) => {
+                            app.refresh_document(); app.s = dwm_settings::load(); app.refresh_color_choices();
+                            let mut signal = [0u8; 8];
+                            signal[..4].copy_from_slice(&RELOAD_MAGIC.to_le_bytes());
+                            app.error = libdunit::ipc_send(compositor, &signal) < 0;
+                            app.status = if app.error { "Document saved; reload request failed." }
+                                else { "Document validated and saved; desktop reload requested." };
+                            libdunit::println("gui_settings: complete document saved");
+                            if let Some(path) = &import_path {
+                                libdunit::println(&alloc::format!("gui_settings: desktop profile saved {}",path));
+                            }
+                        },
+                    }
+                    spots = render(px, &font, &app);
+                    continue;
+                }
+                if matches!(a, Action::SelectPage(_) | Action::Scroll(_, _) | Action::EditLine(_)
+                    | Action::InsertLine | Action::NewTable | Action::DeleteLine | Action::EditorPage(_)
+                    | Action::RevertDocument | Action::SelectProfile(_) | Action::FocusProfilePath) {
                     app.apply(a);
                     spots = render(px, &font, &app);
                     match a {
@@ -1393,6 +1674,7 @@ pub extern "C" fn _start() -> ! {
                     spots = render(px, &font, &app);
                     continue;
                 }
+                if app.editor.as_ref().map(|e| !e.dirty).unwrap_or(false) { app.refresh_document(); }
                 if let Action::ImportTheme(index) = a {
                     app.refresh_color_choices();
                     libdunit::println(&alloc::format!("gui_settings: theme saved {}", app.themes[index]));

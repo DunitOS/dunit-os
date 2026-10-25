@@ -10,6 +10,11 @@ pub const ENOENT:isize=-2;
 pub const EFBIG:isize=-27;
 pub const EINVAL:isize=-22;
 pub const OPEN_READ:u32=1;
+pub const KEYMOD_SHIFT:u8=1;
+pub const KEYMOD_CTRL:u8=2;
+pub const KEYMOD_ALT:u8=4;
+pub const KEYMOD_SUPER:u8=8;
+pub fn mkdir(_: &str)->isize {panic!("unexpected I/O")}
 pub fn open(_: &str,_:u32)->isize {panic!("unexpected I/O")}
 pub fn read(_:usize,_:&mut[u8])->isize {panic!("unexpected I/O")}
 pub fn close(_:usize)->isize {panic!("unexpected I/O")}

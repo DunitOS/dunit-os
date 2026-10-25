@@ -17,6 +17,8 @@ extern crate alloc;
 
 mod preserve;
 mod validation;
+pub mod shell;
+pub mod policy;
 pub use validation::{validate, ConfigError};
 mod overlay;
 pub use overlay::{apply_overlay, edit, load_overlay, value};
@@ -573,7 +575,7 @@ impl Tray {
 /// good) rather than half-applying an unknown layout. An older version is
 /// forward-migrated (see `migrate_config`). Absent `[meta]` ⇒ treated as the
 /// current version (old hand-written files stay valid).
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// True iff this build can load a document declaring schema version `v`. The
 /// single predicate `load_config` and the compositor's startup guard both use,
@@ -824,6 +826,7 @@ pub struct Scripts {
     pub enabled: bool,
     pub runner: ConfigStr,
     pub layout: ConfigStr,
+    pub events: ConfigStr,
     pub timeout_ms: u32,
 }
 
@@ -833,6 +836,7 @@ impl Scripts {
             enabled: false,
             runner: ConfigStr::new("/app/dwm_lua"),
             layout: ConfigStr::new("/assets/dwm/scripts/columns.lua"),
+            events: ConfigStr::new(""),
             timeout_ms: 500,
         }
     }
@@ -845,6 +849,7 @@ impl Scripts {
             }
             "runner" => self.runner.set(value),
             "layout" => self.layout.set(value),
+            "events" => self.events.set(value),
             "timeout_ms" => {
                 if let Ok(v) = value.parse::<u32>() {
                     self.timeout_ms = v.clamp(50, 5000);
@@ -900,7 +905,30 @@ impl Settings {
     }
 }
 
-const CONFIG_PATH: &str = "/system/share/dwm/default.toml";
+const CONFIG_PATH:&str="/system/share/dwm/default.toml";
+/// An optional complete user profile overrides the system desktop document.
+/// Theme overlays are merged through the separate overlay API.
+pub const USER_CONFIG_PATH:&str="/persist/config/dwm.toml";
+fn read_active_config()->Result<String,isize>{
+    match read_file_checked(USER_CONFIG_PATH){Ok(text)=>Ok(text),Err(libdunit::ENOENT)=>read_file_checked(CONFIG_PATH),Err(error)=>Err(error)}
+}
+pub fn active_config_path()->&'static str{match read_file_checked(USER_CONFIG_PATH){Err(libdunit::ENOENT)=>CONFIG_PATH,_=>USER_CONFIG_PATH}}
+fn write_active_config(text:&str)->Result<(),isize>{
+    let path=match read_file_checked(USER_CONFIG_PATH){Ok(_)=>USER_CONFIG_PATH,Err(libdunit::ENOENT)=>CONFIG_PATH,Err(error)=>return Err(error)};
+    libdunit::write_string(path,text)
+}
+/// The packaged desktop remains recoverable even if a user profile is broken.
+pub fn load_system_config()->Config{
+    for path in [CONFIG_PATH,"/assets/dwm/default.toml"]{if let Ok(source)=read_file_checked(path){if let Ok(config)=validate_document(&source){if config.valid{return config;}}}}
+    Config::defaults()
+}
+/// Activate a complete user profile while retaining the system document.
+pub fn save_user_document(text:&str)->Result<(),ConfigError>{
+    let config=validate_document(text)?;
+    if !config.valid{return Err(ConfigError{line:0,field:"application".into(),reason:"user profile requires a complete application registry"});}
+    let _=libdunit::mkdir("/persist/config");
+    libdunit::write_string(USER_CONFIG_PATH,text).map_err(|_|ConfigError{line:0,field:USER_CONFIG_PATH.into(),reason:"could not write user profile"})
+}
 
 /// Upper bound on registered applications (safety cap, not a pixel count): a
 /// malformed config cannot make the compositor allocate an unbounded registry.
@@ -982,6 +1010,8 @@ impl Applications {
 pub struct Config {
     pub settings: Settings,
     pub apps: Applications,
+    pub shell: shell::ShellConfig,
+    pub policy: policy::PolicyConfig,
     pub valid: bool,
 }
 
@@ -991,6 +1021,8 @@ impl Config {
         Config {
             settings: Settings::defaults(),
             apps: Applications::baseline(),
+            shell: shell::ShellConfig::default(),
+            policy: policy::PolicyConfig::default(),
             valid: false,
         }
     }
@@ -1012,21 +1044,21 @@ pub fn save(settings: &Settings) -> bool {
     // save would silently wipe the app registry. `to_toml` re-emits the core
     // theme/layout/effects/desktop tables; merge unowned keys into them and
     // retain independent tables verbatim.
-    let existing = match read_file_checked(CONFIG_PATH) {
+    let existing = match read_active_config() {
         Ok(text) => text,
         Err(libdunit::ENOENT) => String::new(),
         Err(_) => return false, // never replace data we could not preserve
     };
     text = preserve::merge(&text, &existing);
     if text.len() > 64 * 1024 { return false; }
-    libdunit::write_string(CONFIG_PATH, &text).is_ok()
+    write_active_config(&text).is_ok()
 }
 
 /// Read + parse the system DWM config, overlaying it on the baseline. Never
 /// fails: an absent/unreadable/garbage file yields the pure baseline.
 pub fn load() -> Settings {
     let mut settings = Settings::defaults();
-    let text = match read_file_checked(CONFIG_PATH) {
+    let text = match read_active_config() {
         Ok(text) => text,
         Err(libdunit::ENOENT) => return settings,
         Err(errno) => {
@@ -1044,8 +1076,8 @@ pub fn load() -> Settings {
 }
 
 fn config_warning(error: &ConfigError) {
-    libdunit::println(&alloc::format!("dwm_settings: warning line={} field={} reason={}; configuration rejected",
-        error.line, error.field, error.reason));
+    libdunit::println(&alloc::format!("dwm_settings: warning file={} line={} field={} reason={}; configuration rejected",
+        active_config_path(),error.line, error.field, error.reason));
 }
 
 /// Low-level scalar parser used by checked edits. Loaders validate the complete
@@ -1121,7 +1153,7 @@ pub fn parse_into(text: &str, settings: &mut Settings) {
 /// point; `load()` remains for callers that only need the scalar `Settings`.
 pub fn load_config() -> Config {
     let mut settings = Settings::defaults();
-    let text = match read_file_checked(CONFIG_PATH) {
+    let text = match read_active_config() {
         Ok(text) => text,
         Err(libdunit::ENOENT) => match read_file_checked("/assets/dwm/default.toml") {
             Ok(text) => text,
@@ -1154,43 +1186,87 @@ pub fn load_config() -> Config {
         }
     }
 
-    // Schema-version gate. A document from a NEWER build (version > ours) may use
-    // keys/semantics we cannot honour, so it is rejected here → the reload path
-    // keeps last-known-good rather than half-applying an unknown layout. An OLDER
-    // (but valid) version is forward-migrated in place, then stamped current.
+    match resolve_config(&text, settings, apps, saw_apps) {
+        Ok(config) => config,
+        Err(error) => { config_warning(&error); Config::defaults() }
+    }
+}
+
+/// Validate and resolve a complete document without filesystem access. A document
+/// without an application registry has an empty model; load_config additionally
+/// inherits the packaged registry for legacy theme-only configurations.
+pub fn validate_document(text: &str) -> Result<Config, ConfigError> {
+    validate(text)?;
+    let mut settings = Settings::defaults();
+    settings.from_file = true;
+    parse_into(text, &mut settings);
+    let (apps, saw_apps) = parse_apps(text);
+    resolve_config(text, settings, apps, saw_apps)
+}
+
+/// Load editable source exactly as stored. Missing system source falls back to
+/// the packaged document, matching desktop startup's first-run behavior.
+pub fn load_document() -> Result<String, ConfigError> {
+    match read_active_config() {
+        Ok(text) => Ok(text),
+        Err(libdunit::ENOENT) => read_file_checked("/assets/dwm/default.toml")
+            .map_err(|_| ConfigError { line: 0, field: String::new(), reason: "could not read complete desktop configuration" }),
+        Err(_) => Err(ConfigError { line: 0, field: String::new(), reason: "could not read complete desktop configuration" }),
+    }
+}
+
+/// Read a bounded complete-desktop import source from an explicit absolute path.
+pub fn load_document_from(path: &str) -> Result<String, ConfigError> {
+    if !path.starts_with('/') || path.split('/').any(|part| part == "..") {
+        return Err(ConfigError { line: 0, field: String::new(), reason: "document path must be absolute without traversal" });
+    }
+    let source = read_file_checked(path).map_err(|_| ConfigError {
+        line: 0, field: String::new(), reason: "could not read complete desktop document",
+    })?;
+    if !validate_document(&source)?.valid {
+        return Err(ConfigError { line: 0, field: String::new(), reason: "full desktop import requires an application registry" });
+    }
+    Ok(source)
+}
+
+/// Save checked source to the existing desktop configuration node. Keeping the
+/// caller's complete source preserves comments and tables edited by Settings.
+/// No runtime state is mutated here; the existing reload validates its candidate.
+pub fn save_document(text: &str) -> Result<(), ConfigError> {
+    if !validate_document(text)?.valid {
+        return Err(ConfigError { line: 0, field: String::from("application"), reason: "full desktop document requires an application registry" });
+    }
+    write_active_config(text).map_err(|_| ConfigError {
+        line: 0, field: String::new(), reason: "could not write desktop configuration",
+    })
+}
+
+fn resolve_config(text: &str, mut settings: Settings, mut apps: Applications, saw_apps: bool) -> Result<Config, ConfigError> {
     let declared = settings.meta.schema_version;
     let version_ok = version_supported(declared);
     if version_ok && declared < SCHEMA_VERSION {
         migrate_config(&mut settings, &mut apps, declared);
         settings.meta.schema_version = SCHEMA_VERSION;
     }
-
-    // A file counts as a usable config when it changed *something* — either a
-    // recognised scalar key or an `[application.*]` table — AND its schema version
-    // is one this build understands. A file that parsed to nothing (empty/garbage)
-    // or targets a future schema is `!valid`, and the reload path keeps last-good.
+    let shell = shell::resolve(text, &settings, &apps).map_err(|error|validation::locate(text,error))?;
+    let policy = policy::resolve(text, &apps).map_err(|error|validation::locate(text,error))?;
     let valid = version_ok
         && apps.workspaces >= 1
         && apps.workspaces <= MAX_WS
         && !apps.apps.is_empty()
         && apps.apps.len() <= MAX_APPS
-        && (settings.applied > 0 || saw_apps);
-
-    Config {
-        settings,
-        apps,
-        valid,
-    }
+        && (settings.applied > 0 || saw_apps || shell.explicit);
+    Ok(Config { settings, apps, shell, policy, valid })
 }
 
 /// Forward-migrate a parsed document from an older schema `from` to
 /// `SCHEMA_VERSION`. The hook exists so a future field rename / default change
 /// lands in ONE place instead of scattering `if version < N` checks across the
-/// compositor. v1 is the earliest schema, so there is nothing older to transform
-/// yet; a v2 that (say) renamed a key would remap it here.
+/// compositor. v2 adds a shell tree; absent explicit panels are resolved from
+/// the legacy strip settings by shell::resolve without changing the source file.
 fn migrate_config(_settings: &mut Settings, _apps: &mut Applications, from: u32) {
     match from {
-        // 0 is never a real schema (rejected before we get here); 1 is current.
+        // Scalar names are compatible; legacy strips resolve through shell::resolve.
         _ => {}
     }
 }
@@ -1693,6 +1769,7 @@ pub fn to_toml(s: &Settings) -> String {
     push_bool(&mut out, "enabled", s.scripts.enabled);
     push_string(&mut out, "runner", s.scripts.runner.as_str());
     push_string(&mut out, "layout", s.scripts.layout.as_str());
+    push_string(&mut out, "events", s.scripts.events.as_str());
     push_int(&mut out, "timeout_ms", s.scripts.timeout_ms as i64);
 
     out
@@ -2105,8 +2182,15 @@ impl DemoCfg {
 /// false is not drawn. `accent` 0 / `corner` -1 mean "inherit the desktop theme
 /// accent / `[widgets] corner`".
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ClockStyle { Digital, Analog }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct WidgetCfg {
     pub enabled: bool,
+    pub style: ClockStyle,
+    pub size: u32,
+    pub font_px: u32,
+    pub interval_ms: u32,
     pub accent: u32,
     pub corner: i32,
     /// True when a config file was actually found.
@@ -2117,6 +2201,10 @@ impl WidgetCfg {
     pub const fn baseline() -> Self {
         WidgetCfg {
             enabled: true,
+            style: ClockStyle::Digital,
+            size: 160,
+            font_px: 18,
+            interval_ms: 1000,
             accent: 0,
             corner: -1,
             from_file: false,
@@ -2143,6 +2231,10 @@ impl WidgetCfg {
                 "enabled" => { candidate.enabled = parse_bool(input).ok_or("expected a boolean")?; }
                 "accent" => { candidate.accent = validation::color(input)?; }
                 "corner" => { candidate.corner = validation::uint(input, 3)? as i32; }
+                "style" => { candidate.style = match validation::config_string(input)? { "analog" => ClockStyle::Analog, "digital" => ClockStyle::Digital, _ => return Err("expected analog or digital") }; }
+                "size" => { candidate.size = validation::uint(input, 1024)?; if candidate.size < 24 { return Err("widget size must be at least 24"); } }
+                "font_px" => { candidate.font_px = validation::uint(input, 128)?; if candidate.font_px < 6 { return Err("widget font must be at least 6 px"); } }
+                "interval_ms" => { candidate.interval_ms = validation::uint(input, 3600000)?; if candidate.interval_ms < 16 { return Err("widget interval must be at least 16 ms"); } }
                 _ => return Err("unknown setting"),
             }
             Ok(())

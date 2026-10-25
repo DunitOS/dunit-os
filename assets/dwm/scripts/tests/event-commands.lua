@@ -1,0 +1,6 @@
+local dwm = require('dwm')
+dwm.on('config::reloaded', function()
+    dwm.command('launcher')
+    dwm.command('launch:terminal')
+    dwm.command('workspace:2')
+end)

@@ -15,7 +15,7 @@
       "source": "userspace/system_apps/gui_server/src/main.rs"
     },
     {
-      "marker": "gui_server: config schema_version=1 supported=1",
+      "marker": "gui_server: config schema_version=2 supported=1",
       "claim": "M4 schema versioning: test.toml declares [meta] schema_version=1 and this build supports it",
       "source": "userspace/dwm_settings/src/lib.rs"
     },

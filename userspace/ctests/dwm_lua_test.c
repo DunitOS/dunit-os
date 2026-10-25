@@ -12,8 +12,8 @@
 
 extern char **environ;
 
-static int run(const char *name, char *const argv[], char *const env[],
-               int expected_status, const char *expected_output)
+static int run_input(const char *name, char *const argv[], char *const env[],
+               int expected_status, const char *expected_output, const char *input)
 {
     char envblock[1024];
     size_t envlen = 0;
@@ -45,9 +45,13 @@ static int run(const char *name, char *const argv[], char *const env[],
         dunit_lua_log(STDOUT_FILENO, "[DWM-LUA] FAIL %s: pty-spawn\n", name);
         return 1;
     }
+    const char *input_tail = input ? strchr(input, '\n') : NULL;
+    if (input_tail) input_tail++;
+    size_t initial_input = input ? (input_tail ? (size_t)(input_tail - input) : strlen(input)) : 0;
+    long written = input ? syscall(SYS_PTY_WRITE, pty, input, initial_input) : 0;
     char output[4096];
     size_t used = 0;
-    int io_error = 0, drained = 0, reaped = 0, status = 0;
+    int io_error = input && written != (long)initial_input, drained = 0, reaped = 0, status = 0;
     /* Bounded master polling; never block in libc waitpid on a hung child. */
     for (int tick = 0; tick < 1000; tick++) {
         char block[256];
@@ -63,6 +67,15 @@ static int run(const char *name, char *const argv[], char *const env[],
                 output[used++] = block[i];
             }
             if (io_error) break;
+            output[used] = 0;
+            if (input_tail && strstr(output, "\nEND\n")) {
+                // Exercise a real idle wait before dispatching to the same worker.
+                usleep(20000);
+                size_t remaining = strlen(input_tail);
+                if (syscall(SYS_PTY_WRITE, pty, input_tail, remaining) != (long)remaining) io_error = 1;
+                input_tail = NULL;
+                if (io_error) break;
+            }
         }
         if (!reaped) {
             pid_t w = waitpid((pid_t)pid, &status, WNOHANG);
@@ -92,6 +105,10 @@ static int run(const char *name, char *const argv[], char *const env[],
          * reject any policy emission, instead of claiming zero stdout. */
         output_ok = strstr(output, "DWM_LUA ") == NULL
             && strstr(output, "RECT ") == NULL
+            && strstr(output, "DWM_EVENT ") == NULL
+            && strstr(output, "ANIMATE ") == NULL
+            && strstr(output, "COMMAND ") == NULL
+            && strstr(output, "WIDGET ") == NULL
             && (strstr(output, "dwm_lua:") != NULL
                 || strstr(output, "usage: dwm_lua") != NULL);
     }
@@ -103,6 +120,11 @@ static int run(const char *name, char *const argv[], char *const env[],
     }
     return dunit_lua_log(STDOUT_FILENO,
         "[DWM-LUA] %s status=%d output=validated OK\n", name, expected_status) ? 1 : 0;
+}
+
+static int run(const char *name, char *const argv[], char *const env[], int expected_status, const char *expected_output)
+{
+    return run_input(name, argv, env, expected_status, expected_output, NULL);
 }
 
 int main(void)
@@ -125,6 +147,64 @@ int main(void)
     char *env[] = {"DWM_LUA_SCRIPT=/assets/dwm/scripts/columns.lua",
         "DWM_LUA_WIDTH=1200", "DWM_LUA_HEIGHT=800", "DWM_LUA_WINDOWS=3", NULL};
     failed += run("environment", noargs, env, 0, columns_output);
+    char *event_env[] = {"DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/events.lua",
+        "DWM_LUA_WIDTH=1", "DWM_LUA_HEIGHT=1", "DWM_LUA_WINDOWS=0",
+        "DWM_LUA_EVENT=window_minimize", "DWM_LUA_WINDOW=7", "DWM_LUA_TARGET=9", NULL};
+    failed += run("sdk-event", noargs, event_env, 0,
+        "DWM_EVENT 2 window_minimize 7 1\nANIMATE 7 9 genie 420 none 0 0"
+        " 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\nEND\n");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-property.lua";
+    event_env[4] = "DWM_LUA_EVENT=window_open";
+    failed += run("sdk-property", noargs, event_env, 0,
+        "DWM_EVENT 2 window_open 7 1\nANIMATE 7 9 fade 250 opacity 16384 65535"
+        " 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\nEND\n");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-spring.lua";
+    failed += run("sdk-spring", noargs, event_env, 0,
+        "DWM_EVENT 2 window_open 7 1\nANIMATE 7 9 fade 250 opacity 0 65535"
+        " 0 14980 32579 49435 63345 73222 78900 80872 80011 77329 73782 70152 66991 64608 63104 62421 62402 62841 63532 64297 65001 65562 65944 66147 66198 66138 66009 65852 65699 65569 65476 65420 65535\nEND\n");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-properties.lua";
+    failed += run("sdk-properties", noargs, event_env, 0,
+        "DWM_EVENT 2 window_open 7 12\n"
+        "ANIMATE 7 9 fade 200 opacity 16384 65535 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 x -100 200 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 y 20 300 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 width 100 800 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 height 80 600 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 scale 32768 131070 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 translation_x -30 40 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 translation_y 10 -20 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 blur 0 12 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 shadow 0 20 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 corner_radius 0 16 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "ANIMATE 7 9 fade 200 color 16711680 4294967295 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\n"
+        "END\n");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-invalid-property.lua";
+    failed += run("sdk-invalid-property", noargs, event_env, 1, "");
+    event_env[4] = "DWM_LUA_EVENT=window_minimize";
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-invalid.lua";
+    failed += run("sdk-invalid-curve", noargs, event_env, 1, "");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-commands.lua";
+    event_env[4] = "DWM_LUA_EVENT=reload";
+    failed += run("sdk-commands", noargs, event_env, 0,
+        "DWM_EVENT 2 reload 7 0\nCOMMAND launcher\nCOMMAND launch:terminal\nCOMMAND workspace:2\nEND\n");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-invalid-command.lua";
+    failed += run("sdk-invalid-command", noargs, event_env, 1, "");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-widget.lua";
+    event_env[4] = "DWM_LUA_EVENT=widget_update";
+    failed += run("sdk-widget", noargs, event_env, 0,
+        "DWM_EVENT 2 widget_update 7 0\nWIDGET 9 4289379276 435055203432250ae29c93\nWIDGET 9 -1 -\nEND\n");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-invalid-widget.lua";
+    failed += run("sdk-invalid-widget", noargs, event_env, 1, "");
+    event_env[0] = "DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-component.lua";
+    event_env[4] = "DWM_LUA_EVENT=panel_hover";
+    failed += run("sdk-component", noargs, event_env, 0,
+        "DWM_EVENT 2 panel_hover 7 1\nANIMATE 0 9 fade 140 opacity 0 32768 0 2048 4096 6144 8192 10240 12288 14336 16384 18432 20480 22528 24576 26624 28672 30720 32768 34815 36863 38911 40959 43007 45055 47103 49151 51199 53247 55295 57343 59391 61439 63487 65535\nEND\n");
+    char *daemon_env[] = {"DWM_LUA_SCRIPT=/assets/dwm/scripts/tests/event-state.lua",
+        "DWM_LUA_WIDTH=1", "DWM_LUA_HEIGHT=1", "DWM_LUA_WINDOWS=0", "DWM_LUA_DAEMON=1", NULL};
+    failed += run_input("sdk-daemon-state", noargs, daemon_env, 0,
+        "DWM_EVENT 2 reload 0 0\nCOMMAND workspace:1\nEND\n"
+        "DWM_EVENT 2 reload 0 0\nCOMMAND workspace:2\nEND\n",
+        "EVENT reload 0 0\nEVENT reload 0 0\nSTOP\n");
     const char *names[] = {"outside", "missing", "quota", "memory", "syntax"};
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         char path[128];

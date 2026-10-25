@@ -350,7 +350,7 @@ def build_disk(config: str, workdir: Path) -> Path:
     return image
 
 
-def type_command(qmp: Qmp, text: str) -> None:
+def type_command(qmp: Qmp, text: str, key_interval: float = 0.05) -> None:
     for ch in text:
         keys = char_to_keys(ch)
         if keys is None:
@@ -361,7 +361,7 @@ def type_command(qmp: Qmp, text: str) -> None:
         # send-key replies before its timed key release. Overlapping the next
         # character can leave Shift held after an underscore/quote and corrupt
         # the command. Let the 40 ms press finish before sending another key.
-        time.sleep(0.05)
+        time.sleep(key_interval)
     qmp.send_key(["ret"])
     time.sleep(0.05)
 
@@ -387,7 +387,12 @@ def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
                     raise RuntimeError(f"command action marker not seen: {marker!r}")
                 time.sleep(0.02)
         elif "type_text" in step:
-            type_command(qmp, str(step["type_text"]))
+            # Slow software-rendered editors need realistic input pacing; keep
+            # the existing terminal default and bound manifest overrides.
+            interval = float(step.get("key_interval_ms", 50)) / 1000
+            if not 0.05 <= interval <= 1:
+                raise ValueError("key interval must be between 50 and 1000 ms")
+            type_command(qmp, str(step["type_text"]), interval)
         elif "delay_ms" in step:
             delay = float(step["delay_ms"]) / 1000
             if not 0 <= delay <= 5:

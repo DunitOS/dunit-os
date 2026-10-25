@@ -1,18 +1,8 @@
 #![no_std]
 #![no_main]
 
-//! Dunit GUI server — userspace ELF (M3).
-//!
-//! Bring-up slice for the M3 milestone "userspace GUI Server и compositor". This
-//! is intentionally minimal: it proves the M2 headless protocol reference crate
-//! [`gui_protocol_v1`] compiles, links and runs on the `x86_64-unknown-none`
-//! userspace target, that a fresh system ELF flows through the
-//! Makefile → `build/userspace` → kernel-embedded `/app` pipeline, and that the
-//! privileged display-master capability can be acquired from userspace.
-//!
-//! Later M3 items replace this body with the real compositor: shared-buffer
-//! syscalls, the framebuffer output path, and driving [`gui_protocol_v1::server`]
-//! with real wire packets + transferred buffer capabilities.
+//! Userspace desktop compositor: gui-v1 transport, configured shell scenes,
+//! isolated Lua policies and native animation over client shared buffers.
 
 use core::panic::PanicInfo;
 
@@ -26,6 +16,19 @@ use gui_protocol_v1::Opcode;
 
 mod lua_policy;
 mod animation;
+mod protocol_runtime;
+use protocol_runtime::*;
+mod drawing;
+use drawing::*;
+mod composite;
+use composite::blend;
+mod shell_runtime;
+mod shell_motion;
+mod desktop_motion;
+mod window_effects;
+fn report_genie(pid:u32,pixels:usize){libdunit::println(&alloc::format!("gui_server: genie rendered pid={} pixels={}",pid,pixels));}
+mod window_painter;
+mod desktop_actions;
 
 use dwm_settings as settings;
 use settings::{Applications, Edge, Effects, Layout, Theme};
@@ -234,1026 +237,6 @@ pub extern "C" fn _start() -> ! {
 }
 
 /// Opcode of an outbound protocol packet (offset 8, little-endian u16).
-fn opcode_of(p: &[u8]) -> Option<Opcode> {
-    Opcode::from_u16(u16::from_le_bytes([p[8], p[9]]))
-}
-
-/// Read a little-endian u32 at `off`.
-fn u32_at(p: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes([p[off], p[off + 1], p[off + 2], p[off + 3]])
-}
-
-/// Read a little-endian u64 at `off`.
-fn u64_at(p: &[u8], off: usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&p[off..off + 8]);
-    u64::from_le_bytes(a)
-}
-
-/// Find the first packet with `op` in a batch of outbound packets.
-fn find<'a>(batch: &'a [Vec<u8>], op: Opcode) -> Option<&'a Vec<u8>> {
-    batch.iter().find(|p| opcode_of(p) == Some(op))
-}
-
-/// Drive one client's full map-and-present lifecycle through the reference
-/// server with real wire packets, backing the surface with a real kernel
-/// shared buffer, then composite the committed pixels to the framebuffer.
-fn run_compositor_cycle(server: &mut Server, conn: gui_protocol_v1::server::ConnId) -> bool {
-    const SURFACE: u64 = 1; // client-chosen surface object id
-    const BUFFER: u64 = 2; // client-chosen buffer object id
-    const W: u32 = 64;
-    const H: u32 = 64;
-    const FMT_XRGB8888: u32 = 1;
-    let bytes = (W * H * 4) as usize;
-
-    // Back the buffer with a real zero-copy kernel shared buffer and paint a
-    // recognizable gradient into the mapped frames (XRGB8888, little-endian).
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        return false;
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::handle_close(buf);
-        return false;
-    }
-    let pixels = mapped as usize as *mut u8;
-    unsafe {
-        for y in 0..H as usize {
-            for x in 0..W as usize {
-                let off = (y * W as usize + x) * 4;
-                core::ptr::write_volatile(pixels.add(off), (x * 4) as u8); // B
-                core::ptr::write_volatile(pixels.add(off + 1), (y * 4) as u8); // G
-                core::ptr::write_volatile(pixels.add(off + 2), 0x80); // R
-                core::ptr::write_volatile(pixels.add(off + 3), 0xff); // X
-            }
-        }
-    }
-
-    let ok = drive_protocol(server, conn, bytes, W, H, FMT_XRGB8888, SURFACE, BUFFER, pixels);
-    libdunit::shared_buffer::release(buf, mapped as usize, bytes);
-    ok
-}
-
-/// Feed one client's request stream through the reference server as real wire
-/// packets and, on the committed frame, blit the shared buffer to the display.
-/// Returns true iff every stage produced the expected reply and the framebuffer
-/// present succeeded.
-#[allow(clippy::too_many_arguments)]
-fn drive_protocol(
-    server: &mut Server,
-    conn: gui_protocol_v1::server::ConnId,
-    bytes: usize,
-    w: u32,
-    h: u32,
-    fmt: u32,
-    surface: u64,
-    buffer: u64,
-    pixels: *const u8,
-) -> bool {
-    use gui_protocol_v1::wire::FEATURE_ARGB8888;
-
-    // 1) HELLO -> WELCOME (completes connection negotiation).
-    let hello = Request::Hello {
-        min_minor: 0,
-        max_minor: 0,
-        offered_features: FEATURE_ARGB8888,
-        required_features: 0,
-    }
-    .encode(0, 1);
-    if find(&server.deliver(conn, &hello, None), Opcode::Welcome).is_none() {
-        return false;
-    }
-
-    // 2) CREATE_SURFACE -> RESULT + CONFIGURE; the configure token is the
-    //    CONFIGURE packet's header serial (offset 24).
-    let create =
-        Request::CreateSurface { role: 1, width: w, height: h, format: fmt }.encode(surface, 2);
-    let out = server.deliver(conn, &create, None);
-    let token = match find(&out, Opcode::Configure) {
-        Some(cfg) => u64_at(cfg, 24),
-        None => return false,
-    };
-
-    // 3) ACK_CONFIGURE -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(surface, 3);
-    if find(&server.deliver(conn, &ack, None), Opcode::Result).is_none() {
-        return false;
-    }
-
-    // 4) IMPORT_BUFFER — cap carries the backing size in bytes -> RESULT.
-    let import = Request::ImportBuffer {
-        width: w,
-        height: h,
-        stride: w * 4,
-        format: fmt,
-        offset: 0,
-    }
-    .encode(buffer, 4);
-    if find(&server.deliver(conn, &import, Some(bytes as u64)), Opcode::Result).is_none() {
-        return false;
-    }
-
-    // 5) ATTACH_BUFFER (no damage) -> RESULT.
-    let attach = Request::AttachBuffer { buffer, damage: Vec::new() }.encode(surface, 5);
-    if find(&server.deliver(conn, &attach, None), Opcode::Result).is_none() {
-        return false;
-    }
-
-    // 6) COMMIT with a frame callback -> RESULT; the surface is now mapped.
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(surface, 6);
-    if find(&server.deliver(conn, &commit, None), Opcode::Result).is_none() {
-        return false;
-    }
-
-    // 7) Composition tick fires the mapped surface's frame callback:
-    //    FRAME_DONE with status 0 (PRESENTED, offset 48) addressed to conn.
-    let presented = server.composite().iter().any(|(c, p)| {
-        *c == conn && opcode_of(p) == Some(Opcode::FrameDone) && u32_at(p, 48) == 0
-    });
-    if !presented {
-        return false;
-    }
-
-    // 8) Blit the committed surface's pixels to the framebuffer at the
-    //    compositor's chosen placement. Gated by the kernel on display master.
-    let data = unsafe { core::slice::from_raw_parts(pixels, bytes) };
-    if libdunit::fb_present(data, w, h, 100, 100) != 0 {
-        return false;
-    }
-
-    // 8.5) Damaged second frame: commit a new buffer that differs only in a
-    //      small rectangle and re-present ONLY that damaged region. Proves the
-    //      compositor honors client-declared damage instead of repainting the
-    //      whole surface every frame.
-    if !present_damaged_frame(server, conn, surface, token, w, h, fmt) {
-        return false;
-    }
-
-    // 8.75) Server-initiated resize (spec §9 reconfigure): the compositor pushes
-    //       a fresh CONFIGURE at new geometry; the client must ACK the new token,
-    //       re-import a buffer of the new size with a FRESH object id, and commit.
-    //       This is the exact mechanism interactive maximize/fullscreen drives —
-    //       synthesized in-process so the whole round trip is serially verifiable.
-    if !drive_reconfigure(server, conn, surface, fmt) {
-        return false;
-    }
-
-    // 9) Focus/input routing: the compositor owns the input master and fans
-    //    events out to clients through the protocol's single-seat router. Give
-    //    the mapped surface pointer + keyboard focus, then inject a pointer
-    //    motion/button and a key press; the router must emit the corresponding
-    //    client-bound events (ENTER on focus change, then BUTTON/KEY). This is
-    //    the path real keyboard/mouse input from the input master will drive.
-    let target = Some((conn, surface));
-    let entered_ptr = server
-        .set_pointer_focus(target, 10, 10)
-        .iter()
-        .any(|(c, p)| *c == conn && opcode_of(p) == Some(Opcode::PointerEnter));
-    let _ = server.pointer_motion(12, 14);
-    let got_button = server
-        .pointer_button(0, true)
-        .iter()
-        .any(|(c, p)| *c == conn && opcode_of(p) == Some(Opcode::PointerButton));
-    let entered_kbd = server
-        .set_keyboard_focus(target, 0)
-        .iter()
-        .any(|(c, p)| *c == conn && opcode_of(p) == Some(Opcode::KeyEnter));
-    let got_key = server
-        .key(0x04, true, 0, false)
-        .iter()
-        .any(|(c, p)| *c == conn && opcode_of(p) == Some(Opcode::Key));
-
-    let routed = entered_ptr && got_button && entered_kbd && got_key;
-    if routed {
-        libdunit::println("gui_server: input routing OK");
-    } else {
-        libdunit::println("gui_server: FAIL input routing");
-    }
-    routed
-}
-
-/// Commit a second buffer to `surface` whose contents differ from the first
-/// only inside a small rectangle, declaring that rectangle as damage, then
-/// re-present ONLY the damaged sub-rect to the framebuffer. Returns true iff the
-/// protocol lifecycle and the clipped present both succeed.
-fn present_damaged_frame(
-    server: &mut Server,
-    conn: gui_protocol_v1::server::ConnId,
-    surface: u64,
-    token: u64,
-    w: u32,
-    h: u32,
-    fmt: u32,
-) -> bool {
-    use gui_protocol_v1::wire::Rect;
-
-    const BUFFER2: u64 = 3;
-    let bytes = (w * h * 4) as usize;
-    // Damage rectangle within the surface (compositor-space offset added below).
-    let (dx, dy, dw, dh) = (8u32, 8u32, 16u32, 16u32);
-
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        return false;
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::handle_close(buf);
-        return false;
-    }
-    let pixels = mapped as usize as *mut u8;
-    // Fill: same gradient as frame 1 everywhere, except a solid-red damaged box.
-    unsafe {
-        for y in 0..h as usize {
-            for x in 0..w as usize {
-                let off = (y * w as usize + x) * 4;
-                let in_damage = (x as u32) >= dx
-                    && (x as u32) < dx + dw
-                    && (y as u32) >= dy
-                    && (y as u32) < dy + dh;
-                if in_damage {
-                    core::ptr::write_volatile(pixels.add(off), 0x00); // B
-                    core::ptr::write_volatile(pixels.add(off + 1), 0x00); // G
-                    core::ptr::write_volatile(pixels.add(off + 2), 0xff); // R
-                    core::ptr::write_volatile(pixels.add(off + 3), 0xff); // X
-                } else {
-                    core::ptr::write_volatile(pixels.add(off), (x * 4) as u8);
-                    core::ptr::write_volatile(pixels.add(off + 1), (y * 4) as u8);
-                    core::ptr::write_volatile(pixels.add(off + 2), 0x80);
-                    core::ptr::write_volatile(pixels.add(off + 3), 0xff);
-                }
-            }
-        }
-    }
-
-    let ok = drive_damage(server, conn, surface, token, w, h, fmt, BUFFER2, dx, dy, dw, dh, pixels);
-    libdunit::shared_buffer::release(buf, mapped as usize, bytes);
-    ok
-}
-
-/// Protocol + present half of a damaged frame: import/attach(damage)/commit the
-/// new buffer, complete the frame callback, then blit only the damaged rect.
-#[allow(clippy::too_many_arguments)]
-fn drive_damage(
-    server: &mut Server,
-    conn: gui_protocol_v1::server::ConnId,
-    surface: u64,
-    token: u64,
-    w: u32,
-    h: u32,
-    fmt: u32,
-    buffer: u64,
-    dx: u32,
-    dy: u32,
-    dw: u32,
-    dh: u32,
-    pixels: *const u8,
-) -> bool {
-    use gui_protocol_v1::wire::Rect;
-
-    let bytes = (w * h * 4) as usize;
-
-    // IMPORT_BUFFER (serial 7) -> RESULT.
-    let import = Request::ImportBuffer { width: w, height: h, stride: w * 4, format: fmt, offset: 0 }
-        .encode(buffer, 7);
-    if find(&server.deliver(conn, &import, Some(bytes as u64)), Opcode::Result).is_none() {
-        return false;
-    }
-    // ATTACH_BUFFER with a single damage rect (serial 8) -> RESULT.
-    let damage = {
-        let mut v = Vec::new();
-        v.push(Rect { x: dx as i32, y: dy as i32, w: dw, h: dh });
-        v
-    };
-    let attach = Request::AttachBuffer { buffer, damage }.encode(surface, 8);
-    if find(&server.deliver(conn, &attach, None), Opcode::Result).is_none() {
-        return false;
-    }
-    // COMMIT (serial 9, reuse the still-valid configure token) -> RESULT (+ the
-    // previous buffer's BUFFER_RELEASE, which we don't require here).
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(surface, 9);
-    if find(&server.deliver(conn, &commit, None), Opcode::Result).is_none() {
-        return false;
-    }
-    // Frame callback fires for the still-mapped surface.
-    let presented = server.composite().iter().any(|(c, p)| {
-        *c == conn && opcode_of(p) == Some(Opcode::FrameDone) && u32_at(p, 48) == 0
-    });
-    if !presented {
-        return false;
-    }
-
-    // Blit ONLY the damaged rect: pack its strided rows out of the surface
-    // buffer, then present at the surface's screen origin (100,100) + rect.
-    let mut region = Vec::with_capacity((dw * dh * 4) as usize);
-    for row in 0..dh as usize {
-        let src_y = dy as usize + row;
-        let base = (src_y * w as usize + dx as usize) * 4;
-        let len = dw as usize * 4;
-        let src = unsafe { core::slice::from_raw_parts(pixels.add(base), len) };
-        region.extend_from_slice(src);
-    }
-    let ok = libdunit::fb_present(&region, dw, dh, 100 + dx, 100 + dy) == 0;
-    if ok {
-        libdunit::println("gui_server: damage present OK");
-    } else {
-        libdunit::println("gui_server: FAIL damage present");
-    }
-    ok
-}
-
-/// Drive a server-initiated CONFIGURE (resize) round trip in-process: push a
-/// fresh CONFIGURE at new geometry via `Server::reconfigure`, then play the
-/// client half a resizing app must implement — ACK the new token, back a real
-/// kernel buffer of the new size, IMPORT it with a FRESH object id, ATTACH,
-/// COMMIT, and present. Proves the reconfigure mechanism end to end without a
-/// second process. Returns true iff every stage produced the expected reply.
-fn drive_reconfigure(
-    server: &mut Server,
-    conn: gui_protocol_v1::server::ConnId,
-    surface: u64,
-    fmt: u32,
-) -> bool {
-    // Resize object id: strictly greater than every id seen so far (the damage
-    // frame's BUFFER2 = 3 raised the watermark), so it passes the freshness gate.
-    const RESIZE_BUFFER: u64 = 4;
-    const W2: u32 = 96;
-    const H2: u32 = 48;
-    const STATE_ACTIVATED: u32 = 1;
-    let bytes = (W2 * H2 * 4) as usize;
-
-    // Push CONFIGURE(W2, H2); its header serial (offset 24) is the new token the
-    // client must ACK before its next COMMIT is accepted. `reconfigure` returns
-    // conn-tagged packets (like `composite`), so pick ours out of the batch.
-    let out = server.reconfigure(conn, surface, W2, H2, 1, STATE_ACTIVATED);
-    let token = match out
-        .iter()
-        .find(|(c, p)| *c == conn && opcode_of(p) == Some(Opcode::Configure))
-    {
-        Some((_, cfg)) => u64_at(cfg, 24),
-        None => return false,
-    };
-
-    // ACK the new configure token -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(surface, 10);
-    if find(&server.deliver(conn, &ack, None), Opcode::Result).is_none() {
-        return false;
-    }
-    libdunit::println("gui_server: reconfigure w=96 h=48 acked");
-
-    // Back the resized surface with a real kernel shared buffer and paint it.
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        return false;
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::handle_close(buf);
-        return false;
-    }
-    let pixels = mapped as usize as *mut u8;
-    unsafe {
-        for y in 0..H2 as usize {
-            for x in 0..W2 as usize {
-                let off = (y * W2 as usize + x) * 4;
-                core::ptr::write_volatile(pixels.add(off), (x * 2) as u8); // B
-                core::ptr::write_volatile(pixels.add(off + 1), (y * 4) as u8); // G
-                core::ptr::write_volatile(pixels.add(off + 2), 0x40); // R
-                core::ptr::write_volatile(pixels.add(off + 3), 0xff); // X
-            }
-        }
-    }
-
-    // IMPORT (fresh id) / ATTACH / COMMIT (new token) -> RESULT each.
-    let import = Request::ImportBuffer { width: W2, height: H2, stride: W2 * 4, format: fmt, offset: 0 }
-        .encode(RESIZE_BUFFER, 11);
-    let imported = find(&server.deliver(conn, &import, Some(bytes as u64)), Opcode::Result).is_some();
-    let attach = Request::AttachBuffer { buffer: RESIZE_BUFFER, damage: Vec::new() }.encode(surface, 12);
-    let attached = imported && find(&server.deliver(conn, &attach, None), Opcode::Result).is_some();
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(surface, 13);
-    let committed = attached && find(&server.deliver(conn, &commit, None), Opcode::Result).is_some();
-    let presented = committed
-        && server.composite().iter().any(|(c, p)| {
-            *c == conn && opcode_of(p) == Some(Opcode::FrameDone) && u32_at(p, 48) == 0
-        });
-
-    let data = unsafe { core::slice::from_raw_parts(pixels, bytes) };
-    let ok = presented && libdunit::fb_present(data, W2, H2, 100, 100) == 0;
-    libdunit::shared_buffer::release(buf, mapped as usize, bytes);
-    if ok {
-        libdunit::println("gui_server: client resized to 96x48 OK");
-    } else {
-        libdunit::println("gui_server: FAIL client resize");
-    }
-    ok
-}
-
-/// Control-message magic marking a capability announce (vs. a protocol packet,
-/// which begins with the DGUI wire magic). Shared with `gui_client`.
-const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1"
-
-// Client -> compositor "reload settings" signal (slice C). A settings app
-// (gui_settings) rewrites /system/share/dwm/default.toml, then sends this 4-byte
-// control message so the compositor re-reads the config and re-seeds its live
-// theme/layout/effects state without a reboot — the GUI<->TOML round-trip. A
-// distinct magic (not CAP1/INP1/DGUI) so `handle_client_payload` can tell it
-// apart from a buffer announce or a wire packet.
-const RELOAD_MAGIC: u32 = 0x3144_4C52; // "RLD1"
-
-// Client -> compositor "post a desktop notification" signal. An unprivileged
-// client asks the compositor to raise a toast (e.g. gui_demo's "Notify" button).
-// The client never touches the toast queue itself — it only names the text; ALL
-// policy (whether notifications are on, the timeout, the corner) stays in the
-// compositor's `[notifications]` config (single source of truth), applied when
-// the frame loop drains the request into `notify_post`. Layout: [magic:u32]
-// [len:u32][utf8 text bytes]. A distinct magic from CAP1/INP1/RLD1/DGUI so
-// `handle_client_payload` can tell it apart from a buffer announce or wire packet.
-const NOTIFY_MAGIC: u32 = 0x3154_4F4E; // "NOT1"
-
-/// Longest client-supplied toast text the compositor accepts (bytes). Bounds the
-/// copy out of the untrusted IPC buffer; longer text is truncated, never trusted.
-const NOTIFY_TEXT_MAX: usize = 64;
-
-// Compositor -> client input control messages (20 bytes). Distinct magic from
-// CTRL_MAGIC and the DGUI wire magic so the client can tell them apart. Coords
-// are client-local (relative to the surface origin). Kept deliberately simple:
-// the focused window is the sole recipient, so no per-message routing id.
-const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1"
-const IN_MOVE: u8 = 1;
-const IN_DOWN: u8 = 2;
-const IN_UP: u8 = 3;
-const IN_LEAVE: u8 = 4;
-const IN_KEY: u8 = 5;
-const IN_SCROLL: u8 = 6;
-const IN_QUIT: u8 = 9;
-
-/// How long the maximize/restore self-test waits for a client to re-import the
-/// work-area-sized buffer before advancing anyway (in desktop ticks; ~60/s, so
-/// ~4s). A resizable client grows well within this; a fixed-size client that
-/// declines the server-pushed resize is force-settled here so the self-test —
-/// and the recycle proof gated on every window reaching `st_step == 2` — never
-/// stalls on a client exercising its right to keep its own size.
-const ST_SETTLE_TICKS: u32 = 240;
-
-/// Send one input control message to a client.
-fn send_input(pid: u32, kind: u8, lx: i32, ly: i32, button: u32) {
-    let mut msg = [0u8; 20];
-    msg[0..4].copy_from_slice(&INPUT_MAGIC.to_le_bytes());
-    msg[4] = kind;
-    msg[8..12].copy_from_slice(&lx.to_le_bytes());
-    msg[12..16].copy_from_slice(&ly.to_le_bytes());
-    msg[16..20].copy_from_slice(&button.to_le_bytes());
-    libdunit::ipc_send(pid, &msg);
-}
-
-/// True for the modifier keys themselves (Shift/Ctrl/Alt/Super/Caps), whose
-/// make/break we never forward to clients — their state already rides in every
-/// other event's `mods` field. Scancodes are the `sc & 0x7F` form the kernel
-/// reports (no release bit).
-fn is_modifier_scancode(sc: u8) -> bool {
-    matches!(sc, 0x1D | 0x2A | 0x36 | 0x38 | 0x3A | 0x5B | 0x5C)
-}
-
-/// Per-client compositing state held by the multi-client server loop.
-#[derive(Clone, Copy)]
-struct ClientState {
-    pid: u32,
-    conn: gui_protocol_v1::server::ConnId,
-    slot_x: u32,
-    slot_y: u32,
-    buf_ptr: *const u8,
-    buf_size: usize,
-    mapped_handle: u32,
-    surf_w: u32,
-    surf_h: u32,
-    presented: bool,
-    /// Surface object id the client chose in CreateSurface (needed to push a
-    /// server-initiated CONFIGURE via `Server::reconfigure` for resize/maximize).
-    surface: u64,
-    /// Pixel format the client imported its buffer with (FORMAT_XRGB8888 = 1 or
-    /// FORMAT_ARGB8888 = 2). Drives per-pixel blend vs. opaque copy at composite.
-    format: u32,
-    // Desktop bring-up state (used by run_desktop_session for runtime-spawned
-    // clients): `ready` once the buffer is mapped and a frame has been committed
-    // so it is safe to blit; `win_created` once it owns a Win in the model.
-    ready: bool,
-    win_created: bool,
-    placement: Option<Placement>,
-    /// Index into the live application registry (`settings::Applications.apps`)
-    /// of the app this client runs (0xFF = unknown/not registered), used to draw
-    /// a "running" indicator on the matching dock icon.
-    app: u8,
-    /// Workspace (0-based) this client's window lives on, captured from the
-    /// active workspace at spawn time. Startup clients default to workspace 0.
-    ws: usize,
-}
-
-impl ClientState {
-    const fn empty() -> ClientState {
-        ClientState {
-            pid: 0,
-            conn: 0,
-            slot_x: 0,
-            slot_y: 0,
-            buf_ptr: core::ptr::null(),
-            buf_size: 0,
-            mapped_handle: 0,
-            surf_w: 0,
-            surf_h: 0,
-            presented: false,
-            surface: 0,
-            format: FORMAT_XRGB8888,
-            ready: false,
-            win_created: false,
-            placement: None,
-            app: 0xFF,
-            ws: 0,
-        }
-    }
-}
-
-/// Process one inbound (envelope-stripped) message for client `c`: either map
-/// its announced buffer capability, or track geometry + feed the protocol
-/// packet through the Server and relay the replies back to the client.
-fn handle_client_payload(
-    server: &mut Server,
-    c: &mut ClientState,
-    payload: &[u8],
-    reload: &mut bool,
-    notify_out: &mut Vec<alloc::string::String>,
-) {
-    let n = payload.len();
-    if n >= 16 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == CTRL_MAGIC
-    {
-        let handle = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-        // Игнорируем размер, названный клиентом (payload[8..12]) — он недоверенный.
-        // Мапим буфер и берём ИСТИННУЮ длину backing-объекта из ядра: только она
-        // задаёт безопасную границу для последующего блита.
-        // Query length before mapping so every successful mapping has an exact
-        // release range, including rejected announcements. Re-announcing our
-        // current capability is not a new owned reference.
-        if handle == c.mapped_handle { return; }
-        let real_len = libdunit::handle_shared_len(handle);
-        if real_len <= 0 {
-            libdunit::handle_close(handle);
-            return;
-        }
-        let mapped = libdunit::handle_map(handle, 0, real_len as usize);
-        if mapped <= 0 {
-            libdunit::handle_close(handle);
-            return;
-        }
-        libdunit::shared_buffer::release(c.mapped_handle, c.buf_ptr as usize, c.buf_size);
-        c.buf_ptr = mapped as usize as *const u8;
-        c.buf_size = real_len as usize;
-        c.mapped_handle = handle;
-        return;
-    }
-    // "Reload settings" signal from a trusted-enough client (gui_settings): the
-    // config file was just rewritten, so raise a flag the desktop loop drains at
-    // the top of the next frame (re-read + re-seed derived state). No payload
-    // beyond the magic — the new values come from the config file, not the wire.
-    if n >= 4 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == RELOAD_MAGIC
-    {
-        *reload = true;
-        return;
-    }
-    // "Post a notification" signal: the client names the toast text; the frame
-    // loop turns it into a toast through the SAME `notify_post` path a launch
-    // uses (so `[notifications]` policy still gates it). The text length is the
-    // client's claim, so clamp it to the real remaining bytes AND a hard cap
-    // before copying — an untrusted client must not drive an out-of-bounds read
-    // or an unbounded allocation.
-    if n >= 8 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == NOTIFY_MAGIC
-    {
-        let claimed = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]) as usize;
-        let avail = n - 8;
-        let len = claimed.min(avail).min(NOTIFY_TEXT_MAX);
-        let text = core::str::from_utf8(&payload[8..8 + len]).unwrap_or("");
-        if !text.is_empty() {
-            notify_out.push(text.into());
-        }
-        return;
-    }
-    // Заголовок wire-протокола — 32 байта; CreateSurface читает поля вплоть до
-    // offset 44, поэтому короткие пакеты отбрасываем ДО индексирования (иначе
-    // паника → падение всего компоситора: DoS от одного клиента).
-    if n < 32 {
-        return;
-    }
-    let op = Opcode::from_u16(u16::from_le_bytes([payload[8], payload[9]]));
-    if op == Some(Opcode::CreateSurface) {
-        if n < 44 {
-            return;
-        }
-        // Surface object id is the wire header `object` (offset 16); remember it so
-        // the compositor can push a server-initiated CONFIGURE for resize/maximize.
-        c.surface = u64::from_le_bytes([
-            payload[16], payload[17], payload[18], payload[19],
-            payload[20], payload[21], payload[22], payload[23],
-        ]);
-        c.surf_w = u32::from_le_bytes([payload[36], payload[37], payload[38], payload[39]]);
-        c.surf_h = u32::from_le_bytes([payload[40], payload[41], payload[42], payload[43]]);
-        // Surface format (offset 44) selects opaque copy (XRGB) vs. per-pixel
-        // blend (ARGB) at composite time; older short packets keep the default.
-        if n >= 48 {
-            c.format = u32::from_le_bytes([payload[44], payload[45], payload[46], payload[47]]);
-        }
-    }
-    // A client that resizes (in response to our CONFIGURE) re-imports a buffer of
-    // the new geometry with a FRESH object id. IMPORT_BUFFER carries the true
-    // pixel dimensions (width@32, height@36), so track them here — this is the
-    // single point where the compositor learns a surface's current size, for both
-    // the initial import and every subsequent resize.
-    if op == Some(Opcode::ImportBuffer) && n >= 40 {
-        c.surf_w = u32::from_le_bytes([payload[32], payload[33], payload[34], payload[35]]);
-        c.surf_h = u32::from_le_bytes([payload[36], payload[37], payload[38], payload[39]]);
-    }
-    let cap = if op == Some(Opcode::ImportBuffer) {
-        Some(c.buf_size as u64)
-    } else {
-        None
-    };
-    for reply in &server.deliver(c.conn, payload, cap) {
-        libdunit::ipc_send(c.pid, reply);
-    }
-}
-/// Bring one client online: reserve a protocol connection, spawn the `exec` ELF,
-/// and hand it the `[our_pid][client_id]` handshake it blocks on at startup. The
-/// returned `ClientState` is *pending* — its buffer is mapped and it becomes
-/// `ready` only once its protocol handshake is pumped (see `pump_clients`). The
-/// `id` is a tint hint only; routing uses the kernel-authenticated sender pid.
-/// `app_idx` is the caller-resolved registry index (0xFF = not in the registry),
-/// stored so the dock can draw a "running" marker on the matching icon.
-fn spawn_client(
-    server: &mut Server,
-    id: u32,
-    slot_x: u32,
-    slot_y: u32,
-    app_idx: u8,
-    exec: &str,
-) -> Option<ClientState> {
-    let conn = server.connect()?;
-    let pid = libdunit::spawn(exec);
-    if pid <= 0 {
-        return None;
-    }
-    let mut c = ClientState::empty();
-    c.pid = pid as u32;
-    c.conn = conn;
-    c.slot_x = slot_x;
-    c.slot_y = slot_y;
-    c.app = app_idx;
-    let mut hs = [0u8; 8];
-    hs[0..4].copy_from_slice(&libdunit::get_pid().to_le_bytes());
-    hs[4..8].copy_from_slice(&id.to_le_bytes());
-    libdunit::ipc_send(c.pid, &hs);
-    Some(c)
-}
-
-/// Open the app at registry index `ri` as a fresh client window on `current_ws`,
-/// respecting the `max_windows` cap, and post the config-gated launch toast. This
-/// is the SINGLE "launch an app" path shared by the launcher menu (mouse click +
-/// keyboard Enter) and the dock — so program-launch policy lives in exactly one
-/// place instead of being copied per trigger. Returns true iff a client spawned.
-fn try_launch(
-    server: &mut Server,
-    clients: &mut Vec<ClientState>,
-    apps: &Applications,
-    ri: usize,
-    current_ws: usize,
-    next_id: &mut u32,
-    max_windows: usize,
-    notifs: &mut Vec<Toast>,
-    notifications: &settings::Notifications,
-    now_ms: u64,
-) -> bool {
-    if clients.len() >= max_windows {
-        return false;
-    }
-    let Some(entry) = apps.apps.get(ri) else {
-        return false;
-    };
-    let exec = entry.exec.as_str();
-    let name = entry.name.as_str();
-    if let Some(mut c) = spawn_client(server, *next_id, 0, 0, ri as u8, exec) {
-        c.ws = current_ws;
-        clients.push(c);
-        *next_id += 1;
-        notify_post(notifs, notifications, now_ms, name);
-        true
-    } else {
-        false
-    }
-}
-
-/// Bring up the desktop: autostart the configured `[startup]` apps, prove the
-/// M3 cross-process isolation invariant (≥2 untrusted clients composited
-/// concurrently, routed by KERNEL-AUTHENTICATED sender pid so one cannot inject
-/// into another's connection), then hand off to the interactive session. What
-/// launches at boot is data (`settings::Applications::startup`), so changing the
-/// startup set needs no gui_server edit. Returns true iff the isolation smoke saw
-/// two clients present at once (the baseline config autostarts three).
-fn serve_two_clients() -> bool {
-    let cfg = settings::load_config();
-    // The display mode as configured at boot, captured BEFORE any client is spawned
-    // — so a settings client that rewrites `[display]` during bring-up cannot move
-    // this baseline. Threaded into the first `run_desktop_session` so a bring-up
-    // resolution edit is diffed against the true boot mode (see that fn's head).
-    let boot_display = cfg.settings.display;
-    let mut server = Server::new();
-    let mut clients: Vec<ClientState> = Vec::new();
-    // Notification texts a client posts (NOTIFY_MAGIC) DURING bring-up — before the
-    // interactive desktop loop and its per-tick `pump_clients` exist. An autostart
-    // app can toast the moment it presents (e.g. gui_demo's "I'm up" toast), which
-    // lands here in `serve_two_clients` or the `resize_one_client` resize proof, not
-    // in `run_desktop_session`. Collect them instead of dropping them, and hand them
-    // to the session so it emits each through the SAME config-gated `notify_post`
-    // path once its toast queue exists (single source of truth; nothing is lost to a
-    // bring-up race).
-    let mut pending_notifies: Vec<alloc::string::String> = Vec::new();
-    // A reload pinged by a client (e.g. gui_settings' resolution self-test) while it
-    // presents during bring-up — captured here instead of dropped, then handed to
-    // the first interactive session so the edited `[display]` actually re-applies.
-    let mut bringup_reload = false;
-
-    // Autostart the configured startup apps. Each entry is a registry index; a
-    // stale/out-of-range index is skipped rather than trusted. Initial slots
-    // cascade — the desktop session re-tiles them under the panel/dock anyway.
-    let mut next_id = 1u32;
-    for (k, &ri) in cfg.apps.startup.iter().enumerate() {
-        let Some(entry) = cfg.apps.apps.get(ri) else {
-            continue;
-        };
-        let sx = 300 + (k as u32) * 70;
-        let sy = 100 + (k as u32) * 90;
-        if let Some(c) = spawn_client(&mut server, next_id, sx, sy, ri as u8, entry.exec.as_str()) {
-            clients.push(c);
-            next_id += 1;
-        }
-    }
-    if clients.is_empty() {
-        // No startup apps (or none spawnable): still raise the shell so the
-        // panel/dock/launcher are usable and can spawn apps on demand.
-        libdunit::println("gui_server: no startup apps to autostart");
-        // Loop so a live `[display]` change (which returns `true`) re-enters the
-        // session at the new resolution. The caller owns notifications until
-        // a session has actually processed them, including across mode changes.
-        let mut pn = pending_notifies;
-        let mut baseline = Some(boot_display);
-        let mut pointer = PointerSession::default();
-        while run_desktop_session(
-            &mut server,
-            &mut clients,
-            &mut pn,
-            baseline.take(),
-            core::mem::take(&mut bringup_reload),
-            &mut pointer,
-        ) {}
-        return false;
-    }
-
-    // Pump until the isolation invariant is proven: at least two untrusted
-    // clients presented concurrently (or, with a single startup app, that one).
-    // We break the INSTANT the target count is reached — inside the composite —
-    // so any slower startup app (e.g. the terminal, which sets up a pty first)
-    // stays UNpresented here and becomes a runtime-pumped window in the desktop
-    // loop. That is what later fires "gui_server: desktop input ready", so the
-    // keyboard-ready gate keeps working regardless of client presentation order.
-    let target = clients.len().min(2);
-    let mut rx = [0u8; 256];
-    let mut presented_total = clients.iter().filter(|c| c.presented).count();
-    'pump: for _ in 0..128 {
-        if presented_total >= target {
-            break;
-        }
-        // Route by the kernel-authenticated sender pid; a client cannot spoof
-        // another's identity, so the protocol connections stay isolated.
-        let mut sender: u32 = 0;
-        let n = libdunit::ipc_recv_blocking_from(&mut rx, &mut sender, 3000);
-        if n <= 0 {
-            break;
-        }
-        let n = n as usize;
-        let idx = match clients.iter().position(|c| c.pid == sender) {
-            Some(idx) => idx,
-            None => continue, // message from an unknown pid — ignore
-        };
-        // A settings client can present and run its resolution self-test here (a
-        // bring-up race): capture its reload ping into `bringup_reload` instead of
-        // dropping it, so the first interactive session re-applies the edited
-        // `[display]` (see run_desktop_session's first-entry baseline). NOTIFYs
-        // posted this early are still preserved in `pending_notifies`.
-        handle_client_payload(&mut server, &mut clients[idx], &rx[..n], &mut bringup_reload, &mut pending_notifies);
-
-        // A composition tick: route each FRAME_DONE to its client and blit that
-        // client's committed buffer into its own slot.
-        for (fc, fp) in &server.composite() {
-            for c in clients.iter_mut() {
-                if c.conn != *fc {
-                    continue;
-                }
-                libdunit::ipc_send(c.pid, fp);
-                let status = if fp.len() >= 52 {
-                    u32::from_le_bytes([fp[48], fp[49], fp[50], fp[51]])
-                } else {
-                    0
-                };
-                if status != 0 || c.presented {
-                    continue;
-                }
-                if !c.buf_ptr.is_null() && c.surf_w > 0 && c.surf_h > 0 {
-                    // Non-wrapping bounds check against the REAL mapped length
-                    // (c.buf_size came from handle_shared_len, not the client).
-                    let want = c.surf_w as u64 * c.surf_h as u64 * 4;
-                    if want <= c.buf_size as u64 {
-                        let data =
-                            unsafe { core::slice::from_raw_parts(c.buf_ptr, want as usize) };
-                        if libdunit::fb_present(data, c.surf_w, c.surf_h, c.slot_x, c.slot_y) == 0 {
-                            c.presented = true;
-                            presented_total += 1;
-                            // Stop the instant the invariant holds, leaving the
-                            // rest of the startup set for the runtime pump.
-                            if presented_total >= target {
-                                break 'pump;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let both = presented_total >= 2;
-
-    // Hand off to the interactive desktop session: a persistent compositor loop
-    // that owns a full-screen back buffer, decorates each client surface with a
-    // draggable title bar, routes the real mouse (syscall 60) into focus/raise/
-    // drag, and re-presents every tick. This is the M4 userspace DWM taking over
-    // from the linear M3 smoke.
-    if both {
-        // Emit the isolation marker BEFORE the session loop so automated smokes
-        // observe it immediately (headless runs are force-quit after capture).
-        libdunit::println("gui_server: served two untrusted clients OK");
-        // Cross-process resize proof: push a server-initiated CONFIGURE to one
-        // live client and drive its re-negotiation to completion. This exercises
-        // the maximize/fullscreen mechanism across a REAL process boundary (the
-        // client re-allocates its buffer and re-imports it with a fresh object
-        // id), which the in-process compositor self-test cannot cover.
-        resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload);
-    }
-    // Loop so a live `[display]` change re-enters the session at the new
-    // resolution (rebuilding all buffers); unprocessed notifications survive.
-    let mut pn = pending_notifies;
-    // The first session carries the boot display baseline + any reload pinged during
-    // bring-up (serve_two_clients / resize_one_client); re-entries pass None/false
-    // because the config file is authoritative by then.
-    let mut baseline = Some(boot_display);
-    let mut pointer = PointerSession::default();
-    while run_desktop_session(
-        &mut server,
-        &mut clients,
-        &mut pn,
-        baseline.take(),
-        core::mem::take(&mut bringup_reload),
-        &mut pointer,
-    ) {}
-
-    for c in clients.iter() {
-        if c.mapped_handle != 0 {
-            libdunit::shared_buffer::release(c.mapped_handle, c.buf_ptr as usize, c.buf_size);
-        }
-        let mut status = libdunit::WaitStatus::empty();
-        for _ in 0..50 {
-            if libdunit::wait(c.pid, &mut status) == c.pid as isize {
-                break;
-            }
-            libdunit::sleep_ms(10);
-        }
-    }
-    both
-}
-
-/// Push a server-initiated CONFIGURE to one already-presented client and pump its
-/// re-negotiation until it re-imports a fresh buffer at the new geometry and
-/// re-presents. This drives the exact maximize/fullscreen mechanism across a real
-/// process boundary: `Server::reconfigure` emits the CONFIGURE, the client backs
-/// a new buffer and replays IMPORT/ATTACH/COMMIT with a FRESH object id, and the
-/// compositor picks up the new size from the client's IMPORT_BUFFER. Verifiable
-/// headlessly (the in-process self-test cannot cross an address-space boundary).
-fn resize_one_client(
-    server: &mut Server,
-    clients: &mut [ClientState],
-    pending_notifies: &mut Vec<alloc::string::String>,
-    reload_seen: &mut bool,
-) {
-    const NEWW: u32 = 320;
-    const NEWH: u32 = 160;
-    const STATE_ACTIVATED: u32 = 1;
-    // First presented client that announced a surface object (a gui_client).
-    let target = match clients.iter().position(|c| c.presented && c.surface != 0) {
-        Some(i) => i,
-        None => return,
-    };
-    let (conn, surface, pid) = (clients[target].conn, clients[target].surface, clients[target].pid);
-
-    // Emit CONFIGURE(NEWW, NEWH) and forward it to the owning client.
-    for (fc, fp) in &server.reconfigure(conn, surface, NEWW, NEWH, 1, STATE_ACTIVATED) {
-        if *fc == conn {
-            libdunit::ipc_send(pid, fp);
-        }
-    }
-
-    let mut rx = [0u8; 256];
-    for _ in 0..256 {
-        let mut sender: u32 = 0;
-        let n = libdunit::ipc_recv_blocking_from(&mut rx, &mut sender, 3000);
-        if n <= 0 {
-            break;
-        }
-        let n = n as usize;
-        let idx = match clients.iter().position(|c| c.pid == sender) {
-            Some(i) => i,
-            None => continue,
-        };
-        // A settings client's resolution self-test can present during this resize
-        // proof: capture its reload ping into `reload_seen` so the first interactive
-        // session re-applies the edited `[display]` rather than dropping the signal.
-        // A NOTIFY posted mid-resize is still preserved (bring-up race safety).
-        handle_client_payload(server, &mut clients[idx], &rx[..n], reload_seen, pending_notifies);
-        // Route every frame callback to its owner (keeps the other clients live).
-        // Mirror `pump_clients`: a client that completes its handshake here (a
-        // slower startup app such as the terminal or file manager, which finishes
-        // committing while we drive the target's resize) MUST be latched `ready`,
-        // exactly as the desktop pump would. Otherwise it is orphaned — presented
-        // client-side but never adopted as a runtime window — because it then goes
-        // idle in `run_desktop_session` and sends nothing further to re-trigger a
-        // composite. This keeps the documented "slower startup app becomes a
-        // runtime-pumped window" invariant true even across this resize proof.
-        for (fc, fp) in &server.composite() {
-            let status = if fp.len() >= 52 {
-                u32::from_le_bytes([fp[48], fp[49], fp[50], fp[51]])
-            } else {
-                0
-            };
-            for c in clients.iter_mut() {
-                if c.conn != *fc {
-                    continue;
-                }
-                libdunit::ipc_send(c.pid, fp);
-                if status == 0 && !c.buf_ptr.is_null() && c.surf_w > 0 && c.surf_h > 0 {
-                    c.ready = true;
-                }
-            }
-        }
-        // Done once the target reports the new geometry (via its IMPORT_BUFFER)
-        // with a fresh backing buffer that we can blit within bounds.
-        let c = &clients[target];
-        if c.surf_w == NEWW && c.surf_h == NEWH && !c.buf_ptr.is_null() {
-            let want = c.surf_w as u64 * c.surf_h as u64 * 4;
-            if want <= c.buf_size as u64 {
-                let data = unsafe { core::slice::from_raw_parts(c.buf_ptr, want as usize) };
-                if libdunit::fb_present(data, c.surf_w, c.surf_h, c.slot_x, c.slot_y) == 0 {
-                    libdunit::println("gui_server: live client resized to 320x160 OK");
-                    return;
-                }
-            }
-        }
-    }
-    libdunit::println("gui_server: FAIL live client resize");
-}
-
-/// Push a server-initiated CONFIGURE to the client that owns `pid` and forward it
-/// to that client, so it re-imports a `w`x`h` buffer (Phase 3 maximize / restore /
-/// fullscreen). The client's re-negotiation (IMPORT/ATTACH/COMMIT with a fresh
-/// object id) is drained by the desktop loop's `pump_clients`, which updates the
-/// client's `ClientState` geometry; the per-frame Win<->ClientState sync then
-/// mirrors the fresh buffer + size into the owning `Win`. A no-op for an unknown
-/// pid or a client that never announced a surface object (so a fixed-size client
-/// that ignores CONFIGURE is simply never asked to resize).
-fn reconfigure_client(
-    server: &mut Server,
-    clients: &[ClientState],
-    pid: u32,
-    w: u32,
-    h: u32,
-    state: u32,
-) {
-    let Some(c) = clients.iter().find(|c| c.pid == pid && c.surface != 0) else {
-        return;
-    };
-    let (conn, surface) = (c.conn, c.surface);
-    for (fc, fp) in &server.reconfigure(conn, surface, w, h, 1, state) {
-        if *fc == conn {
-            libdunit::ipc_send(pid, fp);
-        }
-    }
-}
-
 /// Reserved screen margins (px) that the shell strips subtract from the usable
 /// desktop, one accumulator per edge. `reserved_insets` fills it from the
 /// configured panel/tray/dock edges, and every geometry
@@ -1287,15 +270,7 @@ fn add_edge(ins: &mut Insets, edge: Edge, size: i32) {
 /// Margins accumulate, so the default (panel=top, tray=top, dock=left) yields
 /// `{top: panel_h, left: dock_w, bottom: 0, right: 0}` — byte-identical to the
 /// pre-Phase-5 fixed layout.
-fn reserved_insets(ly: &Layout, panel_edge: Edge, tray_edge: Edge, tray_size: i32) -> Insets {
-    let mut ins = Insets { top: 0, bottom: 0, left: 0, right: 0 };
-    add_edge(&mut ins, panel_edge, ly.panel_h);
-    add_edge(&mut ins, ly.dock_edge, ly.dock_w + ly.dock_margin);
-    if tray_edge != panel_edge {
-        add_edge(&mut ins, tray_edge, tray_size);
-    }
-    ins
-}
+
 
 /// The screen rect `(x, y, w, h)` of a shell strip `thickness` px thick on `edge`,
 /// offset `off` px inward from that edge. Horizontal strips (top/bottom) span the
@@ -1362,6 +337,7 @@ fn set_window_state(
         WinState::Floating => win.restore.take(),
     };
     win.motion = None;
+    win.desired_size=None;
     win.state = new_state;
     if let Some((tx, ty, tw, th)) = target {
         win.cx = tx;
@@ -1671,823 +647,6 @@ fn notify_post(q: &mut Vec<Toast>, cfg: &settings::Notifications, now: u64, text
 // Each `Win` carries its own `title_h`/`border` so its methods stay parameter-free.
 
 /// Fill an axis-aligned rectangle in the back buffer, clipped to its bounds.
-fn fill_rect(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, color: u32) {
-    let x0 = x.max(0) as usize;
-    let y0 = y.max(0) as usize;
-    let x1 = ((x + w).max(0) as usize).min(bw);
-    let y1 = ((y + h).max(0) as usize).min(bh);
-    let mut yy = y0;
-    while yy < y1 {
-        let row = yy * bw;
-        let mut xx = x0;
-        while xx < x1 {
-            buf[row + xx] = color;
-            xx += 1;
-        }
-        yy += 1;
-    }
-}
-
-// ===========================================================================
-// Compositor visual effects (concept §5): alpha blending, gradients, rounded
-// corners, soft shadows, backdrop blur. All integer math (no FP in userspace),
-// all gated by `settings::Effects` so the flat look is one config flag away.
-// ===========================================================================
-
-/// src-over composite of an ARGB `src` onto an opaque XRGB `dst`. Fast paths for
-/// fully transparent / fully opaque source.
-#[inline]
-fn blend(dst: u32, src: u32) -> u32 {
-    let a = (src >> 24) & 0xFF;
-    if a == 0 {
-        return dst;
-    }
-    if a == 255 {
-        return 0xFF00_0000 | (src & 0x00FF_FFFF);
-    }
-    let na = 255 - a;
-    let sr = (src >> 16) & 0xFF;
-    let sg = (src >> 8) & 0xFF;
-    let sb = src & 0xFF;
-    let dr = (dst >> 16) & 0xFF;
-    let dg = (dst >> 8) & 0xFF;
-    let db = dst & 0xFF;
-    let r = (sr * a + dr * na + 127) / 255;
-    let g = (sg * a + dg * na + 127) / 255;
-    let b = (sb * a + db * na + 127) / 255;
-    0xFF00_0000 | (r << 16) | (g << 8) | b
-}
-
-/// Blend one ARGB pixel into the back buffer (bounds-checked).
-#[inline]
-fn blend_pixel(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, src: u32) {
-    if x < 0 || y < 0 || x as usize >= bw || y as usize >= bh {
-        return;
-    }
-    let idx = y as usize * bw + x as usize;
-    buf[idx] = blend(buf[idx], src);
-}
-
-/// Shift every RGB channel of `c` by `delta` (positive = lighten), clamped. Used
-/// to derive gradient endpoints from a single theme color.
-#[inline]
-fn shade(c: u32, delta: i32) -> u32 {
-    let cl = |v: i32| v.clamp(0, 255) as u32;
-    let r = ((c >> 16) & 0xFF) as i32 + delta;
-    let g = ((c >> 8) & 0xFF) as i32 + delta;
-    let b = (c & 0xFF) as i32 + delta;
-    (cl(r) << 16) | (cl(g) << 8) | cl(b)
-}
-
-/// Linear RGB interpolation between `a` and `b`; `t` in 0..=255 (0 = a, 255 = b).
-#[inline]
-fn lerp_color(a: u32, b: u32, t: u32) -> u32 {
-    let t = t.min(255);
-    let inv = 255 - t;
-    let r = (((a >> 16) & 0xFF) * inv + ((b >> 16) & 0xFF) * t) / 255;
-    let g = (((a >> 8) & 0xFF) * inv + ((b >> 8) & 0xFF) * t) / 255;
-    let bl = ((a & 0xFF) * inv + (b & 0xFF) * t) / 255;
-    (r << 16) | (g << 8) | bl
-}
-
-/// Blend a translucent solid ARGB rect into the buffer.
-fn fill_rect_alpha(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, color: u32) {
-    let x0 = x.max(0);
-    let y0 = y.max(0);
-    let x1 = (x + w).min(bw as i32);
-    let y1 = (y + h).min(bh as i32);
-    let mut py = y0;
-    while py < y1 {
-        let mut px = x0;
-        while px < x1 {
-            blend_pixel(buf, bw, bh, px, py, color);
-            px += 1;
-        }
-        py += 1;
-    }
-}
-
-/// No animation clock means instant transitions, never a frozen half-open UI.
-fn animation_time_ms() -> Option<u64> {
-    let mut stats = libdunit::SystemStats::default();
-    if libdunit::get_system_stats(&mut stats) < 0 || stats.uptime_available == 0
-        || stats.uptime_hz == 0 { return None; }
-    Some((stats.uptime_ticks / stats.uptime_hz).saturating_mul(1000)
-        .saturating_add((stats.uptime_ticks % stats.uptime_hz) * 1000 / stats.uptime_hz))
-}
-
-// Rounded-corner selection bitmask for `fill_rrect*` (which corners get the arc).
-const RR_TL: u8 = 1;
-const RR_TR: u8 = 2;
-const RR_BL: u8 = 4;
-const RR_BR: u8 = 8;
-const RR_ALL: u8 = RR_TL | RR_TR | RR_BL | RR_BR;
-const RR_TOP: u8 = RR_TL | RR_TR;
-
-/// Coverage 0..255 of pixel (px,py) inside rounded-rect [x,y,w,h] radius `r`.
-/// Straight edges and non-selected corners return 255; a selected corner is
-/// 4x4-supersampled in 1/8-px units for a cheap anti-aliased arc (integer only).
-fn rr_cov(px: i32, py: i32, x: i32, y: i32, w: i32, h: i32, r: i32, corners: u8) -> u32 {
-    if r <= 0 {
-        return 255;
-    }
-    let (cx, cy, bit);
-    if px < x + r && py < y + r {
-        cx = x + r;
-        cy = y + r;
-        bit = RR_TL;
-    } else if px >= x + w - r && py < y + r {
-        cx = x + w - r;
-        cy = y + r;
-        bit = RR_TR;
-    } else if px < x + r && py >= y + h - r {
-        cx = x + r;
-        cy = y + h - r;
-        bit = RR_BL;
-    } else if px >= x + w - r && py >= y + h - r {
-        cx = x + w - r;
-        cy = y + h - r;
-        bit = RR_BR;
-    } else {
-        return 255;
-    }
-    if corners & bit == 0 {
-        return 255;
-    }
-    let r8 = (r * 8) as i64;
-    let r2 = r8 * r8;
-    let mut inside = 0u32;
-    let mut sy = 0;
-    while sy < 4 {
-        let dy = (py * 8 + (sy * 2 + 1) - cy * 8) as i64;
-        let mut sx = 0;
-        while sx < 4 {
-            let dx = (px * 8 + (sx * 2 + 1) - cx * 8) as i64;
-            if dx * dx + dy * dy <= r2 {
-                inside += 1;
-            }
-            sx += 1;
-        }
-        sy += 1;
-    }
-    inside * 255 / 16
-}
-
-/// Fill a rounded rect with a flat (alpha-aware) `color`. `corners` selects which
-/// corners get the arc (e.g. `RR_TOP` for a title bar). `r <= 0` = plain rect.
-fn fill_rrect(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, r: i32, corners: u8, color: u32) {
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    let r = r.max(0).min(w / 2).min(h / 2);
-    let base_a = (color >> 24) & 0xFF;
-    if base_a == 0 {
-        return;
-    }
-    let x0 = x.max(0);
-    let y0 = y.max(0);
-    let x1 = (x + w).min(bw as i32);
-    let y1 = (y + h).min(bh as i32);
-    let mut py = y0;
-    while py < y1 {
-        let mut px = x0;
-        while px < x1 {
-            let cov = rr_cov(px, py, x, y, w, h, r, corners);
-            if cov > 0 {
-                let a = base_a * cov / 255;
-                blend_pixel(buf, bw, bh, px, py, (a << 24) | (color & 0x00FF_FFFF));
-            }
-            px += 1;
-        }
-        py += 1;
-    }
-}
-
-/// Fill a rounded rect with a vertical gradient (`top`..`bottom` RGB) at overall
-/// opacity `alpha` (0..255), corner arcs anti-aliased. Used for glass panels,
-/// title bars and buttons.
-fn fill_rrect_grad(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, r: i32, corners: u8, top: u32, bottom: u32, alpha: i32) {
-    if w <= 0 || h <= 0 || alpha <= 0 {
-        return;
-    }
-    let alpha = alpha.min(255) as u32;
-    let r = r.max(0).min(w / 2).min(h / 2);
-    let x0 = x.max(0);
-    let y0 = y.max(0);
-    let x1 = (x + w).min(bw as i32);
-    let y1 = (y + h).min(bh as i32);
-    let span = (h - 1).max(1) as u32;
-    let mut py = y0;
-    while py < y1 {
-        let t = ((py - y).max(0) as u32 * 255) / span;
-        let row = lerp_color(top, bottom, t);
-        let mut px = x0;
-        while px < x1 {
-            let cov = rr_cov(px, py, x, y, w, h, r, corners);
-            if cov > 0 {
-                let a = alpha * cov / 255;
-                blend_pixel(buf, bw, bh, px, py, (a << 24) | (row & 0x00FF_FFFF));
-            }
-            px += 1;
-        }
-        py += 1;
-    }
-}
-
-/// Layered soft drop shadow under a rounded rect: `spread` nested black rounded
-/// rects, each at `alpha/spread`, so overlap accumulates into a soft falloff.
-/// Offset down-right a touch for a light-from-above look. The opaque window
-/// interior [x,y,w,h] is skipped — it gets overdrawn, so shadowing it is wasted
-/// work (this is the bulk of the pixels, so skipping keeps the effect cheap).
-fn draw_soft_shadow(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, r: i32, spread: i32, alpha: i32) {
-    if spread <= 0 || alpha <= 0 {
-        return;
-    }
-    let per = ((alpha / spread).max(1)) as u32;
-    let mut s = spread;
-    while s >= 1 {
-        let off = s / 2 + 2;
-        let (lx, ly2, lw, lh, lr) = (x - s, y - s + off, w + 2 * s, h + 2 * s, r + s);
-        let x0 = lx.max(0);
-        let y0 = ly2.max(0);
-        let x1 = (lx + lw).min(bw as i32);
-        let y1 = (ly2 + lh).min(bh as i32);
-        let mut py = y0;
-        while py < y1 {
-            let in_row = py >= y && py < y + h;
-            let mut px = x0;
-            while px < x1 {
-                if in_row && px >= x && px < x + w {
-                    px = x + w; // jump past the opaque window interior
-                    continue;
-                }
-                let cov = rr_cov(px, py, lx, ly2, lw, lh, lr, RR_ALL);
-                if cov > 0 {
-                    blend_pixel(buf, bw, bh, px, py, (per * cov / 255) << 24);
-                }
-                px += 1;
-            }
-            py += 1;
-        }
-        s -= 1;
-    }
-}
-
-/// One horizontal box-blur pass: `src` -> `dst` (both `w*h` packed), radius `r`,
-/// sliding-window average of RGB with edge clamp. Alpha forced opaque.
-fn box_h(src: &[u32], dst: &mut [u32], w: usize, h: usize, r: usize) {
-    for y in 0..h {
-        let row = y * w;
-        let mut sr = 0u32;
-        let mut sg = 0u32;
-        let mut sb = 0u32;
-        let first_hi = r.min(w - 1);
-        for i in 0..=first_hi {
-            let p = src[row + i];
-            sr += (p >> 16) & 0xFF;
-            sg += (p >> 8) & 0xFF;
-            sb += p & 0xFF;
-        }
-        let mut lo = 0i32;
-        let mut hi = first_hi as i32;
-        for x in 0..w {
-            let cnt = (hi - lo + 1) as u32;
-            dst[row + x] = 0xFF00_0000 | ((sr / cnt) << 16) | ((sg / cnt) << 8) | (sb / cnt);
-            let add = x as i32 + 1 + r as i32;
-            if add < w as i32 {
-                let p = src[row + add as usize];
-                sr += (p >> 16) & 0xFF;
-                sg += (p >> 8) & 0xFF;
-                sb += p & 0xFF;
-                hi = add;
-            }
-            let rem = x as i32 - r as i32;
-            if rem >= 0 {
-                let p = src[row + rem as usize];
-                sr -= (p >> 16) & 0xFF;
-                sg -= (p >> 8) & 0xFF;
-                sb -= p & 0xFF;
-                lo = rem + 1;
-            }
-        }
-    }
-}
-
-/// One vertical box-blur pass: `src` -> `dst` (both `w*h` packed), radius `r`.
-fn box_v(src: &[u32], dst: &mut [u32], w: usize, h: usize, r: usize) {
-    for x in 0..w {
-        let mut sr = 0u32;
-        let mut sg = 0u32;
-        let mut sb = 0u32;
-        let first_hi = r.min(h - 1);
-        for i in 0..=first_hi {
-            let p = src[i * w + x];
-            sr += (p >> 16) & 0xFF;
-            sg += (p >> 8) & 0xFF;
-            sb += p & 0xFF;
-        }
-        let mut lo = 0i32;
-        let mut hi = first_hi as i32;
-        for y in 0..h {
-            let cnt = (hi - lo + 1) as u32;
-            dst[y * w + x] = 0xFF00_0000 | ((sr / cnt) << 16) | ((sg / cnt) << 8) | (sb / cnt);
-            let add = y as i32 + 1 + r as i32;
-            if add < h as i32 {
-                let p = src[add as usize * w + x];
-                sr += (p >> 16) & 0xFF;
-                sg += (p >> 8) & 0xFF;
-                sb += p & 0xFF;
-                hi = add;
-            }
-            let rem = y as i32 - r as i32;
-            if rem >= 0 {
-                let p = src[rem as usize * w + x];
-                sr -= (p >> 16) & 0xFF;
-                sg -= (p >> 8) & 0xFF;
-                sb -= p & 0xFF;
-                lo = rem + 1;
-            }
-        }
-    }
-}
-
-/// Separable box blur of a sub-region of the back buffer (the acrylic backdrop
-/// under the panel/menu/dock). `tmp_a`/`tmp_b` are ping-pong scratch buffers
-/// allocated once by the caller; a region larger than the scratch is skipped.
-/// `iters` box passes ≈ a Gaussian. Integer-only, O(region) per pass.
-fn blur_region(buf: &mut [u32], bw: usize, bh: usize, rx: i32, ry: i32, rw: i32, rh: i32, radius: i32, iters: i32, tmp_a: &mut [u32], tmp_b: &mut [u32]) {
-    if radius <= 0 || iters <= 0 {
-        return;
-    }
-    let x0 = rx.max(0) as usize;
-    let y0 = ry.max(0) as usize;
-    let x1 = ((rx + rw).max(0) as usize).min(bw);
-    let y1 = ((ry + rh).max(0) as usize).min(bh);
-    if x1 <= x0 || y1 <= y0 {
-        return;
-    }
-    let w = x1 - x0;
-    let h = y1 - y0;
-    if w * h > tmp_a.len() || w * h > tmp_b.len() {
-        return;
-    }
-    for yy in 0..h {
-        let dr = yy * w;
-        let sr = (y0 + yy) * bw + x0;
-        tmp_a[dr..dr + w].copy_from_slice(&buf[sr..sr + w]);
-    }
-    let r = radius as usize;
-    for _ in 0..iters {
-        box_h(tmp_a, tmp_b, w, h, r);
-        box_v(tmp_b, tmp_a, w, h, r);
-    }
-    for yy in 0..h {
-        let sr = yy * w;
-        let dr = (y0 + yy) * bw + x0;
-        buf[dr..dr + w].copy_from_slice(&tmp_a[sr..sr + w]);
-    }
-}
-
-/// Clip the rect `(x, y, w, h)` to the `bw*bh` framebuffer, returning
-/// `(x0, y0, cw, ch)` in buffer pixels (`cw == 0` or `ch == 0` = fully off-screen).
-fn clip_to_screen(x: i32, y: i32, w: i32, h: i32, bw: usize, bh: usize) -> (usize, usize, usize, usize) {
-    let x0 = x.max(0);
-    let y0 = y.max(0);
-    let x1 = (x + w).min(bw as i32);
-    let y1 = (y + h).min(bh as i32);
-    if x1 <= x0 || y1 <= y0 {
-        return (0, 0, 0, 0);
-    }
-    (x0 as usize, y0 as usize, (x1 - x0) as usize, (y1 - y0) as usize)
-}
-
-/// Blit a client's surface into the back buffer at (x, y), clipped. `argb`
-/// selects the compositing rule per the format the client imported its buffer
-/// with (captured in `ClientState.format`, mirrored into `Win.format`):
-///   * XRGB8888 (`argb == false`): the surface is opaque — a straight copy, the
-///     fast path; the top 8 bits are "don't care" so we never read them.
-///   * ARGB8888 (`argb == true`):  the surface carries a straight-alpha channel
-///     (e.g. a terminal with a translucent background) — src-over blend each
-///     pixel over the already-composited desktop so the wallpaper/windows behind
-///     show through, while opaque pixels (text, icons: alpha 255) overwrite.
-fn blit_surface(
-    buf: &mut [u32],
-    bw: usize,
-    bh: usize,
-    x: i32,
-    y: i32,
-    src: &[u32],
-    sw: usize,
-    sh: usize,
-    argb: bool,
-) {
-    let mut sy = 0usize;
-    while sy < sh {
-        let dy = y + sy as i32;
-        if dy >= 0 && (dy as usize) < bh {
-            let drow = dy as usize * bw;
-            let srow = sy * sw;
-            let mut sx = 0usize;
-            while sx < sw {
-                let dx = x + sx as i32;
-                if dx >= 0 && (dx as usize) < bw {
-                    if argb {
-                        // src-over: opaque (a==255) pixels overwrite, translucent
-                        // ones blend, fully transparent (a==0) leave the desktop.
-                        blend_pixel(buf, bw, bh, dx, dy, src[srow + sx]);
-                    } else {
-                        buf[drow + dx as usize] = src[srow + sx];
-                    }
-                }
-                sx += 1;
-            }
-        }
-        sy += 1;
-    }
-}
-/// A classic top-left arrow cursor. 'X' = black outline, '.' = white fill,
-/// ' ' = transparent. Hotspot is the top-left corner (0,0).
-const CURSOR: [&str; 17] = [
-    "X                ",
-    "XX               ",
-    "X.X              ",
-    "X..X             ",
-    "X...X            ",
-    "X....X           ",
-    "X.....X          ",
-    "X......X         ",
-    "X.......X        ",
-    "X........X       ",
-    "X.....XXXXX      ",
-    "X..X..X          ",
-    "X.X X..X         ",
-    "XX  X..X         ",
-    "X    X..X        ",
-    "     X..X        ",
-    "      XX         ",
-];
-
-/// Draw the arrow cursor into the back buffer with its hotspot at (px, py).
-fn draw_cursor(buf: &mut [u32], bw: usize, bh: usize, px: i32, py: i32) {
-    for (ry, row) in CURSOR.iter().enumerate() {
-        let dy = py + ry as i32;
-        if dy < 0 || dy as usize >= bh {
-            continue;
-        }
-        let drow = dy as usize * bw;
-        for (rx, ch) in row.bytes().enumerate() {
-            let color = match ch {
-                b'X' => 0xFF000000,
-                b'.' => 0xFFFFFFFF,
-                _ => continue,
-            };
-            let dx = px + rx as i32;
-            if dx >= 0 && (dx as usize) < bw {
-                buf[drow + dx as usize] = color;
-            }
-        }
-    }
-}
-// ===========================================================================
-// DWM shell — top panel / taskbar (M4 slice 5)
-// ===========================================================================
-//
-// A compositor-owned panel across the top of the screen: a launcher glyph on
-// the left, one taskbar button per live window (click to raise + focus) in the
-// middle, and an uptime clock on the right. The panel is drawn on top of every
-// window each tick and its band is reserved — windows are kept below it and
-// pointer input over the panel is consumed by the shell, never forwarded to a
-// client.
-
-// Panel/launcher/taskbar/menu geometry now lives in `settings::Layout` (loaded
-// from the `[layout]` TOML table); `max_windows` there also caps launcher spawns
-// so a stuck loop cannot fork the machine to death.
-
-// The application registry (ids, names, exec paths, icons, labels) and the
-// dock / launcher / autostart lists are no longer hardcoded here: they live in
-// `settings::Applications`, built from the `[application.*]` / `[dock]` /
-// `[launcher]` / `[startup]` TOML tables (baseline in `Applications::baseline`).
-// A window's `app` field is an index into that live registry (0xFF = unknown).
-
-// Shell-content geometry is laid out along the panel's MAIN axis (X for a
-// top/bottom panel, Y for a left/right panel) so one set of helpers serves all
-// four edges. `panel_slot` maps a 1-D span on the main axis to a screen rect
-// spanning the full cross-axis thickness; `inset_cross` trims the cross axis.
-// For the default top panel these reproduce the old fixed geometry byte-for-byte.
-
-/// Fill a shell strip (panel / dock / tray) with the acrylic-glass look: optional
-/// backdrop blur, then a vertical gradient tint (or a flat tint when gradients are
-/// off). `top_shade` lightens the gradient's top edge (panel 16, dock 14). One
-/// code path for every strip so all edges paint identically.
-fn fill_strip_bg(
-    buf: &mut [u32],
-    bw: usize,
-    bh: usize,
-    rect: (i32, i32, i32, i32),
-    panel: u32,
-    fx: &Effects,
-    top_shade: i32,
-    tmp_a: &mut [u32],
-    tmp_b: &mut [u32],
-) {
-    let (x, y, w, h) = rect;
-    if fx.blur {
-        blur_region(buf, bw, bh, x, y, w, h, fx.blur_radius, fx.blur_iters, tmp_a, tmp_b);
-    }
-    if fx.gradient {
-        fill_rrect_grad(buf, bw, bh, x, y, w, h, 0, 0, shade(panel, top_shade), panel, fx.panel_alpha);
-    } else {
-        fill_rect_alpha(buf, bw, bh, x, y, w, h, ((fx.panel_alpha.min(255) as u32) << 24) | (panel & 0x00FF_FFFF));
-    }
-}
-
-/// Map a `[main_off, main_off+main_len)` span on the panel's main axis to a
-/// screen rect that spans the panel's full cross-axis thickness.
-fn panel_slot(panel: (i32, i32, i32, i32), edge: Edge, main_off: i32, main_len: i32) -> (i32, i32, i32, i32) {
-    let (px, py, pw, ph) = panel;
-    if edge.is_horizontal() {
-        (px + main_off, py, main_len, ph)
-    } else {
-        (px, py + main_off, pw, main_len)
-    }
-}
-
-/// Trim `c` px off each side of a strip rect on its CROSS axis (vertical for a
-/// horizontal strip, horizontal for a vertical strip); the main axis is untouched.
-fn inset_cross(rect: (i32, i32, i32, i32), edge: Edge, c: i32) -> (i32, i32, i32, i32) {
-    let (x, y, w, h) = rect;
-    if edge.is_horizontal() {
-        (x, y + c, w, (h - 2 * c).max(1))
-    } else {
-        (x + c, y, (w - 2 * c).max(1), h)
-    }
-}
-
-/// Main-axis length reserved for the launcher button at the panel's start
-/// (`launcher_w` on a horizontal panel; a square panel-thick cell on a vertical
-/// one, so the mark stays legible in the narrow bar).
-fn launcher_main(ly: &Layout, edge: Edge) -> i32 {
-    if edge.is_horizontal() {
-        ly.launcher_w
-    } else {
-        ly.panel_h
-    }
-}
-
-/// The panel strip itself: `ly.panel_h` thick, flush against `panel_edge`, owning
-/// its corners (offset 0). For the default top panel this is `(0, 0, bw, panel_h)`.
-fn panel_strip(ly: &Layout, ins: &Insets, edge: Edge, bw: usize, bh: usize) -> (i32, i32, i32, i32) {
-    strip_rect(edge, ly.panel_h, 0, ins, bw, bh)
-}
-
-/// Dock geometry is shared by drawing, hit-testing and layout reservations.
-fn dock_strip(ly: &Layout, ins: &Insets, bw: usize, bh: usize, count: usize) -> (i32, i32, i32, i32) {
-    let edge = ly.dock_edge;
-    let inset = match edge { Edge::Top => ins.top, Edge::Bottom => ins.bottom,
-        Edge::Left => ins.left, Edge::Right => ins.right };
-    let rect = strip_rect(edge, ly.dock_w, inset - ly.dock_w - ly.dock_margin, ins, bw, bh);
-    let (mut x, mut y, mut w, mut h) = rect;
-    // The margin is outside the dock, toward the screen edge.
-    match edge { Edge::Top => y += ly.dock_margin, Edge::Bottom => y -= ly.dock_margin,
-        Edge::Left => x += ly.dock_margin, Edge::Right => x -= ly.dock_margin }
-    if ly.dock_centered {
-        let cell = (ly.dock_w - 2 * ly.dock_padding).max(1);
-        let length = 2 * ly.dock_padding + count as i32 * cell
-            + (count as i32 - 1).max(0) * ly.dock_gap;
-        if edge.is_horizontal() {
-            let available = (bw as i32 - ins.left - ins.right).max(1);
-            w = length.min(available);
-            x = ins.left + (available - w) / 2;
-        } else {
-            h = length.min(h);
-            y += (rect.3 - h) / 2;
-        }
-    }
-    (x, y, w, h)
-}
-
-fn dock_icon_rect(ly: &Layout, ins: &Insets, bw: usize, bh: usize, count: usize, i: i32) -> (i32, i32, i32, i32) {
-    let (dx, dy, dw, dh) = dock_strip(ly, ins, bw, bh, count);
-    let pad = ly.dock_padding;
-    let natural = (ly.dock_w - 2 * pad).max(1);
-    let available = if ly.dock_edge.is_horizontal() { dw } else { dh };
-    let n = count.max(1) as i32;
-    // Fit every launcher even when a display is narrower than the requested dock.
-    let gap = if n > 1 { ly.dock_gap.min(((available - 2 * pad - n) / (n - 1)).max(0)) } else { 0 };
-    let iw = natural.min(((available - 2 * pad - (n - 1) * gap) / n).max(1));
-    if ly.dock_edge.is_horizontal() {
-        (dx + pad + i * (iw + gap), dy + (dh - iw) / 2, iw, iw)
-    } else {
-        (dx + (dw - iw) / 2, dy + pad + i * (iw + gap), iw, iw)
-    }
-}
-
-/// Rect of the i-th workspace pip (0-based), laid along the panel's main axis
-/// immediately after the launcher glyph.
-fn ws_pip_rect(ly: &Layout, edge: Edge, panel: (i32, i32, i32, i32), i: i32) -> (i32, i32, i32, i32) {
-    let off = launcher_main(ly, edge) + i * ly.ws_w;
-    inset_cross(panel_slot(panel, edge, off, ly.ws_w - 2), edge, 2)
-}
-
-/// Top-left origin `(x, y)` of the launcher dropdown, flying out PERPENDICULAR to
-/// the panel edge: below a top panel, above a bottom panel, right of a left panel,
-/// left of a right panel. `item_count` sizes the "above" case. The menu itself is
-/// always a vertical list of `menu_item_h` rows.
-fn menu_origin(ly: &Layout, edge: Edge, panel: (i32, i32, i32, i32), item_count: i32) -> (i32, i32) {
-    let (px, py, pw, ph) = panel;
-    let full_h = item_count * ly.menu_item_h;
-    match edge {
-        Edge::Top => (px, py + ph),
-        Edge::Bottom => (px, py - full_h),
-        Edge::Left => (px + pw, py),
-        Edge::Right => (px - ly.menu_w, py),
-    }
-}
-
-/// Rect of the i-th launcher-menu entry, stacked vertically from `origin`.
-fn menu_item_rect(ly: &Layout, origin: (i32, i32), i: i32) -> (i32, i32, i32, i32) {
-    (origin.0, origin.1 + i * ly.menu_item_h, ly.menu_w, ly.menu_item_h)
-}
-
-/// Quick-settings applet cell (M4, `[quicksettings]`): a panel-thick square on the
-/// panel's main axis, just past the workspace pips. Clickable to open the flyout
-/// of live toggles. Only meaningful when `[quicksettings] enabled` (the caller
-/// gates on it); geometry follows the configured panel edge like every other cell.
-fn qs_applet_rect(ly: &Layout, edge: Edge, panel: (i32, i32, i32, i32), ws_count: usize) -> (i32, i32, i32, i32) {
-    let off = launcher_main(ly, edge) + ws_count as i32 * ly.ws_w + 6;
-    let side = if edge.is_horizontal() { panel.3 } else { panel.2 };
-    inset_cross(panel_slot(panel, edge, off, side), edge, 3)
-}
-
-/// Quick-settings flyout card: `rows` toggle rows flying out PERPENDICULAR to the
-/// panel edge from the applet cell (same convention as the launcher `menu_origin`).
-fn qs_flyout_rect(ly: &Layout, edge: Edge, applet: (i32, i32, i32, i32), rows: i32) -> (i32, i32, i32, i32) {
-    let (ax, ay, aw, _ah) = applet;
-    let w = 150i32;
-    let h = rows * ly.menu_item_h + 8;
-    match edge {
-        Edge::Top => (ax, ay + applet.3, w, h),
-        Edge::Bottom => (ax, ay - h, w, h),
-        Edge::Left => (ax + aw, ay, w, h),
-        Edge::Right => (ax - w, ay, w, h),
-    }
-}
-
-/// Rect of the i-th quick-settings flyout row (a toggle line).
-fn qs_row_rect(ly: &Layout, flyout: (i32, i32, i32, i32), i: i32) -> (i32, i32, i32, i32) {
-    (flyout.0 + 4, flyout.1 + 4 + i * ly.menu_item_h, flyout.2 - 8, ly.menu_item_h)
-}
-
-/// True when the point is inside `rect`.
-fn in_rect(rect: (i32, i32, i32, i32), x: i32, y: i32) -> bool {
-    x >= rect.0 && x < rect.0 + rect.2 && y >= rect.1 && y < rect.1 + rect.3
-}
-
-// A 3x5 bitmap font, just digits and ':' — enough for window numbers and a
-// MM:SS clock. Each row is a 3-bit mask (bit 2 = leftmost pixel).
-const GLYPH_W: i32 = 3;
-
-fn glyph_3x5(c: u8) -> Option<[u8; 5]> {
-    Some(match c {
-        b'0' => [7, 5, 5, 5, 7],
-        b'1' => [2, 6, 2, 2, 7],
-        b'2' => [7, 1, 7, 4, 7],
-        b'3' => [7, 1, 7, 1, 7],
-        b'4' => [5, 5, 7, 1, 1],
-        b'5' => [7, 4, 7, 1, 7],
-        b'6' => [7, 4, 7, 5, 7],
-        b'7' => [7, 1, 2, 2, 2],
-        b'8' => [7, 5, 7, 5, 7],
-        b'9' => [7, 5, 7, 1, 7],
-        b':' => [0, 2, 0, 2, 0],
-        // A few uppercase letters for launcher menu labels (WIN / CALC).
-        b'W' => [5, 5, 5, 7, 5],
-        b'I' => [7, 2, 2, 2, 7],
-        b'N' => [5, 7, 7, 7, 5],
-        b'C' => [7, 4, 4, 4, 7],
-        b'A' => [2, 5, 7, 5, 5],
-        b'L' => [4, 4, 4, 4, 7],
-        b'S' => [3, 4, 2, 1, 6],
-        b'T' => [7, 2, 2, 2, 2],
-        b'F' => [7, 4, 6, 4, 4],
-        b'E' => [7, 4, 6, 4, 7],
-        b'R' => [6, 5, 6, 5, 5],
-        b'M' => [5, 7, 7, 5, 5],
-        _ => return None,
-    })
-}
-
-/// Draw an ASCII string in the 3x5 font at `scale`, returning the x just past
-/// the last glyph. Unknown bytes advance a blank cell (used for spaces).
-fn draw_text_3x5(
-    buf: &mut [u32],
-    bw: usize,
-    bh: usize,
-    x: i32,
-    y: i32,
-    scale: i32,
-    color: u32,
-    s: &[u8],
-) -> i32 {
-    let advance = (GLYPH_W + 1) * scale;
-    let mut cx = x;
-    for &c in s {
-        if let Some(rows) = glyph_3x5(c) {
-            for (ry, mask) in rows.iter().enumerate() {
-                for bit in 0..GLYPH_W {
-                    if mask & (1 << (GLYPH_W - 1 - bit)) != 0 {
-                        fill_rect(
-                            buf,
-                            bw,
-                            bh,
-                            cx + bit * scale,
-                            y + ry as i32 * scale,
-                            scale,
-                            scale,
-                            color,
-                        );
-                    }
-                }
-            }
-        }
-        cx += advance;
-    }
-    cx
-}
-
-/// Write a zero-padded two-digit value into `out[off..off+2]`.
-fn two_digits(out: &mut [u8], off: usize, v: u64) {
-    out[off] = b'0' + ((v / 10) % 10) as u8;
-    out[off + 1] = b'0' + (v % 10) as u8;
-}
-
-// --- Crisp TTF text for the shell (panel titles, window titles, tray) --------
-// The 3x5 bitmap font above stays for tiny numeric labels (ws pips, taskbar
-// numbers, dock initials); everything reference-facing now renders in the real
-// desktop font so it reads like the mockup.
-
-/// Load the configured TTF from the VFS, falling back to the shipped default
-/// font in the initrd (/assets/fonts) — assets live on the filesystem, not baked
-/// into the ELF. The live font path is a config knob (`[desktop] font`). `None`
-/// only if even the default font fails to parse — then the shell silently keeps
-/// its 3x5 labels and skips the new crisp text.
-fn load_font() -> Option<Font> {
-    let cfg = settings::load();
-    if let Some(bytes) = libdunit::read_binary(cfg.desktop.font.as_str(), 4 * 1024 * 1024) {
-        if let Ok(f) = Font::parse(bytes) {
-            return Some(f);
-        }
-    }
-    libdunit::read_binary("/assets/fonts/DejaVuSans.ttf", 4 * 1024 * 1024).and_then(|b| Font::parse(b).ok())
-}
-
-fn round_i32(v: f32) -> i32 {
-    if v <= 0.0 {
-        0
-    } else {
-        (v + 0.5) as i32
-    }
-}
-
-/// Total advance width of `text` at `px`, rounded to whole pixels.
-fn text_width_ttf(font: &Font, text: &str, px: f32) -> i32 {
-    round_i32(font.layout_line(text, px).1)
-}
-
-/// Draw one line of TTF `text` into the back buffer with its left edge at `x`
-/// and baseline at `baseline`, blending each glyph's 8-bit coverage as alpha
-/// over `color` (0x00RRGGBB). Returns the x just past the last glyph.
-fn draw_text_ttf(
-    back: &mut [u32],
-    bw: usize,
-    bh: usize,
-    font: &Font,
-    x: i32,
-    baseline: i32,
-    px: f32,
-    text: &str,
-    color: u32,
-) -> i32 {
-    let rgb = color & 0x00FF_FFFF;
-    let (glyphs, adv) = font.layout_line(text, px);
-    for g in glyphs {
-        if let Some(bmp) = font.rasterize(g.glyph, px) {
-            let ox = x + round_i32(g.x) + bmp.left;
-            let oy = baseline - bmp.top;
-            for row in 0..bmp.height {
-                for col in 0..bmp.width {
-                    let cov = bmp.coverage[row * bmp.width + col] as u32;
-                    if cov == 0 {
-                        continue;
-                    }
-                    blend_pixel(back, bw, bh, ox + col as i32, oy + row as i32, (cov << 24) | rgb);
-                }
-            }
-        }
-    }
-    x + round_i32(adv)
-}
-
 /// Human-readable window title for a window's registry index (`Win.app`), looked
 /// up in the live application registry. An unknown index (0xFF, e.g. a client
 /// spawned for an app not in the registry) falls back to a generic "Window".
@@ -2530,6 +689,7 @@ struct Placement {
 #[derive(Clone, Copy)]
 struct Motion { from: (i32, i32), to: (i32, i32), start: u64, duration_ms: u32, ease_out: bool }
 
+#[derive(Clone)]
 struct Win {
     motion: Option<Motion>,
     pid: u32,
@@ -2538,6 +698,9 @@ struct Win {
     cy: i32,
     sw: i32,
     sh: i32,
+    surface_w: i32,
+    surface_h: i32,
+    desired_size: Option<(i32,i32)>,
     buf_ptr: *const u8,
     buf_size: usize,
     alive: bool,
@@ -2549,6 +712,8 @@ struct Win {
     /// Index into the live application registry (0xFF = unknown) — drives the
     /// dock running marker and the window title (see `win_title`).
     app: u8,
+    opacity: u8,
+    rule_applied: bool,
     /// Workspace (0-based) this window belongs to; only the active workspace's
     /// windows are drawn and receive input.
     ws: usize,
@@ -2596,6 +761,10 @@ impl Win {
     fn contains(&self, mx: i32, my: i32) -> bool {
         let (x, y, w, h) = self.outer();
         mx >= x && mx < x + w && my >= y && my < y + h
+    }
+    fn content_position(&self,x:i32,y:i32)->(i32,i32){
+        (((x-self.cx)as i64*self.surface_w as i64/self.sw.max(1)as i64)as i32,
+         ((y-self.cy)as i64*self.surface_h as i64/self.sh.max(1)as i64)as i32)
     }
     /// The client content region (below the title bar).
     fn in_content(&self, mx: i32, my: i32) -> bool {
@@ -2918,6 +1087,7 @@ struct DeskWidget {
     kind: WidgetKind,
     corner: i32,
     accent: u32,
+    clock: settings::WidgetCfg,
 }
 
 /// Resolve the config-driven desktop-widget set. Each widget kind the compositor
@@ -2939,7 +1109,7 @@ fn resolve_desk_widgets(default_corner: i32) -> Vec<DeskWidget> {
         let wc = settings::WidgetCfg::load(name);
         if wc.from_file && wc.enabled {
             let corner = if wc.corner >= 0 { wc.corner.min(3) } else { default_corner };
-            v.push(DeskWidget { kind, corner, accent: wc.accent });
+            v.push(DeskWidget { kind, corner, accent: wc.accent, clock: wc });
         }
     }
     v
@@ -3005,11 +1175,11 @@ fn run_desktop_session(
     // baseline — the same last-known-good discipline the reload block uses, applied
     // to the very first load. A well-formed current/older file passes through as-is
     // (older ones are already forward-migrated inside `load_config`).
-    let cfg = if cfg.valid {
+    let mut cfg = if cfg.valid {
         cfg
     } else {
         libdunit::println("gui_server: boot config invalid (schema/shape) — using baseline");
-        settings::Config::defaults()
+        settings::load_system_config()
     };
 
     // Config-driven runtime resolution: apply BEFORE `get_framebuffer` so the
@@ -3049,16 +1219,24 @@ fn run_desktop_session(
     }
     let bw = fb.width as usize;
     let bh = fb.height as usize;
-    let mut theme: Theme = cfg.settings.theme;
-    let mut ly: Layout = cfg.settings.layout;
     // The application registry (id/name/exec/icon/label), the dock/launcher/
     // startup pin-lists and the workspace count are DATA, owned here so the dock,
     // launcher menu, taskbar, workspace switcher and window titles all render off
     // one live model. A malformed config never lands: `load_config` keeps the
     // last-known-good baseline (an invalid file yields the baseline registry).
+    let mut shell = match shell_runtime::Shell::prepare(cfg.shell.clone(), &cfg.apps, bw, bh) {
+        Ok(shell) => shell,
+        Err(error)=>{
+            libdunit::println(&alloc::format!("gui_server: boot shell rejected {}; recovering packaged desktop",error));
+            cfg=settings::load_document_from("/assets/dwm/default.toml").and_then(|text|settings::validate_document(&text)).unwrap_or_else(|_|settings::Config::defaults());
+            match shell_runtime::Shell::prepare(cfg.shell.clone(),&cfg.apps,bw,bh){Ok(shell)=>shell,Err(error)=>{libdunit::println(&alloc::format!("gui_server: packaged shell unavailable {}",error));return false;}}
+        }
+    };
+    let mut theme=cfg.settings.theme;let mut ly=cfg.settings.layout;
+    let mut policy = cfg.policy;
     let mut apps: Applications = cfg.apps;
     if cfg.settings.from_file {
-        libdunit::println("gui_server: settings loaded from /system/share/dwm/default.toml");
+        libdunit::println(&alloc::format!("gui_server: settings loaded from {}",settings::active_config_path()));
     } else {
         libdunit::println("gui_server: settings default (no config file)");
     }
@@ -3103,8 +1281,8 @@ fn run_desktop_session(
     // (plus the configured dock) into the per-edge margins every geometry
     // computation below subtracts, so maximize/spawn/drag all honor the edges.
     let mut panel_edge: Edge = cfg.settings.panel.pos;
-    let mut tray_edge: Edge = cfg.settings.tray.pos;
-    let mut tray_size: i32 = cfg.settings.tray.size;
+    let tray_edge: Edge = cfg.settings.tray.pos;
+    let tray_size: i32 = cfg.settings.tray.size;
     // Serial diagnostic: the resolved edges, so a `[panel]`/`[tray] pos` flip is
     // observable headless. Flip the TOML and this line moves — proof the shell
     // layout is config-driven, not baked into Rust.
@@ -3114,7 +1292,7 @@ fn run_desktop_session(
         tray_edge.as_str(),
         tray_size
     ));
-    let mut ins = reserved_insets(&ly, panel_edge, tray_edge, tray_size);
+    let mut ins = shell.insets;
 
     // Config-driven desktop-widget set (Phase 8): each widget is present only when
     // its widgets/<name>.toml exists AND is enabled, so removing a widget = delete
@@ -3181,15 +1359,17 @@ fn run_desktop_session(
         libdunit::println("gui_server: wordmark logo absent — accent mark fallback");
     }
 
-    // Crisp TTF for the shell's reference-facing text (window titles, centered
-    // focused title, right-side tray). `None` only if even the embedded font is
-    // unparsable — then those texts are skipped and the 3x5 labels remain.
-    let font = load_font();
+    // Cache TrueType shell glyphs before exposing the committed scene.
+    // Configured and packaged fonts are loaded through the VFS.
+    let mut font = load_font_path(cfg.settings.desktop.font.as_str());
+    if let Err(error)=shell.prepare_text(font.as_ref(),&apps,&ly){libdunit::println(&alloc::format!("gui_server: shell font cache rejected {}",error));return false;}
     if font.is_some() {
         libdunit::println("gui_server: shell font loaded (TTF)");
     } else {
-        libdunit::println("gui_server: shell font unavailable — 3x5 labels only");
+        libdunit::println("gui_server: shell font unavailable — install a valid TrueType font");
     }
+
+    shell.describe();
 
     // Window/session restore (M4): the remembered per-app geometry, loaded once
     // from the writable session store. Gated by `[session] restore`; when off we
@@ -3260,6 +1440,9 @@ fn run_desktop_session(
             cy,
             sw,
             sh,
+            surface_w: sw,
+            surface_h: sh,
+            desired_size: None,
             buf_ptr: clients[i].buf_ptr,
             buf_size: clients[i].buf_size,
             alive: true,
@@ -3267,6 +1450,8 @@ fn run_desktop_session(
             title_h: ly.title_h,
             border: ly.border,
             app: clients[i].app,
+            opacity: 255,
+            rule_applied: false,
             ws: 0,
             born: animation_epoch,
             minimized: false,
@@ -3394,6 +1579,7 @@ fn run_desktop_session(
     // now-disabled applet can't leave a stale card up.
     let mut quicksettings = cfg.settings.quicksettings;
     let mut qs_open = false;
+    let mut active_qs_anchor=None;
     let mut qs_st_done = false;
     // Desktop notifications (`[notifications]`): a bounded queue of transient
     // launch-feedback toasts, each auto-dismissed after `timeout_ms` (→ ~16 ms
@@ -3438,7 +1624,7 @@ fn run_desktop_session(
     let mut menu_was_open = false;
     // Per-dock-icon hover progress (0..255), eased toward hovered/idle each
     // frame. Sized to the live dock pin-count (config `[dock] entries`).
-    let mut dock_hover: Vec<u8> = alloc::vec![0u8; apps.dock.len()];
+
     // Ping-pong scratch for the backdrop blur, sized for the largest blurred
     // region (panel / dock strip / menu) and allocated once.
     let panel_area = bw * ly.panel_h.max(0) as usize;
@@ -3467,6 +1653,21 @@ fn run_desktop_session(
     // in serve_two_clients/resize_one_client). The loop's reload block processes it
     // on the first tick, diffing the edited config against `applied_display` above.
     let mut reload_requested = pending_reload;
+    let mut reload_candidate:Option<(settings::Config,lua_policy::Preflight)>=None;
+    let mut menu_entries = apps.launcher.clone();
+    let mut custom_menu_origin: Option<(i32,i32)> = None;
+    let mut effects = window_effects::Effects::new();
+    let mut desktop_tracks=shell_motion::Tracks::default();
+    let mut workspace_layer=desktop_motion::Layer::default();
+    let mut menu_closed_at=0u64;
+    let mut event_engine = lua_policy::EventEngine::new();
+    event_engine.set_context(&shell.config,&apps);
+    let mut observed: Vec<(u32,bool,bool,WinState)> = Vec::new();
+    let mut observed_ws = current_ws;
+    let mut observed_focus = None;
+    let mut observed_menu = false;
+    let mut hovered_component=None;
+
     let mut scripts = cfg.settings.scripts;
     let mut lua_engine = lua_policy::Engine::new();
     let mut lua_requests = lua_policy::Requests::new();
@@ -3489,13 +1690,35 @@ fn run_desktop_session(
         // derived from theme/layout/effects — plus the asset paths in [desktop]
         // (wallpaper + icon theme), so a config change swaps them live too. Never
         // fatal — load() falls back to the baseline on a bad file.
+        let mut ready_reload=None;
         if reload_requested {
-            reload_requested = false;
-            let ncfg = settings::load_config();
+            reload_requested=false;
+            let candidate=settings::load_config();
+            reload_candidate=None;
+            if !candidate.valid {ready_reload=Some(candidate);}
+            else {match lua_policy::Preflight::new(&candidate.settings.scripts,bw as u32,bh as u32,0){
+                Ok(probe)=>reload_candidate=Some((candidate,probe)),
+                Err(reason)=>libdunit::println(&alloc::format!("gui_server: settings reload rejected (Lua preflight {}) — keeping last good",reason)),
+            }}
+        }
+        if let Some((_,probe))=&mut reload_candidate {
+            match probe.poll(){
+                lua_policy::PreflightPoll::Pending=>{},
+                lua_policy::PreflightPoll::Ready=>{ready_reload=reload_candidate.take().map(|(candidate,_)|candidate);},
+                lua_policy::PreflightPoll::Failed(reason)=>{libdunit::println(&alloc::format!("gui_server: settings reload rejected (Lua preflight {}) — keeping last good",reason));notify_post(&mut notifs,&notifications,animation_now,"Configuration reload rejected: Lua script failed. Previous desktop retained.");reload_candidate=None;}
+            }
+        }
+        if let Some(ncfg)=ready_reload {
+            let next_font=load_font_path(ncfg.settings.desktop.font.as_str());
+            let next_shell=if ncfg.valid {
+                shell_runtime::Shell::prepare(ncfg.shell.clone(),&ncfg.apps,bw,bh).and_then(|mut shell|{
+                    shell.prepare_text(next_font.as_ref(),&ncfg.apps,&ncfg.settings.layout)?;Ok(shell)})
+            }else{Err(alloc::string::String::from("invalid config"))};
+            if let Err(error) = &next_shell { libdunit::println(&alloc::format!("gui_server: shell reload rejected {}",error)); }
             let mut next_icon_theme = if ncfg.valid {
                 load_icon_theme(ncfg.settings.desktop.icon_theme.as_str())
             } else { None };
-            if !ncfg.valid || next_icon_theme.is_none() {
+            if !ncfg.valid || next_icon_theme.is_none() || next_shell.is_err() {
                 // Malformed/incoherent config: keep the running (last-known-good)
                 // state WHOLESALE. Never partially apply a bad file — a broken
                 // reload must not blank the dock or drop the registry.
@@ -3531,12 +1754,14 @@ fn run_desktop_session(
                     return true;
                 }
                 lua_engine.cancel();
+                event_engine.cancel();
+                let _=event_engine.submit(lua_policy::Event{name:"reload",window_id:0,target:0});
+                let _=event_engine.submit(lua_policy::Event{name:"theme_change",window_id:0,target:0});
                 lua_requests.reset();
                 lua_expected.clear();
                 scripts = ncfg.settings.scripts;
                 lua_ease_out = false;
                 for win in wins.iter_mut() {
-                    win.lua_floating = false;
                     if !scripts.enabled && win.state == WinState::Tiled {
                         set_window_state(
                             server,
@@ -3560,18 +1785,30 @@ fn run_desktop_session(
                 // now-disabled applet can't leave a stale card behind.
                 quicksettings = ncfg.settings.quicksettings;
                 qs_open = false;
+                active_qs_anchor=None;
                 notifications = ncfg.settings.notifications;
                 // Re-resolve the config-driven widget set so a live edit that adds/
                 // removes a widgets/<name>.toml (or flips its `enabled`) takes effect.
                 desk_widgets = resolve_desk_widgets(ncfg.settings.widgets.corner);
+                shell = next_shell.unwrap();
+                shell.describe();
+                effects.clear();
+                desktop_tracks=shell_motion::Tracks::default();
+
+                hovered_component=None;
+                font = next_font;
+                policy = ncfg.policy;
+                for win in &mut wins {win.app=apps.apps.get(win.app as usize).and_then(|old|ncfg.apps.apps.iter().position(|new|new.id==old.id)).map(|index|index as u8).unwrap_or(255);}
+                for client in clients.iter_mut(){client.app=apps.apps.get(client.app as usize).and_then(|old|ncfg.apps.apps.iter().position(|new|new.id==old.id)).map(|index|index as u8).unwrap_or(255);}
                 apps = ncfg.apps;
+                event_engine.set_context(&shell.config,&apps);
+                menu_entries = apps.launcher.clone();
+                custom_menu_origin = None;
                 // Re-seed the shell-strip placement + recompute the reserved
                 // margins, so a live `[panel]`/`[tray] pos` edit moves the panel,
                 // tray and the maximize/work area together.
                 panel_edge = ncfg.settings.panel.pos;
-                tray_edge = ncfg.settings.tray.pos;
-                tray_size = ncfg.settings.tray.size;
-                ins = reserved_insets(&ly, panel_edge, tray_edge, tray_size);
+                ins = shell.insets;
                 anim_duration_ms = if fx.anim { fx.anim_ms as u32 } else { 0 };
                 // Every Win caches its own title_h/border (used by outer/contains):
                 // re-seed them so existing windows adopt the new geometry.
@@ -3586,7 +1823,7 @@ fn run_desktop_session(
                 let panel_area = bw * ly.panel_h.max(0) as usize;
                 let dock_area = ly.dock_w.max(0) as usize * bw.max(bh);
                 let menu_area =
-                    ly.menu_w.max(0) as usize * (apps.launcher.len() * ly.menu_item_h.max(0) as usize);
+                    ly.menu_w.max(0) as usize * (menu_entries.len() * ly.menu_item_h.max(0) as usize);
                 let need = panel_area.max(dock_area).max(menu_area).max(1);
                 if blur_a.len() < need {
                     blur_a.resize(need, 0);
@@ -3595,13 +1832,13 @@ fn run_desktop_session(
                 // Re-seed the config-driven assets (wallpaper + icon theme) and the
                 // registry-derived state (icons per entry, dock hover slots).
                 wallpaper = load_wallpaper(ncfg.settings.desktop.wallpaper.as_str(), bw, bh, theme.desktop);
-                logo = image_result(ncfg.settings.desktop.logo.as_str(),
-                    dunit_image::load(ncfg.settings.desktop.logo.as_str(), 32, 32));
+
+                logo=image_result(ncfg.settings.desktop.logo.as_str(),dunit_image::load(ncfg.settings.desktop.logo.as_str(),32,32));
                 app_icons.clear();
                 for entry in apps.apps.iter() {
                     app_icons.push(resolve_app_icon(entry.icon.as_str(), &mut next_icon_theme, (ly.dock_w + 6).max(32) as u32));
                 }
-                dock_hover = alloc::vec![0u8; apps.dock.len()];
+
                 if current_ws >= apps.workspaces {
                     current_ws = apps.workspaces.saturating_sub(1);
                 }
@@ -3695,8 +1932,9 @@ fn run_desktop_session(
             if let Some(c) = clients.iter().find(|c| c.pid == w.pid) {
                 w.buf_ptr = c.buf_ptr;
                 w.buf_size = c.buf_size;
-                w.sw = c.surf_w as i32;
-                w.sh = c.surf_h as i32;
+                w.surface_w=c.surf_w as i32;w.surface_h=c.surf_h as i32;
+                if w.desired_size==Some((w.surface_w,w.surface_h)){w.desired_size=None;}
+                if let Some((width,height))=w.desired_size{w.sw=width;w.sh=height;}else{w.sw=w.surface_w;w.sh=w.surface_h;}
                 w.format = c.format;
             }
         }
@@ -3741,6 +1979,9 @@ fn run_desktop_session(
                 cy,
                 sw,
                 sh,
+                surface_w: sw,
+                surface_h: sh,
+            desired_size: None,
                 buf_ptr: clients[i].buf_ptr,
                 buf_size: clients[i].buf_size,
                 alive: true,
@@ -3748,6 +1989,8 @@ fn run_desktop_session(
                 title_h: ly.title_h,
                 border: ly.border,
                 app: clients[i].app,
+            opacity: 255,
+            rule_applied: false,
                 ws: clients[i].ws,
                 born: animation_now,
                 minimized: false,
@@ -4000,7 +2243,10 @@ fn run_desktop_session(
                     if all_settled && argb_blit_logged && !clients.is_empty() {
                         recycle_pre = clients.len();
                         for &wi in &live {
-                            wins[wi].alive = false;
+                            effects.start(&wins[wi],&back,bw,bh,wins[wi].outer(),animation_now,anim_duration_ms,
+                        animation::Effect::Fade,animation::Easing::ease_out(),true,
+                        &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                    wins[wi].alive = false;
                             send_input(wins[wi].pid, IN_QUIT, 0, 0, 0);
                         }
                         recycle_deadline = ticks.saturating_add(600); // ~10s budget
@@ -4056,9 +2302,21 @@ fn run_desktop_session(
             }
         }
 
+        for commit in effects.take_geometry_commits(&wins,animation_now) {
+            if let Some(w)=wins.iter_mut().find(|w|w.pid==commit.pid) {
+                w.cx=commit.cx;w.cy=commit.cy;
+                if w.sw!=commit.width||w.sh!=commit.height {
+                    w.sw=commit.width;w.sh=commit.height;w.desired_size=Some((commit.width,commit.height));
+                    reconfigure_client(server,clients,w.pid,commit.width as u32,commit.height as u32,1);}
+            }
+        }
+        shell.advance(animation_now);
+        ins=shell.insets;
         let m = libdunit::get_mouse_state();
         let mx = m.x as i32;
         let my = m.y as i32;
+        let workspace_input=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);
+        let (wx,wy)=desktop_motion::logical_point(workspace_input.rect,mx,my,bw,bh);
         let left = m.left();
         let press = left && !prev_left;
         let release = !left && prev_left;
@@ -4072,24 +2330,17 @@ fn run_desktop_session(
         // `in_shell` marks the shell-owned region: a click/right-click there is the
         // shell's, never routed to a client window.
         let panel_rect = panel_strip(&ly, &ins, panel_edge, bw, bh);
-        let dock_rect = dock_strip(&ly, &ins, bw, bh, apps.dock.len());
-        let tray_own = if tray_edge != panel_edge {
-            Some(strip_rect(tray_edge, tray_size, 0, &ins, bw, bh))
-        } else {
-            None
-        };
-        let launcher_hit = panel_slot(panel_rect, panel_edge, 0, launcher_main(&ly, panel_edge));
-        let menu_org = menu_origin(&ly, panel_edge, panel_rect, apps.launcher.len() as i32);
+
+        let raw_menu_org=custom_menu_origin.unwrap_or_else(||menu_origin(&ly,panel_edge,panel_rect,menu_entries.len()as i32));
+        let menu_view=desktop_tracks.sample(desktop_motion::LAUNCHER,(raw_menu_org.0,raw_menu_org.1,ly.menu_w,(menu_entries.len().max(1)as i32)*ly.menu_item_h),animation_now);
+        let menu_org=(menu_view.rect.0,menu_view.rect.1);
+        let mut menu_ly=ly;menu_ly.menu_w=menu_view.rect.2;menu_ly.menu_item_h=(menu_view.rect.3/menu_entries.len().max(1)as i32).max(1);
         // Quick-settings applet cell on the panel (only when enabled); its flyout
         // flies out below/beside the panel and is NOT part of `in_shell` (a
         // transient overlay), so its clicks are caught by the `qs_open` branch
         // below before window routing — exactly like the launcher dropdown.
-        let qs_applet = qs_applet_rect(&ly, panel_edge, panel_rect, if ly.show_workspaces { apps.workspaces } else { 0 });
-        let in_shell = |x: i32, y: i32| {
-            in_rect(panel_rect, x, y)
-                || in_rect(dock_rect, x, y)
-                || tray_own.map_or(false, |t| in_rect(t, x, y))
-        };
+        let (qs_applet,qs_edge)=active_qs_anchor.or_else(||shell.first_quicksettings_anchor()).unwrap_or(((0,0,0,0),panel_edge));
+        let in_shell = |x: i32, y: i32| shell.contains(x,y);
 
         // --- Right-button press: forward to the content window under the cursor
         // as IN_DOWN with button=1 (context-menu trigger). Panel/dock/title are
@@ -4099,10 +2350,10 @@ fn run_desktop_session(
             while zi > 0 {
                 zi -= 1;
                 let wi = z[zi];
-                if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && wins[wi].in_content(mx, my) {
+                if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && !effects.covers(wins[wi].pid,animation_now) && effects.input_geometry(&wins[wi],animation_now).in_content(wx,wy) {
                     z.retain(|&i| i != wi);
                     z.push(wi);
-                    send_input(wins[wi].pid, IN_DOWN, mx - wins[wi].cx, my - wins[wi].cy, 1);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(wins[wi].pid,IN_DOWN,x,y,1);
                     break;
                 }
             }
@@ -4114,8 +2365,8 @@ fn run_desktop_session(
             // other click just dismisses the menu. Either way the menu closes
             // and the click is consumed (never reaches a window).
             let mut chosen: Option<usize> = None;
-            for i in 0..apps.launcher.len() {
-                let r = menu_item_rect(&ly, menu_org, i as i32);
+            for i in 0..menu_entries.len() {
+                let r = menu_item_rect(&menu_ly, menu_org, i as i32);
                 if in_rect(r, mx, my) {
                     chosen = Some(i);
                     break;
@@ -4123,7 +2374,7 @@ fn run_desktop_session(
             }
             menu_open = false;
             if let Some(i) = chosen {
-                if let Some(ri) = apps.launcher.get(i).copied() {
+                if let Some(ri) = menu_entries.get(i).copied() {
                     try_launch(
                         server, clients, &apps, ri, current_ws, &mut next_id,
                         ly.max_windows, &mut notifs, &notifications, animation_now,
@@ -4136,7 +2387,7 @@ fn run_desktop_session(
             // are exactly the fields the renderer reads); any other click just
             // dismisses the flyout. Either way the click is consumed and the flyout
             // closes, mirroring the launcher-dropdown model.
-            let flyout = qs_flyout_rect(&ly, panel_edge, qs_applet, 2);
+            let flyout = qs_flyout_rect(&ly, qs_edge, qs_applet, 2);
             if in_rect(qs_row_rect(&ly, flyout, 0), mx, my) {
                 fx.blur = !fx.blur;
                 libdunit::println(&alloc::format!("gui_server: quicksettings blur={}", fx.blur as u32));
@@ -4145,72 +2396,33 @@ fn run_desktop_session(
                 libdunit::println(&alloc::format!("gui_server: quicksettings widgets={}", wg.enabled as u32));
             }
             qs_open = false;
-        } else if press && in_rect(panel_rect, mx, my) {
-            // Panel click. The launcher mark (strip start) opens the app menu; the
-            // quick-settings applet opens its flyout; the workspace pips switch
-            // workspaces; the rest of the panel is consumed by the shell (task
-            // switching lives on the dock now). Either way the click never reaches a
-            // client — the shell owns the panel strip.
-            if in_rect(launcher_hit, mx, my) {
-                menu_open = true;
-                menu_sel = 0;
-                qs_open = false;
-            } else if quicksettings.enabled && panel_edge.is_horizontal() && in_rect(qs_applet, mx, my) {
-                // Toggle the quick-settings flyout (horizontal panels only — a
-                // narrow vertical bar has no spare main-axis room for the applet).
-                qs_open = !qs_open;
-                menu_open = false;
-            } else {
-                // Workspace switcher: activate the clicked pip's workspace. A
-                // click in the gap between pips is consumed but changes nothing.
-                for i in 0..if ly.show_workspaces { apps.workspaces } else { 0 } {
-                    let r = ws_pip_rect(&ly, panel_edge, panel_rect, i as i32);
-                    if in_rect(r, mx, my) {
-                        if current_ws != i {
-                            ws_switch_tick = animation_now; // start the incoming crossfade
-                        }
-                        current_ws = i;
-                        break;
+        } else if press && shell.contains(mx,my) {
+            if let Some(action) = shell.click(mx,my,&apps) {
+                match action {
+                    shell_runtime::Action::Launcher(ids,anchor,edge) => {
+                        menu_entries = ids;
+                        custom_menu_origin = Some(menu_origin(&ly,edge,anchor,menu_entries.len() as i32));
+                        menu_open = true; menu_sel = 0; qs_open = false;
                     }
-                }
-            }
-            // Any other panel click (centered title, tray) is consumed.
-        } else if press && in_rect(dock_rect, mx, my) {
-            // Dock strip on its configured edge: the task switcher.
-            // A click on a pinned icon raises its running window (switching
-            // workspace if needed) or spawns the app when none is running. The dock
-            // owns its strip — clicks never reach a client.
-            let mut chosen: Option<usize> = None;
-            for i in 0..apps.dock.len() {
-                let r = dock_icon_rect(&ly, &ins, bw, bh, apps.dock.len(), i as i32);
-                if in_rect(r, mx, my) {
-                    chosen = Some(i);
-                    break;
-                }
-            }
-            if let Some(i) = chosen {
-                if let Some(ri) = apps.dock.get(i).copied() {
-                    // Raise-if-running: newest live window registered to this app.
-                    let running = (0..wins.len())
-                        .rev()
-                        .find(|&wi| wins[wi].alive && wins[wi].app as usize == ri);
-                    if let Some(wi) = running {
-                        if current_ws != wins[wi].ws {
-                            ws_switch_tick = animation_now; // crossfade into the target ws
-                            current_ws = wins[wi].ws;
-                        }
-                        // Restore if it was minimized, then raise to the top.
-                        if wins[wi].minimized {
-                            wins[wi].minimized = false;
-                            wins[wi].born = animation_now; // replay the grow-in on restore
-                        }
-                        z.retain(|&i| i != wi);
-                        z.push(wi);
-                    } else {
-                        try_launch(
-                            server, clients, &apps, ri, current_ws, &mut next_id,
-                            ly.max_windows, &mut notifs, &notifications, animation_now,
-                        );
+                    shell_runtime::Action::Workspace(ws) => {
+                        if current_ws != ws { ws_switch_tick = animation_now; } current_ws = ws;
+                    }
+                    shell_runtime::Action::QuickSettings(anchor,edge)=>{active_qs_anchor=Some((anchor,edge));qs_open=!qs_open;menu_open=false;},
+                    shell_runtime::Action::Group(index,anchor) => shell.open_group(index,anchor,bw,bh),
+                    shell_runtime::Action::Command(command) => {
+                        if let Ok(action)=settings::policy::action(&command,&apps){desktop_actions::run(action,&mut desktop_actions::Context{session:&mut session,policy:&policy,server,clients,wins:&mut wins,z:&mut z,apps:&apps,shell:&shell,effects:&mut effects,back:&back,bw,bh,now:animation_now,duration:if animation_clock.is_some(){anim_duration_ms}else{0},theme:&theme,ly:&ly,fx:&fx,font:font.as_ref(),ws:&mut current_ws,ws_tick:&mut ws_switch_tick,menu:&mut menu_open,menu_sel:&mut menu_sel,entries:&mut menu_entries,next_id:&mut next_id,notifs:&mut notifs,notifications:&notifications,lua_requests:&mut lua_requests});}
+                    }
+                    shell_runtime::Action::App(ri) => {
+                        let running=(0..wins.len()).rev().find(|&wi|wins[wi].alive&&wins[wi].app as usize==ri);
+                        if let Some(wi)=running {
+                            if current_ws!=wins[wi].ws {ws_switch_tick=animation_now;current_ws=wins[wi].ws;}
+                            if wins[wi].minimized {
+                                effects.restore(&wins[wi],animation_now,anim_duration_ms);
+                                wins[wi].minimized=false;
+                                libdunit::println(&alloc::format!("gui_server: restored pid={}",wins[wi].pid));
+                            }
+                            raise_window(&mut z,wi);
+                        } else {try_launch(server,clients,&apps,ri,current_ws,&mut next_id,ly.max_windows,&mut notifs,&notifications,animation_now);}
                     }
                 }
             }
@@ -4220,16 +2432,23 @@ fn run_desktop_session(
             while zi > 0 {
                 zi -= 1;
                 let wi = z[zi];
-                if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && wins[wi].contains(mx, my) {
+                if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && !effects.covers(wins[wi].pid,animation_now) && effects.input_geometry(&wins[wi],animation_now).contains(wx,wy) {
                     hit = Some(wi);
                     break;
                 }
             }
-            if let Some(wi) = hit {
+            if let Some(wi)=hit {
+                let visual=effects.input_geometry(&wins[wi],animation_now);
+                effects.cancel_geometry(wins[wi].pid);
+                if (visual.sw,visual.sh)!=(wins[wi].sw,wins[wi].sh){wins[wi].desired_size=Some((visual.sw,visual.sh));reconfigure_client(server,clients,wins[wi].pid,visual.sw as u32,visual.sh as u32,1);}
+                wins[wi].cx=visual.cx;wins[wi].cy=visual.cy;wins[wi].sw=visual.sw;wins[wi].sh=visual.sh;
                 // Raise: move wi to the top of the z-order.
                 z.retain(|&i| i != wi);
                 z.push(wi);
-                if wins[wi].in_close(mx, my) {
+                if wins[wi].in_close(wx, wy) {
+                    effects.start(&wins[wi],&back,bw,bh,wins[wi].outer(),animation_now,anim_duration_ms,
+                        animation::Effect::Fade,animation::Easing::ease_out(),true,
+                        &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                     wins[wi].alive = false;
                     send_input(wins[wi].pid, IN_QUIT, 0, 0, 0);
                     drag = None;
@@ -4237,12 +2456,18 @@ fn run_desktop_session(
                     // app restores its last geometry.
                     session_remember(&mut session, &apps, &wins[wi]);
                     settings::save_session(&session);
-                } else if wins[wi].in_min(mx, my) {
+                } else if wins[wi].in_min(wx, wy) {
                     // Minimize: drop it from compositing/input; the dock task
                     // switcher restores it on click.
+                    let target=shell.app_target(wins[wi].app as usize,&apps).unwrap_or((bw as i32/2,bh as i32-1,1,1));
+                    effects.minimize(&wins[wi],&back,bw,bh,target,animation_now,anim_duration_ms,
+                        &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                    if let Some(name)=policy.for_app(apps.apps.get(wins[wi].app as usize).map(|a|a.id.as_str()).unwrap_or("")).animation {
+                        let (effect,easing)=window_effects::preset(&name,wins[wi].outer(),target);effects.configure(wins[wi].pid,effect,anim_duration_ms,easing,animation_now);
+                    }
                     wins[wi].minimized = true;
                     drag = None;
-                } else if wins[wi].in_max(mx, my) {
+                } else if wins[wi].in_max(wx, wy) {
                     // Maximize/restore: toggle the window between the work area
                     // and its saved floating geometry via a server-push CONFIGURE
                     // (Phase 3). The owning client re-imports at the new size and
@@ -4253,7 +2478,7 @@ fn run_desktop_session(
                     // rect) so a reopen restores it in the same state.
                     session_remember(&mut session, &apps, &wins[wi]);
                     settings::save_session(&session);
-                } else if wins[wi].in_title(mx, my) {
+                } else if wins[wi].in_title(wx, wy) {
                     // Title-bar drag. macOS-style restore: grabbing a *tiled*
                     // window (e.g. maximized) first restores it to its floating
                     // size, then it follows the pointer keeping the SAME
@@ -4267,9 +2492,9 @@ fn run_desktop_session(
                     wins[wi].motion = None;
                     if wins[wi].is_tiled() {
                         let old_w = wins[wi].sw.max(1);
-                        let grip_x = (mx - wins[wi].cx).clamp(0, old_w);
+                        let grip_x = (wx - wins[wi].cx).clamp(0, old_w);
                         let grip_y =
-                            (my - (wins[wi].cy - wins[wi].title_h)).clamp(0, (wins[wi].title_h - 1).max(0));
+                            (wy - (wins[wi].cy - wins[wi].title_h)).clamp(0, (wins[wi].title_h - 1).max(0));
                         let rest_w = wins[wi]
                             .restore
                             .map(|(_, _, w, _)| w)
@@ -4278,15 +2503,15 @@ fn run_desktop_session(
                         set_window_state(server, clients, &mut wins[wi], WinState::Floating, bw, bh, &ly, &ins);
                         let ox = (grip_x as i64 * rest_w as i64 / old_w as i64) as i32;
                         let oy = grip_y - wins[wi].title_h;
-                        wins[wi].cx = mx - ox;
-                        wins[wi].cy = my - oy;
+                        wins[wi].cx = wx - ox;
+                        wins[wi].cy = wy - oy;
                         drag = Some((wi, ox, oy));
                     } else {
-                        drag = Some((wi, mx - wins[wi].cx, my - wins[wi].cy));
+                        drag = Some((wi, wx - wins[wi].cx, wy - wins[wi].cy));
                     }
-                } else if wins[wi].in_content(mx, my) {
+                } else if wins[wi].in_content(wx, wy) {
                     // Click landed on client content: forward it to the client.
-                    send_input(wins[wi].pid, IN_DOWN, mx - wins[wi].cx, my - wins[wi].cy, 0);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(wins[wi].pid,IN_DOWN,x,y,0);
                     pressed_win = Some(wi);
                 }
             }
@@ -4303,8 +2528,8 @@ fn run_desktop_session(
 
         // --- Drag move ---
         if let Some((wi, ox, oy)) = drag {
-            let mut ncx = mx - ox;
-            let mut ncy = my - oy;
+            let mut ncx = wx - ox;
+            let mut ncy = wy - oy;
             ncx = ncx
                 .max(ins.left + ly.border)
                 .min(bw as i32 - ins.right - wins[wi].sw - ly.border);
@@ -4316,7 +2541,7 @@ fn run_desktop_session(
         }
 
         // --- Pointer focus + motion routed to the topmost content window ---
-        let cur = if drag.is_some() {
+        let cur = if drag.is_some() || shell.contains(mx,my) || menu_open || qs_open {
             None
         } else {
             let mut c = None;
@@ -4324,7 +2549,7 @@ fn run_desktop_session(
             while zi > 0 {
                 zi -= 1;
                 let wi = z[zi];
-                if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && wins[wi].in_content(mx, my) {
+                if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && !effects.covers(wins[wi].pid,animation_now) && effects.input_geometry(&wins[wi],animation_now).in_content(wx,wy) {
                     c = Some(wi);
                     break;
                 }
@@ -4341,8 +2566,7 @@ fn run_desktop_session(
             last_lx = i32::MIN; // force the next motion to be delivered
         }
         if let Some(wi) = cur {
-            let lx = mx - wins[wi].cx;
-            let ly = my - wins[wi].cy;
+            let (lx,ly)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);
             if lx != last_lx || ly != last_ly {
                 send_input(wins[wi].pid, IN_MOVE, lx, ly, 0);
                 last_lx = lx;
@@ -4354,7 +2578,7 @@ fn run_desktop_session(
         if release {
             if let Some(wi) = pressed_win {
                 if wins[wi].alive {
-                    send_input(wins[wi].pid, IN_UP, mx - wins[wi].cx, my - wins[wi].cy, 0);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(wins[wi].pid,IN_UP,x,y,0);
                 }
             }
             pressed_win = None;
@@ -4430,6 +2654,7 @@ fn run_desktop_session(
                         // Arming modifier released → commit the highlighted window.
                         if let Some(sel) = switcher.commit() {
                             if wins.get(sel).map_or(false, |w| w.alive) {
+                                if wins[sel].minimized{effects.restore(&wins[sel],animation_now,anim_duration_ms);}
                                 wins[sel].minimized = false;
                                 raise_window(&mut z, sel);
                                 libdunit::println(&alloc::format!(
@@ -4459,13 +2684,13 @@ fn run_desktop_session(
                             }
                         }
                         SC_DOWN => {
-                            if menu_sel + 1 < apps.launcher.len() {
+                            if menu_sel + 1 < menu_entries.len() {
                                 menu_sel += 1;
                             }
                         }
                         SC_ENTER => {
                             menu_open = false;
-                            if let Some(ri) = apps.launcher.get(menu_sel).copied() {
+                            if let Some(ri) = menu_entries.get(menu_sel).copied() {
                                 try_launch(
                                     server, clients, &apps, ri, current_ws, &mut next_id,
                                     ly.max_windows, &mut notifs, &notifications, animation_now,
@@ -4482,46 +2707,12 @@ fn run_desktop_session(
             // Intercepted before client forwarding, exactly like the switcher. The
             // DECISION is the pure `match_shortcut` (so the self-test can prove the
             // mapping); the EFFECT here reuses the same paths the mouse chips drive.
-            match match_shortcut(ev.scancode, ev.mods, ev.pressed, &shortcuts, apps.workspaces) {
-                ShortcutAction::Workspace(ws) => {
-                    if current_ws != ws {
-                        ws_switch_tick = animation_now; // start the incoming crossfade
-                        current_ws = ws;
-                    }
-                    continue;
-                }
-                ShortcutAction::Launcher => {
-                    menu_open = true;
-                    menu_sel = 0;
-                    qs_open = false;
-                    continue;
-                }
-                ShortcutAction::CloseWindow => {
-                    if let Some(wi) = focused {
-                        // Same close path as the title-bar close chip: drop it from
-                        // compositing, tell the client to quit, and remember its
-                        // geometry so reopening restores where it sat.
-                        wins[wi].alive = false;
-                        send_input(wins[wi].pid, IN_QUIT, 0, 0, 0);
-                        drag = None;
-                        session_remember(&mut session, &apps, &wins[wi]);
-                        settings::save_session(&session);
-                    }
-                    continue;
-                }
-                ShortcutAction::MaximizeWindow => {
-                    if let Some(wi) = focused {
-                        // Same maximize path as the title-bar chip: a server-push
-                        // CONFIGURE the client re-imports at the new size.
-                        toggle_maximize(server, clients, &mut wins[wi], bw, bh, &ly, &ins);
-                        drag = None;
-                        session_remember(&mut session, &apps, &wins[wi]);
-                        settings::save_session(&session);
-                    }
-                    continue;
-                }
-                ShortcutAction::None => {}
-            }
+            let custom=if ev.pressed {policy.bindings.iter().find(|b|b.scancode==ev.scancode&&b.modifiers==ev.mods).map(|b|b.action.clone())}else{None};
+            if let Some(action)=custom {desktop_actions::run(action,&mut desktop_actions::Context{session:&mut session,policy:&policy,server,clients,wins:&mut wins,z:&mut z,apps:&apps,shell:&shell,effects:&mut effects,back:&back,bw,bh,now:animation_now,duration:if animation_clock.is_some(){anim_duration_ms}else{0},theme:&theme,ly:&ly,fx:&fx,font:font.as_ref(),ws:&mut current_ws,ws_tick:&mut ws_switch_tick,menu:&mut menu_open,menu_sel:&mut menu_sel,entries:&mut menu_entries,next_id:&mut next_id,notifs:&mut notifs,notifications:&notifications,lua_requests:&mut lua_requests});continue;}
+            let action=match match_shortcut(ev.scancode,ev.mods,ev.pressed,&shortcuts,apps.workspaces){
+                ShortcutAction::Workspace(ws)=>Some(settings::policy::Action::Workspace(ws)),ShortcutAction::Launcher=>Some(settings::policy::Action::Launcher),
+                ShortcutAction::CloseWindow=>Some(settings::policy::Action::Close),ShortcutAction::MaximizeWindow=>Some(settings::policy::Action::Maximize),ShortcutAction::None=>None};
+            if let Some(action)=action {desktop_actions::run(action,&mut desktop_actions::Context{session:&mut session,policy:&policy,server,clients,wins:&mut wins,z:&mut z,apps:&apps,shell:&shell,effects:&mut effects,back:&back,bw,bh,now:animation_now,duration:if animation_clock.is_some(){anim_duration_ms}else{0},theme:&theme,ly:&ly,fx:&fx,font:font.as_ref(),ws:&mut current_ws,ws_tick:&mut ws_switch_tick,menu:&mut menu_open,menu_sel:&mut menu_sel,entries:&mut menu_entries,next_id:&mut next_id,notifs:&mut notifs,notifications:&notifications,lua_requests:&mut lua_requests});continue;}
 
             if !ev.pressed || is_modifier_scancode(ev.scancode) {
                 continue;
@@ -4537,10 +2728,93 @@ fn run_desktop_session(
             }
         }
 
+        for win in wins.iter_mut().filter(|w|w.alive&&!w.rule_applied) {
+            let app=apps.apps.get(win.app as usize).map(|a|a.id.as_str()).unwrap_or("");
+            let rule=policy.for_app(app);
+            if let Some(ws)=rule.workspace {win.ws=ws;}
+            if let Some(x)=rule.x {win.cx=x.clamp(ins.left,(bw as i32-ins.right-win.sw).max(ins.left));}
+            if let Some(y)=rule.y {win.cy=y.clamp(ins.top+ly.title_h,(bh as i32-ins.bottom-win.sh).max(ins.top+ly.title_h));}
+            if rule.width.is_some()||rule.height.is_some() {reconfigure_client(server,clients,win.pid,
+                rule.width.unwrap_or(win.sw).min(bw as i32)as u32,rule.height.unwrap_or(win.sh).min(bh as i32)as u32,1);}
+            if let Some(floating)=rule.floating {win.lua_floating=floating;}
+            if let Some(opacity)=rule.opacity {win.opacity=opacity;}
+            if let Some(name)=rule.animation.as_deref().filter(|_|animation_clock.is_some()){let target=shell.app_target(win.app as usize,&apps).unwrap_or((bw as i32/2,bh as i32-1,1,1));
+                let (effect,easing)=window_effects::preset(name,win.outer(),target);
+                effects.start(win,&back,bw,bh,target,animation_now,anim_duration_ms,effect,easing,false,
+                    &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});}
+            win.rule_applied=true;
+        }
+        if scripts.enabled && !scripts.events.as_str().is_empty() {
+            for win in &wins {
+                let old=observed.iter().find(|old|old.0==win.pid);
+                let name=match old {
+                    None if win.alive=>Some("window_open"),
+                    Some(old) if old.1&&!win.alive=>Some("window_close"),
+                    Some(old) if old.2!=win.minimized=>Some(if win.minimized{"window_minimize"}else{"window_restore"}),
+                    Some(old) if old.3!=win.state=>Some("window_maximize"),_=>None,
+                };
+                if let Some(name)=name {let _=event_engine.submit(lua_policy::Event{name,window_id:win.pid,target:win.app as u32+1});}
+            }
+            for old in &observed {if old.1&&!wins.iter().any(|w|w.pid==old.0){let _=event_engine.submit(lua_policy::Event{name:"window_close",window_id:old.0,target:0});}}
+            let focus=focused.map(|i|wins[i].pid);
+            if focus!=observed_focus {if let Some(pid)=focus {let _=event_engine.submit(lua_policy::Event{name:"window_focus",window_id:pid,target:wins.iter().find(|w|w.pid==pid).map_or(0,|w|w.app as u32+1)});}}
+            if current_ws!=observed_ws {let _=event_engine.submit(lua_policy::Event{name:"workspace_change",window_id:0,target:current_ws as u32});}
+            if menu_open!=observed_menu {let _=event_engine.submit(lua_policy::Event{name:if menu_open{"launcher_open"}else{"launcher_close"},window_id:0,target:0});}
+            let hover=shell.event_target(mx,my);
+            if hover!=hovered_component {if let Some((target,_))=hover {let _=event_engine.submit(lua_policy::Event{name:"panel_hover",window_id:0,target});}hovered_component=hover;}
+            if press {if let Some((target,widget))=hover {let _=event_engine.submit(lua_policy::Event{name:if widget{"widget_click"}else{"panel_click"},window_id:0,target});}}
+            for target in shell.due_widget_updates(animation_now){let _=event_engine.submit(lua_policy::Event{name:"widget_update",window_id:0,target});}
+            observed.clear();observed.extend(wins.iter().map(|w|(w.pid,w.alive,w.minimized,w.state)));
+            observed_ws=current_ws;observed_focus=focus;observed_menu=menu_open;
+        }
+        match event_engine.poll(&scripts,scripts.events.as_str()) {
+            lua_policy::EventPoll::Pending=>{},
+            lua_policy::EventPoll::Failed(reason)=>libdunit::println(&alloc::format!("gui_server: Lua event rejected {}; native animation retained",reason)),
+            lua_policy::EventPoll::Ready(actions,commands,widgets)=>'batch:{
+                let commands:Result<Vec<_>,_>=commands.iter().map(|command|settings::policy::action(command,&apps)).collect();
+                let Ok(commands)=commands else {libdunit::println("gui_server: Lua command rejected; native state retained");break 'batch;};
+                let mut actions=actions;
+                if !fx.anim||animation_clock.is_none(){for action in &mut actions{action.duration_ms=0;}}
+                let mut next_desktop_tracks=desktop_tracks.clone();
+                for action in actions.iter().filter(|a|a.window_id==0&&(513..=515).contains(&a.target)){if next_desktop_tracks.submit(action,animation_now).is_err(){libdunit::println("gui_server: desktop animation budget rejected");break 'batch;}}
+                if let Err(error)=shell.apply_response(&actions,&widgets,animation_now,font.as_ref(),&apps,&ly){libdunit::println(&alloc::format!("gui_server: Lua scene batch rejected {}",error));break 'batch;}
+                desktop_tracks=next_desktop_tracks;
+                for update in &widgets{if let Some(component)=shell.config.components.get(update.target as usize-1){libdunit::println(&alloc::format!("gui_server: widget updated component={} text={}",component.id,component.label));}}
+                for action in actions.iter().filter(|a|a.window_id==0){libdunit::println(&alloc::format!("gui_server: component animation committed target={}",action.target));}
+                for command in commands {desktop_actions::run(command,&mut desktop_actions::Context{session:&mut session,policy:&policy,server,clients,wins:&mut wins,z:&mut z,apps:&apps,shell:&shell,effects:&mut effects,back:&back,bw,bh,now:animation_now,duration:if animation_clock.is_some(){anim_duration_ms}else{0},theme:&theme,ly:&ly,fx:&fx,font:font.as_ref(),ws:&mut current_ws,ws_tick:&mut ws_switch_tick,menu:&mut menu_open,menu_sel:&mut menu_sel,entries:&mut menu_entries,next_id:&mut next_id,notifs:&mut notifs,notifications:&notifications,lua_requests:&mut lua_requests});}
+                for mut action in actions {
+                if !fx.anim||animation_clock.is_none(){action.duration_ms=0;}
+                if action.window_id==0{continue;}
+
+                let easing=animation::Easing::new(action.curve).unwrap_or_else(|_|animation::Easing::ease_out());
+                if action.property.is_none(){if let Some((source,target))=effects.snapshot_geometry(action.window_id){
+                    let effect=match action.effect {lua_policy::Effect::Fade=>animation::Effect::Fade,lua_policy::Effect::Slide=>animation::Effect::Slide,
+                        lua_policy::Effect::Scale=>animation::Effect::Scale,lua_policy::Effect::Spring=>animation::Effect::Spring,
+                        lua_policy::Effect::Genie=>animation::Effect::Genie(window_effects::target_edge(source,target))};
+                    effects.configure(action.window_id,effect,action.duration_ms,easing,animation_now);
+                }}
+                if let Some(win)=wins.iter_mut().find(|w|w.pid==action.window_id) {
+                    if let Some(property)=action.property{if property==lua_policy::Property::Opacity{win.born=animation_now.saturating_sub(anim_duration_ms as u64);}effects.scalar(win.pid,property,animation_now,action.duration_ms,action.from,action.to,easing);}
+                    else {
+                        let target=shell.app_target(win.app as usize,&apps).unwrap_or((bw as i32/2,bh as i32-1,1,1));
+                        let effect=match action.effect {lua_policy::Effect::Fade=>animation::Effect::Fade,lua_policy::Effect::Slide=>animation::Effect::Slide,
+                            lua_policy::Effect::Scale=>animation::Effect::Scale,lua_policy::Effect::Spring=>animation::Effect::Spring,
+                            lua_policy::Effect::Genie=>animation::Effect::Genie(window_effects::target_edge(win.outer(),target))};
+                        if !effects.configure(win.pid,effect,action.duration_ms,easing,animation_now) {
+                            effects.start(win,&back,bw,bh,target,animation_now,action.duration_ms,effect,easing,false,
+                                &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                        }
+                    }
+                    libdunit::println(&alloc::format!("gui_server: Lua animation committed pid={} duration={}",win.pid,action.duration_ms));
+                }
+            }
+            }
+        }
+
         // Lua policy is evaluated outside the compositor process. Only topology,
         // workspace or configuration changes start a new request; frame rendering
-        // never waits for the VM. A dragged tiled window becomes floating until
-        // the next settings reload, so policy cannot fight the pointer.
+        // never waits for the VM. Dragging releases a window from Lua tiling
+        // until an explicit retile action, so policy cannot fight the pointer.
         let mut lua_failure = None;
         if scripts.enabled {
             let ids: Vec<u32> = wins
@@ -4710,8 +2984,8 @@ fn run_desktop_session(
                     }
                     let card_w = 236i32;
                     let pad = 16i32;
-                    let clock_px = (ly.title_font_px as f32 * 2.4).max(24.0);
-                    let clock_h = if clock_w.is_some() { clock_px as i32 + 10 } else { 0 };
+                    let clock_px=clock_w.map(|w|w.clock.font_px as f32).unwrap_or(ly.title_font_px as f32);
+                    let clock_h=clock_w.map(|w|if w.clock.style==settings::ClockStyle::Analog{w.clock.size as i32}else{clock_px as i32+10}).unwrap_or(0);
                     let mon_h = if mon_w.is_some() { 58 } else { 0 };
                     let card_h = pad * 2 + clock_h + mon_h;
                     let margin = 24i32;
@@ -4729,13 +3003,17 @@ fn run_desktop_session(
                         blur_region(&mut back, bw, bh, cx, cy, card_w, card_h, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b);
                     }
                     fill_rrect_grad(&mut back, bw, bh, cx, cy, card_w, card_h, fx.corner_radius, RR_ALL, shade(theme.menu, 16), shade(theme.menu, -8), fx.menu_alpha);
-                    let secs = if whave { wst.uptime_ticks / 100 } else { 0 };
+                    let secs=if whave&&wst.uptime_hz>0{wst.uptime_ticks/wst.uptime_hz}else{0};
                     let mut ty = cy + pad;
-                    if clock_w.is_some() {
+                    if let Some(clock)=clock_w {
+                        if clock.clock.style==settings::ClockStyle::Analog {
+                            shell_runtime::analog(&mut back,bw,bh,(cx+pad,ty,card_w-2*pad,clock_h),secs,theme.panel_text,theme.launcher);
+                        } else {
                         let clk = alloc::format!("{:02}:{:02}:{:02}", (secs / 3600) % 100, (secs / 60) % 60, secs % 60);
                         let tw = text_width_ttf(f, &clk, clock_px);
                         let baseline = ty + clock_px as i32 - 4;
                         draw_text_ttf(&mut back, bw, bh, f, cx + (card_w - tw) / 2, baseline, clock_px, &clk, theme.panel_text & 0x00FF_FFFF);
+                        }
                         ty += clock_h;
                     }
                     if let Some(mw) = mon_w {
@@ -4768,366 +3046,53 @@ fn run_desktop_session(
         // in from `born`, and the active workspace fades in after a switch —
         // folded into one alpha `a` so both read as a single grow-in.
         let duration_ms = if animation_clock.is_some() { anim_duration_ms } else { 0 };
+        let workspace_view=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);
+        let workspace_transform=desktop_motion::changed(&workspace_view,bw,bh)&&workspace_layer.begin(&back);
         let ws_fade = animation::progress(animation_now, ws_switch_tick, duration_ms, lua_ease_out);
         for &wi in z.iter() {
             let w = &wins[wi];
-            if !w.alive || w.ws != current_ws || w.minimized {
+            if !w.alive || w.ws != current_ws || w.minimized || effects.covers(w.pid,animation_now) {
                 continue;
             }
             let is_focused = focused == Some(wi);
-            let a = animation::progress(animation_now, w.born, duration_ms, lua_ease_out).min(ws_fade) as i32;
+            let a = (animation::progress(animation_now,w.born,duration_ms,lua_ease_out).min(if desktop_tracks.has(desktop_motion::WORKSPACE,lua_policy::Property::Opacity){255}else{ws_fade}) * effects.alpha(w.pid,animation_now) / 255 * w.opacity as u32 / 255) as i32;
             if a <= 0 {
                 continue;
             }
-            let (ox, oy, ow, oh) = w.outer();
-            let bcol = if is_focused { theme.border_focused } else { theme.border_unfocused };
-            let tcol = if is_focused { theme.title_focused } else { theme.title_unfocused };
-            if fx.shadow > 0 {
-                draw_soft_shadow(&mut back, bw, bh, ox, oy, ow, oh, fx.corner_radius, fx.shadow, fx.shadow_alpha * a / 255);
-            }
-            // Translucent (ARGB) window: snapshot the real backing (wallpaper +
-            // lower-z windows already composited into `back`) under the content
-            // rect NOW, before the opaque frame gradient below overwrites it. It's
-            // restored right before the client blit so the client's semi-transparent
-            // background blends over what's genuinely behind the window. Opaque
-            // (XRGB) windows skip this — they overwrite the content rect wholesale.
-            let translucent = w.format == FORMAT_ARGB8888 && a >= 224;
-            let mut backing_rect: Option<(usize, usize, usize, usize)> = None;
-            if translucent {
-                let (bx, by, cw, ch) = clip_to_screen(w.cx, w.cy, w.sw, w.sh, bw, bh);
-                if cw > 0 && ch > 0 {
-                    win_backing.clear();
-                    for ry in 0..ch {
-                        let srow = (by + ry) * bw + bx;
-                        win_backing.extend_from_slice(&back[srow..srow + cw]);
-                    }
-                    backing_rect = Some((bx, by, cw, ch));
-                }
-            }
-            // Rounded frame: top corners only, so the square-bottomed client
-            // surface tucks flush against the bottom edge (no corner poke-through).
-            fill_rrect_grad(&mut back, bw, bh, ox, oy, ow, oh, fx.corner_radius, RR_TOP, shade(bcol, 18), shade(bcol, -12), a);
-            fill_rrect_grad(&mut back, bw, bh, w.cx, w.cy - w.title_h, w.sw, w.title_h, fx.corner_radius, RR_TOP, shade(tcol, 16), shade(tcol, -10), a);
-            for (role, color) in [(0, theme.close), (1, theme.minimize), (2, theme.maximize)] {
-                let (x, y, size, _) = w.control_rect(role);
-                let radius = if w.traffic_lights { size / 2 } else { fx.corner_radius.min(size / 2) };
-                fill_rrect(&mut back, bw, bh, x, y, size, size, radius, RR_ALL,
-                    ((a as u32) << 24) | (color & 0x00FF_FFFF));
-                // Traffic lights reveal action glyphs on hover, like desktop controls.
-                if !w.traffic_lights || in_rect(w.control_rect(role), mx, my) {
-                    let glyph = if is_focused { theme.title_text_focused } else { theme.title_text_unfocused };
-                    let col = ((a as u32) << 24) | (glyph & 0x00FF_FFFF);
-                    let half = (size / 2).max(3);
-                    let gx = x + (size - half) / 2;
-                    let gy = y + size / 2;
-                    if role == 1 { fill_rect_alpha(&mut back, bw, bh, gx, gy, half, 1, col); }
-                    if role == 2 {
-                        let top = y + (size - half) / 2;
-                        fill_rect_alpha(&mut back, bw, bh, gx, top, half, 1, col);
-                        fill_rect_alpha(&mut back, bw, bh, gx, top + half - 1, half, 1, col);
-                        fill_rect_alpha(&mut back, bw, bh, gx, top, 1, half, col);
-                        fill_rect_alpha(&mut back, bw, bh, gx + half - 1, top, 1, half, col);
-                    }
-                    if role == 0 && w.traffic_lights {
-                        for j in 0..half {
-                            fill_rect_alpha(&mut back, bw, bh, gx + j, y + (size - half) / 2 + j, 1, 1, col);
-                            fill_rect_alpha(&mut back, bw, bh, gx + half - 1 - j, y + (size - half) / 2 + j, 1, 1, col);
-                        }
-                    }
-                }
-            }
-            // Window title text (TTF), left-aligned in the title bar, clear of the
-            // close chip. Drawn only once the card is nearly solid so it appears
-            // with the surface rather than through the grow-in blend.
-            if a >= 224 {
-                if let Some(f) = font.as_ref() {
-                    let px = ly.title_font_px as f32;
-                    let baseline = w.cy - w.title_h / 2 + 5;
-                    let txtcol = if is_focused {
-                        theme.title_text_focused & 0x00FF_FFFF
-                    } else {
-                        theme.title_text_unfocused & 0x00FF_FFFF
-                    };
-                    let title = win_title(&apps, w.app);
-                    let tx = if w.traffic_lights {
-                        w.cx + (w.sw - text_width_ttf(f, title, px)) / 2
-                    } else { w.cx + 12 };
-                    draw_text_ttf(&mut back, bw, bh, f, tx, baseline, px, title, txtcol);
-                }
-            }
-            // Client surface. Held back until the frame is nearly solid so the
-            // grow-in shows a clean card, not a half-blended image. XRGB surfaces
-            // are an opaque copy (fast path); ARGB surfaces blend per-pixel over
-            // the restored backing so a translucent client reveals the desktop.
-            if a >= 224 {
-                let want = (w.sw as usize) * (w.sh as usize);
-                if want > 0 && want * 4 <= w.buf_size {
-                    // Restore the pre-frame backing under the content rect so the
-                    // ARGB blend composites over wallpaper/lower windows, not frame.
-                    if let Some((bx, by, cw, ch)) = backing_rect {
-                        for ry in 0..ch {
-                            let drow = (by + ry) * bw + bx;
-                            let srow = ry * cw;
-                            back[drow..drow + cw].copy_from_slice(&win_backing[srow..srow + cw]);
-                        }
-                    }
-                    let src = unsafe { core::slice::from_raw_parts(w.buf_ptr as *const u32, want) };
-                    let argb = w.format == FORMAT_ARGB8888;
-                    if argb && !argb_blit_logged {
-                        libdunit::println(&alloc::format!(
-                            "gui_server: argb blit (client format={}, per-pixel src-over)",
-                            w.format
-                        ));
-                        argb_blit_logged = true;
-                    }
-                    blit_surface(&mut back, bw, bh, w.cx, w.cy, src, w.sw as usize, w.sh as usize, argb);
-                }
-            }
+            let (visual,visual_theme,visual_fx)=effects.visual(w,animation_now,&theme,&fx);
+            window_painter::paint(&mut back,bw,bh,&visual,is_focused,a,&visual_theme,&ly,&visual_fx,font.as_ref(),&apps,wx,wy,&mut win_backing,&mut argb_blit_logged,&mut blur_a,&mut blur_b);
         }
 
-        // --- DWM panel: acrylic glass bar on its configured edge ---
-        // `panel_rect` (computed per-frame from `panel_edge`) is the strip; for the
-        // default top edge it is (0,0,bw,panel_h) so the layout below is byte-for-
-        // byte identical. Horizontal panels (top/bottom) carry the full text layout
-        // (wordmark, centred title, tray line); vertical panels (left/right) are a
-        // narrow bar and render only the compact icon + pip content.
-        let (panx, pany, panw, panh) = panel_rect;
-        let horiz = panel_edge.is_horizontal();
-        fill_strip_bg(&mut back, bw, bh, panel_rect, theme.panel, &fx, 16, &mut blur_a, &mut blur_b);
-        // App-menu button: the brand logo mark at the panel's start (top-left on a
-        // horizontal bar, top-centre on a vertical one), clickable to open the
-        // launcher dropdown. The "Dunit" wordmark follows it, but only where a wide
-        // horizontal bar has room for it. Falls back to a flat mark + hamburger
-        // bars when the shell font/logo is unavailable.
-        {
-            let logo_sz = (ly.panel_h - 8).clamp(8, 22);
-            let (lgx, lgy) = if horiz {
-                (panx + 8, pany + (panh - logo_sz) / 2)
-            } else {
-                (panx + (panw - logo_sz) / 2, pany + 8)
-            };
-            if let Some(lg) = logo.as_ref() {
-                blit_icon(&mut back, bw, bh, &lg.pixels, lg.width, lg.height, lgx, lgy, logo_sz, logo_sz);
-            } else {
-                fill_rrect(&mut back, bw, bh, lgx, lgy, logo_sz, logo_sz, logo_sz / 2, RR_ALL, 0xFF00_0000 | (theme.launcher & 0x00FF_FFFF));
-                fill_rrect(&mut back, bw, bh, lgx + logo_sz / 3, lgy + logo_sz / 3, logo_sz / 3, logo_sz / 3, logo_sz / 6, RR_ALL, 0xFF00_0000 | (theme.panel & 0x00FF_FFFF));
-            }
-            if horiz {
-                let text_x = lgx + logo_sz + 6;
-                if let Some(f) = font.as_ref() {
-                    let px = ly.panel_font_px as f32;
-                    let baseline = pany + ly.panel_h / 2 + 5;
-                    draw_text_ttf(&mut back, bw, bh, f, text_x, baseline, px, "Dunit", theme.panel_text & 0x00FF_FFFF);
-                } else {
-                    for r in 0..3 {
-                        fill_rect(&mut back, bw, bh, text_x, pany + 8 + r * 5, 18, 2, theme.launcher);
-                    }
-                }
-            }
-        }
-        // Workspace switcher: pips 1..=ws_count laid along the panel's main axis
-        // after the launcher glyph. The active workspace is highlighted; any
-        // workspace holding a live window gets an accent underline.
-        for i in 0..if ly.show_workspaces { apps.workspaces } else { 0 } {
-            let (px, py, pw, ph) = ws_pip_rect(&ly, panel_edge, panel_rect, i as i32);
-            let base = if i == current_ws {
-                theme.taskbtn_focused
-            } else {
-                theme.taskbtn
-            };
-            fill_rrect_grad(&mut back, bw, bh, px, py, pw, ph, 5, RR_ALL, shade(base, 18), shade(base, -10), 255);
-            let label = [b'1' + i as u8];
-            let tx = px + (pw - GLYPH_W * 2) / 2;
-            let ty = py + (ph - 5 * 2) / 2;
-            draw_text_3x5(&mut back, bw, bh, tx, ty, 2, theme.panel_text, &label);
-            if wins.iter().any(|w| w.alive && w.ws == i) {
-                fill_rrect(&mut back, bw, bh, px + 2, py + ph - 3, pw - 4, 2, 1, RR_ALL, 0xFF00_0000 | (theme.launcher & 0x00FF_FFFF));
-            }
-        }
-        // Quick-settings applet cell: a small toggle button just past the pips
-        // (horizontal panels only — a vertical bar has no spare main-axis room).
-        // Gated by `[quicksettings] enabled`; opening it reveals the live-toggle
-        // flyout drawn later. A "sliders" mark keeps it legible without an asset.
-        if quicksettings.enabled && horiz {
-            let (ax, ay, aw, ah) = qs_applet;
-            let hot = qs_open || (mx >= ax && mx < ax + aw && my >= ay && my < ay + ah);
-            let base = if hot { theme.taskbtn_focused } else { theme.taskbtn };
-            fill_rrect_grad(&mut back, bw, bh, ax, ay, aw, ah, 6, RR_ALL, shade(base, 18), shade(base, -10), 255);
-            let gx = ax + aw / 2 - 5;
-            for r in 0..3i32 {
-                let gy = ay + ah / 2 - 4 + r * 4;
-                fill_rect(&mut back, bw, bh, gx, gy, 10, 2, theme.panel_text);
-                let kx = gx + if r == 1 { 6 } else { r * 3 };
-                fill_rrect(&mut back, bw, bh, kx, gy - 1, 3, 4, 1, RR_ALL, 0xFF00_0000 | (theme.launcher & 0x00FF_FFFF));
-            }
-        }
-        // Centered focused-window title (icon + app name). Horizontal panels only —
-        // a narrow vertical bar has no room for the label. Task switching lives on
-        // the dock; this is just the active window's identity.
-        if horiz {
-            if let (Some(wi), Some(f)) = (focused, font.as_ref()) {
-                let title = win_title(&apps, wins[wi].app);
-                let px = ly.title_font_px as f32;
-                let tw = text_width_ttf(f, title, px);
-                let icon = app_icons.get(wins[wi].app as usize).and_then(|s| s.as_ref());
-                let isz = (ly.panel_h - 8).clamp(8, 22);
-                let gap = if icon.is_some() { 6 } else { 0 };
-                let iw = if icon.is_some() { isz } else { 0 };
-                let total = iw + gap + tw;
-                let sx = panx + (panw - total) / 2;
-                if let Some(ic) = icon {
-                    let iy = pany + (ly.panel_h - isz) / 2;
-                    blit_icon(&mut back, bw, bh, &ic.pixels, ic.width, ic.height, sx, iy, isz, isz);
-                }
-                let baseline = pany + ly.panel_h / 2 + 5;
-                draw_text_ttf(&mut back, bw, bh, f, sx + iw + gap, baseline, px, title, theme.title_text_focused & 0x00FF_FFFF);
-            }
-        }
-        // System tray: live RAM usage, running-process count and the uptime clock.
-        // When `[tray] pos` differs from the panel edge it gets its OWN acrylic
-        // strip (`tray_own`); otherwise it rides the end of the panel (right-aligned
-        // on a horizontal bar — the default look). A horizontal tray shows the full
-        // TTF line; a vertical tray shows only the compact MM:SS clock (no room for
-        // the wide text) so it stays legible in the narrow bar.
-        {
-            if let Some(t) = tray_own {
-                fill_strip_bg(&mut back, bw, bh, t, theme.panel, &fx, 12, &mut blur_a, &mut blur_b);
-            }
-            let (trect, tray_h) = match tray_own {
-                Some(t) => (t, tray_edge.is_horizontal()),
-                None => (panel_rect, horiz),
-            };
-            let (tx0, ty0, tw0, th0) = trect;
-            let mut stats = libdunit::SystemStats::default();
-            let have = libdunit::get_system_stats(&mut stats) >= 0;
-            let secs = if have { stats.uptime_ticks / 100 } else { 0 };
-            if tray_h {
-                if let Some(f) = font.as_ref() {
-                    let ram_pct = if have && stats.pmm_total_bytes > 0 {
-                        stats.memory_used_percent()
-                    } else {
-                        0
-                    };
-                    let tray = alloc::format!(
-                        "RAM {}%   {} proc   {:02}:{:02}",
-                        ram_pct,
-                        stats.process_running,
-                        (secs / 60) % 100,
-                        secs % 60
-                    );
-                    let px = ly.title_font_px as f32;
-                    let tw = text_width_ttf(f, &tray, px);
-                    let baseline = ty0 + th0 / 2 + 5;
-                    draw_text_ttf(&mut back, bw, bh, f, tx0 + tw0 - tw - 14, baseline, px, &tray, theme.panel_text);
-                } else {
-                    let mut clk = *b"00:00";
-                    two_digits(&mut clk, 0, (secs / 60) % 100);
-                    two_digits(&mut clk, 3, secs % 60);
-                    let clk_w = clk.len() as i32 * (GLYPH_W + 1) * 3;
-                    draw_text_3x5(&mut back, bw, bh, tx0 + tw0 - clk_w - 12, ty0 + (th0 - 15) / 2, 3, theme.panel_text, &clk);
-                }
-            } else {
-                let mut clk = *b"00:00";
-                two_digits(&mut clk, 0, (secs / 60) % 100);
-                two_digits(&mut clk, 3, secs % 60);
-                let clk_w = clk.len() as i32 * (GLYPH_W + 1) * 2;
-                let cx0 = tx0 + (tw0 - clk_w) / 2;
-                let cy0 = ty0 + th0 - 5 * 2 - 8;
-                draw_text_3x5(&mut back, bw, bh, cx0, cy0, 2, theme.panel_text, &clk);
-            }
-        }
-
-        // --- DWM dock: pinned launchers on the configured edge ---
-        if ly.dock_centered {
-            let (x, y, width, height) = dock_rect;
-            if fx.blur { blur_region(&mut back, bw, bh, x, y, width, height, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b); }
-            fill_rrect(&mut back, bw, bh, x, y, width, height, fx.corner_radius, RR_ALL,
-                ((fx.panel_alpha as u32) << 24) | (theme.panel & 0x00FF_FFFF));
-        } else {
-            fill_strip_bg(&mut back, bw, bh, dock_rect, theme.panel, &fx, 14, &mut blur_a, &mut blur_b);
-        }
-        // Hover easing step per frame (instant when animations are off).
-        let hover_step = if duration_ms == 0 { 255u8 } else {
-            (animation_now.saturating_sub(previous_animation_time).saturating_mul(255)
-                / duration_ms as u64).min(255) as u8
-        };
-        for i in 0..apps.dock.len() {
-            let ri = apps.dock[i];
-            let (ix, iy, iw, ih) = dock_icon_rect(&ly, &ins, bw, bh, apps.dock.len(), i as i32);
-            if iy + ih > dock_rect.1 + dock_rect.3 || ix + iw > dock_rect.0 + dock_rect.2 {
-                break;
-            }
-            let hovered = mx >= dock_rect.0 && mx < dock_rect.0 + dock_rect.2 && mx >= ix && mx < ix + iw && my >= iy && my < iy + ih;
-            dock_hover[i] = if hovered {
-                dock_hover[i].saturating_add(hover_step)
-            } else {
-                dock_hover[i].saturating_sub(hover_step)
-            };
-            let hp = dock_hover[i] as i32; // 0..255 eased hover amount
-            let grow = 3 * hp / 255; // grow the cell up to 3px each side on hover
-            let (cx0, cy0, cw, ch) = (ix - grow, iy - grow, iw + 2 * grow, ih + 2 * grow);
-            let base = lerp_color(theme.taskbtn, theme.taskbtn_focused, hp as u32);
-            fill_rrect_grad(&mut back, bw, bh, cx0, cy0, cw, ch, 7, RR_ALL, shade(base, 20), shade(base, -10), ly.dock_tile_alpha.max(hp as u32) as i32);
-            // Icon for the pinned registry entry (grows with the hover zoom); if
-            // the asset is missing, fall back to the app's label initial.
-            if let Some(icon) = app_icons.get(ri).and_then(|s| s.as_ref()) {
-                let pad = 4;
-                let dw = (cw - 2 * pad).max(1);
-                let dh = (ch - 2 * pad).max(1);
-                blit_icon(&mut back, bw, bh, &icon.pixels, icon.width, icon.height, cx0 + pad, cy0 + pad, dw, dh);
-            } else {
-                let tx = cx0 + (cw - GLYPH_W * 3) / 2;
-                let ty = cy0 + (ch - 5 * 3) / 2;
-                let ch0 = apps
-                    .apps
-                    .get(ri)
-                    .and_then(|a| a.label.as_bytes().first().copied())
-                    .unwrap_or(b'?');
-                if let Some(f) = font.as_ref() {
-                    let label = [ch0];
-                    let text = core::str::from_utf8(&label).unwrap_or("?");
-                    let px = ly.title_font_px as f32;
-                    let width = text_width_ttf(f, text, px);
-                    draw_text_ttf(&mut back, bw, bh, f, cx0 + (cw - width) / 2,
-                        cy0 + ch / 2 + ly.title_font_px / 3, px, text, theme.panel_text);
-                } else {
-                    draw_text_3x5(&mut back, bw, bh, tx, ty, 3, theme.panel_text, &[ch0]);
-                }
-            }
-            // Running/active marker: an accent bar on the icon's left edge. A
-            // merely-running app gets a short, dimmed pip; the app that owns the
-            // focused window gets a longer, full-accent bar — the dock's active
-            // indicator, like the reference dock.
-            if wins.iter().any(|w| w.alive && w.app == ri as u8) {
-                let active = focused.map(|wi| wins[wi].app) == Some(ri as u8);
-                let barh = if active { ch * 2 / 3 } else { ch / 4 };
-                let bcol = if active { theme.launcher } else { shade(theme.launcher, -40) };
-                let marker = if ly.dock_edge.is_horizontal() {
-                    (cx0 + (cw - barh) / 2, cy0 + ch, barh, 3)
-                } else { (cx0 - 3, cy0 + (ch - barh) / 2, 3, barh) };
-                fill_rrect(&mut back, bw, bh, marker.0, marker.1, marker.2, marker.3, 1, RR_ALL, 0xFF00_0000 | (bcol & 0x00FF_FFFF));
-            }
-        }
+        effects.prune(&wins,animation_now);
+        effects.paint(&mut back,bw,bh,animation_now,current_ws);
+        if workspace_transform{workspace_layer.finish(&mut back,bw,bh,&workspace_view,&mut blur_a,&mut blur_b);}
+        let frame_fx=Effects{anim:fx.anim&&animation_clock.is_some(),..fx};
+        shell.paint(&mut back,bw,bh,font.as_ref(),&app_icons,logo.as_ref(),&apps,&wins,focused,current_ws,mx,my,
+            animation_now,&theme,&ly,&frame_fx,&mut blur_a,&mut blur_b);
 
         // Launcher dropdown: acrylic rounded menu with a drop-in reveal.
         if menu_open && !menu_was_open {
             menu_anim_tick = animation_now; // stamp the open so the menu drops in
         }
-        menu_was_open = menu_open;
-        if menu_open {
+        if !menu_open&&menu_was_open{menu_closed_at=animation_now;}
+        menu_was_open=menu_open;
+        if menu_open||(menu_closed_at>0&&animation_now.saturating_sub(menu_closed_at)<duration_ms as u64)||desktop_tracks.active(desktop_motion::LAUNCHER,animation_now){
+            let menu_opacity=if desktop_tracks.has(desktop_motion::LAUNCHER,lua_policy::Property::Opacity)&&(menu_open||desktop_tracks.since(desktop_motion::LAUNCHER,lua_policy::Property::Opacity,menu_closed_at)){menu_view.opacity}else if menu_open{255}else{255-animation::progress(animation_now,menu_closed_at,duration_ms,lua_ease_out)};
+            let menu_blend=menu_opacity<255&&workspace_layer.begin(&back);
             let mprog = animation::progress(animation_now, menu_anim_tick, duration_ms, lua_ease_out) as i32; // 0..255
-            let (mx0, my0, mw0, _) = menu_item_rect(&ly, menu_org, 0);
-            let full_h = apps.launcher.len() as i32 * ly.menu_item_h;
+            let (mx0, my0, mw0, _) = menu_item_rect(&menu_ly, menu_org, 0);
+            let full_h = menu_entries.len() as i32 * menu_ly.menu_item_h;
             let reveal_h = full_h * mprog / 255; // grow the card downward
             if reveal_h > 0 {
-                if fx.blur {
-                    blur_region(&mut back, bw, bh, mx0, my0, mw0, reveal_h, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b);
+                if fx.blur||menu_view.blur>0 {
+                    blur_region(&mut back, bw, bh, mx0, my0, mw0, reveal_h, if menu_view.blur>0{menu_view.blur}else{fx.blur_radius}, fx.blur_iters, &mut blur_a, &mut blur_b);
                 }
-                fill_rrect_grad(&mut back, bw, bh, mx0, my0, mw0, reveal_h, fx.corner_radius, RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha);
+                if menu_view.shadow>0{draw_soft_shadow(&mut back,bw,bh,mx0,my0,mw0,reveal_h,menu_view.radius.unwrap_or(fx.corner_radius),menu_view.shadow,fx.shadow_alpha);}
+                fill_rrect_grad(&mut back, bw, bh, mx0, my0, mw0, reveal_h, menu_view.radius.unwrap_or(fx.corner_radius), RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha);
             }
-            for i in 0..apps.launcher.len() {
-                let ri = apps.launcher[i];
-                let (ix, iy, iw, ih) = menu_item_rect(&ly, menu_org, i as i32);
+            for i in 0..menu_entries.len() {
+                let ri = menu_entries[i];
+                let (ix, iy, iw, ih) = menu_item_rect(&menu_ly, menu_org, i as i32);
                 if iy + ih > my0 + reveal_h {
                     break; // below the revealed edge — not shown yet
                 }
@@ -5146,8 +3111,9 @@ fn run_desktop_session(
                     text_x = ix + 6 + isz + 6;
                 }
                 let label = apps.apps.get(ri).map(|a| a.label.as_str()).unwrap_or("");
-                draw_text_3x5(&mut back, bw, bh, text_x, iy + (ih - 5 * 3) / 2, 3, theme.panel_text, label.as_bytes());
+                draw_shell_text(&mut back, bw, bh, font.as_ref(), text_x, iy + (ih - ly.panel_font_px) / 2, ly.panel_font_px, 0xff000000|(menu_view.color.unwrap_or(theme.panel_text)&0x00ff_ffff), label.as_bytes());
             }
+            if menu_blend{let mut opacity=desktop_tracks.sample(0,(0,0,bw as i32,bh as i32),animation_now);opacity.opacity=menu_opacity;workspace_layer.finish(&mut back,bw,bh,&opacity,&mut blur_a,&mut blur_b);}
         }
 
         // --- Window switcher overlay (M4) ------------------------------------
@@ -5180,7 +3146,7 @@ fn run_desktop_session(
                     blit_icon(&mut back, bw, bh, &ic.pixels, ic.width, ic.height, tx + 6, ty + 6, isz, isz);
                 } else {
                     let lbl = apps.apps.get(app).map(|a| a.label.as_str()).unwrap_or("?");
-                    draw_text_3x5(&mut back, bw, bh, tx + 8, ty + isz / 2 - 6, 3, theme.panel_text, lbl.as_bytes());
+                    draw_shell_text(&mut back, bw, bh, font.as_ref(), tx + 8, ty+(isz-ly.panel_font_px)/2,ly.panel_font_px,theme.panel_text, lbl.as_bytes());
                 }
             }
             if let Some(&wi) = switcher.order.get(switcher.idx) {
@@ -5200,8 +3166,8 @@ fn run_desktop_session(
         // Each row shows and flips the SAME flag the renderer reads (fx.blur /
         // wg.enabled) with an on/off pill — no shadow state. Drawn above windows,
         // below the switcher overlay/cursor. Every colour comes from the theme.
-        if quicksettings.enabled && qs_open && panel_edge.is_horizontal() {
-            let flyout = qs_flyout_rect(&ly, panel_edge, qs_applet, 2);
+        if quicksettings.enabled && qs_open {
+            let flyout = qs_flyout_rect(&ly, qs_edge, qs_applet, 2);
             let (fx0, fy0, fw0, fh0) = flyout;
             if fx.blur {
                 blur_region(&mut back, bw, bh, fx0, fy0, fw0, fh0, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b);
@@ -5266,13 +3232,16 @@ fn run_desktop_session(
                 } else {
                     bh as i32 - margin - cardh - slot as i32 * (cardh + gap)
                 };
-                draw_soft_shadow(&mut back, bw, bh, cx, cy, cardw, cardh, 10, 8, 80);
-                fill_rrect_grad(&mut back, bw, bh, cx, cy, cardw, cardh, 10, RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha);
+                let view=desktop_tracks.sample(desktop_motion::NOTIFICATIONS,(cx,cy,cardw,cardh),animation_now);
+                let (cx,cy,cardw,cardh)=view.rect;let radius=view.radius.unwrap_or(10);
+                if view.blur>0{let need=(cardw.max(0)as usize).saturating_mul(cardh.max(0)as usize).min(bw*bh);if blur_a.len()<need{blur_a.resize(need,0);blur_b.resize(need,0);}blur_region(&mut back,bw,bh,cx,cy,cardw,cardh,view.blur,1,&mut blur_a,&mut blur_b);}
+                draw_soft_shadow(&mut back,bw,bh,cx,cy,cardw,cardh,radius,if view.shadow>0{view.shadow}else{8},80*view.opacity as i32/255);
+                fill_rrect_grad(&mut back, bw, bh, cx, cy, cardw, cardh, radius, RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha*view.opacity as i32/255);
                 // Accent bar on the leading edge marks it as a toast.
-                fill_rrect(&mut back, bw, bh, cx, cy + 4, 4, cardh - 8, 2, RR_ALL, 0xFF00_0000 | (theme.launcher & 0x00FF_FFFF));
+                fill_rrect(&mut back, bw, bh, cx, cy + 4, 4, cardh - 8, 2, RR_ALL, (view.opacity<<24)|(theme.launcher&0x00ffffff));
                 if let Some(f) = font.as_ref() {
                     let baseline = cy + cardh / 2 + 5;
-                    draw_text_ttf(&mut back, bw, bh, f, cx + 14, baseline, px, &t.text, theme.panel_text & 0x00FF_FFFF);
+                    draw_text_ttf_alpha(&mut back,bw,bh,f,cx+14,baseline,px,&t.text,view.color.unwrap_or(theme.panel_text),view.opacity);
                 }
             }
         }

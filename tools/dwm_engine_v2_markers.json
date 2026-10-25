@@ -1,0 +1,698 @@
+{
+  "description": "Real desktop config import, component scene, configured launch/minimize keys and native genie pixel mapping.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /assets/dwm/tests/engine-v2.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 100
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "gui_terminal: surface presented OK",
+          "timeout": 40
+        },
+        {
+          "delay_ms": 1800
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "gui_server: minimized pid=",
+          "timeout": 30
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-minimize.ppm"
+          }
+        },
+        {
+          "delay_ms": 1000
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 4,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": 127,
+            "repeat": 5,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 68,
+            "y": 107,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "gui_server: shell group=folder open entries=3 presentation=fan",
+          "timeout": 20
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-group.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": -127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -88,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "gui_server: restored pid=",
+          "timeout": 20
+        },
+        {
+          "delay_ms": 800
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-restored.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 44,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "gui_settings: surface presented OK",
+          "timeout": 30
+        },
+        {
+          "delay_ms": 800
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-settings.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -31,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -78,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "gui_settings: page 12",
+          "timeout": 20
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-profiles.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": -127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": -127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 46,
+            "y": -82,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type_text": "/assets/dwm/tests/invalid-events-desktop.toml",
+          "key_interval_ms": 150
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "relative_motion": {
+            "x": -80,
+            "y": 40,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "gui_server: settings reload rejected (Lua preflight",
+          "timeout": 20
+        },
+        {
+          "delay_ms": 400
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": 106,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 500
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-selected.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": -112,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "gui_server: shell panel=utility edge=top",
+          "timeout": 30
+        },
+        {
+          "wait_marker": "gui_server: widget updated component=activity text=Lua 2",
+          "timeout": 30
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 7,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 61,
+            "y": 40,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 500
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "/home/tuxpc/dunit-os/build/engine-v2-multi-panel.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "spc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "gui_server: component animation committed target=513",
+          "timeout": 20
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "esc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "2"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "gui_server: component animation committed target=514",
+          "timeout": 20
+        },
+        {
+          "delay_ms": 500
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "setup: full desktop applied",
+    "gui_server: shell panel=bottom edge=bottom",
+    "gui_server: shell component=folder kind=app_group",
+    "gui_server: desktop ready",
+    "gui_terminal: surface presented OK",
+    "gui_server: minimized pid=",
+    "gui_server: genie rendered pid=",
+    "gui_server: shell group=folder open entries=3 presentation=fan",
+    "gui_server: restored pid=",
+    "gui_settings: surface presented OK",
+    "gui_settings: page 12",
+    "gui_server: settings reload rejected (Lua preflight",
+    "gui_server: shell panel=utility edge=top",
+    "gui_server: widget updated component=activity text=Lua 2",
+    "gui_server: component animation committed target=",
+    "gui_settings: desktop profile saved /assets/dwm/multi-panel-desktop.toml",
+    "gui_server: component animation committed target=513",
+    "gui_server: component animation committed target=514",
+    "gui_server: component animation committed target=515"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "gui_server: PANIC",
+    "gui_server: FAIL",
+    "gui_server: shell rejected",
+    "gui_server: Lua event rejected",
+    "gui_server: shell panel=legacy-"
+  ]
+}

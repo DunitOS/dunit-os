@@ -19,6 +19,8 @@ Commands:\n  menu                 open numbered settings menu\n\
   show [section]       show supported settings as TOML\n\
   get section.key      read a setting\n\
   set section.key VALUE  validate and stage a TOML value\n\
+  import-user PATH     activate a persistent user profile\n\
+  import-desktop PATH  validate and apply a complete desktop config\n\
   import PATH          stage a TOML theme/settings overlay\n\
   check                check staged serialization and on-disk config\n\
   save                 save staged settings\n\
@@ -74,6 +76,14 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
             *settings = edit(settings, field, input.trim())?;
             *dirty = true;
             libdunit::println("setup: staged; use save to write");
+        }
+        "import-desktop"|"import-user"=>{
+            let source=dwm_settings::load_document_from(rest).map_err(|_|"could not load full desktop configuration")?;
+            let config=dwm_settings::validate_document(&source).map_err(|_|"invalid full desktop configuration")?;
+            if cmd=="import-user"{dwm_settings::save_user_document(&source).map_err(|_|"user profile could not be saved")?;}
+            else{dwm_settings::save_document(&source).map_err(|_|"desktop document could not be saved")?;}
+            *settings=config.settings;*dirty=false;
+            libdunit::println("setup: full desktop applied");
         }
         "import" => {
             *settings = dwm_settings::load_overlay(settings, rest)?;

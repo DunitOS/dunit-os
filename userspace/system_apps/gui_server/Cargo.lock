@@ -55,6 +55,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunit_style"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_svg"
 version = "0.1.0"
 dependencies = [
@@ -66,6 +70,10 @@ dependencies = [
 
 [[package]]
 name = "dunit_text"
+version = "0.1.0"
+
+[[package]]
+name = "dunit_ui"
 version = "0.1.0"
 
 [[package]]
@@ -94,7 +102,9 @@ name = "gui_server"
 version = "0.1.0"
 dependencies = [
  "dunit_image",
+ "dunit_style",
  "dunit_text",
+ "dunit_ui",
  "dwm_settings",
  "gui_protocol_v1",
  "libdunit",

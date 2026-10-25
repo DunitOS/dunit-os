@@ -1,5 +1,8 @@
-/* One-shot layout policy evaluator. No compositor, IPC or syscall bindings. */
+#define _POSIX_C_SOURCE 200809L
+/* Isolated layout and event policy evaluator. No compositor/syscall bindings. */
 #include <errno.h>
+#include <poll.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,11 +20,14 @@
 struct rectangle { int x, y, w, h; };
 struct request {
     const char *source;
+    const char *path;
     size_t source_len;
     int width, height, count;
     struct rectangle rectangles[WINDOW_LIMIT];
     int duration_ms;
     const char *easing;
+    struct sdk_request *event;
+    int daemon;
 };
 
 static void field(lua_State *L, int index, const char *key)
@@ -114,6 +120,8 @@ static void validate(lua_State *L, struct request *r)
     lua_pop(L, 2);
 }
 
+#include "sdk.h"
+
 /* Everything which can allocate or raise a Lua error executes under pcall. */
 static int evaluate(lua_State *L)
 {
@@ -130,15 +138,19 @@ static int evaluate(lua_State *L)
         lua_pushnil(L);
         lua_setglobal(L, removed[i]);
     }
+    if (r->event) sdk_open(L, r->event);
     lua_createtable(L, 0, 3);
     lua_pushinteger(L, r->width); lua_setfield(L, -2, "width");
     lua_pushinteger(L, r->height); lua_setfield(L, -2, "height");
     lua_pushinteger(L, r->count); lua_setfield(L, -2, "count");
     lua_setglobal(L, "workarea");
-    if (luaL_loadbufferx(L, r->source, r->source_len, "dwm-policy", "t") != LUA_OK)
+    if (luaL_loadbufferx(L, r->source, r->source_len, r->path, "t") != LUA_OK)
         return lua_error(L);
     lua_call(L, 0, 1);
-    validate(L, r);
+    if (r->event) {
+        lua_pop(L, 1);
+        if (!r->daemon) sdk_dispatch(L, r->event);
+    } else validate(L, r);
     return 0;
 }
 
@@ -153,10 +165,142 @@ static int number(const char *text, int minimum, int maximum, int *out)
     return 1;
 }
 
+static int emit_event(const struct sdk_request *event)
+{
+    char response[16384];
+    int n = snprintf(response, sizeof response, "DWM_EVENT 2 %s %u %d\n",
+                     event->event, event->window, event->count);
+    if (n < 0 || (size_t)n >= sizeof response) return 1;
+    size_t used = (size_t)n;
+    for (int i = 0; i < event->count; i++) {
+        const struct sdk_animation *a = &event->actions[i];
+        n = snprintf(response + used, sizeof response - used,
+                     "ANIMATE %u %u %s %d %s %lld %lld", a->window, a->target, a->effect, a->duration, a->property, a->from, a->to);
+        if (n < 0 || (size_t)n >= sizeof response - used) return 1;
+        used += (size_t)n;
+        for (int j = 0; j < SDK_CURVE_SAMPLES; j++) {
+            n = snprintf(response + used, sizeof response - used, " %d", a->curve[j]);
+            if (n < 0 || (size_t)n >= sizeof response - used) return 1;
+            used += (size_t)n;
+        }
+        if (used + 1 >= sizeof response) return 1;
+        response[used++] = '\n';
+    }
+    for (int i = 0; i < event->command_count; i++) {
+        n = snprintf(response + used, sizeof response - used, "COMMAND %s\n", event->commands[i]);
+        if (n < 0 || (size_t)n >= sizeof response - used) return 1;
+        used += (size_t)n;
+    }
+    for (int i = 0; i < event->widget_count; i++) {
+        const struct sdk_widget *widget = &event->widgets[i];
+        n = snprintf(response + used, sizeof response - used, "WIDGET %u %lld ", widget->target, widget->color);
+        if (n < 0 || (size_t)n >= sizeof response - used) return 1;
+        used += (size_t)n;
+        if (used + widget->length * 2 + 2 >= sizeof response) return 1;
+        if (!widget->length) response[used++] = '-';
+        const char *hex = "0123456789abcdef";
+        for (size_t j = 0; j < widget->length; j++) {
+            response[used++] = hex[widget->text[j] >> 4];
+            response[used++] = hex[widget->text[j] & 15];
+        }
+        response[used++] = '\n';
+    }
+    if(event->report_subscriptions){n=snprintf(response+used,sizeof response-used,"SUBSCRIPTIONS %u\n",event->subscriptions);if(n<0||(size_t)n>=sizeof response-used)return 1;used+=(size_t)n;}
+    if (used + 4 >= sizeof response) return 1;
+    memcpy(response + used, "END\n", 4); used += 4;
+    return dunit_lua_write(STDOUT_FILENO, response, used) ? 1 : 0;
+}
+
+static int dispatch_event(lua_State *L)
+{
+    sdk_dispatch(L, lua_touserdata(L, 1));
+    return 0;
+}
+
+/* PTY stdin is nonblocking on Dunit. Wait through the native poll interface,
+ * retaining partial input instead of treating EAGAIN as EOF in stdio. */
+static int event_line(char *line, size_t capacity)
+{
+    size_t used = 0;
+    while (used + 1 < capacity) {
+        ssize_t got = read(STDIN_FILENO, line + used, 1);
+        if (got > 0) {
+            if (!line[used]) return -1;
+            if (line[used++] == '\n') { line[used] = 0; return 1; }
+        } else if (!got) return used ? -1 : 0;
+        else if (errno == EINTR) continue;
+        else if (errno == EAGAIN) {
+            struct pollfd input = { .fd = STDIN_FILENO, .events = POLLIN };
+            if (poll(&input, 1, -1) < 0 && errno != EINTR) return -1;
+        } else return -1;
+    }
+    return -1;
+}
+
+/* A native line loop owns process I/O. Lua only sees validated event records. */
+static int serve_events(lua_State *L, struct sdk_request *event, struct dunit_lua_limits *limits)
+{
+    char line[128];
+    int read_status;
+    while ((read_status = event_line(line, sizeof line)) > 0) {
+        size_t length = strlen(line);
+        if (!length || line[length - 1] != '\n') return 2;
+        char *save = NULL;
+        char *kind = strtok_r(line, " \r\n", &save);
+        char *name = strtok_r(NULL, " \r\n", &save);
+        char *window = strtok_r(NULL, " \r\n", &save);
+        char *target = strtok_r(NULL, " \r\n", &save);
+        char *identity = strtok_r(NULL," \r\n",&save);
+        char *panel = strtok_r(NULL," \r\n",&save);
+        int window_id, target_id;
+        if (kind && !strcmp(kind, "STOP") && !name) return 0;
+        if (!kind || strcmp(kind, "EVENT") || !name || sdk_event_index(name) < 0
+            || !number(window, 0, 2147483647, &window_id)
+            || !number(target, 0, 2147483647, &target_id)
+            || strtok_r(NULL, " \r\n", &save)) return 2;
+        if(identity){size_t n=strlen(identity);if(!n||n>64)return 2;for(size_t i=0;i<n;i++){unsigned char c=identity[i];if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'))return 2;}}
+        event->event = name;
+        event->identity = identity;
+        int panel_id=0;if(panel&&!number(panel,1024,1087,&panel_id))return 2;event->panel=(unsigned)panel_id;
+        event->window = (unsigned)window_id;
+        event->target = (unsigned)target_id;
+        event->count = event->command_count = event->widget_count = 0;
+        limits->instructions = 100000;
+        limits->quota_hit = 0;
+        lua_pushcfunction(L, dispatch_event);
+        lua_pushlightuserdata(L, event);
+        lua_sethook(L, dunit_lua_hook, LUA_MASKCOUNT, 1000);
+        int status = lua_pcall(L, 1, 0, 0);
+        lua_sethook(L, NULL, 0, 0);
+        if (status != LUA_OK) {
+            const char *message = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "event error";
+            dunit_lua_log(STDERR_FILENO, "dwm_lua: %s\n", message);
+            return 1;
+        }
+        if (emit_event(event)) return 1;
+    }
+    return read_status < 0 ? 1 : 0;
+}
+
 int main(int argc, char **argv)
 {
     struct request r = {0};
+    struct sdk_request event = {0};
+    r.daemon = getenv("DWM_LUA_DAEMON") && !strcmp(getenv("DWM_LUA_DAEMON"), "1");
+    if (r.daemon) r.event = &event;
+    event.report_subscriptions=getenv("DWM_LUA_SUBSCRIPTIONS")&&!strcmp(getenv("DWM_LUA_SUBSCRIPTIONS"),"1");
+    const char *event_name = getenv("DWM_LUA_EVENT");
+    if (event_name) {
+        int window, target;
+        if (sdk_event_index(event_name) < 0
+            || !number(getenv("DWM_LUA_WINDOW"), 0, 2147483647, &window)
+            || !number(getenv("DWM_LUA_TARGET"), 0, 2147483647, &target)) return 2;
+        event.event = event_name;
+        event.window = (unsigned)window; event.target = (unsigned)target;
+        r.event = &event;
+    }
     const char *path = argc == 5 ? argv[1] : getenv("DWM_LUA_SCRIPT");
+    r.path=path;
     const char *width = argc == 5 ? argv[2] : getenv("DWM_LUA_WIDTH");
     const char *height = argc == 5 ? argv[3] : getenv("DWM_LUA_HEIGHT");
     const char *count = argc == 5 ? argv[4] : getenv("DWM_LUA_WINDOWS");
@@ -207,11 +351,18 @@ int main(int argc, char **argv)
             ? lua_tostring(L, -1) : "non-string Lua error";
         dunit_lua_log(STDERR_FILENO, "dwm_lua: %s\n", message);
     }
+    if (status == LUA_OK && r.daemon) {
+        free(source);
+        int result = serve_events(L, &event, &limits);
+        lua_close(L);
+        return result || limits.used ? 1 : 0;
+    }
     lua_close(L);
     free(source);
     if (status != LUA_OK || limits.used) return 1;
     /* Nothing reaches stdout before the complete result has passed validation.
      * A consumer must buffer through END and check exit status before applying. */
+    if (r.event) return emit_event(&event);
     char response[4096];
     int n = snprintf(response, sizeof response, "DWM_LUA 1 %d %d %d\n",
                      r.width, r.height, r.count);

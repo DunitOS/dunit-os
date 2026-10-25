@@ -1,0 +1,6 @@
+$text: #e6efeb;
+Panel.frost { background: #18242ad9; opacity: 217; corner-radius: 12; blur: true; }
+Component { color: $text; font-size: 14; transition: background 180ms ease-out, color 180ms ease-out; }
+Component:hover { background: #40595088; corner-radius: 8; }
+#brand { color: #99c9ab; font-size: 15; }
+#clock { font-size: 15; }

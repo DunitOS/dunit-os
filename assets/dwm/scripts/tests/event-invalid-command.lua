@@ -1,0 +1,5 @@
+local dwm = require('dwm')
+dwm.on('config::reloaded', function()
+    dwm.command('launcher')
+    dwm.command('exec:/app/terminal')
+end)

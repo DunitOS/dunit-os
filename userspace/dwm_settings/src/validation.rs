@@ -9,6 +9,17 @@ pub struct ConfigError {
     pub reason: &'static str,
 }
 
+pub(crate) fn locate(text:&str,mut error:ConfigError)->ConfigError{
+    if error.line!=0{return error;}
+    let (wanted,key)=error.field.rsplit_once('.').unwrap_or((&error.field,""));
+    let mut section="";let mut fallback=1;
+    for(index,raw)in text.lines().enumerate(){let line=crate::strip_comment(raw).trim();
+        if let Some(name)=line.strip_prefix('[').and_then(|s|s.strip_suffix(']')){section=name.trim();if section==error.field{error.line=index+1;return error;}if section==wanted{fallback=index+1;}}
+        else if section==wanted&&line.split_once('=').is_some_and(|(name,_)|name.trim()==key){error.line=index+1;return error;}
+    }
+    error.line=fallback;error
+}
+
 fn string(input: &str) -> Result<&str, &'static str> {
     let text = input
         .strip_prefix('"')
@@ -20,7 +31,7 @@ fn string(input: &str) -> Result<&str, &'static str> {
     Ok(text)
 }
 
-fn list(input: &str) -> Result<Vec<&str>, &'static str> {
+pub(crate) fn list(input: &str) -> Result<Vec<&str>, &'static str> {
     let text = input
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
@@ -44,6 +55,7 @@ fn list(input: &str) -> Result<Vec<&str>, &'static str> {
 /// canonical round trip. Registry data is validated separately, before its
 /// tolerant low-level parser can clamp or silently drop it.
 pub fn validate(text: &str) -> Result<(), ConfigError> {
+    if text.len() > 64 * 1024 { return Err(ConfigError { line: 0, field: String::new(), reason: "configuration exceeds 64 KiB" }); }
     let baseline = Settings::defaults();
     let schema = crate::to_toml(&baseline);
     let mut section = "";
@@ -81,7 +93,7 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
                 if applications.len() > MAX_APPS {
                     return Err(error(section.into(), "too many applications"));
                 }
-            } else if !matches!(section, "dock" | "launcher" | "startup" | "workspaces")
+            } else if !crate::shell::section(section) && !crate::policy::section(section) && section != "shell" && !matches!(section, "dock" | "launcher" | "startup" | "workspaces")
                 && !schema.lines().any(|s| s == format!("[{}]", section))
             {
                 return Err(error(section.into(), "unknown section"));
@@ -98,7 +110,9 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
             return Err(error(field, "duplicate key"));
         }
         fields.push(field.clone());
-        let checked = if section.starts_with("application.") {
+        let checked = if crate::shell::section(section) || crate::policy::section(section) || section == "shell" {
+            Ok(()) // Typed shell parsing and complete tree validation below.
+        } else if section.starts_with("application.") {
             if matches!(key, "name" | "exec" | "icon" | "label") {
                 string(input).map(|_| ())
             } else {
@@ -121,6 +135,11 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
                 .filter(|n| *n >= 1 && *n as usize <= MAX_WS)
                 .map(|_| ())
                 .ok_or("workspace count out of range")
+        } else if section == "scripts" && matches!(key, "runner" | "layout" | "events") {
+            config_string(input).and_then(|path| {
+                if (path.is_empty() && key == "events") || (path.starts_with('/') && !path.split('/').any(|part| part == "..")) { Ok(()) }
+                else { Err("script path must be absolute without traversal") }
+            })
         } else if field == "meta.schema_version" {
             input
                 .parse::<u32>()
@@ -159,6 +178,11 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
             }
         }
     }
+    let mut settings = Settings::defaults();
+    crate::parse_into(text, &mut settings);
+    let (apps, _) = crate::parse_apps(text);
+    crate::shell::resolve(text, &settings, &apps).map_err(|error|locate(text,error))?;
+    crate::policy::resolve(text, &apps).map_err(|error|locate(text,error))?;
     Ok(())
 }
 
