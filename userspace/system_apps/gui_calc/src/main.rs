@@ -13,6 +13,7 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
+use gui_protocol_v1::control::{IN_DOWN, IN_KEY, IN_QUIT};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,13 +23,6 @@ use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888, MAGIC};
 use dunit_render::Surface;
 use dunit_style::value::Color;
 use dunit_text::Font;
-
-// Control-message magics shared with the compositor.
-const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1" — capability announce
-const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1" — pointer input
-const IN_DOWN: u8 = 2;
-const IN_KEY: u8 = 5;
-const IN_QUIT: u8 = 9;
 
 // Cooked key bytes the compositor forwards in the IN_KEY `button` field.
 const KEY_BACKSPACE: u8 = 0x08;
@@ -663,11 +657,12 @@ fn resize_surface(
     *serial += 1;
     libdunit::ipc_send(compositor, &ack);
 
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(obj as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: obj as u32,
+    }
+    .encode();
     libdunit::ipc_send(compositor, &ann);
 
     let import = Request::ImportBuffer {
@@ -812,11 +807,12 @@ pub extern "C" fn _start() -> ! {
         libdunit::println("gui_calc: FAIL cap transfer");
         libdunit::exit(5);
     }
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(cha as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(BUFFER as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: cha as u32,
+        advertised_bytes: bytes as u32,
+        object: BUFFER as u32,
+    }
+    .encode();
     libdunit::ipc_send(compositor, &ann);
 
     // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
@@ -877,23 +873,23 @@ pub extern "C" fn _start() -> ! {
             }
             continue;
         }
-        if magic != INPUT_MAGIC {
+        let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n as usize]) else {
             continue;
-        }
-        let kind = rx[4];
+        };
+        let kind = input.kind;
         if kind == IN_QUIT {
             break;
         }
         let mut dirty = false;
         if kind == IN_DOWN {
-            let lx = i32::from_le_bytes([rx[8], rx[9], rx[10], rx[11]]);
-            let ly = i32::from_le_bytes([rx[12], rx[13], rx[14], rx[15]]);
+            let lx = input.x;
+            let ly = input.y;
             if let Some(k) = Layout::new(cur_w as i32, cur_h as i32).key_at(lx, ly) {
                 calc.press(k);
                 dirty = true;
             }
         } else if kind == IN_KEY {
-            if let Some(k) = key_from_ascii(rx[16]) {
+            if let Some(k) = key_from_ascii(input.value as u8) {
                 calc.press(k);
                 dirty = true;
             }

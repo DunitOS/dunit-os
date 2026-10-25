@@ -13,6 +13,7 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
+use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_KEY, IN_QUIT};
 
 use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888};
 
@@ -24,21 +25,6 @@ use dunit_ui::layout::layout_measured;
 use dunit_ui::parse as parse_dui;
 use dunit_ui::tree::{Kind, NodeId};
 use dunit_widgets::{intrinsic_size, FontMeasure, Widget};
-
-/// Control-message magic distinguishing a capability announce from a protocol
-/// packet (protocol packets begin with the DGUI wire magic instead). Shared
-/// with the compositor.
-const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1"
-
-// Compositor -> client input control messages (mirrors gui_server). Coords are
-// client-local. The client is only ever sent events while it holds focus.
-const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1"
-const IN_MOVE: u8 = 1;
-const IN_DOWN: u8 = 2;
-const IN_UP: u8 = 3;
-const IN_LEAVE: u8 = 4;
-const IN_KEY: u8 = 5;
-const IN_QUIT: u8 = 9;
 
 /// Interaction state driving the client's re-paint: whether the pointer is over
 /// the OK button, whether it is being pressed, and how many times it was clicked.
@@ -141,11 +127,12 @@ fn resize_surface(
     *serial += 1;
     send_env(compositor, id, &ack);
 
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(obj as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: obj as u32,
+    }
+    .encode();
     send_env(compositor, id, &ann);
 
     // IMPORT (fresh object id) / ATTACH / COMMIT (new token).
@@ -351,11 +338,12 @@ pub extern "C" fn _start() -> ! {
         libdunit::println("gui_client: FAIL cap transfer");
         libdunit::exit(5);
     }
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(BUFFER as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: BUFFER as u32,
+    }
+    .encode();
     send_env(compositor, id, &ann);
 
     // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
@@ -427,24 +415,24 @@ pub extern "C" fn _start() -> ! {
             }
             continue;
         }
-        if magic != INPUT_MAGIC {
+        let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n as usize]) else {
             continue;
-        }
-        let kind = rx[4];
+        };
+        let kind = input.kind;
         if kind == IN_QUIT {
             break;
         }
         if kind == IN_KEY {
             // The compositor forwards each typed byte in the button field. Echo
             // it to serial so the keyboard-routing path is headlessly verifiable.
-            let byte = rx[16];
+            let byte = input.value as u8;
             let line = [b'k', b'e', b'y', b'=', byte];
             libdunit::write(1, &line);
             libdunit::write(1, b"\n");
             continue;
         }
-        let lx = i32::from_le_bytes([rx[8], rx[9], rx[10], rx[11]]);
-        let ly = i32::from_le_bytes([rx[12], rx[13], rx[14], rx[15]]);
+        let lx = input.x;
+        let ly = input.y;
         let inside =
             lx >= btn.0 && lx < btn.0 + btn.2 && ly >= btn.1 && ly < btn.1 + btn.3;
         let before = st;

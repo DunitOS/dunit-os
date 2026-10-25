@@ -416,44 +416,7 @@ pub(super) fn drive_reconfigure(
     ok
 }
 
-/// Control-message magic marking a capability announce (vs. a protocol packet,
-/// which begins with the DGUI wire magic). Shared with `gui_client`.
-pub(super) const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1"
-
-// Client -> compositor "reload settings" signal (slice C). A settings app
-// (gui_settings) rewrites /system/share/dwm/default.toml, then sends this 4-byte
-// control message so the compositor re-reads the config and re-seeds its live
-// theme/layout/effects state without a reboot — the GUI<->TOML round-trip. A
-// distinct magic (not CAP1/INP1/DGUI) so `handle_client_payload` can tell it
-// apart from a buffer announce or a wire packet.
-pub(super) const RELOAD_MAGIC: u32 = 0x3144_4C52; // "RLD1"
-
-// Client -> compositor "post a desktop notification" signal. An unprivileged
-// client asks the compositor to raise a toast (e.g. gui_demo's "Notify" button).
-// The client never touches the toast queue itself — it only names the text; ALL
-// policy (whether notifications are on, the timeout, the corner) stays in the
-// compositor's `[notifications]` config (single source of truth), applied when
-// the frame loop drains the request into `notify_post`. Layout: [magic:u32]
-// [len:u32][utf8 text bytes]. A distinct magic from CAP1/INP1/RLD1/DGUI so
-// `handle_client_payload` can tell it apart from a buffer announce or wire packet.
-pub(super) const NOTIFY_MAGIC: u32 = 0x3154_4F4E; // "NOT1"
-
-/// Longest client-supplied toast text the compositor accepts (bytes). Bounds the
-/// copy out of the untrusted IPC buffer; longer text is truncated, never trusted.
-pub(super) const NOTIFY_TEXT_MAX: usize = 64;
-
-// Compositor -> client input control messages (20 bytes). Distinct magic from
-// CTRL_MAGIC and the DGUI wire magic so the client can tell them apart. Coords
-// are client-local (relative to the surface origin). Kept deliberately simple:
-// the focused window is the sole recipient, so no per-message routing id.
-pub(super) const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1"
-pub(super) const IN_MOVE: u8 = 1;
-pub(super) const IN_DOWN: u8 = 2;
-pub(super) const IN_UP: u8 = 3;
-pub(super) const IN_LEAVE: u8 = 4;
-pub(super) const IN_KEY: u8 = 5;
-pub(super) const IN_SCROLL: u8 = 6;
-pub(super) const IN_QUIT: u8 = 9;
+pub(super) use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_KEY, IN_SCROLL, IN_QUIT};
 
 /// How long the maximize/restore self-test waits for a client to re-import the
 /// work-area-sized buffer before advancing anyway (in desktop ticks; ~60/s, so
@@ -465,12 +428,13 @@ pub(super) const ST_SETTLE_TICKS: u32 = 240;
 
 /// Send one input control message to a client.
 pub(super) fn send_input(pid: u32, kind: u8, lx: i32, ly: i32, button: u32) {
-    let mut msg = [0u8; 20];
-    msg[0..4].copy_from_slice(&INPUT_MAGIC.to_le_bytes());
-    msg[4] = kind;
-    msg[8..12].copy_from_slice(&lx.to_le_bytes());
-    msg[12..16].copy_from_slice(&ly.to_le_bytes());
-    msg[16..20].copy_from_slice(&button.to_le_bytes());
+    let msg = gui_protocol_v1::control::Input {
+        kind,
+        x: lx,
+        y: ly,
+        value: button,
+    }
+    .encode();
     libdunit::ipc_send(pid, &msg);
 }
 
@@ -551,9 +515,8 @@ pub(super) fn handle_client_payload(
     notify_out: &mut Vec<alloc::string::String>,
 ) {
     let n = payload.len();
-    if n >= 16 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == CTRL_MAGIC
-    {
-        let handle = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    if let Some(announcement) = gui_protocol_v1::control::Capability::decode(payload) {
+        let handle = announcement.handle;
         // Игнорируем размер, названный клиентом (payload[8..12]) — он недоверенный.
         // Мапим буфер и берём ИСТИННУЮ длину backing-объекта из ядра: только она
         // задаёт безопасную границу для последующего блита.
@@ -581,8 +544,7 @@ pub(super) fn handle_client_payload(
     // config file was just rewritten, so raise a flag the desktop loop drains at
     // the top of the next frame (re-read + re-seed derived state). No payload
     // beyond the magic — the new values come from the config file, not the wire.
-    if n >= 4 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == RELOAD_MAGIC
-    {
+    if gui_protocol_v1::control::is_reload(payload) {
         *reload = true;
         return;
     }
@@ -592,13 +554,8 @@ pub(super) fn handle_client_payload(
     // client's claim, so clamp it to the real remaining bytes AND a hard cap
     // before copying — an untrusted client must not drive an out-of-bounds read
     // or an unbounded allocation.
-    if n >= 8 && u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) == NOTIFY_MAGIC
-    {
-        let claimed = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]) as usize;
-        let avail = n - 8;
-        let len = claimed.min(avail).min(NOTIFY_TEXT_MAX);
-        let text = core::str::from_utf8(&payload[8..8 + len]).unwrap_or("");
-        if !text.is_empty() {
+    if gui_protocol_v1::control::is_notification(payload) {
+        if let Some(text) = gui_protocol_v1::control::notification_text(payload) {
             notify_out.push(text.into());
         }
         return;

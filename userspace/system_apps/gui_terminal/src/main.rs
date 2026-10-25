@@ -14,6 +14,7 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
+use gui_protocol_v1::control::{IN_KEY, IN_SCROLL, IN_QUIT};
 
 use alloc::vec::Vec;
 
@@ -22,13 +23,6 @@ use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888, MAGIC};
 use dunit_render::Surface;
 use dunit_style::value::Color;
 use dunit_text::Font;
-
-// Control-message magics shared with the compositor.
-const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1" — capability announce
-const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1" — input events
-const IN_KEY: u8 = 5;
-const IN_SCROLL: u8 = 6;
-const IN_QUIT: u8 = 9;
 
 // Modifier bit in the IN_KEY `mods` field (mirrors libdunit::KEYMOD_CTRL).
 const KEYMOD_CTRL: u8 = 1 << 1;
@@ -311,11 +305,12 @@ fn resize_surface(
     let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
     *serial += 1;
     libdunit::ipc_send(compositor, &ack);
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(obj as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: obj as u32,
+    }
+    .encode();
     libdunit::ipc_send(compositor, &ann);
 
     // IMPORT (fresh object id) / ATTACH / COMMIT (new token).
@@ -479,11 +474,12 @@ pub extern "C" fn _start() -> ! {
         libdunit::println("gui_terminal: FAIL cap transfer");
         libdunit::exit(5);
     }
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(BUFFER as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: BUFFER as u32,
+    }
+    .encode();
     libdunit::ipc_send(compositor, &ann);
 
     // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
@@ -599,26 +595,25 @@ pub extern "C" fn _start() -> ! {
                     );
                 }
             }
-        } else if magic == INPUT_MAGIC && n >= 8 {
-            match rx[4] {
+        } else if let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize]) {
+            match input.kind {
                 IN_QUIT => break,
                 IN_SCROLL => {
                     // Wheel delta (i32) in the lx field: positive = scroll up
                     // into the backlog, negative = back toward the live bottom.
-                    let delta = i32::from_le_bytes([rx[8], rx[9], rx[10], rx[11]]);
+                    let delta = input.x;
                     if delta != 0 {
                         term.scroll_by(delta.unsigned_abs() as usize * 3, delta > 0);
                     }
                 }
                 IN_KEY => {
-                    // Widened IN_KEY: scancode@rx[8..12], mods@rx[12..16],
-                    // cooked ASCII@rx[16] (see gui_server::send_input). Decode
+                    // IN_KEY carries scancode, modifiers and cooked ASCII. Decode
                     // into a pty byte sequence: control codes for Ctrl+letter,
                     // the cooked byte for printables/Enter/Tab, and xterm ESC
                     // sequences for the extended nav keys (arrows/Home/End/Del).
-                    let scancode = rx[8];
-                    let mods = rx[12];
-                    let ascii = rx[16];
+                    let scancode = input.x as u8;
+                    let mods = input.y as u8;
+                    let ascii = input.value as u8;
                     // PgUp/PgDn scroll the local view a page at a time and are
                     // never forwarded to the pty.
                     if scancode == SC_PGUP {

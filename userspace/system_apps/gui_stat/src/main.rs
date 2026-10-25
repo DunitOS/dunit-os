@@ -14,6 +14,7 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
+use gui_protocol_v1::control::IN_QUIT;
 
 use alloc::string::String;
 
@@ -27,11 +28,6 @@ use dunit_ui::layout::layout_measured;
 use dunit_ui::parse as parse_dui;
 use dunit_ui::tree::{Kind, NodeId};
 use dunit_widgets::{intrinsic_size, FontMeasure, Widget};
-
-// Control-message magics shared with the compositor.
-const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1" — capability announce
-const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1" — pointer input
-const IN_QUIT: u8 = 9;
 
 const SURFACE: u64 = 1;
 const BUFFER: u64 = 2;
@@ -261,11 +257,12 @@ pub extern "C" fn _start() -> ! {
         libdunit::println("gui_stat: FAIL cap transfer");
         libdunit::exit(5);
     }
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(BUFFER as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: BUFFER as u32,
+    }
+    .encode();
     libdunit::ipc_send(compositor, &ann);
 
     // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
@@ -297,7 +294,8 @@ pub extern "C" fn _start() -> ! {
     //    counters and repaint. The compositor blits our buffer every tick.
     loop {
         let n = libdunit::ipc_recv_blocking(&mut rx, POLL_MS);
-        if n >= 8 && u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]) == INPUT_MAGIC && rx[4] == IN_QUIT
+        if gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize])
+            .map(|input| input.kind) == Some(IN_QUIT)
         {
             break;
         }

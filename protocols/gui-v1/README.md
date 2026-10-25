@@ -417,3 +417,30 @@ Wall clock, случайный ID и host pointer не могут влиять �
 Все будущие автоматические suites подключаются к единственной точке запуска
 `tools/qemu_test.py`. До появления decoder/model обычный QEMU smoke доказывает
 только сохранение текущей загрузки/runtime, а не conformance нового протокола.
+
+## Live IPC control messages
+
+The established control channel alongside DGUI packets is defined in
+[`src/control.rs`](src/control.rs). The compositor and all seven GUI clients
+share its encoders, decoders and constants. This consolidation preserves the
+existing byte layouts and GUI protocol version:
+
+| Family | Bytes | Existing layout |
+| --- | --- | --- |
+| CAP1 | 16 | magic, transferred handle, advertised backing length, buffer object (four little-endian u32 words) |
+| INP1 | 20 | magic, kind at byte 4, reserved bytes 5–7, signed x/scancode and y/modifiers at 8/12, button/cooked value at 16 |
+| RLD1 | 4 or 8 | reload magic; configuration is read from the existing configuration file |
+| NOT1 | 8 + text | magic, claimed UTF-8 byte length, up to 64 text bytes |
+
+`Capability::decode` does not validate or authorize a capability. The compositor
+continues to query the actual shared-buffer length and mapping permissions from
+the kernel. `Input::decode` rejects truncated key/pointer messages and unknown
+kinds; it retains the historical eight-byte quit/leave forms. Notification
+encoding ends on a UTF-8 boundary. The decoder clamps claimed lengths to both
+the received payload and the existing text limit. `is_notification` recognizes
+even a malformed notification so its bytes cannot fall through as DGUI fields.
+
+Golden-byte tests in `tests/control.rs` verify compatibility, negative
+coordinates, malformed lengths, UTF-8 boundaries and payload-family separation.
+This is the first M7.8 foundation; live damage tracking, a shared SDK event loop,
+and broader application migration are separate work.

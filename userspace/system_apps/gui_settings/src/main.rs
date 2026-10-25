@@ -13,6 +13,7 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
+use gui_protocol_v1::control::{IN_DOWN, IN_KEY, IN_SCROLL, IN_QUIT};
 mod document_editor;
 use document_editor::{Editor, Section};
 
@@ -26,15 +27,6 @@ use dunit_style::value::Color;
 use dunit_text::Font;
 
 use dwm_settings::{Effects, Settings, Theme};
-
-// Control-message magics shared with the compositor (see gui_server main.rs).
-const CTRL_MAGIC: u32 = 0x3150_4143; // "CAP1" — capability announce
-const INPUT_MAGIC: u32 = 0x3150_4E49; // "INP1" — pointer input
-const RELOAD_MAGIC: u32 = 0x3144_4C52; // "RLD1" — "config changed, reload"
-const IN_DOWN: u8 = 2;
-const IN_KEY: u8 = 5;
-const IN_SCROLL: u8 = 6;
-const IN_QUIT: u8 = 9;
 
 const SURFACE: u64 = 1;
 const BUFFER: u64 = 2;
@@ -1241,11 +1233,12 @@ fn resize_surface(
         libdunit::shared_buffer::release(handle, mapping as usize, bytes);
         return None;
     }
-    let mut announcement = [0u8; 16];
-    announcement[..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    announcement[4..8].copy_from_slice(&(remote as u32).to_le_bytes());
-    announcement[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    announcement[12..16].copy_from_slice(&(object as u32).to_le_bytes());
+    let announcement = gui_protocol_v1::control::Capability {
+        handle: remote as u32,
+        advertised_bytes: bytes as u32,
+        object: object as u32,
+    }
+    .encode();
     let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
     *serial += 1;
     let import = Request::ImportBuffer {
@@ -1396,11 +1389,12 @@ pub extern "C" fn _start() -> ! {
         libdunit::println("gui_settings: FAIL cap transfer");
         libdunit::exit(5);
     }
-    let mut ann = [0u8; 16];
-    ann[0..4].copy_from_slice(&CTRL_MAGIC.to_le_bytes());
-    ann[4..8].copy_from_slice(&(ch as u32).to_le_bytes());
-    ann[8..12].copy_from_slice(&(bytes as u32).to_le_bytes());
-    ann[12..16].copy_from_slice(&(BUFFER as u32).to_le_bytes());
+    let ann = gui_protocol_v1::control::Capability {
+        handle: ch as u32,
+        advertised_bytes: bytes as u32,
+        object: BUFFER as u32,
+    }
+    .encode();
     libdunit::ipc_send(compositor, &ann);
 
     // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
@@ -1461,8 +1455,7 @@ pub extern "C" fn _start() -> ! {
             guard += 1;
         }
         if dwm_settings::save(&app.s) {
-            let mut sig = [0u8; 8];
-            sig[0..4].copy_from_slice(&RELOAD_MAGIC.to_le_bytes());
+            let sig = gui_protocol_v1::control::RELOAD;
             libdunit::ipc_send(compositor, &sig);
             spots = render(px, &font, &app);
             let (tw, th) = RES_PRESETS[app.res_idx];
@@ -1541,20 +1534,20 @@ pub extern "C" fn _start() -> ! {
             libdunit::println("gui_settings: surface protocol error");
             continue;
         }
-        if n < 8 || u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]) != INPUT_MAGIC {
+        let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize]) else {
             continue;
-        }
-        let kind = rx[4];
+        };
+        let kind = input.kind;
         if kind == IN_QUIT {
             break;
         }
         if kind == IN_SCROLL && n >= 12 {
-            let delta = i32::from_le_bytes([rx[8], rx[9], rx[10], rx[11]]);
+            let delta = input.x;
             app.apply(Action::Scroll(0, delta.saturating_mul(-32)));
             spots = render(px, &font, &app);
         }
         if kind == IN_KEY && n >= 17 && app.page == 12 && app.profile_focused {
-            app.profile_path.key(rx[8], rx[16]);
+            app.profile_path.key(input.x as u8, input.value as u8);
             app.document_error.clear();
             app.status = "Path edited. Import complete desktop validates the file before saving.";
             app.error = false;
@@ -1563,15 +1556,15 @@ pub extern "C" fn _start() -> ! {
         if kind == IN_KEY && n >= 17 && app.editor_section().is_some() {
             app.document_error.clear();
             if let Some(editor) = &mut app.editor {
-                editor.key(rx[8], rx[16]);
+                editor.key(input.x as u8, input.value as u8);
                 app.status = "Draft only. Apply validates and saves; Revert reloads the saved document.";
                 app.error = false;
                 draft_repaint = true;
             }
         }
         if kind == IN_DOWN && n >= 16 {
-            let lx = i32::from_le_bytes([rx[8], rx[9], rx[10], rx[11]]);
-            let ly = i32::from_le_bytes([rx[12], rx[13], rx[14], rx[15]]);
+            let lx = input.x;
+            let ly = input.y;
             let mut act = None;
             for hs in spots.iter() {
                 if hs.hit(lx, ly) {
@@ -1616,8 +1609,7 @@ pub extern "C" fn _start() -> ! {
                         },
                         Ok(()) => {
                             app.refresh_document(); app.s = dwm_settings::load(); app.refresh_color_choices();
-                            let mut signal = [0u8; 8];
-                            signal[..4].copy_from_slice(&RELOAD_MAGIC.to_le_bytes());
+                            let signal = gui_protocol_v1::control::RELOAD;
                             app.error = libdunit::ipc_send(compositor, &signal) < 0;
                             app.status = if app.error { "Document saved; reload request failed." }
                                 else { "Document validated and saved; desktop reload requested." };
@@ -1679,8 +1671,7 @@ pub extern "C" fn _start() -> ! {
                     app.refresh_color_choices();
                     libdunit::println(&alloc::format!("gui_settings: theme saved {}", app.themes[index]));
                 }
-                let mut sig = [0u8; 8];
-                sig[0..4].copy_from_slice(&RELOAD_MAGIC.to_le_bytes());
+                let sig = gui_protocol_v1::control::RELOAD;
                 if libdunit::ipc_send(compositor, &sig) < 0 {
                     app.status = "Saved; desktop reload could not be requested.";
                     app.error = true;
