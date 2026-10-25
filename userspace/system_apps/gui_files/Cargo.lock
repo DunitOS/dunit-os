@@ -86,6 +86,10 @@ name = "dunit_ui"
 version = "0.1.0"
 
 [[package]]
+name = "dunit_wait_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_widgets"
 version = "0.1.0"
 dependencies = [
@@ -146,6 +150,9 @@ dependencies = [
 [[package]]
 name = "libdunit"
 version = "0.1.0"
+dependencies = [
+ "dunit_wait_abi",
+]
 
 [[package]]
 name = "libm"

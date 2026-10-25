@@ -51,6 +51,7 @@ name = "vfs_properties"
 harness = true
 
 [dependencies]
+dunit_wait_abi = { path = "../abi/wait-set" }
 bootloader = "0.9"
 bitflags = "2.11"
 # Shared terminal color-theme presets (single source of truth), also linked by

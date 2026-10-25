@@ -1,0 +1,9 @@
+# Isolated native SDK monitor regression; all other settings use system defaults.
+[meta]
+schema_version = 2
+[startup]
+entries = ["gui_stat"]
+self_test = false
+[application.gui_stat]
+name = "System Monitor"
+label = "STAT"

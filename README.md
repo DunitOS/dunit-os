@@ -165,6 +165,14 @@ The [roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) tracks the next steps. More detaile
 verification results are in the [desktop report](docs/DWM_ENGINE_V2_REPORT.md)
 and [M6 report](docs/m6-readiness.md).
 
+## Writing apps
+
+Work on the native Rust SDK has started. It uses `no_std + alloc` over
+`libdunit`, with an event loop that can wait for messages, files, timers and
+child processes together. System Monitor is the first app to use that loop.
+The SDK is still early: app templates, declarative widgets and packaging tools
+are being built. See the [SDK progress and contract](docs/sdk/m7-start.md).
+
 ## Get involved
 
 If you'd like to help build Dunit, take a look at the

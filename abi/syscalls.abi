@@ -96,3 +96,4 @@
 86	Fcntl
 87	Poll
 88	Ioctl
+89	WaitSetWait

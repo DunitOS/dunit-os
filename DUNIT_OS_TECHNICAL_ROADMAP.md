@@ -38,7 +38,7 @@ M7–M10 не закрываются наличием прототипов ил�
 | M4 | Рабочие desktop/apps, setup/Settings, TOML/Lua, темы/SVG/Chameleon, pointer/mode switch до 3K; session/config persistence через reboot остаётся открытым. |
 | M5 | DunitFS v2/fsck/installer/init/profiles — рабочая база; MemFS root и незавершённые user profiles не позволяют закрыть installed-system milestone. |
 | M6 | Static C, pthread/condvar, dup и on-device TinyCC подтверждены; native pipe/fd actions/poll/ioctl, boot-UTC clock, libc-test subset и 1000 join + 1000 detached проверены; secure entropy, broader POSIX и release gates открыты. |
-| M7 | Выбран runtime `no_std + alloc` поверх `libdunit`; живой control-канал объединён в `gui_protocol_v1::control` и проверен в QEMU. Нет единого wait-set, cargo dunit/Component, полного widget поведения, clipboard/DnD и C GUI SDK. |
+| M7 | Выбран runtime `no_std + alloc` поверх `libdunit`; живой control-канал объединён в `gui_protocol_v1::control` и проверен в QEMU. Добавлены `WaitSetWait` и начальный SDK event loop; cargo dunit/Component, полное widget поведение, clipboard/DnD и C GUI SDK ещё не готовы. |
 | M8 | Packet networking ещё нет; reboot/poweroff уже есть, остальные platform services открыты. |
 | M9–M10 | Полировка имеющихся GUI начата; rock, SDK-приложения и браузер не закрыты. |
 
@@ -178,15 +178,16 @@ root@dunit:~#
 - **Реализовано после исходного среза:** wait queue переводит потоки в Blocked; PIT будит `sleep` и timed IPC event wait, отправка IPC будит ожидающие потоки. GUI apps ждут IPC-события без цикла `yield`; QEMU `[WAIT-TEST] OK` проверяет таймаут, sleep и IPC wakeup.
 - **Реализовано после исходного среза:** `FS.base` переключается для каждого TID, syscalls 39–40 задают/читают thread pointer, ELF `PT_TLS` создаёт отдельный initial TLS/TCB для main и новых потоков. `[TLS-TEST] OK` проверяет `.tdata/.tbss` и изоляцию при вытеснении.
 - **Реализовано:** futex (`FutexWait/Wake`, 41–42) используется базовыми musl pthread/condvar (`musl_thread`, `musl_cond`). Native barrier из потерянной линии не восстановлен.
-- **Не реализовано:** dynamic thread vector для dynamic TLS, **единый wait-set** (ожидание набора IPC+timer+file+pipe одним вызовом — первый пункт M7 SDK), priorities, time accounting, SMP.
-- **Следствие:** `gui_server` как long-running userspace service и musl pthreads **работают и проверены** (M3/M4, pthread subset); остаётся dynamic TLS/DTV и wait-set.
+- **Реализовано в начале M7:** call-scoped level-triggered `WaitSetWait` (89): IPC+timer+file/pipe/PTY+child exit, безопасная `libdunit::wait_set`, `dunit::event::EventLoop`; edge/persistent registration ещё нет.
+- **Не реализовано:** dynamic thread vector для dynamic TLS, priorities, time accounting, SMP.
+- **Следствие:** `gui_server` как long-running userspace service и musl pthreads **работают и проверены** (M3/M4, pthread subset); остаётся dynamic TLS/DTV и расширение wait-set до edge/persistent registration.
 
 ### 4.4 Syscalls и ABI
 
-- **Реализовано:** generated ABI (`abi/*.abi` → `tools/gen_abi.py`), номера 0–84: file I/O, anonymous mmap, IPC/WaitEvent, framebuffer/input capabilities, spawn/wait/kill, cwd/stats, seek/fstat/dup/pipe/truncate, clocks, threads/TLS/futex. `fcntl/poll/ioctl`, spawn file-actions и единый wait-set отсутствуют.
+- **Реализовано:** generated ABI (`abi/*.abi` → `tools/gen_abi.py`), номера 0–89 (85 зарезервирован): file I/O, anonymous mmap, IPC/WaitEvent, framebuffer/input capabilities, spawn/wait/kill, cwd/stats, seek/fstat/dup/pipe/truncate, clocks, threads/TLS/futex. `fcntl/poll/ioctl`, spawn file-actions и начальный level-triggered wait-set также реализованы; wait-set ещё не имеет edge/persistent registration.
 - **Удачно:** user-copy проверяет присутствие и writable/user flags каждой страницы до доступа.
 - **Безопасность:** raw framebuffer/input — через capability handles (DISPLAY_MASTER/INPUT_MASTER, exclusive), доступные только владельцу (gui_server); не-владелец получает `EACCES`.
-- **ABI-долг (остаток):** **единый wait-set** (poll/event wait над набором разнородных объектов) и dynamic TLS/DTV. Остальное из прежнего списка (manifest, handle rights, dup/pipe, seek, realtime clocks, robust errno) **сделано**.
+- **ABI-долг (остаток):** edge/persistent registration для wait-set и dynamic TLS/DTV. Остальное из прежнего списка (manifest, handle rights, dup/pipe, seek, realtime clocks, robust errno) **сделано**.
 
 ### 4.5 IPC
 
@@ -704,11 +705,11 @@ SDK — слой, на котором пишутся прикладные про
 
 #### M7.1. wait-set — единый примитив ожидания (ПЕРВЫЙ пункт; изменение `abi/*.abi` → Решение человека)
 
-Сегодня каждый класс объектов ждётся отдельно: IPC → WaitEvent(33), память → FutexWait(41), ребёнок → WaitProcess(16). Native Poll(87) восстановлен и проверен для file/pipe/PTY; он не объединяет IPC/timer/process в один wait-set. Единого wait-set нет; этот пункт остаётся входом в event loop SDK и M8.7.
+Прежние вызовы IPC → WaitEvent(33), память → FutexWait(41), ребёнок → WaitProcess(16) и native Poll(87) сохранены. По решению пользователя 26 октября 2026 добавлен WaitSetWait(89): один call-scoped level-triggered набор IPC/timer/file/pipe/PTY/child-exit. Контракт и ограничения: `docs/sdk/m7-start.md`. Полный M7.1 остаётся открытым до edge/persistent registration и расширенной интеграции.
 
-- [ ] Спроектировать wait-set: регистрация интереса к набору {IPC endpoint, timer/deadline, file/pipe readiness, process handle, позже socket} + блокирующее ожидание с таймаутом; readiness-edge и отмена.
-- [ ] Добавить syscall(ы) **только через `abi/syscalls.abi` + регенерацию** (это изменение ABI — **Решение человека**, см. раздел в конце).
-- [ ] libdunit-обёртка `wait_set`/`event.wait`; привязать к ней будущий `Poll` и существующие fut/IPC-пути, не плодя busy-poll.
+- [~] Реализованы снимок набора {own IPC inbox, timer/deadline, file/pipe/PTY readiness, child pid}, блокирующее ожидание, относительный таймаут, токены и отмена через IPC. Сохраняются исходные deadline и fd slot identity при пробуждении. Readiness-edge и постоянная регистрация ещё не реализованы; sockets отложены до M8.
+- [x] `WaitSetWait` (89) добавлен через `abi/syscalls.abi` и регенерацию Rust/C outputs после решения пользователя 26 октября 2026; совместимость прежних вызовов сохранена.
+- [~] Добавлены безопасная `libdunit::wait_set::wait` и `dunit::event::EventLoop`, применённый в `gui_stat`. Готовность fd разделяет реализацию с native Poll; старые futex/IPC ABI остаются совместимыми. Полная унификация остальных SDK циклов ещё впереди.
 
 **Цель:** один примитив ожидания для GUI/сетевых/сервисных циклов. **Зависимости:** M1 wait queue (`block_current(pid, deadline)` уже умеет IPC+timer). **Результат:** программа блокируется на наборе объектов одним вызовом. **Критерии приёмки (qemu_test):** тест регистрирует {pipe, IPC, timer}, пишет в один из них → просыпается именно на нём с корректным токеном; таймаут срабатывает; закрытие объекта будит с hangup-событием; маркер `[WAITSET] OK`. **Риски:** переусложнение API и lost-wakeup — сначала минимальный набор классов + property-тест на гонки. **DoD:** wait-set в ABI, обёрнут в SDK, используется event loop (M7.4) — не «добавлен и не вызывается».
 
@@ -727,7 +728,7 @@ SDK — слой, на котором пишутся прикладные про
 Два варианта несущего рантайма приложений: **(A)** собственный `no_std + alloc` крейт с нативным Dunit-API (как сегодняшние `runtime/` + `libdunit`); **(B)** полноценный Rust `std` поверх musl-порта (`std` требует бэкенд: процессы/потоки/сеть/время/fs поверх Dunit). Разбор обоих — в разделе «Решения человека»; агент не выбирает сам.
 
 - [x] Зафиксировать выбор (A/B) решением человека ДО написания прикладного API. **Решение 26 октября 2026:** A, `no_std + alloc` поверх `libdunit`; пользователь выбрал этот вариант для M7 SDK.
-- [ ] Реализовать выбранный рантайм как узкий слой; не тянуть второй источник правды.
+- [~] Начат узкий `runtime/dunit` (`no_std + alloc`): owning event loop поверх `libdunit::wait_set`, используется `gui_stat`. Прикладные fs/process/thread API, entry attributes и Component ещё не реализованы.
 
 **Цель:** одна несущая модель для всех приложений. **Зависимости:** M6 (для B — зрелость musl: TLS/threads/fs/time уже есть; не хватает сети и части POSIX). **Результат:** приложения SDK используют единый рантайм. **Критерии приёмки:** эталонное приложение собирается и проходит тесты на выбранном рантайме; документирован профиль (что доступно). **Риски:** `std`-путь тянет широкую POSIX-поверхность (сеть/signals) раньше времени; `no_std`-путь — свой API, который придётся развивать. **DoD:** выбор зафиксирован, второй вариант не висит полуреализованным.
 
@@ -1305,6 +1306,7 @@ tools/qemu_test.py
   - **Принято 26 октября 2026:** A (`no_std + alloc` поверх `libdunit`). Полноценный `std` не является текущим рантаймом M7. API не должен закрывать возможность отдельного std-порта позднее.
 
 - **wait-set и прочие изменения ABI (M7.1, M8, uname).** Новый syscall(ы) для единого ожидания набора объектов; uname/sysinfo-источник фактов для `dufetch`; сетевые права/handles (ниже) — всё это изменения `abi/*.abi`.
+  - **Принято 26 октября 2026:** пользователь разрешил `WaitSetWait` с call-scoped level-triggered ожиданием; реализован под номером 89. Новые ABI-контракты сверх этого решения требуют отдельного согласования.
   - **Рекомендация:** wait-set — первым пунктом M7 (блокирует event loop и сеть); uname-источник — перед миграцией `dufetch`; добавлять строго через `abi/syscalls.abi`+регенерацию с проверкой нумерации.
 
 - **Формат манифеста `dunit.toml` (M7.2).** Поля (`id`, имя, иконка, вид gui/tui/cli, `capabilities`), источник (initrd/`/system`), как его читают launcher/dock/`init`.

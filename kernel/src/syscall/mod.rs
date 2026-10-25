@@ -1,4 +1,5 @@
 mod native_fd;
+pub(crate) mod wait_set;
 mod terminal_ioctl;
 mod spawn_actions;
 use alloc::string::String;
@@ -100,6 +101,7 @@ pub enum Syscall {
     Fcntl = 86,
     Poll = 87,
     Ioctl = 88,
+    WaitSetWait = 89,
 }
 
 impl Syscall {
@@ -194,6 +196,7 @@ impl Syscall {
             86 => Some(Syscall::Fcntl),
             87 => Some(Syscall::Poll),
             88 => Some(Syscall::Ioctl),
+            89 => Some(Syscall::WaitSetWait),
             _ => None,
         }
     }
@@ -762,6 +765,7 @@ pub extern "C" fn syscall_handler(
             arg3 as usize, arg4 as usize, arg5 as usize,
         ),
         Syscall::Fcntl => native_fd::fcntl(arg0 as u32, arg1 as u32, arg2),
+        Syscall::WaitSetWait => wait_set::wait(arg0, arg1 as usize, arg2, arg3 as usize, arg4, arg5),
         Syscall::Poll => native_fd::poll(arg0 as *mut u8, arg1 as usize, arg2),
         Syscall::Ioctl => terminal_ioctl::ioctl(arg0 as u32, arg1 as u32, arg2 as *mut u8, arg3 as usize),
         Syscall::TerminalDiag => sys_terminal_diag(

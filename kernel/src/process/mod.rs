@@ -32,6 +32,7 @@ pub const FIRST_PROCESS_FD: ProcessFd = 3;
 pub const MAX_PROCESS_FD: ProcessFd = 1024;
 pub const DEFAULT_KERNEL_STACK_SIZE: usize = 0x40000;
 
+static NEXT_FD_IDENTITY: AtomicU64 = AtomicU64::new(1);
 static NEXT_PID: AtomicU64 = AtomicU64::new(1);
 static NEXT_SHARED_VM_ID: AtomicU64 = AtomicU64::new(1);
 static SHARED_VM_OBJECTS: IrqSafeSpinLock<BTreeMap<u64, SharedVmObject>> =
@@ -145,6 +146,7 @@ enum WaitKey {
     /// with readers still open.
     Pipe(u64),
     Poll,
+    WaitSet,
 }
 
 #[derive(Clone, Copy)]
@@ -350,6 +352,7 @@ pub struct Process {
     handle_table: crate::handle::HandleTable,
     /// Счётчик доставленных, но ещё не считанных сигналов (право SIGNAL).
     pending_signals: u64,
+    pub(crate) wait_set: Option<Box<crate::syscall::wait_set::Pending>>,
 }
 
 const USER_MMAP_BASE: usize = 0x0000_0010_0000_0000;
@@ -411,6 +414,7 @@ impl Process {
             tls_allocation: None,
             handle_table: crate::handle::HandleTable::new(),
             pending_signals: 0,
+            wait_set: None,
         };
         process.reserve_stdio();
         process
@@ -454,6 +458,7 @@ impl Process {
             tls_allocation: None,
             handle_table: crate::handle::HandleTable::new(),
             pending_signals: 0,
+            wait_set: None,
         };
         process.reserve_stdio();
         Ok(process)
@@ -575,6 +580,7 @@ impl Process {
     /// (close a VFS file whose last reference went away, or wake a pipe end).
     pub fn drop_fd(&mut self, fd: ProcessFd) -> Result<FdCleanup, ProcessError> {
         let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
+        wake_wait_set_waiters();
         Ok(self.release_target(entry.target))
     }
 
@@ -630,7 +636,9 @@ impl Process {
                     Some(old) => self.release_target(old.target),
                     None => FdCleanup::None,
                 };
+                entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
                 self.fd_table.insert(nf, entry);
+                wake_wait_set_waiters();
                 Ok((nf, cleanup))
             }
             None => {
@@ -646,10 +654,11 @@ impl Process {
     pub fn allocate_fd(&mut self, entry: FdEntry) -> Result<ProcessFd, ProcessError> {
         self.allocate_fd_from(entry, 0)
     }
-    pub fn allocate_fd_from(&mut self, entry: FdEntry, minimum: u32) -> Result<ProcessFd, ProcessError> {
+    pub fn allocate_fd_from(&mut self, mut entry: FdEntry, minimum: u32) -> Result<ProcessFd, ProcessError> {
         if minimum >= MAX_PROCESS_FD { return Err(ProcessError::InvalidFd); }
         for fd in minimum..MAX_PROCESS_FD {
             if !self.fd_table.contains_key(&fd) {
+                entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
                 self.fd_table.insert(fd, entry);
                 return Ok(fd);
             }
@@ -678,11 +687,13 @@ impl Process {
         self.fd_table.get_mut(&fd).ok_or(ProcessError::InvalidFd)?.cloexec = value;
         Ok(())
     }
-    pub fn install_fd(&mut self, fd: u32, entry: FdEntry) -> Result<FdCleanup, ProcessError> {
+    pub fn install_fd(&mut self, fd: u32, mut entry: FdEntry) -> Result<FdCleanup, ProcessError> {
         if fd >= MAX_PROCESS_FD { return Err(ProcessError::InvalidFd); }
         self.retain_target(entry.target);
         let cleanup = self.fd_table.remove(&fd).map(|old| self.release_target(old.target)).unwrap_or(FdCleanup::None);
+        entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
         self.fd_table.insert(fd, entry);
+        wake_wait_set_waiters();
         Ok(cleanup)
     }
     /// Adds a freshly opened VFS object at an exact descriptor, consuming its
@@ -708,7 +719,9 @@ impl Process {
     }
 
     pub fn close_fd(&mut self, fd: ProcessFd) -> Result<FdEntry, ProcessError> {
-        self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)
+        let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
+        wake_wait_set_waiters();
+        Ok(entry)
     }
 
     /// Maps zero-filled private anonymous memory into this process.
@@ -1421,13 +1434,15 @@ impl ProcessOutputSink {
 #[derive(Debug, Clone)]
 pub struct FdEntry {
     pub target: FdTarget,
+    /// Unique descriptor-slot binding; dups and reused slots get a fresh id.
+    pub(crate) identity: u64,
     pub cloexec: bool,
     pub terminal: Option<Arc<crate::pty::Endpoint>>,
     status: Arc<AtomicU32>,
 }
 impl FdEntry {
     pub fn new(target: FdTarget, status: u32) -> Self {
-        Self { target, cloexec: false, terminal: None, status: Arc::new(AtomicU32::new(status)) }
+        Self { target, identity: NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed), cloexec: false, terminal: None, status: Arc::new(AtomicU32::new(status)) }
     }
     pub fn stdin() -> Self { Self::new(FdTarget::Stdin, 1) }
     pub fn stdout() -> Self { Self::new(FdTarget::Stdout, 2) }
@@ -2088,6 +2103,7 @@ fn wake_entry(entry: WaitEntry) {
 }
 
 pub fn wake_ipc_waiters(pid: ProcessId) {
+    wake_wait_set_waiters();
     let _irq = InterruptGuard::new();
     let mut queue = WAIT_QUEUE.lock();
     let mut index = 0;
@@ -2137,6 +2153,12 @@ pub fn pipe_block_current(id: u64) -> Result<(), ProcessError> {
 /// Poll restarts the original syscall after an actual readiness notification
 /// or its absolute deadline. No userspace sleep/rescan loop is involved.
 pub fn poll_block_current(deadline_ns: u64) -> Result<(), ProcessError> {
+    readiness_block_current(deadline_ns, WaitKey::Poll)
+}
+pub(crate) fn wait_set_block_current(deadline_ns: u64) -> Result<(), ProcessError> {
+    readiness_block_current(deadline_ns, WaitKey::WaitSet)
+}
+fn readiness_block_current(deadline_ns: u64, key: WaitKey) -> Result<(), ProcessError> {
     let _irq = InterruptGuard::new();
     let entity = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
     let table = process_table_mut();
@@ -2151,7 +2173,7 @@ pub fn poll_block_current(deadline_ns: u64) -> Result<(), ProcessError> {
     let deadline = if deadline_ns == u64::MAX { None } else {
         Some(deadline_ns.saturating_add(tick_ns - 1) / tick_ns)
     };
-    WAIT_QUEUE.lock().push(WaitEntry { entity, key: WaitKey::Poll, deadline });
+    WAIT_QUEUE.lock().push(WaitEntry { entity, key, deadline });
     PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
     PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
     Ok(())
@@ -2161,7 +2183,18 @@ pub fn wake_poll_waiters() {
     let mut queue = WAIT_QUEUE.lock();
     let mut index = 0;
     while index < queue.len() {
-        if queue[index].key == WaitKey::Poll { wake_entry(queue.remove(index)); }
+        if matches!(queue[index].key, WaitKey::Poll | WaitKey::WaitSet) { wake_entry(queue.remove(index)); }
+        else { index += 1; }
+    }
+}
+/// Event-driven rescan of call-scoped sets. Unrelated producers may cause a
+/// spurious rescan; the original snapshot/deadline is preserved across restart.
+pub(crate) fn wake_wait_set_waiters() {
+    let _irq = InterruptGuard::new();
+    let mut queue = WAIT_QUEUE.lock();
+    let mut index = 0;
+    while index < queue.len() {
+        if queue[index].key == WaitKey::WaitSet { wake_entry(queue.remove(index)); }
         else { index += 1; }
     }
 }
@@ -2357,6 +2390,11 @@ pub fn is_pid_blocked(pid: ProcessId) -> bool {
 fn remove_waiter(entity: ProcessId) {
     let _irq = InterruptGuard::new();
     WAIT_QUEUE.lock().retain(|entry| entry.entity != entity);
+    if let Some(index) = process_record_index(process_table_mut(), entity) {
+        if let Some(process) = process_table_mut()[index].process.as_mut() {
+            process.wait_set = None;
+        }
+    }
 }
 
 pub fn mark_process_finished(exit: ProcessExit) {
@@ -2377,6 +2415,7 @@ pub fn mark_process_finished(exit: ProcessExit) {
             log_process_transition(exit.pid, from, ProcessState::Dead, "finished");
         }
     }
+    wake_wait_set_waiters();
 }
 
 pub fn reap_process(pid: ProcessId) -> Result<(), ProcessError> {
@@ -2464,6 +2503,7 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
     }
     remove_waiter(pid);
     cleanup_owned_threads(pid);
+    wake_wait_set_waiters();
     Ok(false)
 }
 
@@ -2488,6 +2528,17 @@ pub fn is_pid_runnable(pid: ProcessId) -> bool {
         && process.context.rsp != 0
         && owner_address_space.is_some()
         && process.kernel_stack_top().is_some()
+}
+
+/// Non-consuming observation, with exactly the existing child-wait authority.
+pub(crate) fn child_exit_snapshot(pid: ProcessId) -> Result<Option<WaitRecord>, ProcessError> {
+    let parent = current_process().ok_or(ProcessError::NoCurrentProcess)?.pid;
+    let table = process_table_mut();
+    let record = table.iter().find(|record| record.pid == pid && record.parent == Some(parent)
+        && record.waitable && record.owner.is_none()).ok_or(ProcessError::NotChild)?;
+    Ok(record.status.filter(|_| record.has_run).map(|status| WaitRecord {
+        pid, kind: status.kind_code(), code: status.exit_code(),
+    }))
 }
 
 pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessError> {
@@ -2555,6 +2606,7 @@ pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessErr
         }
     }
 
+    wake_wait_set_waiters();
     Ok(WaitRecord { pid, kind, code })
 }
 

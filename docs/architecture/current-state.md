@@ -67,6 +67,7 @@
 | `kill` процесса | ✅ | `[WAIT] pid=10 kind=0 code=-9` (runtime_stress: kill OK) |
 | Обработка user-fault (page fault) | ✅ | `[USER-FAULT] pid=11 reason=page-fault … err=0x4`, `[WAIT] pid=11 kind=1 code=-14` |
 | Schedulable user threads | ✅ | `[THREAD-TEST] OK`: TID, create/exit/nonblocking join, отдельные GPR/kernel stack/FXSAVE, общий PID/address space/fd table; thread fault не завершает процесс |
+| Native wait-set (M7, 2026-10-26) | 🟡 | `[WAITSET] OK`: IPC + timer + file/pipe/PTY + child exit в одном call-scoped level-triggered вызове; edge/persistent registration ещё нет. `tools/waitset_markers.json`, `docs/sdk/m7-start.md`. |
 | Wait queues / blocking sleep / IPC event | ✅ | `[WAIT-TEST] OK`: timeout, blocked sleep, wake при отправке IPC; GUI apps ждут событие без yield polling |
 | VM lifecycle | ✅ | `[VM-TEST] OK`: `munmap/mprotect`, W^X, guard fault, shared frame между процессами и освобождение после закрытия/exit |
 | Static TLS | ✅ | `[TLS-TEST] OK`: `FS.base`, x86_64 Variant II TCB, initial `PT_TLS` `.tdata/.tbss`, изоляция main/threads |
@@ -75,7 +76,7 @@
 Профиль исполнения: UP round-robin с PIT (~100 Гц), один процесс исполняется
 в каждый момент времени. Состояние x87/MMX/SSE сохраняется отдельно для каждого
 потока; AVX/XSAVE пока не поддержаны. `clock.rs` предоставляет монотонные
-тики/наносекунды и deadline. Dynamic TLS/DTV, универсальный event/handle wait и SMP остаются будущими задачами.
+тики/наносекунды и deadline. Dynamic TLS/DTV, edge/persistent registration для нового wait-set и SMP остаются будущими задачами.
 
 ## IPC
 

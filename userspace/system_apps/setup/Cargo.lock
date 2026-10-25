@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "dunit_wait_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dwm_settings"
 version = "0.1.0"
 dependencies = [
@@ -13,6 +17,9 @@ dependencies = [
 [[package]]
 name = "libdunit"
 version = "0.1.0"
+dependencies = [
+ "dunit_wait_abi",
+]
 
 [[package]]
 name = "setup"

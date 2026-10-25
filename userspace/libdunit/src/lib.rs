@@ -3,6 +3,7 @@
 extern crate alloc;
 pub mod shared_buffer;
 pub mod process;
+pub mod wait_set;
 mod exec_path;
 
 use core::alloc::{GlobalAlloc, Layout};

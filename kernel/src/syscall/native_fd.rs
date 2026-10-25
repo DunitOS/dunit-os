@@ -76,7 +76,7 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
     }
 }
 
-fn readiness(fd: i32, events: u16) -> u16 {
+pub(super) fn readiness(fd: i32, events: u16) -> u16 {
     if fd < 0 {
         return 0;
     }

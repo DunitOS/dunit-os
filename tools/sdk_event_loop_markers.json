@@ -1,0 +1,14 @@
+{
+  "description": "Real GUI monitor refresh and close through native SDK wait-set event loop",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": ["exec /app/setup import-desktop /assets/dwm/tests/sdk-waitset.toml", "exec /app/gui_server"],
+    "command_actions": {"exec /app/gui_server": [
+      {"wait_marker": "gui_stat: SDK wait-set refresh OK", "timeout": 60},
+      {"execute": "send-key", "arguments": {"keys": [{"type": "qcode", "data": "meta_l"}, {"type": "qcode", "data": "q"}], "hold-time": 80}},
+      {"wait_marker": "gui_stat: SDK quit OK", "timeout": 30}
+    ]}
+  },
+  "required": ["[TERM-007] Starting main loop", "setup: full desktop applied", "gui_stat: surface presented OK", "gui_stat: SDK wait-set refresh OK", "gui_server: desktop ready", "gui_stat: SDK quit OK"],
+  "forbidden": ["[PANIC]", "gui_stat: FAIL", "gui_stat: PANIC", "gui_server: FAIL"]
+}

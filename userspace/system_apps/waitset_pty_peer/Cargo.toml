@@ -1,0 +1,6 @@
+[package]
+name = "waitset_pty_peer"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+libdunit = { path = "../../libdunit" }

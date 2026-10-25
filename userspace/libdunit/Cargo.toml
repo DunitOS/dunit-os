@@ -8,3 +8,4 @@ name = "libdunit"
 crate-type = ["rlib"]
 
 [dependencies]
+dunit_wait_abi = { path = "../../abi/wait-set" }

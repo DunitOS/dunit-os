@@ -124,3 +124,11 @@ The opt-in is valid only for an additional thread (main returns EINVAL).
 All dead threads release their kernel stack and kernel-allocated TLS after HAL
 returns; joinable status survives until ThreadJoin=30. Auto-reap deletes that
 status as well, so it must not have a joiner. No syscall number was added.
+
+## Native wait-set (M7 foundation)
+
+`WaitSetWait` (89) observes own-inbox IPC, descriptor readiness, monotonic
+timers and child termination in one blocking call. It is non-consuming and
+level-triggered. `abi/wait-set` defines the shared Rust record layout;
+`libdunit::wait_set::wait` is the safe slice-based binding. The exact contract,
+limits and remaining M7 work are in [SDK foundation](../docs/sdk/m7-start.md).

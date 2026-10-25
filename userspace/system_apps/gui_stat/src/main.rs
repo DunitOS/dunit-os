@@ -289,22 +289,41 @@ pub extern "C" fn _start() -> ! {
         libdunit::exit(6);
     }
 
-    // 9) Live loop: block on IPC with a timeout. On QUIT we exit; on any input
-    //    we ignore it (nothing to hit-test); on timeout (EAGAIN) we re-poll the
-    //    counters and repaint. The compositor blits our buffer every tick.
+    // The native SDK event loop blocks on inbox readiness with a refresh timeout.
+    let mut events = match dunit::event::EventLoop::new(&[dunit::event::Interest::ipc(1)]) {
+        Ok(events) => events,
+        Err(_) => { libdunit::println("gui_stat: FAIL event loop"); libdunit::exit(6); }
+    };
+    let mut verified_refresh = false;
     loop {
-        let n = libdunit::ipc_recv_blocking(&mut rx, POLL_MS);
+        let timed_out = match events.wait(POLL_MS * 1_000_000) {
+            Ok(ready) => ready.is_empty(),
+            Err(_) => {
+                libdunit::println("gui_stat: FAIL wait-set");
+                libdunit::exit(6);
+            }
+        };
+        let previous_ticks = stats.uptime_ticks;
+        if libdunit::get_system_stats(&mut stats) != 0 {
+            libdunit::println("gui_stat: FAIL refresh stats");
+            libdunit::exit(6);
+        }
+        if timed_out && stats.uptime_ticks > previous_ticks && !verified_refresh {
+            libdunit::println("gui_stat: SDK wait-set refresh OK");
+            verified_refresh = true;
+        }
+        let n = libdunit::ipc_recv(&mut rx);
         if gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize])
             .map(|input| input.kind) == Some(IN_QUIT)
         {
             break;
         }
-        // Whether woken by a stray event or the poll timeout, refresh the view.
-        libdunit::get_system_stats(&mut stats);
+        // Repaint the sample obtained after this wake.
         render_stats(px, &font, &stats);
     }
 
     libdunit::handle_close(buf);
+    libdunit::println("gui_stat: SDK quit OK");
     libdunit::exit(0)
 }
 

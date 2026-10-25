@@ -55,6 +55,12 @@ jobs:
           path: limine
           key: limine-v8-binary
 
+      - name: Native ABI and protocol contracts
+        run: |
+          python3 tools/gen_abi.py --check
+          cargo test --manifest-path abi/wait-set/Cargo.toml
+          cargo test --manifest-path protocols/gui-v1/Cargo.toml
+
       - name: Image profile tests
         run: python3 tools/test_image_profiles.py
 
@@ -101,6 +107,18 @@ jobs:
             --boot-timeout 180 \
             --cmd-timeout 60 \
             --timeout 420
+
+      - name: Wait-set regression (QEMU, TCG)
+        run: |
+          python3 tools/qemu_test.py --markers-file tools/waitset_markers.json \
+            --accel tcg --boot-timeout 180 --cmd-timeout 130 --timeout 300 \
+            --post-boot-delay 3 --settle 4
+
+      - name: Native SDK monitor event loop (QEMU, TCG)
+        run: |
+          python3 tools/qemu_test.py --markers-file tools/sdk_event_loop_markers.json \
+            --accel tcg --boot-timeout 180 --cmd-timeout 100 --timeout 300 \
+            --post-boot-delay 3 --settle 1.5
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

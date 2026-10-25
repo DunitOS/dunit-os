@@ -1,0 +1,25 @@
+{
+  "description": "Native call-scoped wait-set readiness, authority, restart and descriptor lifetime",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/waitset_test"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[WAITSET] pipe token level OK",
+    "[WAITSET] IPC cancellation OK",
+    "[WAITSET] timer timeout spurious OK",
+    "[WAITSET] hangup close reuse OK",
+    "[WAITSET] child nonreaping authority OK",
+    "[WAITSET] PTY readiness OK",
+    "[WAITSET] validation OK",
+    "[WAITSET] OK",
+    "[EXEC] /app/waitset_test returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[WAITSET] FAIL"
+  ]
+}
