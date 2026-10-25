@@ -2,92 +2,41 @@
 
 ![Dunit OS](assets/images/banner.png)
 
-Dunit OS is an experimental x86_64 operating system built from scratch. It uses
-Green Tea Kernel (Rust `no_std`), a C/NASM hardware abstraction layer, and a
-userspace desktop called DWM.
+Dunit is an operating system we're building from scratch for x86_64 computers.
+It has its own kernel, a terminal, a graphical desktop and a growing set of apps.
+It's still an experimental project, but you can already boot it, explore the
+system and make the desktop your own.
 
-The kernel provides memory management, scheduling, drivers and process
-isolation. The desktop, window manager and applications run as separate ring-3
-ELF processes. Desktop policy stays in userspace.
+The kernel is written in Rust, with C and assembly handling the hardware layer.
+The desktop and apps run as separate processes in userspace.
 
-## Quick start
+## The desktop is yours
 
-Build on 64-bit Linux with `git`, `gcc`, `nasm`, `lld`, `xorriso`, `python3`,
-`qemu-system-x86_64`, and nightly Rust with `rust-src`.
+DWM is Dunit's desktop environment. You can change its layout and behavior
+without rebuilding the OS: keep a single bottom bar, add a second panel, move
+things to another edge, or build a different arrangement altogether.
 
-```bash
-git clone --recurse-submodules https://github.com/DunitOS/dunit-os.git
-cd dunit-os
-rustup override set nightly
-rustup component add rust-src
-./build_iso.sh
-```
+Panels are made of individual components. Put the launcher, workspaces, running
+apps, clocks and system monitors where you want them. Group applications into
+folders that open as a grid, a list or a fan. Add your own buttons and indicators.
 
-The bootable ISO is written to `build/microkernel.iso`.
+Appearance is configurable too: TrueType fonts, colors, spacing, transparency,
+blur, shadows and rounded corners. Settings lets you choose themes and profiles,
+edit panels, set shortcuts and define window rules. Some of these pages expose
+the configuration source directly.
 
-Common build targets:
+Changes reload while the desktop is running. If a new configuration or its Lua
+reload check fails, DWM keeps the previous working desktop.
 
-- `make iso`: terminal ISO.
-- `make iso-dwm`: graphical desktop ISO.
-- `make disk-image`: BIOS/UEFI raw disk image.
+## A little Lua goes a long way
 
-Build and test the desktop through the QEMU harness:
+Dunit includes Lua 5.5.1. You can use it to arrange windows, respond to desktop
+events, update widgets and choose animations.
 
-```bash
-python3 tools/qemu_test.py --build --config limine_test_gui.conf \
-  --markers-file tools/gui_smoke_markers.json \
-  --ready-marker 'gui_server: desktop ready' --timeout 300 --linger 8
-```
-
-## DWM desktop
-
-DWM runs in the `gui_server` userspace software compositor. Its desktop can be
-configured without recompiling the OS:
-
-- Multiple independent panels on any screen edge, with configurable size,
-  alignment, spacing, auto-hide and window reservations.
-- Nested components: launcher, workspaces, application lists, tray, titles,
-  clocks, system monitors, buttons and indicators.
-- Pinned and running applications, plus application folders with grid, list or
-  fan presentation.
-- TrueType text with configurable font paths and component font sizes.
-- Transparency, blur, shadows, rounded corners and DSS style transitions.
-- Configurable keybindings and per-application window rules for workspace,
-  geometry, floating state, opacity and animation.
-- Window dragging, resizing, minimize/maximize/restore and a window switcher.
-- Digital and analog clocks, periodic widget updates and Lua-driven indicators.
-
-Desktop configuration has three layers:
-
-- TOML defines components, panels, applications, keybindings and window rules.
-- DSS controls appearance, dimensions, spacing, states and transitions.
-- Lua provides layouts, event handlers, desktop commands and animation policies.
-
-Settings includes panels, typography, widgets, animations, Lua scripts,
-keybindings, window rules, themes and desktop profiles. Structural settings use
-validated source editors. Theme overlays and complete desktop imports are
-separate operations.
-
-Configuration reloads without restarting the desktop. Candidates are validated
-and prepared before applying; a failed reload retains the last working scene.
-Schema-1 configurations remain supported.
-
-The system document is `/system/share/dwm/default.toml`. A complete user profile
-at `/persist/config/dwm.toml` takes precedence. Persistence across reboot requires
-a persistent `/persist` mount.
-
-## Lua scripting
-
-DWM includes Lua 5.5.1 and the versioned Lua SDK 2. Layout scripts control window
-placement. Event scripts can react to window creation, closing, focus,
-minimizing, restoring and maximizing, as well as workspace changes, panel
-interaction, launcher actions, widget updates and configuration changes.
-
-For example, fade in newly created windows:
+Here's a small example that fades in a new window:
 
 ```lua
 local dwm = require("dwm")
-assert(dwm.api_version == 2)
 
 dwm.on("window::created", function(win)
     dwm.animate(win, {
@@ -100,104 +49,111 @@ dwm.on("window::created", function(win)
 end)
 ```
 
-Animations include fade, slide, scale, spring and Genie. Scripts can register
-custom easing curves and animate window, component, panel, launcher, workspace
-and notification properties. Lua submits descriptors; Rust interpolates frames
-using a monotonic clock. Lua does not run on every compositor frame.
+There are events for window focus, closing, minimizing and restoring, as well as
+workspaces, panels, the launcher and widgets. Animations include fade, slide,
+scale, spring and Genie. You can also write your own easing curves.
 
-Scripts run in separate processes with limits on memory, execution, message
-size and event queues. The API exposes checked desktop commands and widget
-updates, without arbitrary access to kernel memory or compositor capabilities.
-Script failures retain native fallback behavior.
+Lua describes what should happen; the native animation engine draws the frames.
+Scripts run in separate processes with resource limits, so a script error can
+fall back to the desktop's standard behavior.
 
-The bundled macOS-style event example can be selected in the active document's
-`[scripts]` section:
+Desktop customization uses three kinds of files:
 
-```toml
-[scripts]
-enabled = true
-events = "/assets/dwm/scripts/events/macos.lua"
-```
+- TOML for the layout, apps, shortcuts and window rules.
+- DSS for appearance and style transitions.
+- Lua for layouts, events, commands and animation behavior.
 
-Complete profiles are available in Settings. From the Dunit terminal, activate
-the Frost example with:
+To try a complete example, choose a profile in Settings, or run this in the
+Dunit terminal:
 
 ```text
 exec /app/setup import-user /assets/dwm/frost-desktop.toml
 ```
 
-Examples and documentation:
+[Frost](assets/dwm/frost-desktop.toml) has one full-width bottom panel. The
+[multi-panel example](assets/dwm/multi-panel-desktop.toml) adds an auto-hidden
+utility panel with an analog clock. Both use the bundled
+[Lua event script](assets/dwm/scripts/events/macos.lua) and
+[DSS theme](assets/dwm/styles/frost.dss).
 
-- [Frost desktop](assets/dwm/frost-desktop.toml): one full-width bottom panel.
-- [Multi-panel desktop](assets/dwm/multi-panel-desktop.toml): an additional
-  auto-hidden utility panel with an analog clock.
-- [DSS example](assets/dwm/styles/frost.dss).
-- [Lua event example](assets/dwm/scripts/events/macos.lua).
-- [Configuration reference](docs/architecture/dwm-shell.md).
-- [Lua SDK reference](docs/DWM_LUA_SDK.md).
-- [Implementation and verification report](docs/DWM_ENGINE_V2_REPORT.md).
+For your own setup, see the [configuration guide](docs/architecture/dwm-shell.md)
+and [Lua SDK reference](docs/DWM_LUA_SDK.md).
 
-## Kernel and runtime
+## What else is here?
 
-- Limine bootloader with BIOS and UEFI support.
-- Single-core preemptive scheduling with FPU/SSE state preservation.
-- Isolated processes, kernel threads and static `pthread` support.
-- Per-process page tables, guard pages, `mmap`, `munmap`, `mprotect` and W^X.
-- Native Dunit syscall ABI and a dedicated static musl libc port.
-- AHCI SATA and VirtIO block drivers with GPT support.
-- MemFS root populated from an external initrd; DunitFS v2 on `/persist`.
-- `install.dunit` installation with an EFI System Partition and persistent data.
+The desktop comes with a terminal, file manager, calculator, Settings and a
+system monitor. In the shell you'll find command history, tab completion,
+`dufetch`, a calculator and filesystem tools. There's also a port of Tiny C
+Compiler for building C programs inside Dunit.
 
-## Applications and tools
+Underneath, Dunit has preemptive scheduling, isolated address spaces, threads,
+virtual memory protection and a static musl libc port for its native syscall
+ABI. Limine handles BIOS and UEFI boot. Storage support includes AHCI SATA,
+VirtIO block devices and DunitFS for persistent data.
 
-- GUI Terminal, File Manager, Calculator, Settings and System Stats.
-- `dsh`: command history, tab completion and quoted arguments/path execution.
-  Search paths come from `/assets/exec-path`.
-- `dufetch`: memory, uptime, display and process information.
-- `calc`, `bmp_viewer` and `fsck_dunit`.
-- Tiny C Compiler (`tcc`) for compiling C programs inside Dunit.
+The root filesystem currently lives in memory and is loaded from an external
+initrd. Persistent files live on `/persist`. A user desktop profile at
+`/persist/config/dwm.toml` overrides `/system/share/dwm/default.toml`; keeping it
+across reboots requires a persistent `/persist` mount.
 
-Compile a static C application on the host:
+## Build and try it
+
+You'll need 64-bit Linux, `git`, `gcc`, `nasm`, `lld`, `xorriso`, `python3`,
+`qemu-system-x86_64`, and nightly Rust with `rust-src`.
 
 ```bash
-build/dunit-sysroot/bin/dunit-cc -O2 -o build/userspace/hello hello.c
+git clone --recurse-submodules https://github.com/DunitOS/dunit-os.git
+cd dunit-os
+rustup override set nightly
+rustup component add rust-src
+./build_iso.sh
 ```
 
-Compile and run inside Dunit:
+The ISO is written to `build/microkernel.iso`. You can also build the graphical
+image with `make iso-dwm`, or a BIOS/UEFI disk image with `make disk-image`.
 
-```text
-exec /system/bin/tcc /assets/tcc/hello.c -o /tmp/hello
-exec /tmp/hello
+To build and check the desktop in QEMU:
+
+```bash
+python3 tools/qemu_test.py --build --config limine_test_gui.conf \
+  --markers-file tools/gui_smoke_markers.json \
+  --ready-marker 'gui_server: desktop ready' --timeout 300 --linger 8
 ```
 
-## Screenshots and demos
+## A look around
 
-Limine bootloader:
+The boot menu:
 
 ![Limine bootloader](assets/images/bootloader.gif)
 
-Terminal mode:
+The terminal:
 
 ![Terminal mode](assets/images/terminalmode.gif)
 
-DWM desktop:
+The desktop:
 
 ![DWM desktop](assets/images/dwm.gif)
 
-## Current limitations
+## Still a work in progress
 
-Dunit is under active development. Execution is currently single-core. Networking,
-audio, dynamic linking, signals and a secure entropy service are not yet ready.
-The C runtime profile is static; unsupported semantics return explicit errors.
+Dunit isn't ready to replace your everyday OS. It currently runs on one CPU
+core. Networking, audio, dynamic linking, signals and a secure entropy service
+are not ready yet.
 
-DWM uses software rendering. Large blur regions and many animated surfaces cost
-CPU and memory. Scene limits are 64 panels, 512 components and 16 nesting levels.
-Genie animates an owned window snapshot. Clocks currently use uptime rather
-than RTC calendar time.
+The desktop uses software rendering, so large blur effects and lots of animated
+surfaces can be expensive. There are limits of 64 panels and 512 components.
+Genie uses a snapshot of the window during the animation, and clocks currently
+show uptime rather than calendar time.
 
-The milestone order is M6 (musl/toolchain), M7 (SDK), M8 (network), M9
-(applications), M10 (browser). See the [roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md)
-and [M6 results](docs/m6-readiness.md) for acceptance status and open decisions.
+The [roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) tracks the next steps. More detailed
+verification results are in the [desktop report](docs/DWM_ENGINE_V2_REPORT.md)
+and [M6 report](docs/m6-readiness.md).
+
+## Get involved
+
+If you'd like to help build Dunit, take a look at the
+[contributor guide](.github/CONTRIBUTING.md). Bug reports, reproducible test cases
+and documentation improvements are welcome too.
 
 ## License
 
