@@ -10,8 +10,9 @@ pub mod fs;
 pub mod io;
 pub mod process;
 pub mod system;
+pub mod testing;
 pub mod time;
-pub use dunit_macros::main;
+pub use dunit_macros::{main, test};
 pub use error::{Error, Result};
 pub use libdunit::errno_numbers as errno;
 #[doc(hidden)]

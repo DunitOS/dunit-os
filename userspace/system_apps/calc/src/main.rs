@@ -1,5 +1,8 @@
 #![no_std]
 #![no_main]
+#![cfg_attr(test, feature(custom_test_frameworks))]
+#![cfg_attr(test, test_runner(dunit::testing::runner))]
+#![cfg_attr(test, reexport_test_harness_main = "__dunit_test_main")]
 
 extern crate alloc;
 
@@ -80,4 +83,18 @@ fn skip_spaces(bytes: &[u8], index: &mut usize) {
     while *index < bytes.len() && bytes[*index] == b' ' {
         *index += 1;
     }
+}
+
+#[dunit::test]
+fn arithmetic() {
+    assert_eq!(eval("2+2"), Ok(4));
+    assert_eq!(eval("7 * 6"), Ok(42));
+    assert_eq!(eval("-12 / 3"), Ok(-4));
+}
+#[dunit::test]
+fn invalid_input() -> dunit::Result<()> {
+    assert_eq!(eval("7 / 0"), Err("calc: division by zero"));
+    assert!(eval("hello").is_err());
+    assert!(eval("1 + 2 trailing").is_err());
+    Ok(())
 }

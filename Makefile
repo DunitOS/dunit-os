@@ -240,7 +240,7 @@ iso: $(BUILD_DIR)/kernel.elf userspace
 		echo "[ISO] building Limine host tool"; \
 		$(CC) -O2 -o limine/limine limine/limine.c; \
 	fi
-	python3 tools/install_disk.py $(BUILD_DIR)/installer-esp.img --esp-image-only --no-build --config $(LIMINE_CONFIG) --profile $(IMAGE_PROFILE) --yes-i-know-this-erases-the-disk
+	python3 tools/install_disk.py $(BUILD_DIR)/installer-esp.img --esp-image-only --no-build --config $(LIMINE_CONFIG) --profile $(IMAGE_PROFILE) $(if $(INITRD_OVERLAY),--initrd-overlay "$(INITRD_OVERLAY)",) --yes-i-know-this-erases-the-disk
 	rm -rf $(ISO_DIR)
 	mkdir -p $(ISO_DIR)/boot/limine
 	cp $(BUILD_DIR)/kernel.elf $(ISO_DIR)/boot/

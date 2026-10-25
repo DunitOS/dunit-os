@@ -91,6 +91,20 @@ class ImageProfiles(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_entries(entries, "minimal")
 
+    def test_overlay_adds_metadata_and_replaces_app_without_mutating_sources(self):
+        overlay = self.root / "overlay"
+        self.write("overlay/app/dsh", b"SDK executable")
+        self.write("overlay/system/share/dunit/apps/demo/dunit.toml", b"manifest")
+        self.args.overlay_dir = overlay
+        entries = dict(collect(self.args))
+        self.assertEqual(entries["/app/dsh"], b"SDK executable")
+        self.assertEqual(entries["/system/share/dunit/apps/demo/dunit.toml"], b"manifest")
+        self.assertEqual((self.args.userspace_dir / "dsh").read_bytes(), b"dsh")
+        self.assertEqual(entries, read_archive(pack(sorted(entries.items()))))
+        (overlay / "escape").symlink_to(self.args.assets_dir, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, "symlinks"):
+            collect(self.args)
+
     def test_archive_rejects_corruption_and_duplicate_paths(self):
         valid = pack([("/app/a", b"a")])
         for data in (valid[:-1], valid + b"trailing", b"invalid", pack([("/a", b"a"), ("/a", b"b")])):

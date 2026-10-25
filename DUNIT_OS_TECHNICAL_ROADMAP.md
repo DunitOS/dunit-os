@@ -715,9 +715,9 @@ SDK — слой, на котором пишутся прикладные про
 
 #### M7.2. Модель приложения и инструментарий
 
-- [ ] `cargo dunit new / build / run / test`: `build` кросс-собирает в `x86_64-dunit`; `run` собирает, кладёт бинарник в initrd, грузит QEMU через `tools/qemu_test.py` и запускает приложение; `test` гоняет тесты в QEMU и САМ формирует маркеры (разработчик их не пишет).
-- [ ] Манифест приложения `dunit.toml` (**формат — Решение человека**): `id`, имя, иконка, вид (`gui`/`tui`/`cli`), `capabilities`. Launcher и dock читают манифест — в `gui_server` НЕ появляется `match app`.
-- [~] `#[dunit::main]` реализован: loader entry, argv/env init, общий panic handler и exit 0/1/101; применён в `calc` и гостевом SDK API-тесте. `#[dunit::test]` ещё не реализован.
+- [~] `cargo dunit new / build / run / test` (CLI/TUI реализованы; GUI helper и standalone SDK ещё открыты, см. `docs/sdk/cargo-dunit.md`): `build` кросс-собирает в `x86_64-dunit`; `run` собирает, кладёт бинарник в initrd, грузит QEMU через `tools/qemu_test.py` и запускает приложение; `test` гоняет тесты в QEMU и САМ формирует маркеры (разработчик их не пишет).
+- [~] Манифест приложения `dunit.toml` v1 принят пользователем 26 октября 2026 (`docs/sdk/app-manifest-proposal.md`); строгая проверка и SDK-упаковка реализованы, desktop discovery ещё открыт: `id`, имя, иконка, вид (`gui`/`tui`/`cli`), `capabilities`. Осталось: launcher и dock должны читать манифест; в `gui_server` НЕ должен появиться `match app`.
+- [~] `#[dunit::main]` реализован: loader entry, argv/env init, общий panic handler и exit 0/1/101; применён в `calc` и гостевом SDK API-тесте. `#[dunit::test]` реализован через compiler-collected native harness, возвращает ошибку при пустом наборе, Err и panic.
 - [~] Безопасные `fs, process, time, io, env, args` и существующий `system::stats` реализованы поверх `libdunit`, с общим `Error` и generated errno. `File` владеет дескриптором, буферизованный ввод сохраняет строки, Child ждёт через wait-set. `calc` не содержит `unsafe`, `extern "C"`, raw entry или libdunit dependency. Thread/sync wrappers ещё нет; `docs/sdk/native-api.md`.
 - [ ] `dunit::net` — точка расширения без реализации стека (стек = M8).
 
@@ -1310,7 +1310,7 @@ tools/qemu_test.py
   - **Рекомендация:** wait-set — первым пунктом M7 (блокирует event loop и сеть); uname-источник — перед миграцией `dufetch`; добавлять строго через `abi/syscalls.abi`+регенерацию с проверкой нумерации.
 
 - **Формат манифеста `dunit.toml` (M7.2).** Поля (`id`, имя, иконка, вид gui/tui/cli, `capabilities`), источник (initrd/`/system`), как его читают launcher/dock/`init`.
-  - **Рекомендация:** минимальный TOML-набор как у `dwm_settings`/service-манифестов (`init`), с schema_version и last-known-good; capabilities — список имён прав (см. ниже). Расширять по мере нужды, не раздувая заранее.
+  - **Решение принято 26 октября 2026:** `schema_version = 1`, таблица `[application]`, точный Cargo binary target; `capabilities` — уникальные имена из `abi/rights.abi`, без выдачи прав. Полный контракт: `docs/sdk/app-manifest-proposal.md`. Desktop discovery остаётся отдельной реализацией.
 
 - **Модель drop/буфера обмена (M7.7): путь vs capability на файл.**
   - **Рекомендация (как в задаче):** путь — для текстовых приёмников (терминал вставляет экранированный путь); для остальных — ограниченный по правам handle на файл на время операции. Это даёт и совместимость с CLI, и контролируемую передачу данных без ambient-доступа к ФС.

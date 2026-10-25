@@ -110,8 +110,10 @@ python3 tools/qemu_test.py --markers-file tools/sdk_entry_panic_markers.json \
 ```
 
 CI runs these native contracts with TCG before publishing the two release ISOs.
-The full M7 gates remain open, including `#[dunit::test]`, application manifests,
-cargo tooling, thread/sync APIs, Component/widgets, live damage and clipboard/DnD.
+Native `#[dunit::test]`, manifest validation and CLI/TUI cargo tooling are now
+covered by [the app workflow](cargo-dunit.md). The full M7 gates remain open:
+GUI app tooling, desktop manifest discovery, thread/sync APIs, Component/widgets,
+live damage and clipboard/DnD.
 
 Verified on 26 October 2026: 10 SDK host tests and 2 macro tests passed;
 `tools/gen_abi.py --check` still reports 89 syscalls. The application API and

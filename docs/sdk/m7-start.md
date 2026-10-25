@@ -162,12 +162,20 @@ Every QEMU run above completed with `Result: OK (completed)` and
 `Markers: OK (marker budget satisfied)`. The code still targets the existing
 UP kernel. Producer notifications may rescan unrelated wait-sets; they do not
 reset deadlines or require a userspace polling loop. Persistent registrations,
-native edge delivery, sockets, Component, test attributes and cargo tooling
-remain separate unfinished M7 work.
+native edge delivery, sockets and Component remain separate unfinished M7 work.
+The later native test and CLI/TUI tooling slice is described below.
 
 ## Next implementation: native application APIs
 
 `#[dunit::main]`, fs/io/process/time/args/env/system wrappers and the `calc`
 migration are described in [Native application API](native-api.md). The native
 ABI remains unchanged in this step; no new application-manifest format or
-privilege mechanism is introduced. Thread/sync and cargo tooling remain open.
+privilege mechanism is introduced. Thread/sync remains open.
+
+## Accepted application manifest and native tooling
+
+On 26 October 2026 the owner approved [dunit.toml v1](app-manifest-proposal.md).
+The [cargo dunit workflow](cargo-dunit.md) implements native CLI/TUI generation,
+Cargo artifact selection, image overlays and guest test discovery through
+`#[dunit::test]`. No new syscall or archive format is needed. GUI tooling and
+launcher/dock manifest discovery remain open.

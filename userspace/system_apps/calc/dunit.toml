@@ -1,0 +1,8 @@
+schema_version = 1
+
+[application]
+id = "calc"
+name = "Calculator"
+kind = "tui"
+binary = "calc"
+capabilities = []

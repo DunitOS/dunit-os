@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+"""Cargo subcommand entry; all guest execution belongs to qemu_test.py."""
+from dunit_cli import main
+raise SystemExit(main())

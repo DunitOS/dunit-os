@@ -165,6 +165,19 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
             if tcc_bin.is_file():
                 add("/system/bin/tcc", tcc_bin)
 
+    overlay = getattr(args, "overlay_dir", None)
+    if overlay is not None:
+        overlay = Path(overlay)
+        if overlay.is_symlink() or not overlay.is_dir():
+            raise RuntimeError(f"invalid initrd overlay directory: {overlay}")
+        for source in sorted(overlay.rglob("*")):
+            if source.is_symlink():
+                raise RuntimeError(f"symlinks are not allowed in initrd overlays: {source}")
+            if source.is_dir():
+                continue
+            if not source.is_file():
+                raise RuntimeError(f"non-regular initrd overlay entry: {source}")
+            add("/" + source.relative_to(overlay).as_posix(), source)
     return sorted(entries.items())
 
 
@@ -183,6 +196,7 @@ def pack(entries: list[tuple[str, bytes]]) -> bytes:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("full", "dwm", "minimal"), default="full")
+    parser.add_argument("--overlay-dir", type=Path, help="explicit VFS file additions/replacements")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--userspace-dir", type=Path, required=True)
     parser.add_argument("--assets-dir", type=Path, required=True)

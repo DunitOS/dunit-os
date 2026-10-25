@@ -112,7 +112,7 @@ def validate_payload(root: Path, config: Path) -> None:
         raise RuntimeError(f"missing install payload: {', '.join(missing)}")
 
 
-def build_initrd(root: Path, config: Path, profile: str = "full") -> Path:
+def build_initrd(root: Path, config: Path, profile: str = "full", overlay: Path | None = None) -> Path:
     """Pack userspace ELFs + assets + DWM config into build/initrd.img.
 
     The kernel embeds no application binaries or desktop assets; they ship in
@@ -140,7 +140,7 @@ def build_initrd(root: Path, config: Path, profile: str = "full") -> Path:
         "--lua-config", str(root / "config/lua.h"),
         "--lua-build-rsp", str(root / "build/lua-build.rsp"),
         "--exclude", "gui/boot_blur.bmp",
-    ])
+    ] + (["--overlay-dir", str(overlay)] if overlay is not None else []))
     return out
 
 
@@ -443,6 +443,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-size-mib", type=int, default=256)
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--profile", choices=("full", "dwm", "minimal"), default="full")
+    parser.add_argument("--initrd-overlay", type=Path)
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--esp-image-only", action="store_true")
     parser.add_argument(
@@ -475,7 +476,7 @@ def main() -> int:
     if not args.no_build:
         subprocess.run(["make", "all", "userspace", f"IMAGE_PROFILE={args.profile}", f"LIMINE_CONFIG={config}"], cwd=root, check=True)
     validate_payload(root, config)
-    build_initrd(root, config, args.profile)
+    build_initrd(root, config, args.profile, args.initrd_overlay)
     if args.esp_image_only:
         if block_device:
             raise RuntimeError("ESP payload target must be a regular image file")

@@ -63,8 +63,13 @@ jobs:
           cargo test --manifest-path runtime/dunit-macros/Cargo.toml
           cargo test --manifest-path runtime/dunit/Cargo.toml
 
-      - name: Image profile tests
-        run: python3 tools/test_image_profiles.py
+      - name: Image profile and SDK tooling tests
+        run: |
+          python3 tools/test_image_profiles.py
+          python3 tools/test_dunit_cli.py
+
+      - name: Native SDK workflow and failure contracts
+        run: python3 tools/test_dunit_workflow.py --accel tcg
 
       - name: Build DWM and Minimal ISOs
         run: bash build_iso.sh
