@@ -5,6 +5,21 @@ use dunit_style::value::Color;
 use dunit_style::{parse, Cascade, GREEN_TEA_DSS};
 
 #[test]
+fn padding_shorthand_has_one_shared_edge_order() {
+    for (value, expected) in [
+        ("3",Some([3.0;4])),
+        ("3 7",Some([3.0,7.0,3.0,7.0])),
+        ("1 2 3 4",Some([1.0,2.0,3.0,4.0])),
+        ("1 2 3",None),
+    ] {
+        let mut c = Cascade::new();
+        c.push(parse(&format!("Text {{ padding: {value}; }}")).unwrap());
+        assert_eq!(c.resolve(&NodeStyle::element("Text")).padding(),expected);
+    }
+    assert_eq!(Cascade::new().resolve(&NodeStyle::element("Text")).padding(),None);
+}
+
+#[test]
 fn specificity_and_state_win() {
     let sheet = parse(
         r#"

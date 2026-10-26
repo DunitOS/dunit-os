@@ -6,7 +6,6 @@
 //! from a [`TextMeasure`] source so the sizing logic stays decoupled from font
 //! loading; [`FontMeasure`] adapts a [`dunit_text::Font`].
 
-use dunit_style::value::Value;
 use dunit_style::Style;
 use dunit_text::Font;
 
@@ -87,24 +86,8 @@ fn text_size(text: Option<&str>, font: f32, measure: &dyn TextMeasure) -> (f32, 
 /// Horizontal (`left+right`) and vertical (`top+bottom`) padding from the
 /// `padding` style property, following CSS 1/2/4-value shorthand.
 fn pad_edges(style: &Style) -> (f32, f32) {
-    let v = match style.get("padding") {
-        Some(v) => v,
-        None => return (0.0, 0.0),
-    };
-    match v {
-        Value::Number(n) => (2.0 * n, 2.0 * n),
-        Value::List(items) => {
-            let nums: alloc::vec::Vec<f32> =
-                items.iter().filter_map(Value::as_number).collect();
-            match nums.as_slice() {
-                [a] => (2.0 * a, 2.0 * a),
-                [v, h] => (2.0 * h, 2.0 * v),
-                [t, r, b, l] => (r + l, t + b),
-                _ => (0.0, 0.0),
-            }
-        }
-        _ => (0.0, 0.0),
-    }
+    let [top, right, bottom, left] = style.padding().unwrap_or([0.0; 4]);
+    (left + right, top + bottom)
 }
 
 #[inline]

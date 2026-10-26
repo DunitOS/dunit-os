@@ -20,5 +20,5 @@ extern crate alloc;
 mod paint;
 mod surface;
 
-pub use paint::{paint, StyleOf};
+pub use paint::{paint, paint_clipped, StyleOf};
 pub use surface::{pack_argb, Surface};

@@ -95,6 +95,24 @@ impl Style {
         self.props.get(property).and_then(Value::as_number)
     }
 
+    /// CSS padding shorthand in top/right/bottom/left order. Shared by layout,
+    /// text measurement and painting so all three interpret the same insets.
+    pub fn padding(&self) -> Option<[f32; 4]> {
+        match self.get("padding")? {
+            Value::Number(a) => Some([*a; 4]),
+            Value::List(items) => {
+                let numbers: Vec<_> = items.iter().filter_map(Value::as_number).collect();
+                match numbers.as_slice() {
+                    [a] => Some([*a; 4]),
+                    [v, h] => Some([*v, *h, *v, *h]),
+                    [t, r, b, l] => Some([*t, *r, *b, *l]),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// A keyword-typed property.
     pub fn keyword(&self, property: &str) -> Option<&str> {
         self.props.get(property).and_then(Value::as_keyword)

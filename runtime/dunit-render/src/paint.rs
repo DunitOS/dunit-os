@@ -1,6 +1,6 @@
 //! Painting a laid-out DUI tree into a [`Surface`].
 
-use dunit_style::value::{Color, Value};
+use dunit_style::value::Color;
 use dunit_style::Style;
 use dunit_text::Font;
 use dunit_ui::layout::Layout;
@@ -25,7 +25,17 @@ pub fn paint(tree: &Tree, layout: &Layout, style_of: StyleOf, font: &Font, surfa
     if tree.is_empty() {
         return;
     }
-    paint_node(tree, layout, tree.root(), style_of, font, surface);
+    paint_node(tree, layout, tree.root(), style_of, font, surface, false);
+}
+
+/// Paint within `clip`, additionally containing each node and its descendants
+/// in its layout box. Retained renderers use this to bound invalidation: glyph
+/// overhang and oversized children cannot paint outside the recorded bounds.
+pub fn paint_clipped(tree: &Tree, layout: &Layout, style_of: StyleOf, font: &Font,
+                     surface: &mut Surface, clip: Rect) {
+    if !tree.is_empty() {
+        surface.with_clip(clip, |s| paint_node(tree, layout, tree.root(), style_of, font, s, true));
+    }
 }
 
 fn paint_node(
@@ -35,7 +45,18 @@ fn paint_node(
     style_of: StyleOf,
     font: &Font,
     surface: &mut Surface,
+    contained: bool,
 ) {
+    let rect = layout.rect(id);
+    if contained {
+        surface.with_clip(rect, |s| paint_contents(tree, layout, id, style_of, font, s, true));
+    } else {
+        paint_contents(tree, layout, id, style_of, font, surface, false);
+    }
+}
+
+fn paint_contents(tree: &Tree, layout: &Layout, id: NodeId, style_of: StyleOf,
+                  font: &Font, surface: &mut Surface, contained: bool) {
     let rect = layout.rect(id);
     let style = style_of(id);
 
@@ -54,7 +75,7 @@ fn paint_node(
     }
 
     for &c in &tree.node(id).children {
-        paint_node(tree, layout, c, style_of, font, surface);
+        paint_node(tree, layout, c, style_of, font, surface, contained);
     }
 }
 
@@ -87,23 +108,8 @@ fn paint_text(style: &Style, rect: Rect, border: f32, text: &str, font: &Font, s
 
 /// The left and top padding declared by the `padding` shorthand (CSS 1/2/4).
 fn pad_left_top(style: &Style) -> (f32, f32) {
-    let v = match style.get("padding") {
-        Some(v) => v,
-        None => return (0.0, 0.0),
-    };
-    match v {
-        Value::Number(n) => (*n, *n),
-        Value::List(items) => {
-            let nums: alloc::vec::Vec<f32> = items.iter().filter_map(Value::as_number).collect();
-            match nums.as_slice() {
-                [a] => (*a, *a),
-                [vert, horiz] => (*horiz, *vert),
-                [t, _r, _b, l] => (*l, *t),
-                _ => (0.0, 0.0),
-            }
-        }
-        _ => (0.0, 0.0),
-    }
+    let [top, _, _, left] = style.padding().unwrap_or([0.0; 4]);
+    (left, top)
 }
 
 fn round_i32(v: f32) -> i32 {

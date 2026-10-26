@@ -2,6 +2,7 @@
 
 use dunit_style::value::Color;
 use dunit_text::GlyphBitmap;
+use dunit_ui::Rect;
 
 /// Pack an DSS [`Color`] into a `0xAARRGGBB` pixel.
 pub fn pack_argb(c: Color) -> u32 {
@@ -16,12 +17,23 @@ pub struct Surface<'a> {
     pub width: usize,
     pub height: usize,
     pub stride: usize,
+    clip: (usize, usize, usize, usize),
 }
 
 impl<'a> Surface<'a> {
     /// A surface over a tightly packed `width * height` buffer (stride = width).
     pub fn new(pixels: &'a mut [u32], width: usize, height: usize) -> Surface<'a> {
-        Surface { pixels, width, height, stride: width }
+        Surface { pixels, width, height, stride: width, clip: (0, 0, width, height) }
+    }
+
+    /// Intersect a temporary clip with the current one. Drawing coordinates
+    /// stay in surface space; nested clips cannot escape their parent. Empty
+    /// intersections skip the callback (and expensive glyph rasterization).
+    pub fn with_clip(&mut self, rect: Rect, draw: impl FnOnce(&mut Self)) {
+        let previous = self.clip;
+        self.clip = self.clip_rect(rect.x, rect.y, rect.w.max(0.0), rect.h.max(0.0));
+        if self.clip.0 < self.clip.2 && self.clip.1 < self.clip.3 { draw(self); }
+        self.clip = previous;
     }
 
     /// The pixel at `(x, y)`, or 0 if out of bounds (test/debug helper).
@@ -36,7 +48,7 @@ impl<'a> Surface<'a> {
     /// Alpha-blend `color` over the pixel at `(x, y)` (src-over). Out-of-bounds
     /// and fully transparent writes are no-ops.
     fn blend(&mut self, x: usize, y: usize, color: Color, cov: u8) {
-        if x >= self.width || y >= self.height {
+        if x < self.clip.0 || y < self.clip.1 || x >= self.clip.2 || y >= self.clip.3 {
             return;
         }
         // Effective source alpha folds the color's own alpha with coverage.
@@ -63,7 +75,8 @@ impl<'a> Surface<'a> {
         self.pixels[idx] = (out_a << 24) | (r << 16) | (g << 8) | b;
     }
 
-    /// Overwrite every pixel with `color` (a straight store, NOT a blend). Use
+    /// Overwrite every pixel in the current clip with `color` (a straight store,
+    /// NOT a blend). Without a clip this resets the entire surface. Use
     /// this — never `fill_rect` — for a per-frame background reset when the
     /// surface is presented as translucent ARGB: `fill_rect` composites src-over
     /// onto whatever the buffer held last frame, so a `bg_alpha < 255` fill would
@@ -72,9 +85,9 @@ impl<'a> Surface<'a> {
     /// the compositor to see, so the desktop shows through with a stable alpha.
     pub fn clear(&mut self, color: Color) {
         let packed = pack_argb(color);
-        for py in 0..self.height {
+        for py in self.clip.1..self.clip.3 {
             let row = py * self.stride;
-            for px in 0..self.width {
+            for px in self.clip.0..self.clip.2 {
                 self.pixels[row + px] = packed;
             }
         }
@@ -158,10 +171,10 @@ impl<'a> Surface<'a> {
 
     /// Round `(x, y, w, h)` to integer pixels and clip to the surface.
     fn clip_rect(&self, x: f32, y: f32, w: f32, h: f32) -> (usize, usize, usize, usize) {
-        let x0 = clamp_usize(round_i32(x), self.width);
-        let y0 = clamp_usize(round_i32(y), self.height);
-        let x1 = clamp_usize(round_i32(x + w), self.width);
-        let y1 = clamp_usize(round_i32(y + h), self.height);
+        let x0 = clamp_usize(round_i32(x), self.width).max(self.clip.0);
+        let y0 = clamp_usize(round_i32(y), self.height).max(self.clip.1);
+        let x1 = clamp_usize(round_i32(x + w), self.width).min(self.clip.2);
+        let y1 = clamp_usize(round_i32(y + h), self.height).min(self.clip.3);
         (x0, y0, x1, y1)
     }
 }
