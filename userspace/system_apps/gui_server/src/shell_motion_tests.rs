@@ -27,6 +27,7 @@ fn action(property: Property, from: i64, to: i64) -> Animation {
 #[test]
 fn scene_geometry_and_opacity_reach_their_endpoints() {
     let mut tracks = Tracks::default();
+    assert!(!tracks.animating(1000));
     for a in [
         action(Property::TranslationX, 0, 30),
         action(Property::Width, 100, 60),
@@ -39,6 +40,8 @@ fn scene_geometry_and_opacity_reach_their_endpoints() {
         tracks.sample(1, (10, 20, 100, 50), 1000).rect,
         (10, 20, 100, 50)
     );
+    assert!(tracks.animating(1199));
+    assert!(!tracks.animating(1200));
     let end = tracks.sample(1, (10, 20, 100, 50), 1200);
     assert_eq!(end.rect, (40, 20, 120, 100));
     assert_eq!(end.opacity, 0);

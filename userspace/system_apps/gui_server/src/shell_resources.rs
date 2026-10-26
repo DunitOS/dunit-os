@@ -81,6 +81,7 @@ impl Shell {
             .unwrap_or(1000);
         let count = config.components.len();
         Ok(Self {
+            revision:0,
             config,
             panels,
             insets,

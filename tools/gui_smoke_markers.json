@@ -157,6 +157,11 @@
   ],
   "forbidden": [
     {
+      "marker": "FAIL no frame done",
+      "why": "a legacy client received policy traffic before its initial composed-frame notification",
+      "source": "userspace/system_apps/gui_server/src/protocol_runtime.rs"
+    },
+    {
       "marker": "[PANIC]",
       "why": "kernel panic during desktop bring-up or resize re-negotiation",
       "source": "kernel/src/lib.rs"

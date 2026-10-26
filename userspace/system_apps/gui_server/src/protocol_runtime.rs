@@ -427,15 +427,27 @@ pub(super) use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_
 pub(super) const ST_SETTLE_TICKS: u32 = 240;
 
 /// Send one input control message to a client.
-pub(super) fn send_input(pid: u32, kind: u8, lx: i32, ly: i32, button: u32) {
-    let msg = gui_protocol_v1::control::Input {
+pub(super) fn send_input(clients: &mut [ClientState], pid: u32, kind: u8, lx: i32, ly: i32, button: u32) {
+    let input = gui_protocol_v1::control::Input {
         kind,
         x: lx,
         y: ly,
         value: button,
+    };
+    let Some(client) = clients.iter_mut().find(|c| c.pid == pid) else { return; };
+    if client.buffers.frame.is_none() {
+        // An unmapped surface has no pointer/key target, but close still needs
+        // to terminate an idle client without waiting for a remap.
+        if kind == IN_QUIT { libdunit::ipc_send(pid, &input.encode()); }
+        return;
     }
-    .encode();
-    libdunit::ipc_send(pid, &msg);
+    if !client.presented {
+        // A newly adopted window is painted later in this same tick. Preserve
+        // input order, but let its initial FRAME_DONE reach the client first.
+        client.pending_inputs.push(input);
+    } else {
+        libdunit::ipc_send(pid, &input.encode());
+    }
 }
 
 /// True for the modifier keys themselves (Shift/Ctrl/Alt/Super/Caps), whose
@@ -447,7 +459,6 @@ pub(super) fn is_modifier_scancode(sc: u8) -> bool {
 }
 
 /// Per-client compositing state held by the multi-client server loop.
-#[derive(Clone, Copy)]
 pub(super) struct ClientState {
     pub(super) pid: u32,
     pub(super) conn: gui_protocol_v1::server::ConnId,
@@ -455,10 +466,14 @@ pub(super) struct ClientState {
     pub(super) slot_y: u32,
     pub(super) buf_ptr: *const u8,
     pub(super) buf_size: usize,
-    pub(super) mapped_handle: u32,
+    pub(super) buffers: crate::client_buffers::Buffers,
+    pub(super) dirty: Option<gui_protocol_v1::Rect>,
     pub(super) surf_w: u32,
     pub(super) surf_h: u32,
     pub(super) presented: bool,
+    /// Policy resize waits until the first composed frame has been notified.
+    pub(super) pending_config: Option<(u32, u32, u32)>,
+    pending_inputs: Vec<gui_protocol_v1::control::Input>,
     /// Surface object id the client chose in CreateSurface (needed to push a
     /// server-initiated CONFIGURE via `Server::reconfigure` for resize/maximize).
     pub(super) surface: u64,
@@ -489,10 +504,13 @@ impl ClientState {
             slot_y: 0,
             buf_ptr: core::ptr::null(),
             buf_size: 0,
-            mapped_handle: 0,
+            buffers: crate::client_buffers::Buffers::new(),
+            dirty: None,
             surf_w: 0,
             surf_h: 0,
             presented: false,
+            pending_config: None,
+            pending_inputs: Vec::new(),
             surface: 0,
             format: FORMAT_XRGB8888,
             ready: false,
@@ -514,30 +532,8 @@ pub(super) fn handle_client_payload(
     reload: &mut bool,
     notify_out: &mut Vec<alloc::string::String>,
 ) {
-    let n = payload.len();
     if let Some(announcement) = gui_protocol_v1::control::Capability::decode(payload) {
-        let handle = announcement.handle;
-        // Игнорируем размер, названный клиентом (payload[8..12]) — он недоверенный.
-        // Мапим буфер и берём ИСТИННУЮ длину backing-объекта из ядра: только она
-        // задаёт безопасную границу для последующего блита.
-        // Query length before mapping so every successful mapping has an exact
-        // release range, including rejected announcements. Re-announcing our
-        // current capability is not a new owned reference.
-        if handle == c.mapped_handle { return; }
-        let real_len = libdunit::handle_shared_len(handle);
-        if real_len <= 0 {
-            libdunit::handle_close(handle);
-            return;
-        }
-        let mapped = libdunit::handle_map(handle, 0, real_len as usize);
-        if mapped <= 0 {
-            libdunit::handle_close(handle);
-            return;
-        }
-        libdunit::shared_buffer::release(c.mapped_handle, c.buf_ptr as usize, c.buf_size);
-        c.buf_ptr = mapped as usize as *const u8;
-        c.buf_size = real_len as usize;
-        c.mapped_handle = handle;
+        c.buffers.announce(announcement.object as u64,announcement.handle);
         return;
     }
     // "Reload settings" signal from a trusted-enough client (gui_settings): the
@@ -560,48 +556,55 @@ pub(super) fn handle_client_payload(
         }
         return;
     }
-    // Заголовок wire-протокола — 32 байта; CreateSurface читает поля вплоть до
-    // offset 44, поэтому короткие пакеты отбрасываем ДО индексирования (иначе
-    // паника → падение всего компоситора: DoS от одного клиента).
-    if n < 32 {
-        return;
-    }
-    let op = Opcode::from_u16(u16::from_le_bytes([payload[8], payload[9]]));
-    if op == Some(Opcode::CreateSurface) {
-        if n < 44 {
-            return;
-        }
-        // Surface object id is the wire header `object` (offset 16); remember it so
-        // the compositor can push a server-initiated CONFIGURE for resize/maximize.
-        c.surface = u64::from_le_bytes([
-            payload[16], payload[17], payload[18], payload[19],
-            payload[20], payload[21], payload[22], payload[23],
-        ]);
-        c.surf_w = u32::from_le_bytes([payload[36], payload[37], payload[38], payload[39]]);
-        c.surf_h = u32::from_le_bytes([payload[40], payload[41], payload[42], payload[43]]);
-        // Surface format (offset 44) selects opaque copy (XRGB) vs. per-pixel
-        // blend (ARGB) at composite time; older short packets keep the default.
-        if n >= 48 {
-            c.format = u32::from_le_bytes([payload[44], payload[45], payload[46], payload[47]]);
+    let Ok(header)=gui_protocol_v1::Header::decode(payload) else { return; };
+    let request=gui_protocol_v1::Opcode::from_u16(header.opcode_raw)
+        .and_then(|op|Request::decode(op,&payload[gui_protocol_v1::wire::HEADER_LEN..]).ok());
+    let importing=matches!(request,Some(Request::ImportBuffer{..}));
+    let cap=if importing {c.buffers.capability(header.object)}else{None};
+    let replies=server.deliver(c.conn,payload,cap);
+    let accepted=replies.iter().any(|reply| {
+        let Ok(h)=gui_protocol_v1::Header::decode(reply) else{return false;};
+        gui_protocol_v1::Opcode::from_u16(h.opcode_raw).and_then(|op|
+            gui_protocol_v1::Event::decode(op,&reply[gui_protocol_v1::wire::HEADER_LEN..]).ok())
+            ==Some(gui_protocol_v1::Event::Result{request:header.serial})
+    });
+    if importing { c.buffers.import(header.object,accepted); }
+    if accepted {
+        match request {
+            Some(Request::CreateSurface{..})=>{c.surface=header.object;c.presented=false;},
+            Some(Request::DestroyBuffer)=>c.buffers.destroy(header.object),
+            Some(Request::Disconnect)=>c.buffers.clear(),
+            _=>{}
         }
     }
-    // A client that resizes (in response to our CONFIGURE) re-imports a buffer of
-    // the new geometry with a FRESH object id. IMPORT_BUFFER carries the true
-    // pixel dimensions (width@32, height@36), so track them here — this is the
-    // single point where the compositor learns a surface's current size, for both
-    // the initial import and every subsequent resize.
-    if op == Some(Opcode::ImportBuffer) && n >= 40 {
-        c.surf_w = u32::from_le_bytes([payload[32], payload[33], payload[34], payload[35]]);
-        c.surf_h = u32::from_le_bytes([payload[36], payload[37], payload[38], payload[39]]);
+    refresh_client(server,c);
+    for reply in &replies { libdunit::ipc_send(c.pid,reply); }
+}
+
+pub(super) fn refresh_client(server:&Server,c:&mut ClientState) {
+    let old=c.buffers.frame.map(|f|f.commit);
+    if !c.buffers.sync(server,c.conn,c.surface) {
+        libdunit::println("gui_server: FAIL committed image binding");
+        c.buf_ptr=core::ptr::null();c.buf_size=0;return;
     }
-    let cap = if op == Some(Opcode::ImportBuffer) {
-        Some(c.buf_size as u64)
-    } else {
-        None
-    };
-    for reply in &server.deliver(c.conn, payload, cap) {
-        libdunit::ipc_send(c.pid, reply);
+    (c.buf_ptr,c.buf_size)=c.buffers.image();
+    if let Some(frame)=c.buffers.frame {
+        if old!=Some(frame.commit) || frame.damage.continuous {
+            let full=[gui_protocol_v1::Rect{x:0,y:0,w:frame.width,h:frame.height}];
+            let rects=if frame.damage.rects().is_empty(){&full[..]}else{frame.damage.rects()};
+            for r in rects {
+                c.dirty=Some(match c.dirty {
+                    None=>*r,
+                    Some(a)=>{let x=a.x.min(r.x);let y=a.y.min(r.y);
+                        gui_protocol_v1::Rect{x,y,w:((a.x as i64+a.w as i64).max(r.x as i64+r.w as i64)-x as i64)as u32,
+                            h:((a.y as i64+a.h as i64).max(r.y as i64+r.h as i64)-y as i64)as u32}}
+                });
+            }
+        }
+        c.surf_w=frame.width;c.surf_h=frame.height;c.format=frame.format;
+        c.ready=true;
     }
+
 }
 /// Bring one client online: reserve a protocol connection, spawn the `exec` ELF,
 /// and hand it the `[our_pid][client_id]` handshake it blocks on at startup. The
@@ -845,9 +848,6 @@ pub(super) fn serve_two_clients() -> bool {
     ) {}
 
     for c in clients.iter() {
-        if c.mapped_handle != 0 {
-            libdunit::shared_buffer::release(c.mapped_handle, c.buf_ptr as usize, c.buf_size);
-        }
         let mut status = libdunit::WaitStatus::empty();
         for _ in 0..50 {
             if libdunit::wait(c.pid, &mut status) == c.pid as isize {
@@ -958,19 +958,47 @@ pub(super) fn resize_one_client(
 /// that ignores CONFIGURE is simply never asked to resize).
 pub(super) fn reconfigure_client(
     server: &mut Server,
-    clients: &[ClientState],
+    clients: &mut [ClientState],
     pid: u32,
     w: u32,
     h: u32,
     state: u32,
 ) {
-    let Some(c) = clients.iter().find(|c| c.pid == pid && c.surface != 0) else {
+    let Some(c) = clients.iter_mut().find(|c| c.pid == pid && c.surface != 0) else {
         return;
     };
+    if !c.presented {
+        c.pending_config = Some((w, h, state));
+        return;
+    }
     let (conn, surface) = (c.conn, c.surface);
     for (fc, fp) in &server.reconfigure(conn, surface, w, h, 1, state) {
         if *fc == conn {
             libdunit::ipc_send(pid, fp);
+        }
+    }
+}
+
+/// Complete actual desktop composition before allocating/sending any queued
+/// policy CONFIGURE. This preserves server serial order and lets a new client
+/// finish its first presentation before a restore/rule/self-test resizes it.
+pub(super) fn complete_desktop_frames(server: &mut Server, clients: &mut [ClientState]) {
+    for (conn, packet) in server.composite() {
+        if let Some(c) = clients.iter().find(|c| c.conn == conn) {
+            libdunit::ipc_send(c.pid, &packet);
+        }
+    }
+    // Callback-free commits also finish composition; never make resizing
+    // depend on the client having requested a FRAME_DONE notification.
+    for c in clients.iter_mut().filter(|c| c.win_created && c.buffers.frame.is_some()) {
+        c.presented = true;
+        for input in c.pending_inputs.drain(..) {
+            libdunit::ipc_send(c.pid, &input.encode());
+        }
+        if let Some((w, h, state)) = c.pending_config.take() {
+            for (conn, packet) in server.reconfigure(c.conn, c.surface, w, h, 1, state) {
+                if conn == c.conn { libdunit::ipc_send(c.pid, &packet); }
+            }
         }
     }
 }

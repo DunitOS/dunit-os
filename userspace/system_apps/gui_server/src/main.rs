@@ -17,6 +17,9 @@ use gui_protocol_v1::Opcode;
 mod lua_policy;
 mod animation;
 mod protocol_runtime;
+mod client_buffers;
+mod damage_plan;
+mod damage_runtime;
 use protocol_runtime::*;
 mod drawing;
 use drawing::*;
@@ -314,7 +317,7 @@ fn work_area(bw: usize, bh: usize, ly: &Layout, ins: &Insets) -> (i32, i32, i32,
 /// work area after a display change; other unchanged states are a no-op.
 fn set_window_state(
     server: &mut Server,
-    clients: &[ClientState],
+    clients: &mut [ClientState],
     win: &mut Win,
     new_state: WinState,
     bw: usize,
@@ -349,7 +352,7 @@ fn set_window_state(
 /// Toggle the title-bar maximize chip: `Maximized` <-> `Floating`.
 fn toggle_maximize(
     server: &mut Server,
-    clients: &[ClientState],
+    clients: &mut [ClientState],
     win: &mut Win,
     bw: usize,
     bh: usize,
@@ -816,22 +819,7 @@ fn pump_clients(
             None => continue, // message from an unknown pid — ignore
         };
         handle_client_payload(server, &mut clients[idx], &rx[..n], reload, notify_out);
-        for (fc, fp) in &server.composite() {
-            let status = if fp.len() >= 52 {
-                u32::from_le_bytes([fp[48], fp[49], fp[50], fp[51]])
-            } else {
-                0
-            };
-            for c in clients.iter_mut() {
-                if c.conn != *fc {
-                    continue;
-                }
-                libdunit::ipc_send(c.pid, fp);
-                if status == 0 && !c.buf_ptr.is_null() && c.surf_w > 0 && c.surf_h > 0 {
-                    c.ready = true;
-                }
-            }
-        }
+
     }
 }
 
@@ -1655,6 +1643,8 @@ fn run_desktop_session(
     // Seed with any reload pinged during bring-up (a settings client that presented
     // in serve_two_clients/resize_one_client). The loop's reload block processes it
     // on the first tick, diffing the edited config against `applied_display` above.
+    let mut scene_epoch=0u64;
+    let mut damage_cache=damage_runtime::Cache::new();
     let mut reload_requested = pending_reload;
     let mut reload_candidate:Option<(settings::Config,lua_policy::Preflight)>=None;
     let mut menu_entries = apps.launcher.clone();
@@ -1794,6 +1784,7 @@ fn run_desktop_session(
                 // removes a widgets/<name>.toml (or flips its `enabled`) takes effect.
                 desk_widgets = resolve_desk_widgets(ncfg.settings.widgets.corner);
                 shell = next_shell.unwrap();
+                scene_epoch=scene_epoch.wrapping_add(1);
                 shell.describe();
                 effects.clear();
                 desktop_tracks=shell_motion::Tracks::default();
@@ -1906,9 +1897,6 @@ fn run_desktop_session(
                     continue;
                 }
                 server.disconnect_peer(clients[ci].conn);
-                if clients[ci].mapped_handle != 0 {
-                    libdunit::shared_buffer::release(clients[ci].mapped_handle, clients[ci].buf_ptr as usize, clients[ci].buf_size);
-                }
                 if let Some(app) = apps.apps.get(clients[ci].app as usize) {
                     libdunit::println(&alloc::format!("[GUI-EXIT] app={} kind={} code={}", app.id, st.kind, st.code));
                 }
@@ -1939,6 +1927,7 @@ fn run_desktop_session(
         // owning `Win` so the compositor blits the new buffer at the new size and
         // never the freed old one. Position stays compositor-owned (set by drag or
         // by `toggle_maximize`), so only the buffer + surface size are synced here.
+        for c in clients.iter_mut() { refresh_client(server,c); }
         for w in wins.iter_mut() {
             if !w.alive {
                 continue;
@@ -2264,7 +2253,7 @@ fn run_desktop_session(
                         animation::Effect::Fade,animation::Easing::ease_out(),true,
                         &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                     wins[wi].alive = false;
-                            send_input(wins[wi].pid, IN_QUIT, 0, 0, 0);
+                            send_input(clients, wins[wi].pid, IN_QUIT, 0, 0, 0);
                         }
                         recycle_deadline = ticks.saturating_add(600); // ~10s budget
                         recycle_phase = 1;
@@ -2370,7 +2359,7 @@ fn run_desktop_session(
                 if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && !effects.covers(wins[wi].pid,animation_now) && effects.input_geometry(&wins[wi],animation_now).in_content(wx,wy) {
                     z.retain(|&i| i != wi);
                     z.push(wi);
-                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(wins[wi].pid,IN_DOWN,x,y,1);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_DOWN,x,y,1);
                     break;
                 }
             }
@@ -2467,7 +2456,7 @@ fn run_desktop_session(
                         animation::Effect::Fade,animation::Easing::ease_out(),true,
                         &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                     wins[wi].alive = false;
-                    send_input(wins[wi].pid, IN_QUIT, 0, 0, 0);
+                    send_input(clients, wins[wi].pid, IN_QUIT, 0, 0, 0);
                     drag = None;
                     // Remember where it was before it goes away, so reopening the
                     // app restores its last geometry.
@@ -2528,7 +2517,7 @@ fn run_desktop_session(
                     }
                 } else if wins[wi].in_content(wx, wy) {
                     // Click landed on client content: forward it to the client.
-                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(wins[wi].pid,IN_DOWN,x,y,0);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_DOWN,x,y,0);
                     pressed_win = Some(wi);
                 }
             }
@@ -2576,7 +2565,7 @@ fn run_desktop_session(
         if cur != input_focus {
             if let Some(old) = input_focus {
                 if wins[old].alive {
-                    send_input(wins[old].pid, IN_LEAVE, 0, 0, 0);
+                    send_input(clients, wins[old].pid, IN_LEAVE, 0, 0, 0);
                 }
             }
             input_focus = cur;
@@ -2585,7 +2574,7 @@ fn run_desktop_session(
         if let Some(wi) = cur {
             let (lx,ly)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);
             if lx != last_lx || ly != last_ly {
-                send_input(wins[wi].pid, IN_MOVE, lx, ly, 0);
+                send_input(clients, wins[wi].pid, IN_MOVE, lx, ly, 0);
                 last_lx = lx;
                 last_ly = ly;
             }
@@ -2595,7 +2584,7 @@ fn run_desktop_session(
         if release {
             if let Some(wi) = pressed_win {
                 if wins[wi].alive {
-                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(wins[wi].pid,IN_UP,x,y,0);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_UP,x,y,0);
                 }
             }
             pressed_win = None;
@@ -2621,7 +2610,7 @@ fn run_desktop_session(
         // terminal uses it to move through its scrollback history.
         if m.wheel != 0 {
             if let Some(wi) = focused {
-                send_input(wins[wi].pid, IN_SCROLL, m.wheel, 0, 0);
+                send_input(clients, wins[wi].pid, IN_SCROLL, m.wheel, 0, 0);
             }
         }
 
@@ -2735,7 +2724,7 @@ fn run_desktop_session(
                 continue;
             }
             if let Some(wi) = focused {
-                send_input(
+                send_input(clients,
                     wins[wi].pid,
                     IN_KEY,
                     ev.scancode as i32,
@@ -2954,6 +2943,25 @@ fn run_desktop_session(
             lua_expected.clear();
         }
 
+        let damage_duration=if animation_clock.is_some(){anim_duration_ms}else{0};
+        let mut desktop_widget_stats=libdunit::SystemStats::default();
+        let desktop_widget_stats_valid=wg.enabled&&!desk_widgets.is_empty()
+            &&libdunit::get_system_stats(&mut desktop_widget_stats)>=0;
+        let widget_seconds=if desktop_widget_stats_valid&&desktop_widget_stats.uptime_hz>0 {
+            desktop_widget_stats.uptime_ticks/desktop_widget_stats.uptime_hz
+        }else{0};
+        let workspace_damage_view=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);
+        let damage_blocked=menu_open||menu_was_open||qs_open||switcher.active||!notifs.is_empty()
+            ||(menu_closed_at!=0&&animation_now.saturating_sub(menu_closed_at)<damage_duration as u64)
+            ||animation::progress(animation_now,ws_switch_tick,damage_duration,lua_ease_out)<255
+            ||desktop_tracks.animating(animation_now)||desktop_motion::changed(&workspace_damage_view,bw,bh);
+        let partial=damage_cache.compose(damage_runtime::Context{
+            wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),now:animation_now,
+            duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,effects:&fx,
+            shell:&shell,window_effects:&effects,blocked:damage_blocked,
+            widgets:(wg.enabled,widget_seconds,desktop_widget_stats.memory_used_percent(),desktop_widget_stats.process_running),
+        },clients,&mut back,bw,bh);
+        if !partial {
         // Desktop backdrop: the wallpaper (pre-scaled) when present, else a
         // subtle vertical gradient (or a flat fill when the gradient effect is
         // off — the pre-§5 look).
@@ -2987,8 +2995,8 @@ fn run_desktop_session(
         // composite on top.
         if wg.enabled && !desk_widgets.is_empty() {
             if let Some(f) = font.as_ref() {
-                let mut wst = libdunit::SystemStats::default();
-                let whave = libdunit::get_system_stats(&mut wst) >= 0;
+                let wst=desktop_widget_stats;
+                let whave=desktop_widget_stats_valid;
                 for corner in 0..4i32 {
                     let clock_w = desk_widgets
                         .iter()
@@ -3268,12 +3276,18 @@ fn run_desktop_session(
 
         let bytes =
             unsafe { core::slice::from_raw_parts(back.as_ptr() as *const u8, back.len() * 4) };
-        libdunit::fb_present(bytes, fb.width, fb.height, 0, 0);
+        if libdunit::fb_present(bytes, fb.width, fb.height, 0, 0)!=0 {
+            damage_cache.invalidate();
+            libdunit::println("gui_server: FAIL framebuffer present");
+        }
         if !desktop_ready_announced {
             libdunit::println("gui_server: desktop ready");
             desktop_ready_announced = true;
         }
 
+        }
+        for c in clients.iter_mut(){c.dirty=None;c.buffers.copied=0;}
+        complete_desktop_frames(server,clients);
         previous_animation_time = animation_now;
         libdunit::sleep_ms(16);
         ticks += 1;
@@ -3309,7 +3323,7 @@ fn run_desktop_session(
     // Session over: tell every client to exit its input loop so serve_two_clients
     // can reap them (a QUIT to an already-exited pid is a harmless no-op).
     for w in wins.iter() {
-        send_input(w.pid, IN_QUIT, 0, 0, 0);
+        send_input(clients, w.pid, IN_QUIT, 0, 0, 0);
     }
     // Natural session end (not a live-resolution re-enter): caller does not loop.
     false

@@ -101,6 +101,10 @@ pub struct Effects {
     alpha: Vec<Scalar>,
 }
 impl Effects {
+    pub fn animating(&self, now:u64)->bool {
+        self.snapshots.iter().any(|s|!s.timeline.finished(now))
+            ||self.alpha.iter().any(|s|now.saturating_sub(s.start)<s.duration as u64)
+    }
     pub fn new() -> Self {
         Self {
             snapshots: Vec::new(),

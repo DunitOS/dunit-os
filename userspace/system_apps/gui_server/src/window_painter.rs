@@ -177,7 +177,7 @@ pub fn paint(
     // the restored backing so a translucent client reveals the desktop.
     if a > 0 {
         let want = (w.surface_w as usize) * (w.surface_h as usize);
-        if want > 0 && want * 4 <= w.buf_size {
+        if !w.buf_ptr.is_null() && want > 0 && want * 4 <= w.buf_size {
             // Restore the pre-frame backing under the content rect so the
             // ARGB blend composites over wallpaper/lower windows, not frame.
             if let Some((bx, by, cw, ch)) = backing_rect {

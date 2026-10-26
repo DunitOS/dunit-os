@@ -115,7 +115,7 @@ pub fn run(action: settings::policy::Action, c: &mut Context) {
                         &style,
                     );
                     w.alive = false;
-                    send_input(w.pid, IN_QUIT, 0, 0, 0);
+                    send_input(c.clients, w.pid, IN_QUIT, 0, 0, 0);
                 } else {
                     c.effects
                         .minimize(w, c.back, c.bw, c.bh, target, c.now, c.duration, &style);

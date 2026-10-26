@@ -53,6 +53,9 @@ pub struct Visual {
     pub blur: i32,
 }
 impl Tracks {
+    pub fn animating(&self, now:u64)->bool {
+        self.tracks.iter().any(|t|now.saturating_sub(t.start)<t.duration as u64)
+    }
     pub fn submit(&mut self, a: &Animation, now: u64) -> Result<(), &'static str> {
         let property = a
             .property

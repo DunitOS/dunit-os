@@ -51,6 +51,7 @@ struct Panel {
     style: Style,
 }
 pub struct Shell {
+    pub revision:u64,
     pub config: ShellConfig,
     panels: Vec<Panel>,
     pub insets: Insets,
@@ -218,7 +219,8 @@ impl Shell {
     pub fn apply_response(&mut self,actions:&[lua_policy::Animation],updates:&[lua_policy::WidgetUpdate],now:u64,font:Option<&Font>,apps:&Applications,ly:&Layout)->Result<(),String>{
         let mut motion=self.motion.clone();
         for action in actions.iter().filter(|a|a.window_id==0){if !self.valid_animation_target(action.target){return Err("unknown component token".into());}if !(513..=515).contains(&action.target){motion.submit(action,now).map_err(String::from)?;}}
-        self.apply_widget_updates(updates,font,apps,ly)?;self.motion=motion;Ok(())
+        self.apply_widget_updates(updates,font,apps,ly)?;self.motion=motion;
+        if !actions.is_empty()||!updates.is_empty(){self.revision=self.revision.wrapping_add(1);}Ok(())
     }
     pub fn advance(&mut self,now:u64){
         self.animation_now=now;
@@ -235,6 +237,32 @@ impl Shell {
                 let component=cell.component;let r=geometry::intersect(r,panel.rect);self.motion_rects[component]=r;self.motion_opacity[component]=opacity;panel.cells[index].rect=r;
             }
         }
+    }
+    /// Cached shell pixels are valid only before the next sampled value or
+    /// transition can change. Dynamic analog clocks conservatively redraw.
+    pub fn reusable(&self,now:u64)->bool {
+        self.popup.is_none()&&!self.motion.animating(now)&&self.sampled_at!=u64::MAX
+            &&(!self.config.components.iter().any(|c|matches!(c.kind,Kind::Tray|Kind::SystemMonitor|Kind::Clock))
+                ||now.saturating_sub(self.sampled_at)<self.stats_interval)
+            &&self.config.components.iter().enumerate().all(|(i,c)|match c.kind {
+                Kind::AnalogClock=>false,
+                Kind::Clock|Kind::Tray|Kind::SystemMonitor=>self.text_sampled_at[i]!=u64::MAX
+                    &&now.saturating_sub(self.text_sampled_at[i])<c.interval_ms as u64,
+                _=>true,
+            })
+    }
+    pub fn damage_blockers(&self,now:u64,fx:&Effects)->Vec<crate::damage_plan::Rect> {
+        self.panels.iter().map(|p| {
+            let mut margin=fx.shadow.max(number(&p.style,"shadow",fx.shadow).clamp(0,64))
+                .max(self.motion.sample(1024+p.index as u32,p.base_rect,now).shadow);
+            for c in &p.cells {
+                for style in [&c.normal,&c.hover,&c.focused] {margin=margin.max(number(style,"shadow",0).clamp(0,64));}
+                margin=margin.max(self.motion.sample((c.component+1)as u32,c.base_rect,now).shadow);
+            }
+            margin=margin.max(0).saturating_add(fx.blur_radius.max(0)).saturating_add(2);
+            crate::damage_plan::Rect{x:p.rect.0-margin,y:p.rect.1-margin,
+                w:(p.rect.2+margin*2).max(0)as u32,h:(p.rect.3+margin*2).max(0)as u32}
+        }).collect()
     }
     pub fn due_widget_updates(&mut self, now: u64) -> Vec<u32> {
         let mut due = Vec::new();

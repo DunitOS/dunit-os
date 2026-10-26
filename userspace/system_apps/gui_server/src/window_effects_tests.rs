@@ -39,12 +39,15 @@ mod window_painter {
 fn properties_compose_independent_of_submission_order_and_commit_once(){
     use lua_policy::Property::*;
     let mut f=window_effects::Effects::new();
+    assert!(!f.animating(10));
     let w=window();
     let unit=animation::UNIT as i64;
     for (property,from,to) in [(TranslationX,0,5),(Scale,unit,unit*2),(X,10,20),(Width,2,4),
         (Y,10,30),(TranslationY,0,-3),(Height,2,6)] {
         assert!(f.scalar(w.pid,property,10,100,from,to,animation::Easing::linear()));
     }
+    assert!(f.animating(109));
+    assert!(!f.animating(110));
     assert!(f.take_geometry_commits(&[w.clone()],109).is_empty());
     let commits=f.take_geometry_commits(&[w.clone()],110);
     assert_eq!(commits,alloc::vec![window_effects::GeometryCommit{pid:1,cx:25,cy:27,width:8,height:12}]);
