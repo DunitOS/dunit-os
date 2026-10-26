@@ -60,6 +60,8 @@ jobs:
           python3 tools/gen_abi.py --check
           cargo test --manifest-path abi/wait-set/Cargo.toml
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
+          cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
+          DUNIT_ROOT="$PWD" cargo test --manifest-path userspace/dwm_settings/Cargo.toml
           cargo test --manifest-path runtime/dunit-macros/Cargo.toml
           cargo test --manifest-path runtime/dunit/Cargo.toml
 
@@ -70,6 +72,22 @@ jobs:
 
       - name: Native SDK workflow and failure contracts
         run: python3 tools/test_dunit_workflow.py --accel tcg
+
+      - name: Optional desktop catalog compatibility
+        run: |
+          (cd kernel && cargo build --release --features boot-smoke-tests \
+            -Z build-std=core,alloc,compiler_builtins \
+            -Z build-std-features=compiler-builtins-mem -Z json-target-spec)
+          python3 tools/qemu_test.py --build --markers-file tools/sdk_catalog_absent_markers.json \
+            --accel tcg --post-boot-delay 3 --settle 4 --timeout 300 --boot-timeout 180
+
+      - name: Kernel interrupt after user fault
+        run: |
+          python3 tools/qemu_test.py --markers-file tools/user_fault_irq_markers.json \
+            --accel tcg --post-boot-delay 3 --settle 4 --timeout 240 --boot-timeout 180
+
+      - name: Installed desktop application catalog
+        run: python3 tools/test_sdk_catalog.py --accel tcg
 
       - name: Build DWM and Minimal ISOs
         run: bash build_iso.sh

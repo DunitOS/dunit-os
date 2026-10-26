@@ -32,6 +32,8 @@ def parse_manifest(content: str, path: Path, binaries: list[str], rights: Path) 
         if unknown:
             fail(field, f"unknown keys: {', '.join(sorted(unknown))}")
 
+    if len(content.encode("utf-8")) > 64 * 1024:
+        fail("root", "manifest exceeds 64 KiB")
     try:
         data = tomllib.loads(content)
     except tomllib.TOMLDecodeError as error:
@@ -72,3 +74,18 @@ def parse_manifest(content: str, path: Path, binaries: list[str], rights: Path) 
     if len(set(capabilities)) != len(capabilities) or set(capabilities) - known:
         fail("application.capabilities", "expected unique names from abi/rights.abi")
     return Application(path, identifier, name, kind, binary, icon, tuple(capabilities))
+
+
+def installed_manifest(app: Application) -> str:
+    """Materialize Cargo's resolved binary; installed readers cannot query Cargo."""
+    import json
+    def quote(value):
+        return json.dumps(value, ensure_ascii=False)
+    result = f'schema_version = 1\n\n[application]\nid = {quote(app.id)}\n'
+    result += f'name = {quote(app.name)}\nkind = {quote(app.kind)}\nbinary = {quote(app.binary)}\n'
+    if app.icon is not None:
+        result += f'icon = {quote(app.icon)}\n'
+    result += 'capabilities = [' + ', '.join(quote(cap) for cap in app.capabilities) + ']\n'
+    if len(result.encode('utf-8')) > 64 * 1024:
+        raise ValueError(f'{app.source}: installed manifest exceeds 64 KiB')
+    return result

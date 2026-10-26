@@ -1,0 +1,10 @@
+# Manifest-only application registry. No executable/name/icon in this document.
+[meta]
+schema_version = 2
+[dock]
+entries = ["example.monitor"]
+[launcher]
+entries = ["example.monitor"]
+[startup]
+entries = ["example.monitor"]
+self_test = false

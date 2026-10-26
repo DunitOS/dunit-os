@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 
-from dunit_manifest import load_manifest, parse_manifest
+from dunit_manifest import load_manifest, parse_manifest, installed_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 FLAGS = ["--release", "--target", str(ROOT / "userspace/x86_64-unknown-none.json"),
@@ -136,7 +136,7 @@ def boot(args, app, artifact, tests):
             shutil.copyfile(artifact, executable)
             metadata = overlay / "system/share/dunit/apps" / app.id / "dunit.toml"
             metadata.parent.mkdir(parents=True)
-            shutil.copyfile(app.source, metadata)
+            metadata.write_text(installed_manifest(app), encoding="utf-8")
             required = ["[TERM-007] Starting main loop", f"[EXEC] /app/{app.binary} returned code=0"]
             if tests:
                 required.append("[SDKTEST] OK count=")

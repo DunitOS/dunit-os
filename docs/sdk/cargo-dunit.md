@@ -32,7 +32,7 @@ unknown rights fail before an image is touched. `capabilities` declares
 requirements; it never grants privileges.
 
 `run` and `test` use Cargo's executable artifact path, stage that ELF at
-`/app/<binary>` and the source manifest at
+`/app/<binary>` and normalized installed metadata at
 `/system/share/dunit/apps/<id>/dunit.toml`, then call `tools/qemu_test.py --build`.
 The existing packer applies explicit file overlays; Live and installer payloads
 use the same initrd. The archive format and ABI remain unchanged. SDK commands
@@ -53,9 +53,11 @@ cargo dunit test --manifest-path /path/to/dunit-os/userspace/system_apps/calc/Ca
 `--input-ready` waits for a prompt; otherwise input starts after a short delay.
 Guest arguments follow `--`; the recovery console currently supports only
 nonempty ASCII words without whitespace, and the SDK rejects other arguments.
-Interactive windows, arbitrary quoted arguments, packaging assets and launcher/
-dock discovery are unfinished. Legacy release app registration remains intact;
-only SDK workflow packaging currently installs the new manifest metadata.
+Interactive windows, arbitrary quoted arguments and packaging assets are
+unfinished. [Desktop discovery](desktop-catalog.md) now reads installed GUI
+manifests; CLI/TUI desktop launching still needs a terminal adapter. Legacy
+release app registration remains intact; SDK workflow packaging installs the
+new manifest metadata.
 
 ## Native tests
 

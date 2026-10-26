@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from dunit_cli import ROOT, create
-from dunit_manifest import load_manifest, parse_manifest
+from dunit_manifest import load_manifest, parse_manifest, installed_manifest
 
 
 class Manifest(unittest.TestCase):
@@ -31,6 +31,22 @@ class Manifest(unittest.TestCase):
         self.assertEqual(app.capabilities, ('READ', 'WRITE'))
         self.data['application']['binary'] = 'other'
         self.assertEqual(self.parse(bins=['demo', 'other']).binary, 'other')
+
+    def test_shared_host_and_guest_contract_fixtures(self):
+        for path in (ROOT / 'runtime/dunit-app-manifest/tests/fixtures').glob('*.toml'):
+            with self.subTest(path=path):
+                if path.name.endswith('.valid.toml'):
+                    load_manifest(path, ['gui_stat'], ROOT / 'abi/rights.abi')
+                else:
+                    with self.assertRaises(ValueError):
+                        load_manifest(path, ['gui_stat'], ROOT / 'abi/rights.abi')
+
+    def test_installed_metadata_materializes_cargo_binary(self):
+        app = self.parse(bins=['demo'])
+        content = installed_manifest(app)
+        self.assertIn('binary = "demo"', content)
+        self.assertEqual(parse_manifest(content, Path('installed.toml'), ['demo'], ROOT / 'abi/rights.abi'),
+                         type(app)(Path('installed.toml'), app.id, app.name, app.kind, app.binary, app.icon, app.capabilities))
 
     def test_rejects_missing_ambiguous_or_unsafe_binary(self):
         for bins in ([], ['a', 'b'], ['../demo']):

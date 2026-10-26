@@ -18,3 +18,5 @@ crate-type = ["rlib"]
 libdunit = { path = "../libdunit" }
 # Shared terminal palette presets (SSOT), also linked by the kernel terminal.
 term_theme = { path = "../../runtime/term_theme" }
+
+dunit_app_manifest = { path = "../../runtime/dunit-app-manifest" }

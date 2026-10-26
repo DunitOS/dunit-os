@@ -451,7 +451,8 @@ impl FileSystem for MemFs {
             return Ok(entries);
         }
 
-        if self.node_type(clean) != Some(FileType::Directory) {
+        let kind = self.node_type(clean).ok_or(VfsError::NotFound)?;
+        if kind != FileType::Directory {
             return Err(VfsError::NotADirectory);
         }
 
@@ -487,7 +488,8 @@ impl FileSystem for MemFs {
             return Ok(count);
         }
 
-        if self.node_type(clean) != Some(FileType::Directory) {
+        let kind = self.node_type(clean).ok_or(VfsError::NotFound)?;
+        if kind != FileType::Directory {
             return Err(VfsError::NotADirectory);
         }
 

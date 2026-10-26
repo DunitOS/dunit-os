@@ -1583,7 +1583,7 @@ pub extern "C" fn _start() -> ! {
                     let result = if let Some(path) = &import_path {
                         dwm_settings::load_document_from(path)
                             .and_then(|text| {
-                                let config = dwm_settings::validate_document(&text)?;
+                                let config = dwm_settings::validate_installed_document(&text)?;
                                 if !config.valid || config.apps.apps.is_empty() {
                                     return Err(dwm_settings::ConfigError { line: 0, field: String::new(),
                                         reason: "Full desktop import requires an application registry. Use theme overlay instead." });

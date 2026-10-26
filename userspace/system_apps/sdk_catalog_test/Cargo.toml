@@ -1,0 +1,8 @@
+[package]
+name = "sdk_catalog_test"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+dwm_settings = { path = "../../dwm_settings" }
+libdunit = { path = "../../libdunit" }

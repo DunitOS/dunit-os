@@ -1,0 +1,6 @@
+{
+  "description": "Missing optional catalog keeps legacy desktop; MemFS distinguishes ENOENT from ENOTDIR",
+  "run": {"config": "limine_test_terminal.conf", "cmd": ["exec /app/sdk_catalog_test --absent"]},
+  "required": ["[TERM-007] Starting main loop", "[SDKCAT] absent catalog legacy fallback and directory errno OK", "[EXEC] /app/sdk_catalog_test returned code=0"],
+  "forbidden": ["[PANIC]", "[SDK] PANIC"]
+}

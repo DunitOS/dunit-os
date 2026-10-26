@@ -35,10 +35,12 @@ Unknown keys, missing required fields and unsupported schema versions are
 errors with a path/field diagnostic. Build/run must fail before modifying an
 image. There is no silent acceptance of a newer format.
 
-The accepted source is copied into the image at
+Accepted metadata is installed into the image at
 `/system/share/dunit/apps/<id>/dunit.toml`; the ELF remains under `/app/<binary>`.
+Packaging materializes Cargo's resolved `binary` in that installed manifest;
+source comments and ordering are not preserved.
 The desktop registration contract uses its name/icon/exec metadata in userspace;
-launcher/dock discovery is not implemented in the first tooling slice. Existing
+[GUI launcher/dock discovery](desktop-catalog.md) is now implemented. Existing
 user desktop layout, pinning and explicit presentation overrides retain their
 meaning; no application name or path is added to kernel code. Legacy bundled
 applications keep their current registry until they gain manifests.

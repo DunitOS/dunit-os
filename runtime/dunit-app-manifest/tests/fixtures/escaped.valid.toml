@@ -1,0 +1,11 @@
+schema_version = 1
+[application]
+id = 'escaped.app'
+name = "Unicode \u03a9 and \"quotes\""
+kind = 'gui'
+binary = 'gui_stat'
+icon = '/assets/icons/monitor.rgba'
+capabilities = [
+  'READ', # native requirement, no grant
+  'WRITE',
+]

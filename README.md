@@ -173,8 +173,10 @@ child processes together. System Monitor uses that loop.
 The SDK also handles files, buffered input, time and child processes. Calculator
 now uses the [native application API](docs/sdk/native-api.md) and a normal Rust
 entry function. [cargo dunit](docs/sdk/cargo-dunit.md) creates, builds, runs and
-tests CLI/TUI apps on the Dunit kernel. GUI templates, widgets and desktop
-manifest discovery are still being built. See the [SDK progress and contract](docs/sdk/m7-start.md).
+tests CLI/TUI apps on the Dunit kernel.
+[Installed GUI manifests](docs/sdk/desktop-catalog.md) feed the launcher and dock.
+GUI templates, widgets and CLI/TUI desktop launching are still being built.
+See the [SDK progress and contract](docs/sdk/m7-start.md).
 
 ## Get involved
 

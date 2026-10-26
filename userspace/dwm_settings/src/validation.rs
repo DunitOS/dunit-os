@@ -55,6 +55,15 @@ pub(crate) fn list(input: &str) -> Result<Vec<&str>, &'static str> {
 /// canonical round trip. Registry data is validated separately, before its
 /// tolerant low-level parser can clamp or silently drop it.
 pub fn validate(text: &str) -> Result<(), ConfigError> {
+    validate_with_apps(text, &crate::Applications::baseline())
+}
+pub(crate) fn validate_with_apps(text: &str, base: &crate::Applications) -> Result<(), ConfigError> {
+    validate_mode(text, base, true)
+}
+pub(crate) fn validate_syntax(text: &str) -> Result<(), ConfigError> {
+    validate_mode(text, &crate::Applications::baseline(), false)
+}
+fn validate_mode(text: &str, base: &crate::Applications, references_required: bool) -> Result<(), ConfigError> {
     if text.len() > 64 * 1024 { return Err(ConfigError { line: 0, field: String::new(), reason: "configuration exceeds 64 KiB" }); }
     let baseline = Settings::defaults();
     let schema = crate::to_toml(&baseline);
@@ -82,15 +91,15 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
             }
             sections.push(section);
             if let Some(id) = section.strip_prefix("application.") {
-                if id.is_empty()
+                if id.is_empty() || id == "." || id == ".."
                     || id
                         .chars()
-                        .any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+                        .any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'))
                 {
                     return Err(error(section.into(), "invalid application id"));
                 }
                 applications.push(id);
-                if applications.len() > MAX_APPS {
+                if applications.len() + base.apps.iter().filter(|app| !applications.contains(&app.id.as_str())).count() > MAX_APPS {
                     return Err(error(section.into(), "too many applications"));
                 }
             } else if !crate::shell::section(section) && !crate::policy::section(section) && section != "shell" && !matches!(section, "dock" | "launcher" | "startup" | "workspaces")
@@ -160,15 +169,12 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
             reason: "empty configuration",
         });
     }
-    // A document without a registry retains the documented baseline registry.
-    let defaults = crate::Applications::baseline();
+    if !references_required { return Ok(()); }
+    // References resolve against explicit tables and the installed/inherited model.
     for (line, field, ids) in references {
         for id in ids {
-            let exists = if applications.is_empty() {
-                defaults.apps.iter().any(|a| a.id == id)
-            } else {
-                applications.contains(&id)
-            };
+            let exists = applications.contains(&id)
+                || base.apps.iter().any(|a| a.id == id);
             if !exists {
                 return Err(ConfigError {
                     line,
@@ -180,7 +186,7 @@ pub fn validate(text: &str) -> Result<(), ConfigError> {
     }
     let mut settings = Settings::defaults();
     crate::parse_into(text, &mut settings);
-    let (apps, _) = crate::parse_apps(text);
+    let (apps, _) = crate::parse_apps_seeded(text, base);
     crate::shell::resolve(text, &settings, &apps).map_err(|error|locate(text,error))?;
     crate::policy::resolve(text, &apps).map_err(|error|locate(text,error))?;
     Ok(())

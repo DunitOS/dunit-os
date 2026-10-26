@@ -79,7 +79,7 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
         }
         "import-desktop"|"import-user"=>{
             let source=dwm_settings::load_document_from(rest).map_err(|_|"could not load full desktop configuration")?;
-            let config=dwm_settings::validate_document(&source).map_err(|_|"invalid full desktop configuration")?;
+            let config=dwm_settings::validate_installed_document(&source).map_err(|_|"invalid full desktop configuration")?;
             if cmd=="import-user"{dwm_settings::save_user_document(&source).map_err(|_|"user profile could not be saved")?;}
             else{dwm_settings::save_document(&source).map_err(|_|"desktop document could not be saved")?;}
             *settings=config.settings;*dirty=false;

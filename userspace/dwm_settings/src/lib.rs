@@ -9,13 +9,18 @@
 //!
 //! The parser is a deliberately tiny TOML subset: `# ` / `//` comments, blank
 //! lines, `[section]` headers (recorded but not required), and `key = "value"`
-//! / `key = value` pairs. That covers flat theme/layout tables without pulling
-//! in a full TOML crate.
+//! / `key = value` pairs. Desktop configuration retains this dialect; installed
+//! application manifests use full TOML through dunit_app_manifest.
 
 #![no_std]
 extern crate alloc;
 
 mod preserve;
+mod catalog;
+mod applications;
+pub use applications::{AppEntry, Applications, MAX_APPS, MAX_WS};
+pub(crate) use applications::{parse_apps, parse_apps_seeded};
+pub use catalog::{validate_document_with_manifests, validate_installed_document};
 mod validation;
 pub mod shell;
 pub mod policy;
@@ -919,87 +924,15 @@ fn write_active_config(text:&str)->Result<(),isize>{
 }
 /// The packaged desktop remains recoverable even if a user profile is broken.
 pub fn load_system_config()->Config{
-    for path in [CONFIG_PATH,"/assets/dwm/default.toml"]{if let Ok(source)=read_file_checked(path){if let Ok(config)=validate_document(&source){if config.valid{return config;}}}}
+    for path in [CONFIG_PATH,"/assets/dwm/default.toml"]{if let Ok(source)=read_file_checked(path){if let Ok(config)=validate_installed_document(&source){if config.valid{return config;}}}}
     Config::defaults()
 }
 /// Activate a complete user profile while retaining the system document.
 pub fn save_user_document(text:&str)->Result<(),ConfigError>{
-    let config=validate_document(text)?;
+    let config=validate_installed_document(text)?;
     if !config.valid{return Err(ConfigError{line:0,field:"application".into(),reason:"user profile requires a complete application registry"});}
     let _=libdunit::mkdir("/persist/config");
     libdunit::write_string(USER_CONFIG_PATH,text).map_err(|_|ConfigError{line:0,field:USER_CONFIG_PATH.into(),reason:"could not write user profile"})
-}
-
-/// Upper bound on registered applications (safety cap, not a pixel count): a
-/// malformed config cannot make the compositor allocate an unbounded registry.
-pub const MAX_APPS: usize = 32;
-/// Upper bound on virtual workspaces the switcher will lay out.
-pub const MAX_WS: usize = 9;
-
-/// One registered application — an `[application.<id>]` TOML table. This is the
-/// data that replaces the compositor's old hardcoded `LAUNCH_APPS`/`app_title`:
-/// adding an app is adding a table here, never editing gui_server. `exec`/`icon`/
-/// `label` default to derivations of `id` so a minimal entry is just an `id`.
-#[derive(Clone, PartialEq, Eq)]
-pub struct AppEntry {
-    /// Registry key from `[application.<id>]`; also the default exec/icon stem.
-    pub id: String,
-    /// Human-readable window/taskbar title.
-    pub name: String,
-    /// ELF to spawn (resolved by `libdunit::spawn` against /app). Defaults to `id`.
-    pub exec: String,
-    /// Icon: a stem resolved as SVG (then legacy RGBA), or an absolute VFS
-    /// path if it contains a '/'. Defaults to `id`.
-    pub icon: String,
-    /// 1-4 char dock/menu initials fallback when no icon renders. Derived from
-    /// `name` (uppercased) when omitted.
-    pub label: String,
-}
-
-/// The data-driven desktop application model: the registry plus the ordered
-/// dock / launcher / autostart lists (indices into `apps`) and the workspace
-/// count. Built from `[application.*]`, `[dock]`, `[launcher]`, `[startup]` and
-/// `[workspaces]`. Replaces the compositor's hardcoded `LAUNCH_APPS`/`WS_COUNT`.
-#[derive(Clone)]
-pub struct Applications {
-    pub apps: Vec<AppEntry>,
-    /// Dock icons, in order, as indices into `apps`.
-    pub dock: Vec<usize>,
-    /// Launcher-menu entries, in order, as indices into `apps`.
-    pub launcher: Vec<usize>,
-    /// Autostart spawn list, in order, as indices into `apps` (may repeat).
-    pub startup: Vec<usize>,
-    /// Number of virtual workspaces.
-    pub workspaces: usize,
-    /// Test-only: `[startup] self_test = true` makes the compositor drive its
-    /// runtime windows through a headless resize self-exercise (Phase 3) — no
-    /// mouse exists in the automated harness, so a title-bar maximize chip can't
-    /// be clicked. NEVER set in `default.toml`: a real desktop must not auto-
-    /// maximize its windows; only `test.toml` opts in.
-    pub self_test: bool,
-}
-
-impl AppEntry {
-    /// Build a registry entry; `exec`/`icon` default to `id`, `label` to `label`.
-    fn new(id: &str, name: &str, label: &str) -> AppEntry {
-        AppEntry {
-            id: String::from(id),
-            name: String::from(name),
-            exec: String::from(id),
-            icon: String::from(id),
-            label: String::from(label),
-        }
-    }
-}
-
-impl Applications {
-    /// An empty, inert model for failed configuration reads. Application
-    /// identities and default lists are loaded from the packaged TOML document.
-    pub fn baseline() -> Applications {
-        Applications { apps: Vec::new(), dock: Vec::new(), launcher: Vec::new(),
-            startup: Vec::new(), workspaces: 1, self_test: false }
-    }
-
 }
 
 /// The whole resolved desktop configuration: scalar `settings` (theme/layout/
@@ -1169,24 +1102,31 @@ pub fn load_config() -> Config {
             return config;
         }
     };
-    if let Err(error) = validate(&text) {
+    let mut base = match catalog::load() {
+        Ok(catalog) => catalog,
+        Err(error) => { config_warning(&error); return Config::defaults(); }
+    };
+    let explicit_registry = text.lines().any(|line| strip_comment(line).trim().starts_with("[application."));
+    if !explicit_registry {
+        let default = match read_file_checked("/assets/dwm/default.toml") {
+            Ok(default) => default,
+            Err(_) => { libdunit::println("dwm_settings: canonical application registry unavailable"); return Config::defaults(); }
+        };
+        if let Err(error) = validation::validate_with_apps(&default, &base) {
+            config_warning(&error);
+            return Config::defaults();
+        }
+        base = parse_apps_seeded(&default, &base).0;
+    }
+    if let Err(error) = validation::validate_with_apps(&text, &base) {
         config_warning(&error);
-        let mut config = Config::defaults();
-        config.valid = false;
-        return config;
+        return Config::defaults();
     }
     settings.from_file = true;
     parse_into(&text, &mut settings);
+    let (apps, saw_apps) = parse_apps_seeded(&text, &base);
 
-    let (mut apps, saw_apps) = parse_apps(&text);
-    if !saw_apps {
-        match read_file_checked("/assets/dwm/default.toml") {
-            Ok(default) if validate(&default).is_ok() => { apps = parse_apps(&default).0; }
-            _ => libdunit::println("dwm_settings: warning canonical application registry unavailable"),
-        }
-    }
-
-    match resolve_config(&text, settings, apps, saw_apps) {
+    match resolve_config(&text, settings, apps, saw_apps || !base.apps.is_empty()) {
         Ok(config) => config,
         Err(error) => { config_warning(&error); Config::defaults() }
     }
@@ -1202,6 +1142,15 @@ pub fn validate_document(text: &str) -> Result<Config, ConfigError> {
     parse_into(text, &mut settings);
     let (apps, saw_apps) = parse_apps(text);
     resolve_config(text, settings, apps, saw_apps)
+}
+
+fn validate_seeded_document(text: &str, base: &Applications) -> Result<Config, ConfigError> {
+    validation::validate_with_apps(text, base)?;
+    let mut settings = Settings::defaults();
+    settings.from_file = true;
+    parse_into(text, &mut settings);
+    let (apps, saw_apps) = parse_apps_seeded(text, base);
+    resolve_config(text, settings, apps, saw_apps || !base.apps.is_empty())
 }
 
 /// Load editable source exactly as stored. Missing system source falls back to
@@ -1223,7 +1172,7 @@ pub fn load_document_from(path: &str) -> Result<String, ConfigError> {
     let source = read_file_checked(path).map_err(|_| ConfigError {
         line: 0, field: String::new(), reason: "could not read complete desktop document",
     })?;
-    if !validate_document(&source)?.valid {
+    if !validate_installed_document(&source)?.valid {
         return Err(ConfigError { line: 0, field: String::new(), reason: "full desktop import requires an application registry" });
     }
     Ok(source)
@@ -1233,7 +1182,7 @@ pub fn load_document_from(path: &str) -> Result<String, ConfigError> {
 /// caller's complete source preserves comments and tables edited by Settings.
 /// No runtime state is mutated here; the existing reload validates its candidate.
 pub fn save_document(text: &str) -> Result<(), ConfigError> {
-    if !validate_document(text)?.valid {
+    if !validate_installed_document(text)?.valid {
         return Err(ConfigError { line: 0, field: String::from("application"), reason: "full desktop document requires an application registry" });
     }
     write_active_config(text).map_err(|_| ConfigError {
@@ -1269,131 +1218,6 @@ fn migrate_config(_settings: &mut Settings, _apps: &mut Applications, from: u32)
         // Scalar names are compatible; legacy strips resolve through shell::resolve.
         _ => {}
     }
-}
-
-/// Build the `Applications` model from a config document. Returns the model and
-/// whether any `[application.<id>]` table was present. With none, the built-in
-/// baseline registry is returned (an old theme-only config still yields the
-/// standard desktop) and the caller judges validity from the scalar `applied`.
-///
-/// Two passes over the tiny-TOML lines: the first registers every
-/// `[application.<id>]` (first-seen order) and applies its `name`/`exec`/`icon`/
-/// `label` keys plus the raw `[dock]`/`[launcher]`/`[startup]` `entries` arrays
-/// and `[workspaces].count`; the second resolves those id-lists into indices
-/// (unknown ids dropped). Absent `[dock]`/`[launcher]` default to the whole
-/// registry in order; absent `[startup]` autostarts nothing.
-fn parse_apps(text: &str) -> (Applications, bool) {
-    let mut apps: Vec<AppEntry> = Vec::new();
-    let mut dock_ids: Vec<String> = Vec::new();
-    let mut launcher_ids: Vec<String> = Vec::new();
-    let mut startup_ids: Vec<String> = Vec::new();
-    let (mut have_dock, mut have_launcher, mut have_startup) = (false, false, false);
-    let mut workspaces: usize = 1;
-    let mut self_test = false;
-
-    let mut section = String::new(); // full header, e.g. "application.gui_files"
-    for raw in text.lines() {
-        let line = strip_comment(raw).trim();
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            section.clear();
-            section.push_str(name.trim());
-            // Register the id eagerly so even an empty `[application.x]` counts.
-            if let Some(id) = section.strip_prefix("application.") {
-                let id = id.trim();
-                if !id.is_empty() && apps.len() < MAX_APPS && !apps.iter().any(|a| a.id == id) {
-                    apps.push(AppEntry::new(id, id, ""));
-                }
-            }
-            continue;
-        }
-        let Some(eq) = line.find('=') else {
-            continue;
-        };
-        let key = line[..eq].trim();
-        let rhs = line[eq + 1..].trim();
-
-        if let Some(id) = section.strip_prefix("application.") {
-            let id = id.trim();
-            let value = unquote(rhs);
-            if let Some(app) = apps.iter_mut().find(|a| a.id == id) {
-                match key {
-                    "name" => app.name = String::from(value),
-                    "exec" => app.exec = String::from(value),
-                    "icon" => app.icon = String::from(value),
-                    "label" => app.label = String::from(value),
-                    _ => {}
-                }
-            }
-        } else if section == "dock" && key == "entries" {
-            dock_ids = parse_str_array(rhs);
-            have_dock = true;
-        } else if section == "launcher" && key == "entries" {
-            launcher_ids = parse_str_array(rhs);
-            have_launcher = true;
-        } else if section == "startup" && key == "entries" {
-            startup_ids = parse_str_array(rhs);
-            have_startup = true;
-        } else if section == "startup" && key == "self_test" {
-            self_test = parse_bool(rhs).unwrap_or(false);
-        } else if section == "workspaces" && (key == "count" || key == "n") {
-            if let Some(n) = parse_uint(rhs) {
-                workspaces = (n as usize).clamp(1, MAX_WS);
-            }
-        }
-    }
-
-    if apps.is_empty() {
-        // Caller resolves an omitted registry from the canonical data document.
-        return (Applications::baseline(), false);
-    }
-
-    // Fill any label left empty from the (possibly overridden) name.
-    for app in apps.iter_mut() {
-        if app.label.is_empty() {
-            app.label = default_label(&app.name);
-        }
-    }
-
-    let resolve = |ids: &[String], apps: &[AppEntry]| -> Vec<usize> {
-        let mut out = Vec::new();
-        for id in ids {
-            if let Some(i) = apps.iter().position(|a| &a.id == id) {
-                out.push(i);
-            }
-        }
-        out
-    };
-    let all: Vec<usize> = (0..apps.len()).collect();
-    let dock = if have_dock {
-        resolve(&dock_ids, &apps)
-    } else {
-        all.clone()
-    };
-    let launcher = if have_launcher {
-        resolve(&launcher_ids, &apps)
-    } else {
-        all.clone()
-    };
-    let startup = if have_startup {
-        resolve(&startup_ids, &apps)
-    } else {
-        Vec::new()
-    };
-
-    (
-        Applications {
-            apps,
-            dock,
-            launcher,
-            startup,
-            workspaces,
-            self_test,
-        },
-        true,
-    )
 }
 
 /// Read configurable GUI swatches using the same TOML/color dialect as Settings.
@@ -1436,31 +1260,6 @@ fn parse_str_array(value: &str) -> Vec<String> {
         if !s.is_empty() {
             out.push(String::from(s));
         }
-    }
-    out
-}
-
-/// Derive a 1-4 char uppercase dock/menu label from a display name (fallback for
-/// an `[application.*]` table with no explicit `label`). Takes leading
-/// alphanumerics of the first word; `?` when the name has none.
-fn default_label(name: &str) -> String {
-    let mut out = String::new();
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() {
-            for u in c.to_uppercase() {
-                if out.len() < 4 {
-                    out.push(u);
-                }
-            }
-        } else if !out.is_empty() {
-            break;
-        }
-        if out.len() >= 4 {
-            break;
-        }
-    }
-    if out.is_empty() {
-        out.push('?');
     }
     out
 }
