@@ -6,6 +6,7 @@ version = 4
 name = "dunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_component",
  "dunit_macros",
  "gui_protocol_v1",
  "libdunit",
@@ -17,6 +18,17 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "toml",
+]
+
+[[package]]
+name = "dunit_component"
+version = "0.1.0"
+dependencies = [
+ "dunit_render",
+ "dunit_style",
+ "dunit_text",
+ "dunit_ui",
+ "dunit_widgets",
 ]
 
 [[package]]
@@ -80,11 +92,6 @@ name = "gui_stat"
 version = "0.1.0"
 dependencies = [
  "dunit",
- "dunit_render",
- "dunit_style",
- "dunit_text",
- "dunit_ui",
- "dunit_widgets",
  "dwm_settings",
 ]
 

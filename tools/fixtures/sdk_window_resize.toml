@@ -1,0 +1,9 @@
+[meta]
+schema_version = 2
+[startup]
+entries = ["sdk_resize_fixture"]
+self_test = false
+[shortcuts]
+cmd_mod = "super"
+win_max = true
+win_close = true

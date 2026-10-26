@@ -77,7 +77,8 @@ no wire-format or syscall ABI change. Scale 1 and XRGB8888
 are supported initially. Transparency, multiwindow sessions, reconnect, damage,
 Component diffing and widgets remain separate work.
 
-System Monitor now uses this API, including live maximize/restore, timed
+System Monitor now uses the [typed component adapter](components.md) over this
+API, including live maximize/restore, timed
 refresh and close. Its app code contains no raw IPC, capability management,
 pointers, `_start` or panic handler. Other legacy clients remain to be migrated.
 

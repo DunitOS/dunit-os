@@ -180,5 +180,6 @@ Cargo artifact selection, image overlays and guest test discovery through
 `#[dunit::test]`. No new syscall or archive format is needed.
 [GUI launcher/dock manifest discovery](desktop-catalog.md) is implemented.
 The [native window helper and GUI template](window.md) are implemented.
-Component/widgets, other legacy-client migrations and CLI/TUI desktop launching
-remain open.
+[Typed root components and CPU invalidation](components.md) are implemented and
+used by System Monitor. Compositor damage, widget behaviour/state, other
+legacy-client migrations and CLI/TUI desktop launching remain open.

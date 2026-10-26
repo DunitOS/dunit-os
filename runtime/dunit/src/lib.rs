@@ -1,5 +1,5 @@
 //! Native Dunit SDK: no_std + alloc over libdunit.
-//! Declarative components, widgets and standalone distribution remain unfinished.
+//! Retained components are available with `gui`; widgets and distribution are unfinished.
 #![no_std]
 extern crate alloc;
 pub mod args;
@@ -9,6 +9,8 @@ pub mod event;
 pub mod fs;
 #[cfg(feature = "gui")]
 pub mod window;
+#[cfg(feature = "gui")]
+pub mod ui;
 pub mod io;
 pub mod process;
 pub mod system;

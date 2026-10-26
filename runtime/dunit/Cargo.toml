@@ -8,6 +8,7 @@ dunit_macros = { path = "../dunit-macros" }
 libdunit = { path = "../../userspace/libdunit" }
 
 gui_protocol_v1 = { path = "../../protocols/gui-v1", optional = true }
+dunit_component = { path = "../dunit-component", optional = true }
 
 [features]
-gui = ["dep:gui_protocol_v1"]
+gui = ["dep:gui_protocol_v1", "dep:dunit_component"]

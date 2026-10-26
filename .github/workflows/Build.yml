@@ -65,6 +65,8 @@ jobs:
           cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
           DUNIT_ROOT="$PWD" cargo test --manifest-path userspace/dwm_settings/Cargo.toml
           cargo test --manifest-path runtime/dunit-macros/Cargo.toml
+          cargo test --manifest-path runtime/dunit-render/Cargo.toml
+          cargo test --manifest-path runtime/dunit-component/Cargo.toml
           cargo test --manifest-path runtime/dunit/Cargo.toml --features gui
 
       - name: Image profile and SDK tooling tests
@@ -77,6 +79,9 @@ jobs:
 
       - name: Native GUI SDK workflow and failure contracts
         run: python3 tools/test_dunit_gui_workflow.py --accel tcg
+
+      - name: Native component input, CPU damage and resize
+        run: python3 tools/test_sdk_gui_fixture.py component --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |

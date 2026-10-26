@@ -177,6 +177,8 @@ tests CLI/TUI/GUI apps on the Dunit kernel.
 [Installed GUI manifests](docs/sdk/desktop-catalog.md) feed the launcher and dock.
 The [window API](docs/sdk/window.md) handles drawing, resizing, input and cleanup;
 `cargo dunit new demo --kind gui` creates a working GUI starter.
+System Monitor uses [typed components](docs/sdk/components.md), with state
+updates and a retained tree that repaints changed regions locally.
 Widgets and CLI/TUI desktop launching are still being built.
 See the [SDK progress and contract](docs/sdk/m7-start.md).
 

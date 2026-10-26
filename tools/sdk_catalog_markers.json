@@ -87,6 +87,7 @@
     "[SDKCAT] invalid candidate rejected and recovery OK",
     "[EXEC] /app/sdk_catalog_test returned code=0",
     "gui_stat: surface presented OK",
+    "gui_stat: typed component presented OK",
     "gui_stat: SDK wait-set refresh OK",
     "gui_server: desktop ready",
     "gui_stat: SDK quit OK",

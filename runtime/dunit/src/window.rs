@@ -426,6 +426,11 @@ impl Window {
     /// keep application state updates outside it. Recovery is bounded.
     /// An unrecoverable failure poisons the session; close/drop releases resources.
     pub fn draw(&mut self, mut paint: impl FnMut(&mut Frame<'_>)) -> Result<()> {
+        self.try_draw(|frame| { paint(frame); Ok(()) })
+    }
+    /// Fallible painting, with the same retry semantics as `draw`. An error prevents transfer/import/publication of the
+    /// private buffer and poisons the session like other drawing failures.
+    pub fn try_draw(&mut self, mut paint: impl FnMut(&mut Frame<'_>) -> Result<()>) -> Result<()> {
         let start = Instant::now()?;
         let mut result = Err(Error(libdunit::EAGAIN));
         for _ in 0..MAX_RETRIES {
@@ -444,7 +449,7 @@ impl Window {
         self.failed = true;
         result.and(Err(Error(libdunit::EAGAIN)))
     }
-    fn draw_inner(&mut self, paint: &mut impl FnMut(&mut Frame<'_>)) -> Result<()> {
+    fn draw_inner(&mut self, paint: &mut impl FnMut(&mut Frame<'_>) -> Result<()>) -> Result<()> {
         if self.failed {
             return Err(Error(libdunit::EPIPE));
         }
@@ -462,7 +467,7 @@ impl Window {
             pixels,
             width: self.width,
             height: self.height,
-        });
+        })?;
         let duplicate = checked(libdunit::handle_dup(
             buffer.handle,
             libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,

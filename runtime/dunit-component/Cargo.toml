@@ -1,0 +1,11 @@
+[package]
+name = "dunit_component"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit_ui = { path = "../dunit-ui" }
+dunit_style = { path = "../dunit-style" }
+dunit_text = { path = "../dunit-text" }
+dunit_render = { path = "../dunit-render" }
+dunit_widgets = { path = "../dunit-widgets" }
