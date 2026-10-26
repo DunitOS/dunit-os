@@ -7,6 +7,7 @@ name = "dunit"
 version = "0.1.0"
 dependencies = [
  "dunit_macros",
+ "gui_protocol_v1",
  "libdunit",
 ]
 
@@ -85,8 +86,6 @@ dependencies = [
  "dunit_ui",
  "dunit_widgets",
  "dwm_settings",
- "gui_protocol_v1",
- "libdunit",
 ]
 
 [[package]]

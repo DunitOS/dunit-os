@@ -110,9 +110,9 @@ python3 tools/qemu_test.py --markers-file tools/sdk_entry_panic_markers.json \
 ```
 
 CI runs these native contracts with TCG before publishing the two release ISOs.
-Native `#[dunit::test]`, manifest validation and CLI/TUI cargo tooling are now
+Native `#[dunit::test]`, manifest validation and CLI/TUI/GUI cargo tooling are now
 covered by [the app workflow](cargo-dunit.md). The full M7 gates remain open:
-GUI app tooling, CLI/TUI desktop launch adapters, thread/sync APIs, Component/widgets,
+CLI/TUI desktop launch adapters, thread/sync APIs, Component/widgets,
 live damage and clipboard/DnD.
 
 Verified on 26 October 2026: 10 SDK host tests and 2 macro tests passed;
@@ -122,3 +122,9 @@ PTY calculator test. The existing boot/runtime-stress/IPC marker budget and
 the SDK monitor's refresh/close regression also passed. All completed QEMU
 runs reported `Result: OK (completed)` and `Markers: OK (marker budget satisfied)`.
 The compiler warning budget remained 13/99.
+
+The [window helper](window.md) migrates System Monitor to the same entry/API.
+File and standard-stream reads/writes use bounded native transfers, so logical
+`read_exact`/`write_all` operations can exceed the per-syscall copy budget. The
+native API probe verifies a 200,003-byte binary roundtrip; the monitor also
+loads its TTF through this file API.

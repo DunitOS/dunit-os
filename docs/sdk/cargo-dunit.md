@@ -1,6 +1,6 @@
 # Native app workflow
 
-`cargo dunit` builds and exercises native Rust CLI/TUI applications on the
+`cargo dunit` builds and exercises native Rust CLI/TUI/GUI applications on the
 Dunit kernel. The SDK uses `no_std + alloc`; no application code needs an ABI
 entry point, `unsafe`, a panic handler or hand-written QEMU markers.
 
@@ -53,11 +53,26 @@ cargo dunit test --manifest-path /path/to/dunit-os/userspace/system_apps/calc/Ca
 `--input-ready` waits for a prompt; otherwise input starts after a short delay.
 Guest arguments follow `--`; the recovery console currently supports only
 nonempty ASCII words without whitespace, and the SDK rejects other arguments.
-Interactive windows, arbitrary quoted arguments and packaging assets are
+GUI `run` is a headless smoke: it starts the real compositor with the selected
+installed app, waits for the presented window, sends the configured close
+shortcut after two seconds and requires that child's actual exit code 0.
+GUI `test` autostarts the native test binary in the same desktop; tests may open
+one window for the process. The generated case publishes 201 frames.
+GUI launch currently rejects guest arguments and terminal input.
+Interactive QEMU windows, arbitrary quoted arguments and packaging assets are
 unfinished. [Desktop discovery](desktop-catalog.md) now reads installed GUI
 manifests; CLI/TUI desktop launching still needs a terminal adapter. Legacy
 release app registration remains intact; SDK workflow packaging installs the
 new manifest metadata.
+
+```sh
+cargo dunit new demo --kind gui --name "My window"
+cargo dunit run --manifest-path demo/Cargo.toml
+cargo dunit test --manifest-path demo/Cargo.toml
+```
+
+See the [window API and its initial limits](window.md). The starter is a themed
+canvas; it does not implement the future Component/widget layer.
 
 ## Native tests
 
@@ -79,9 +94,10 @@ ignored tests and parallel execution are not implemented. Use the generated
 python3 tools/test_dunit_cli.py
 python3 tools/test_image_profiles.py
 python3 tools/test_dunit_workflow.py --accel tcg
+python3 tools/test_dunit_gui_workflow.py --accel tcg
 ```
 
-The last command covers new/build/run/test, a native file roundtrip and installed
+The CLI/TUI workflow covers new/build/run/test, a native file roundtrip and installed
 manifest read, empty/error/panic rejection, and both native tests and real TUI
 execution of Calculator. Logs are saved under build/sdk-workflow/; all guest
 launches still go through qemu_test.py.

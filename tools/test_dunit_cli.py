@@ -113,9 +113,15 @@ class Manifest(unittest.TestCase):
                 create(args)
             args.path = Path(directory) / 'gui'
             args.kind = 'gui'
-            with self.assertRaisesRegex(ValueError, 'window helper'):
-                create(args)
-            self.assertFalse(args.path.exists())
+            create(args)
+            app = load_manifest(args.path / 'dunit.toml', ['gui'], ROOT / 'abi/rights.abi')
+            self.assertEqual(app.kind, 'gui')
+            self.assertTrue((ROOT / app.icon.lstrip('/')).is_file())
+            source = (args.path / 'src/main.rs').read_text()
+            self.assertIn('Window::open', source)
+            self.assertNotIn('unsafe', source)
+            self.assertNotIn('__APP_NAME__', source)
+            args.path = Path(directory) / 'invalid'
             args.kind = 'cli'
             args.name = '\n'
             with self.assertRaisesRegex(ValueError, 'application.name'):

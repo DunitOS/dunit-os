@@ -175,8 +175,10 @@ privilege mechanism is introduced. Thread/sync remains open.
 ## Accepted application manifest and native tooling
 
 On 26 October 2026 the owner approved [dunit.toml v1](app-manifest-proposal.md).
-The [cargo dunit workflow](cargo-dunit.md) implements native CLI/TUI generation,
+The [cargo dunit workflow](cargo-dunit.md) implements native CLI/TUI/GUI generation,
 Cargo artifact selection, image overlays and guest test discovery through
 `#[dunit::test]`. No new syscall or archive format is needed.
 [GUI launcher/dock manifest discovery](desktop-catalog.md) is implemented.
-GUI templates and CLI/TUI desktop launching remain open.
+The [native window helper and GUI template](window.md) are implemented.
+Component/widgets, other legacy-client migrations and CLI/TUI desktop launching
+remain open.

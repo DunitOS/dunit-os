@@ -161,3 +161,14 @@ fn arbitrary_bounded_payloads_never_panic_or_decode_across_families() {
         None
     );
 }
+
+
+#[test]
+fn bootstrap_preserves_existing_bytes_and_rejects_partial_or_trailing_data() {
+    use gui_protocol_v1::control::Bootstrap;
+    let intro = Bootstrap { compositor: 0x04030201, client: 0x08070605 };
+    assert_eq!(intro.encode(), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(Bootstrap::decode(&intro.encode()), Some(intro));
+    for len in 0..8 { assert_eq!(Bootstrap::decode(&intro.encode()[..len]), None); }
+    assert_eq!(Bootstrap::decode(&[0; 9]), None);
+}

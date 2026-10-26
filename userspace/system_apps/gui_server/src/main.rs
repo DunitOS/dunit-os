@@ -1487,6 +1487,9 @@ fn run_desktop_session(
         }
         clients[i].ready = true;
         clients[i].win_created = true;
+        if let Some(app) = apps.apps.get(clients[i].app as usize) {
+            libdunit::println(&alloc::format!("[GUI-PRESENT] app={}", app.id));
+        }
         offset += 32;
     }
 
@@ -1884,11 +1887,19 @@ fn run_desktop_session(
         {
             let mut ci = 0;
             while ci < clients.len() {
-                if !clients[ci].ready {
-                    ci += 1;
-                    continue;
-                }
                 let pid = clients[ci].pid;
+                if !clients[ci].ready {
+                    // A client may fail before its first surface. Observe exit
+                    // without consuming a merely prepared/not-yet-run child.
+                    use libdunit::wait_set::{self, Event, Interest, EXITED};
+                    let mut event = [Event::default()];
+                    if wait_set::wait(&[Interest::process(pid, 0)], &mut event, 0) != Ok(1)
+                        || event[0].events & EXITED == 0
+                    {
+                        ci += 1;
+                        continue;
+                    }
+                }
                 let mut st = libdunit::WaitStatus::empty();
                 if libdunit::wait(pid, &mut st) != pid as isize {
                     ci += 1; // still running (or not reapable yet)
@@ -1897,6 +1908,9 @@ fn run_desktop_session(
                 server.disconnect_peer(clients[ci].conn);
                 if clients[ci].mapped_handle != 0 {
                     libdunit::shared_buffer::release(clients[ci].mapped_handle, clients[ci].buf_ptr as usize, clients[ci].buf_size);
+                }
+                if let Some(app) = apps.apps.get(clients[ci].app as usize) {
+                    libdunit::println(&alloc::format!("[GUI-EXIT] app={} kind={} code={}", app.id, st.kind, st.code));
                 }
                 clients.remove(ci);
                 reap_windows_of(
@@ -2003,6 +2017,9 @@ fn run_desktop_session(
                 format: clients[i].format,
             });
             clients[i].win_created = true;
+            if let Some(app) = apps.apps.get(clients[i].app as usize) {
+                libdunit::println(&alloc::format!("[GUI-PRESENT] app={}", app.id));
+            }
             z.push(wi);
             // Re-maximize a window that was remembered maximized (uses the same
             // CONFIGURE path the chip drives), then persist the freshly-placed

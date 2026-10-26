@@ -2,7 +2,7 @@
 #[test]
 fn sdk_applications_use_the_generated_entry_and_sdk_dependency() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../userspace/system_apps");
-    for name in ["calc", "sdk_api_test"] {
+    for name in ["calc", "sdk_api_test", "gui_stat"] {
         let app = root.join(name);
         let source = std::fs::read_to_string(app.join("src/main.rs")).unwrap();
         let manifest = std::fs::read_to_string(app.join("Cargo.toml")).unwrap();

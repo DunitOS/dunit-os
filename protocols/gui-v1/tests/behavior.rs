@@ -418,3 +418,72 @@ fn fuzz_no_panic_and_serials_monotonic() {
 
 
 
+
+/// A configure may invalidate a frame after ATTACH. v1 has no pending-attach
+/// cancellation; surface destruction is the release barrier used by the SDK.
+#[test]
+fn stale_frame_can_release_both_buffers_and_recreate_on_same_connection() {
+    let mut s = Server::new();
+    let c = active_conn(&mut s);
+    let mut serial = 2;
+    let token = create_and_ack(&mut s, c, 1, &mut serial, 8, 8);
+    for request in [
+        import(2, serial, 8, 8, 1),
+        attach(1, serial + 1, 2, vec![]),
+        commit(1, serial + 2, token, 1),
+    ] {
+        let cap = (opcode(&request) == Opcode::ImportBuffer).then_some(cap_of(8, 8));
+        assert_eq!(opcode(&s.deliver(c, &request, cap)[0]), Opcode::Result);
+    }
+    serial += 3;
+    assert_eq!(s.composite().len(), 1);
+    assert_eq!(
+        opcode(&s.deliver(c, &import(3, serial, 8, 8, 1), Some(cap_of(8, 8)))[0]),
+        Opcode::Result
+    );
+    serial += 1;
+    assert_eq!(
+        opcode(&s.deliver(c, &attach(1, serial, 3, vec![]), None)[0]),
+        Opcode::Result
+    );
+    serial += 1;
+    assert_eq!(s.reconfigure(c, 1, 32, 16, 1, 1).len(), 1);
+    let error = s.deliver(c, &commit(1, serial, token, 1), None);
+    assert_eq!(
+        error_of(&error[0]),
+        (gui_protocol_v1::ErrorCode::BadSerial.code(), 0)
+    );
+    serial += 1;
+    let barrier = s.deliver(c, &Request::DestroySurface.encode(1, serial), None);
+    assert_eq!(opcode(barrier.last().unwrap()), Opcode::Result);
+    for buffer in [2, 3] {
+        assert!(barrier[..barrier.len() - 1]
+            .iter()
+            .any(|packet| opcode(packet) == Opcode::BufferRelease && obj_of(packet) == buffer));
+        serial += 1;
+        assert_eq!(
+            opcode(&s.deliver(c, &Request::DestroyBuffer.encode(buffer, serial), None)[0]),
+            Opcode::Result
+        );
+    }
+    serial += 1;
+    let token = create_and_ack(&mut s, c, 4, &mut serial, 32, 16);
+    assert_eq!(
+        opcode(&s.deliver(c, &import(5, serial, 32, 16, 1), Some(cap_of(32, 16)))[0]),
+        Opcode::Result
+    );
+    serial += 1;
+    assert_eq!(
+        opcode(&s.deliver(c, &attach(4, serial, 5, vec![]), None)[0]),
+        Opcode::Result
+    );
+    serial += 1;
+    assert_eq!(
+        opcode(&s.deliver(c, &commit(4, serial, token, 1), None)[0]),
+        Opcode::Result
+    );
+    let frames = s.composite();
+    assert_eq!(frames.len(), 1);
+    assert_eq!(obj_of(&frames[0].1), 4);
+    assert_eq!(u32at(&frames[0].1, 48), 0);
+}

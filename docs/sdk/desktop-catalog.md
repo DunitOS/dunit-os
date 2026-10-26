@@ -67,7 +67,10 @@ python3 tools/test_sdk_catalog.py --accel tcg
 The native fixture has ID `example.monitor` and executes the existing
 `gui_stat` binary. It checks dock/launcher/startup resolution without desktop
 application tables, edits and rereads the name, rejects an invalid schema,
-restores it, and then starts and closes a real monitor window. The probe binary and installed test manifest belong to the full developer
+restores it, and then starts, maximizes, restores and closes a real monitor
+window through the shared SDK window helper. Scalar theme/font consumers now
+use the same catalog-aware configuration resolver as the compositor. The probe
+binary and installed test manifest belong to the full developer
 workflow; the sample desktop document ships with the other DWM examples. Release
 application lists stay explicit. Shared TOML fixtures exercise both Python
 packaging and Rust parsing.

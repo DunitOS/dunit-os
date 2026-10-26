@@ -10,5 +10,5 @@
     ]}
   },
   "required": ["[TERM-007] Starting main loop", "setup: full desktop applied", "gui_stat: surface presented OK", "gui_stat: SDK wait-set refresh OK", "gui_server: desktop ready", "gui_stat: SDK quit OK"],
-  "forbidden": ["[PANIC]", "gui_stat: FAIL", "gui_stat: PANIC", "gui_server: FAIL"]
+  "forbidden": ["[PANIC]", "[SDK] PANIC", "gui_stat: FAIL", "gui_stat: PANIC", "gui_server: FAIL"]
 }

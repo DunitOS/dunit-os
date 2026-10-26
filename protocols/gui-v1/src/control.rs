@@ -26,6 +26,24 @@ fn has_magic(bytes: &[u8], magic: u32) -> bool {
     bytes.len() >= 4 && word(bytes, 0) == magic
 }
 
+/// Existing launch introduction: compositor PID followed by client/tint ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bootstrap {
+    pub compositor: u32,
+    pub client: u32,
+}
+impl Bootstrap {
+    pub fn encode(self) -> [u8; 8] {
+        let mut bytes = [0; 8];
+        bytes[..4].copy_from_slice(&self.compositor.to_le_bytes());
+        bytes[4..].copy_from_slice(&self.client.to_le_bytes());
+        bytes
+    }
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        (bytes.len() == 8).then(|| Self { compositor: word(bytes, 0), client: word(bytes, 4) })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capability {
     pub handle: u32,

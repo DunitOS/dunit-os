@@ -11,9 +11,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dunit = { path = "../../../runtime/dunit" }
-libdunit = { path = "../../libdunit" }
-gui_protocol_v1 = { path = "../../../protocols/gui-v1" }
+dunit = { path = "../../../runtime/dunit", features = ["gui"] }
 dwm_settings = { path = "../../dwm_settings" }
 dunit_ui = { path = "../../../runtime/dunit-ui" }
 dunit_style = { path = "../../../runtime/dunit-style" }

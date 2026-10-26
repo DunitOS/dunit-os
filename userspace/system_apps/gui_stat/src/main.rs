@@ -7,18 +7,15 @@
 //! + wire-protocol path as `gui_client`, and it paints through the same M4 UI
 //! Runtime (DUI + DSS + TTF text). The difference is the event loop: instead of
 //! only reacting to pointer input, it blocks on IPC with a timeout and repaints
-//! fresh `get_system_stats` counters each time it wakes, so the window is a live
-//! monitor. The compositor blits our shared buffer every tick, so repaints show
-//! up without us ever presenting (display master stays with the server).
-
-use core::panic::PanicInfo;
+//! fresh native system counters each time it wakes. The SDK owns bootstrap,
+//! buffer publication, resize, input and teardown; display master stays with
+//! the server.
 
 extern crate alloc;
-use gui_protocol_v1::control::IN_QUIT;
+use dunit::time::Duration;
+use dunit::window::{Frame, Window, WindowEvent};
 
 use alloc::string::String;
-
-use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888};
 
 use dunit_render::{paint, Surface};
 use dunit_style::cascade::{Cascade, NodeStyle};
@@ -29,11 +26,8 @@ use dunit_ui::parse as parse_dui;
 use dunit_ui::tree::{Kind, NodeId};
 use dunit_widgets::{intrinsic_size, FontMeasure, Widget};
 
-const SURFACE: u64 = 1;
-const BUFFER: u64 = 2;
 const W: u32 = 460;
 const H: u32 = 300;
-const FMT_XRGB8888: u32 = 1;
 
 /// Poll cadence: block on IPC at most this long, then repaint fresh counters.
 const POLL_MS: u64 = 500;
@@ -42,26 +36,26 @@ const POLL_MS: u64 = 500;
 /// shipped /assets default font on any error — the desktop font is a live config knob.
 fn load_font() -> Result<Font, ()> {
     let cfg = dwm_settings::load();
-    if let Some(bytes) = libdunit::read_binary(cfg.desktop.font.as_str(), 4 * 1024 * 1024) {
+    if let Some(bytes) = read_font(cfg.desktop.font.as_str()) {
         if let Ok(f) = Font::parse(bytes) {
             return Ok(f);
         }
     }
-    libdunit::read_binary("/assets/fonts/DejaVuSans.ttf", 4 * 1024 * 1024)
+    read_font("/assets/fonts/DejaVuSans.ttf")
         .ok_or(())
         .and_then(|b| Font::parse(b).map_err(|_| ()))
 }
 
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    libdunit::println("gui_stat: PANIC");
-    libdunit::exit(101)
-}
-
-fn u64_at(p: &[u8], off: usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&p[off..off + 8]);
-    u64::from_le_bytes(a)
+fn read_font(path: &str) -> Option<alloc::vec::Vec<u8>> {
+    use dunit::io::Read;
+    let mut file = dunit::fs::File::open(path).ok()?;
+    let size = usize::try_from(file.metadata().ok()?.len).ok()?;
+    if size > 4 * 1024 * 1024 {
+        return None;
+    }
+    let mut bytes = alloc::vec![0; size];
+    file.read_exact(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// Human-readable byte size (B / KiB / MiB), matching the legacy stats window.
@@ -86,54 +80,76 @@ fn push_line(d: &mut String, text: &str) {
     d.push_str("\" ");
 }
 
-// APPEND_MARKER
-
 /// Build the DUI document for the current stats snapshot. Each row is one Text
 /// child of a Column so the runtime stacks them vertically.
-fn build_dui(s: &libdunit::SystemStats) -> String {
+fn build_dui(s: &dunit::system::SystemStats) -> String {
     let mut d = String::new();
     d.push_str("Column#win { Text#title \"System Stats\" ");
     push_line(
         &mut d,
         &alloc::format!(
             "proc: total {} run {} ready {} blocked {}",
-            s.process_total, s.process_running, s.process_ready, s.process_blocked
+            s.process_total,
+            s.process_running,
+            s.process_ready,
+            s.process_blocked
         ),
     );
-    push_line(&mut d, &alloc::format!("dead {} reaped {}", s.process_dead, s.process_reaped));
     push_line(
         &mut d,
-        &alloc::format!("pmm: {} / {}", fmt_size(s.pmm_used_bytes), fmt_size(s.pmm_total_bytes)),
+        &alloc::format!("dead {} reaped {}", s.process_dead, s.process_reaped),
     );
     push_line(
         &mut d,
-        &alloc::format!("heap: {} used  {} free-blocks", fmt_size(s.heap_used_bytes), s.heap_free_blocks),
+        &alloc::format!(
+            "pmm: {} / {}",
+            fmt_size(s.pmm_used_bytes),
+            fmt_size(s.pmm_total_bytes)
+        ),
+    );
+    push_line(
+        &mut d,
+        &alloc::format!(
+            "heap: {} used  {} free-blocks",
+            fmt_size(s.heap_used_bytes),
+            s.heap_free_blocks
+        ),
     );
     push_line(
         &mut d,
         &alloc::format!(
             "ipc: queues {} msgs {} shared {}",
-            s.ipc_queue_count, s.ipc_queued_messages, s.ipc_shared_regions
+            s.ipc_queue_count,
+            s.ipc_queued_messages,
+            s.ipc_shared_regions
         ),
     );
     push_line(
         &mut d,
-        &alloc::format!("fs: files {} dirs {} {}", s.fs_files, s.fs_directories, fmt_size(s.fs_bytes)),
+        &alloc::format!(
+            "fs: files {} dirs {} {}",
+            s.fs_files,
+            s.fs_directories,
+            fmt_size(s.fs_bytes)
+        ),
     );
     push_line(
         &mut d,
-        &alloc::format!("net: nics {} supported {}", s.net_total_nics, s.net_supported_nics),
+        &alloc::format!(
+            "net: nics {} supported {}",
+            s.net_total_nics,
+            s.net_supported_nics
+        ),
     );
     push_line(&mut d, &alloc::format!("uptime: {}s", s.uptime_ticks / 100));
     d.push('}');
     d
 }
 
-// APPEND_MARKER2
-
-/// Paint the current stats snapshot into the mapped ARGB8888 buffer using the
+/// Paint the current stats snapshot into the private XRGB8888 frame using the
 /// M4 UI Runtime (DUI tree -> DSS cascade -> content-measured layout -> render).
-fn render_stats(px: *mut u8, font: &Font, s: &libdunit::SystemStats) {
+fn render_stats(frame: &mut Frame<'_>, font: &Font, s: &dunit::system::SystemStats) {
+    let (width, height) = frame.size();
     let dui = build_dui(s);
     let tree = match parse_dui(&dui) {
         Ok(t) => t,
@@ -154,7 +170,12 @@ fn render_stats(px: *mut u8, font: &Font, s: &libdunit::SystemStats) {
         let node = tree.node(nid);
         let tag = node.kind.tag();
         let ns = match node.name.as_deref() {
-            Some(name) => NodeStyle { element: tag, id: Some(name), classes: &[], states: &[] },
+            Some(name) => NodeStyle {
+                element: tag,
+                id: Some(name),
+                classes: &[],
+                states: &[],
+            },
             None => NodeStyle::element(tag),
         };
         cas.resolve(&ns)
@@ -170,160 +191,42 @@ fn render_stats(px: *mut u8, font: &Font, s: &libdunit::SystemStats) {
         }
         (0.0, 0.0)
     };
-    let lay = layout_measured(&tree, W as f32, H as f32, &measure_fn);
+    let lay = layout_measured(&tree, width as f32, height as f32, &measure_fn);
 
-    let pixels = unsafe { core::slice::from_raw_parts_mut(px as *mut u32, (W * H) as usize) };
-    let mut surface = Surface::new(pixels, W as usize, H as usize);
+    let mut surface = Surface::new(frame.pixels_mut(), width as usize, height as usize);
     paint(&tree, &lay, &style_of, font, &mut surface);
 }
 
-// APPEND_MARKER3
-
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
-    // 1) Handshake: compositor pid + our client id (id is a tint hint only).
-    let mut m = [0u8; 8];
-    if libdunit::ipc_recv_blocking(&mut m, 0) < 8 {
-        libdunit::println("gui_stat: FAIL recv handshake");
-        libdunit::exit(1);
-    }
-    let compositor = u32::from_le_bytes([m[0], m[1], m[2], m[3]]);
-
-    // 2) Create + map our own shared buffer and paint the initial frame.
-    let bytes = (W * H * 4) as usize;
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        libdunit::println("gui_stat: FAIL create buffer");
-        libdunit::exit(2);
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println("gui_stat: FAIL map buffer");
-        libdunit::exit(3);
-    }
-    let px = mapped as usize as *mut u8;
-    let font = match load_font() {
-        Ok(f) => f,
-        Err(_) => {
-            libdunit::println("gui_stat: FAIL font parse");
-            libdunit::exit(7);
-        }
-    };
-    let mut stats = libdunit::SystemStats::default();
-    libdunit::get_system_stats(&mut stats);
-    render_stats(px, &font, &stats);
-
-    let mut rx = [0u8; 256];
-
-    // 3) HELLO -> WELCOME.
-    let hello = Request::Hello {
-        min_minor: 0,
-        max_minor: 0,
-        offered_features: FEATURE_ARGB8888,
-        required_features: 0,
-    }
-    .encode(0, 1);
-    libdunit::ipc_send(compositor, &hello);
-    if libdunit::ipc_recv_blocking(&mut rx, 0) <= 0 {
-        libdunit::println("gui_stat: FAIL welcome");
-        libdunit::exit(4);
-    }
-
-    // 4) CREATE_SURFACE -> RESULT + CONFIGURE (capture the configure token).
-    let create =
-        Request::CreateSurface { role: 1, width: W, height: H, format: FMT_XRGB8888 }.encode(SURFACE, 2);
-    libdunit::ipc_send(compositor, &create);
-    libdunit::ipc_recv_blocking(&mut rx, 0); // RESULT
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0); // CONFIGURE
-    let token = if n >= 32 { u64_at(&rx, 24) } else { 0 };
-
-    // 5) ACK_CONFIGURE -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, 3);
-    libdunit::ipc_send(compositor, &ack);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 6) Transfer the buffer capability (read-only) and announce it.
-    let dup = libdunit::handle_dup(
-        buf,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        libdunit::println("gui_stat: FAIL cap transfer");
-        libdunit::exit(5);
-    }
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: BUFFER as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
-    let import =
-        Request::ImportBuffer { width: W, height: H, stride: W * 4, format: FMT_XRGB8888, offset: 0 }
-            .encode(BUFFER, 4);
-    libdunit::ipc_send(compositor, &import);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let attach = Request::AttachBuffer { buffer: BUFFER, damage: alloc::vec::Vec::new() }.encode(SURFACE, 5);
-    libdunit::ipc_send(compositor, &attach);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(SURFACE, 6);
-    libdunit::ipc_send(compositor, &commit);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 8) FRAME_DONE from the compositor's composition tick.
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-    let ok = n >= 32 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8021;
-    if ok {
-        libdunit::println("gui_stat: surface presented OK");
-    } else {
-        libdunit::println("gui_stat: FAIL no frame done");
-        libdunit::handle_close(buf);
-        libdunit::exit(6);
-    }
-
-    // The native SDK event loop blocks on inbox readiness with a refresh timeout.
-    let mut events = match dunit::event::EventLoop::new(&[dunit::event::Interest::ipc(1)]) {
-        Ok(events) => events,
-        Err(_) => { libdunit::println("gui_stat: FAIL event loop"); libdunit::exit(6); }
-    };
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    let font = load_font().map_err(|_| dunit::Error(dunit::errno::EIO))?;
+    let mut window = Window::open(W, H)?;
+    let mut stats = dunit::system::stats()?;
+    window.draw(|frame| render_stats(frame, &font, &stats))?;
+    dunit::println!("gui_stat: surface presented OK")?;
     let mut verified_refresh = false;
     loop {
-        let timed_out = match events.wait(POLL_MS * 1_000_000) {
-            Ok(ready) => ready.is_empty(),
-            Err(_) => {
-                libdunit::println("gui_stat: FAIL wait-set");
-                libdunit::exit(6);
-            }
-        };
         let previous_ticks = stats.uptime_ticks;
-        if libdunit::get_system_stats(&mut stats) != 0 {
-            libdunit::println("gui_stat: FAIL refresh stats");
-            libdunit::exit(6);
-        }
-        if timed_out && stats.uptime_ticks > previous_ticks && !verified_refresh {
-            libdunit::println("gui_stat: SDK wait-set refresh OK");
-            verified_refresh = true;
-        }
-        let n = libdunit::ipc_recv(&mut rx);
-        if gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize])
-            .map(|input| input.kind) == Some(IN_QUIT)
-        {
+        let event = window.next_event(Duration::from_millis(POLL_MS))?;
+        if matches!(event, Some(WindowEvent::CloseRequested)) {
             break;
         }
-        // Repaint the sample obtained after this wake.
-        render_stats(px, &font, &stats);
+        stats = dunit::system::stats()?;
+        if event.is_none() && stats.uptime_ticks > previous_ticks && !verified_refresh {
+            dunit::println!("gui_stat: SDK wait-set refresh OK")?;
+            verified_refresh = true;
+        }
+        if event.is_none() || matches!(event, Some(WindowEvent::Resized { .. })) {
+            window.draw(|frame| render_stats(frame, &font, &stats))?;
+            if matches!(event, Some(WindowEvent::Resized { .. })) {
+                dunit::println!("gui_stat: SDK reconfigured OK")?;
+                if window.size() == (W, H) {
+                    dunit::println!("gui_stat: SDK restored size=460x300")?;
+                }
+            }
+        }
     }
-
-    libdunit::handle_close(buf);
-    libdunit::println("gui_stat: SDK quit OK");
-    libdunit::exit(0)
+    window.close()?;
+    dunit::println!("gui_stat: SDK quit OK")?;
+    Ok(())
 }
-

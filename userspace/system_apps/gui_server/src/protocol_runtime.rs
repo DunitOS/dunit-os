@@ -629,9 +629,9 @@ pub(super) fn spawn_client(
     c.slot_x = slot_x;
     c.slot_y = slot_y;
     c.app = app_idx;
-    let mut hs = [0u8; 8];
-    hs[0..4].copy_from_slice(&libdunit::get_pid().to_le_bytes());
-    hs[4..8].copy_from_slice(&id.to_le_bytes());
+    let hs = gui_protocol_v1::control::Bootstrap {
+        compositor: libdunit::get_pid(), client: id,
+    }.encode();
     libdunit::ipc_send(c.pid, &hs);
     Some(c)
 }

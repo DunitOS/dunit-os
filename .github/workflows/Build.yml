@@ -58,12 +58,14 @@ jobs:
       - name: Native ABI and protocol contracts
         run: |
           python3 tools/gen_abi.py --check
+          rustc --edition=2021 --test kernel/src/drivers/keyboard_queue.rs -o /tmp/dunit-keyboard-queue-test
+          /tmp/dunit-keyboard-queue-test
           cargo test --manifest-path abi/wait-set/Cargo.toml
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
           cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
           DUNIT_ROOT="$PWD" cargo test --manifest-path userspace/dwm_settings/Cargo.toml
           cargo test --manifest-path runtime/dunit-macros/Cargo.toml
-          cargo test --manifest-path runtime/dunit/Cargo.toml
+          cargo test --manifest-path runtime/dunit/Cargo.toml --features gui
 
       - name: Image profile and SDK tooling tests
         run: |
@@ -72,6 +74,9 @@ jobs:
 
       - name: Native SDK workflow and failure contracts
         run: python3 tools/test_dunit_workflow.py --accel tcg
+
+      - name: Native GUI SDK workflow and failure contracts
+        run: python3 tools/test_dunit_gui_workflow.py --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |
@@ -88,6 +93,9 @@ jobs:
 
       - name: Installed desktop application catalog
         run: python3 tools/test_sdk_catalog.py --accel tcg
+
+      - name: SDK resize during frame publication
+        run: python3 tools/test_sdk_window_resize.py --accel tcg
 
       - name: Build DWM and Minimal ISOs
         run: bash build_iso.sh

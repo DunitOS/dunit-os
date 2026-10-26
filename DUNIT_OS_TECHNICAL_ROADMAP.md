@@ -715,9 +715,9 @@ SDK — слой, на котором пишутся прикладные про
 
 #### M7.2. Модель приложения и инструментарий
 
-- [~] `cargo dunit new / build / run / test` (CLI/TUI реализованы; GUI helper и standalone SDK ещё открыты, см. `docs/sdk/cargo-dunit.md`): `build` кросс-собирает в `x86_64-dunit`; `run` собирает, кладёт бинарник в initrd, грузит QEMU через `tools/qemu_test.py` и запускает приложение; `test` гоняет тесты в QEMU и САМ формирует маркеры (разработчик их не пишет).
+- [~] `cargo dunit new / build / run / test` (CLI/TUI/GUI реализованы; standalone SDK ещё открыт, см. `docs/sdk/cargo-dunit.md`): `build` кросс-собирает в `x86_64-dunit`; `run` собирает, кладёт бинарник в initrd, грузит QEMU через `tools/qemu_test.py` и запускает приложение; `test` гоняет тесты в QEMU и САМ формирует маркеры (разработчик их не пишет).
 - [~] Манифест приложения `dunit.toml` v1 принят пользователем 26 октября 2026 (`docs/sdk/app-manifest-proposal.md`); строгая проверка, SDK-упаковка и GUI discovery реализованы (`docs/sdk/desktop-catalog.md`): `id`, имя, иконка, вид (`gui`/`tui`/`cli`), `capabilities`. Launcher/dock/startup читают общий каталог в userspace, без `match app`. CLI/TUI запуск с desktop через терминал и миграция legacy-регистрации ещё открыты.
-- [~] `#[dunit::main]` реализован: loader entry, argv/env init, общий panic handler и exit 0/1/101; применён в `calc` и гостевом SDK API-тесте. `#[dunit::test]` реализован через compiler-collected native harness, возвращает ошибку при пустом наборе, Err и panic.
+- [~] `#[dunit::main]` реализован: loader entry, argv/env init, общий panic handler и exit 0/1/101; применён в `calc`, `gui_stat` и гостевом SDK API-тесте. `#[dunit::test]` реализован через compiler-collected native harness, возвращает ошибку при пустом наборе, Err и panic.
 - [~] Безопасные `fs, process, time, io, env, args` и существующий `system::stats` реализованы поверх `libdunit`, с общим `Error` и generated errno. `File` владеет дескриптором, буферизованный ввод сохраняет строки, Child ждёт через wait-set. `calc` не содержит `unsafe`, `extern "C"`, raw entry или libdunit dependency. Thread/sync wrappers ещё нет; `docs/sdk/native-api.md`.
 - [ ] `dunit::net` — точка расширения без реализации стека (стек = M8).
 
@@ -728,7 +728,7 @@ SDK — слой, на котором пишутся прикладные про
 Два варианта несущего рантайма приложений: **(A)** собственный `no_std + alloc` крейт с нативным Dunit-API (как сегодняшние `runtime/` + `libdunit`); **(B)** полноценный Rust `std` поверх musl-порта (`std` требует бэкенд: процессы/потоки/сеть/время/fs поверх Dunit). Разбор обоих — в разделе «Решения человека»; агент не выбирает сам.
 
 - [x] Зафиксировать выбор (A/B) решением человека ДО написания прикладного API. **Решение 26 октября 2026:** A, `no_std + alloc` поверх `libdunit`; пользователь выбрал этот вариант для M7 SDK.
-- [~] Начат узкий `runtime/dunit` (`no_std + alloc`): owning event loop поверх `libdunit::wait_set`, используется `gui_stat`. Добавлены fs/process/time/io/env/args API и `#[dunit::main]`; `calc` использует их без ручного ABI. Thread/sync, test attributes, cargo tooling и Component ещё не реализованы.
+- [~] Начат узкий `runtime/dunit` (`no_std + alloc`): owning event loop поверх `libdunit::wait_set`, используется `gui_stat`. Добавлены fs/process/time/io/env/args API и `#[dunit::main]`; `calc` использует их без ручного ABI. Добавлены native `#[dunit::test]`, CLI/TUI/GUI cargo tooling и общий window helper. Thread/sync и Component ещё не реализованы.
 
 **Цель:** одна несущая модель для всех приложений. **Зависимости:** M6 (для B — зрелость musl: TLS/threads/fs/time уже есть; не хватает сети и части POSIX). **Результат:** приложения SDK используют единый рантайм. **Критерии приёмки:** эталонное приложение собирается и проходит тесты на выбранном рантайме; документирован профиль (что доступно). **Риски:** `std`-путь тянет широкую POSIX-поверхность (сеть/signals) раньше времени; `no_std`-путь — свой API, который придётся развивать. **DoD:** выбор зафиксирован, второй вариант не висит полуреализованным.
 
@@ -738,7 +738,7 @@ SDK — слой, на котором пишутся прикладные про
 
 - [ ] `Component` с `update(Msg)` и `view() -> View<Msg>`; единственное место изменения состояния — `update` (immediate mode НЕ делаем).
 - [ ] Перерисовка по дереву: diff старого и нового `view`, вычисление изменённых областей и передача их композитору (связать с damage tracking протокола — сейчас в live-цикле damage не используется, M8-prereq).
-- [ ] Общий window/event-loop helper (сегодня каждый клиент сам пишет gui-v1 handshake + CAP1/INP1 — M7.8 это централизует); event loop строится на wait-set (M7.1).
+- [~] Общий `dunit::window` helper поверх gui-v1 и wait-set: configure/resize, кадры, input/close, освобождение буферов; используется `gui_stat` и GUI-шаблоном `cargo dunit`. Конкурирующий CONFIGURE восстанавливается через destroy/recreate поверхности с повторной отрисовкой; остальные старые клиенты ещё требуют миграции; [контракт и проверки](docs/sdk/window.md).
 - [ ] Тестирование без QEMU: подал `Msg` → проверил состояние и дерево `view` (чистые функции).
 - [ ] Сохранение состояния виджетов при пересборке дерева (инфраструктура stable `#name` в `dunit_ui::Tree` уже есть, но не используется).
 

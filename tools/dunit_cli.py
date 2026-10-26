@@ -80,21 +80,23 @@ def create(args):
     identifier = args.id or destination.name.replace('-', '_')
     if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', identifier):
         raise ValueError("new: --id must be a lowercase Rust/Cargo identifier, 1..64 bytes")
-    if args.kind == "gui":
-        raise ValueError("new: GUI template requires the M7 window helper, which is not implemented yet")
     manifest_text = (
         f'schema_version = 1\n\n[application]\nid = {json.dumps(identifier)}\n'
         f'name = {json.dumps(args.name or identifier, ensure_ascii=False)}\nkind = "{args.kind}"\n'
         f'binary = {json.dumps(identifier)}\ncapabilities = []\n')
+    if args.kind == "gui":
+        manifest_text += 'icon = "/assets/icons/monitor.rgba"\n'
     parse_manifest(manifest_text, destination / "dunit.toml", [identifier], ROOT / "abi/rights.abi")
     # mkdir is intentionally exclusive: never overwrite an existing project.
     destination.mkdir(parents=True)
     (destination / "src").mkdir()
     (destination / "Cargo.toml").write_text(
         f'[package]\nname = {json.dumps(identifier)}\nversion = "0.1.0"\nedition = "2021"\n\n'
-        f'[dependencies]\ndunit = {{ path = {json.dumps(str(ROOT / "runtime/dunit"))} }}\n')
+        f'[dependencies]\ndunit = {{ path = {json.dumps(str(ROOT / "runtime/dunit"))}'
+        + (', features = ["gui"]' if args.kind == "gui" else '') + ' }\n'
+        + (f'dwm_settings = {{ path = {json.dumps(str(ROOT / "userspace/dwm_settings"))} }}\n' if args.kind == "gui" else ''))
     (destination / "dunit.toml").write_text(manifest_text, encoding="utf-8")
-    (destination / "src/main.rs").write_text(TEST_ATTRIBUTES + '''
+    source = TEST_ATTRIBUTES + '''
 #[dunit::main]
 fn main() -> dunit::Result<()> {
     dunit::println!("[SDKAPP] ok")?;
@@ -111,13 +113,17 @@ fn native_file_roundtrip() -> dunit::Result<()> {
     assert!(manifest.contains("schema_version = 1"));
     Ok(())
 }
-'''.replace("__APP_ID__", identifier))
+'''.replace("__APP_ID__", identifier)
+    if args.kind == "gui":
+        template = (ROOT / "tools/templates/gui.rs").read_text()
+        source = TEST_ATTRIBUTES + template
+    (destination / "src/main.rs").write_text(source, encoding="utf-8")
     print(f"[dunit] created {destination}")
 
 
 def boot(args, app, artifact, tests):
-    if app.kind == "gui":
-        raise ValueError("GUI run/test requires the SDK window helper; use the existing GUI harness for legacy apps")
+    if app.kind == "gui" and (args.args or getattr(args, "input", []) or getattr(args, "input_ready", None)):
+        raise ValueError("GUI launch currently accepts no guest arguments or terminal input")
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         raise ValueError("--timeout must be finite and positive")
     for argument in args.args:
@@ -150,6 +156,30 @@ def boot(args, app, artifact, tests):
                 steps = ([{"wait_marker": ready}] if ready else [{"delay_ms": 500}])
                 steps += [{"type_text": line} for line in inputs]
                 markers["run"] = {"command_actions": {guest_command: steps}}
+            if app.kind == "gui":
+                # Only this installed app is autostarted; compositor owns launch.
+                config = overlay / "sdk-desktop.toml"
+                config.write_text(
+                    '[meta]\nschema_version = 2\n[dock]\nentries = [' + json.dumps(app.id) + ']\n'
+                    '[launcher]\nentries = [' + json.dumps(app.id) + ']\n'
+                    '[startup]\nentries = [' + json.dumps(app.id) + ']\nself_test = false\n'
+                    '[shortcuts]\ncmd_mod = "super"\nwin_close = true\n')
+                exit_marker = f"[GUI-EXIT] app={app.id} kind=0 code=0"
+                presented = f"[GUI-PRESENT] app={app.id}"
+                markers["required"] = ["[TERM-007] Starting main loop", "gui_server: desktop ready", exit_marker]
+                steps = []
+                if tests:
+                    markers["required"].append("[SDKTEST] OK count=")
+                else:
+                    markers["required"].append(presented)
+                    steps = [{"wait_marker": presented, "timeout": args.timeout},
+                             {"wait_marker": "gui_server: desktop ready", "timeout": args.timeout},
+                             {"delay_ms": 2000},
+                             {"execute": "send-key", "arguments": {"keys": [
+                                 {"type": "qcode", "data": "meta_l"}, {"type": "qcode", "data": "q"}], "hold-time": 80}}]
+                steps.append({"wait_marker": f"[GUI-EXIT] app={app.id} ", "timeout": args.timeout})
+                markers["run"] = {"command_actions": {"exec /app/gui_server": steps}}
+                markers["forbidden"] += ["gui_server: FAIL", "gui_server: PANIC"]
             marker_path = staging / "markers.json"
             marker_path.write_text(json.dumps(markers))
             checked([cargo(), "build", "--release", "--features", "boot-smoke-tests",
@@ -161,13 +191,15 @@ def boot(args, app, artifact, tests):
                        "--boot-timeout", str(args.timeout), "--cmd-timeout", str(args.timeout),
                        "--post-boot-delay", "3", "--settle", "4",
                        "--cmd", guest_command]
+            if app.kind == "gui":
+                command[-2:] = ["--cmd", "exec /app/setup import-desktop /sdk-desktop.toml", "--cmd", "exec /app/gui_server"]
             checked(command, cwd=ROOT)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="cargo dunit", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    new = commands.add_parser("new", help="create a native CLI/TUI application")
+    new = commands.add_parser("new", help="create a native CLI/TUI/GUI application")
     new.add_argument("path", type=Path)
     new.add_argument("--id")
     new.add_argument("--name")
@@ -194,8 +226,6 @@ def main(argv=None):
             create(args)
         else:
             manifest, package, app = project(args.manifest_path)
-            if args.command != "build" and app.kind == "gui":
-                raise ValueError("GUI run/test awaits the SDK window helper")
             artifact = build(manifest, package, app, args.command == "test")
             if args.command != "build":
                 boot(args, app, artifact, args.command == "test")

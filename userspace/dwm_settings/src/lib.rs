@@ -990,22 +990,9 @@ pub fn save(settings: &Settings) -> bool {
 /// Read + parse the system DWM config, overlaying it on the baseline. Never
 /// fails: an absent/unreadable/garbage file yields the pure baseline.
 pub fn load() -> Settings {
-    let mut settings = Settings::defaults();
-    let text = match read_active_config() {
-        Ok(text) => text,
-        Err(libdunit::ENOENT) => return settings,
-        Err(errno) => {
-            libdunit::println(&alloc::format!("dwm_settings: warning could not read complete configuration errno={}", errno));
-            return settings;
-        }
-    };
-    if let Err(error) = validate(&text) {
-        config_warning(&error);
-        return settings;
-    }
-    settings.from_file = true;
-    parse_into(&text, &mut settings);
-    settings
+    // Scalar consumers must validate against the same installed app catalog as
+    // the compositor; otherwise a manifest-only dock rejects the whole theme.
+    load_config().settings
 }
 
 fn config_warning(error: &ConfigError) {

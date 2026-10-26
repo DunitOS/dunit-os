@@ -640,6 +640,88 @@ pub enum Event {
 }
 
 impl Event {
+    /// Decode a server payload using the same strict cursor as requests.
+    /// Framing and negotiated version are validated by the transport caller.
+    pub fn decode(opcode: Opcode, payload: &[u8]) -> Result<Self, WireError> {
+        let mut c = Cursor::new(payload);
+        let event = match opcode {
+            Opcode::Welcome => {
+                let event = Self::Welcome {
+                    request: c.u64()?,
+                    client_id: c.u64()?,
+                    features: c.u64()?,
+                    formats: c.u32()?,
+                };
+                c.reserved_u32()?;
+                event
+            }
+            Opcode::Result => Self::Result { request: c.u64()? },
+            Opcode::Error => Self::Error {
+                request: c.u64()?,
+                code: c.u32()?,
+                fatal: c.u32()?,
+            },
+            Opcode::Configure => Self::Configure {
+                width: c.u32()?,
+                height: c.u32()?,
+                scale: c.u32()?,
+                state: c.u32()?,
+            },
+            Opcode::RequestClose => Self::RequestClose,
+            Opcode::BufferRelease => Self::BufferRelease { commit: c.u64()? },
+            Opcode::FrameDone => {
+                let event = Self::FrameDone {
+                    commit: c.u64()?,
+                    time_ns: c.u64()?,
+                    status: c.u32()?,
+                };
+                c.reserved_u32()?;
+                event
+            }
+            Opcode::PointerEnter => Self::PointerEnter {
+                x: c.i32()?,
+                y: c.i32()?,
+            },
+            Opcode::PointerLeave => Self::PointerLeave,
+            Opcode::PointerMotion => Self::PointerMotion {
+                time_ns: c.u64()?,
+                x: c.i32()?,
+                y: c.i32()?,
+            },
+            Opcode::PointerButton => Self::PointerButton {
+                time_ns: c.u64()?,
+                button: c.u32()?,
+                pressed: c.u32()?,
+            },
+            Opcode::PointerAxis => Self::PointerAxis {
+                time_ns: c.u64()?,
+                dx: c.i32()?,
+                dy: c.i32()?,
+            },
+            Opcode::KeyEnter => {
+                let event = Self::KeyEnter {
+                    modifiers: c.u32()?,
+                };
+                c.reserved_u32()?;
+                event
+            }
+            Opcode::KeyLeave => Self::KeyLeave,
+            Opcode::Key => Self::Key {
+                time_ns: c.u64()?,
+                usage: c.u32()?,
+                pressed: c.u32()?,
+                modifiers: c.u32()?,
+                repeat: c.u32()?,
+            },
+            Opcode::TextInput => Self::TextInput {
+                time_ns: c.u64()?,
+                text: c.take_str()?,
+            },
+            _ => return Err(WireError::new(ErrorCode::BadOpcode, "not an event opcode")),
+        };
+        c.finish()?;
+        Ok(event)
+    }
     /// Opcode this event encodes to.
     pub fn opcode(&self) -> Opcode {
         match self {
