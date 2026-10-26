@@ -1,95 +1,26 @@
 use crate::sync::IrqSafeSpinLock;
 
-const SCANCODE_BUFFER_LEN: usize = 64;
+#[path = "keyboard_queue.rs"]
+mod queue;
+pub use queue::Scancode;
+use queue::ScancodeQueue;
 
-/// Клавиатурный ринг-буфер + флаги модификаторов. Наполняется из обработчика IRQ
-/// (`push_scancode`), читается кооперативным путём (`read_scancode`,
-/// `scancode_to_char`). `IrqSafeSpinLock` запрещает прерывания на время доступа,
-/// поэтому IRQ клавиатуры не может вклиниться в середину чтения/записи буфера.
-///
-/// Кроме Shift теперь отслеживаются Ctrl/Alt/Super (Super = клавиша Windows/GUI,
-/// приходит как расширенный код E0 5B/5C). `ext_pending` хранит признак того, что
-/// предыдущий байт был префиксом 0xE0, чтобы отличить расширенные модификаторы от
-/// базовых. Содержимое ринга (`buffer`) при этом не меняется — E0 и коды
-/// модификаторов кладутся туда как раньше, поэтому `sys_get_char` (cooked ASCII)
-/// остаётся полностью совместимым.
-struct KeyboardState {
-    buffer: [u8; SCANCODE_BUFFER_LEN],
-    read: usize,
-    write: usize,
-    shift_down: bool,
-    ctrl_down: bool,
-    alt_down: bool,
-    super_down: bool,
-    ext_pending: bool,
-}
-
-static KEYBOARD: IrqSafeSpinLock<KeyboardState> = IrqSafeSpinLock::new(KeyboardState {
-    buffer: [0; SCANCODE_BUFFER_LEN],
-    read: 0,
-    write: 0,
-    shift_down: false,
-    ctrl_down: false,
-    alt_down: false,
-    super_down: false,
-    ext_pending: false,
-});
-
+// Both raw/cooked legacy readers and GetKeyEvent consume the same FIFO. IRQ
+// updates and record pops are atomic under the existing interrupt-safe lock.
+static KEYBOARD: IrqSafeSpinLock<ScancodeQueue> = IrqSafeSpinLock::new(ScancodeQueue::new());
 pub fn init() {}
-
 pub fn read_scancode() -> Option<u8> {
-    let mut kb = KEYBOARD.lock();
-    if kb.read != kb.write {
-        let index = kb.read;
-        let scancode = kb.buffer[index];
-        kb.read = (index + 1) % SCANCODE_BUFFER_LEN;
-        Some(scancode)
-    } else {
-        None
-    }
+    KEYBOARD.lock().pop().map(|event| event.raw)
 }
-
+pub fn read_key_event() -> Option<Scancode> {
+    KEYBOARD.lock().pop_event()
+}
 pub fn push_scancode(scancode: u8) {
-    let mut kb = KEYBOARD.lock();
-    // `ext` = «предыдущий байт был префиксом 0xE0». Захватываем и сбрасываем в
-    // начале: признак живёт ровно один следующий скан-код.
-    let ext = kb.ext_pending;
-    kb.ext_pending = false;
-    match scancode {
-        0xE0 => {
-            kb.ext_pending = true;
-        }
-        0x2A | 0x36 => kb.shift_down = true,
-        0xAA | 0xB6 => kb.shift_down = false,
-        // Ctrl: левый 0x1D, правый E0 0x1D (обе make-версии → ctrl on).
-        0x1D => kb.ctrl_down = true,
-        0x9D => kb.ctrl_down = false,
-        // Alt: левый 0x38, правый (AltGr) E0 0x38.
-        0x38 => kb.alt_down = true,
-        0xB8 => kb.alt_down = false,
-        // Super/GUI приходит только расширенным: E0 5B (левый), E0 5C (правый).
-        0x5B | 0x5C if ext => kb.super_down = true,
-        0xDB | 0xDC if ext => kb.super_down = false,
-        _ => {}
-    }
-
-    let next_write = (kb.write + 1) % SCANCODE_BUFFER_LEN;
-    if next_write != kb.read {
-        let index = kb.write;
-        kb.buffer[index] = scancode;
-        kb.write = next_write;
-    }
+    KEYBOARD.lock().push(scancode);
 }
-
-/// Битовая маска модификаторов на момент вызова: bit0 Shift, bit1 Ctrl, bit2 Alt,
-/// bit3 Super. Совпадает с `KEYMOD_*` в libdunit. Читается вместе со скан-кодом в
-/// `sys_get_key_event`, чтобы компоситор видел горячие клавиши (Super и т.д.).
+/// Current physical state, retained for the legacy cooked keymap interface.
 pub fn modifier_mask() -> u8 {
-    let kb = KEYBOARD.lock();
-    (kb.shift_down as u8)
-        | ((kb.ctrl_down as u8) << 1)
-        | ((kb.alt_down as u8) << 2)
-        | ((kb.super_down as u8) << 3)
+    KEYBOARD.lock().modifiers()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +42,10 @@ pub fn scancode_to_special_key(scancode: u8) -> Option<SpecialKey> {
 }
 
 pub fn scancode_to_char(scancode: u8) -> Option<char> {
-    let shifted = KEYBOARD.lock().shift_down;
+    scancode_to_char_with_modifiers(scancode, modifier_mask())
+}
+pub fn scancode_to_char_with_modifiers(scancode: u8, modifiers: u8) -> Option<char> {
+    let shifted = modifiers & 1 != 0;
 
     let ch = match scancode {
         0x02 => {
