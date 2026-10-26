@@ -60,10 +60,12 @@ jobs:
           python3 tools/gen_abi.py --check
           rustc --edition=2021 --test kernel/src/drivers/keyboard_queue.rs -o /tmp/dunit-keyboard-queue-test
           /tmp/dunit-keyboard-queue-test
+          rustc --edition=2021 --test userspace/system_apps/gui_server/src/damage_plan.rs -o /tmp/dunit-damage-plan-test
+          /tmp/dunit-damage-plan-test
           cargo test --manifest-path abi/wait-set/Cargo.toml
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
           cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
-          DUNIT_ROOT="$PWD" cargo test --manifest-path userspace/dwm_settings/Cargo.toml
+          bash tools/test_dwm_config_host.sh
           cargo test --manifest-path runtime/dunit-macros/Cargo.toml
           cargo test --manifest-path runtime/dunit-render/Cargo.toml
           cargo test --manifest-path runtime/dunit-component/Cargo.toml

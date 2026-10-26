@@ -254,14 +254,15 @@ fn widget_clock_style_and_dimensions_are_atomic() {
 }
 
 #[test]
-fn complete_document_validation_resolves_schema_and_rejects_before_io() {
+fn complete_document_validation_resolves_schema_and_rejects_before_write() {
     let root = std::path::Path::new(env!("DUNIT_ROOT"));
     let source = std::fs::read_to_string(root.join("assets/dwm/default.toml")).unwrap();
     let config = dwm_settings::validate_document(&source).unwrap();
     assert!(config.valid);
     assert_eq!(config.settings.meta.schema_version, dwm_settings::SCHEMA_VERSION);
     assert!(!config.shell.panels.is_empty());
-    // Test doubles panic on filesystem I/O, proving invalid saves never write.
+    // The installed catalog is absent. Other filesystem I/O panics, proving
+    // invalid saves never reach a write or read the desktop configuration.
     assert!(dwm_settings::save_document("[panels.a]\nchildren=[\"missing\"]").is_err());
     assert!(dwm_settings::validate_document("[meta]\nschema_version=999").is_err());
     for source in ["", "[meta]\nschema_version=2", "[theme]\npanel=\"#112233\"", "[meta]\nschema_version=999"] {
