@@ -25,6 +25,42 @@ fn import(obj: u64, serial: u64, w: u32, h: u32, fmt: u32) -> Vec<u8> {
 fn cap_of(w: u32, h: u32) -> u64 {
     (w * 4 * h) as u64
 }
+
+#[test]
+fn committed_damage_is_atomic_and_first_map_resize_are_full() {
+    let mut s=Server::new();let c=active_conn(&mut s);let mut serial=2;
+    let token=create_and_ack(&mut s,c,1,&mut serial,32,32);
+    let r=Rect{x:2,y:3,w:4,h:5};
+    s.deliver(c,&import(2,serial,32,32,1),Some(cap_of(32,32)));serial+=1;
+    s.deliver(c,&attach(1,serial,2,vec![r]),None);serial+=1;
+    assert!(s.frame(c,1).is_none());
+    s.deliver(c,&commit(1,serial,token,0),None);serial+=1;
+    let first=s.frame(c,1).unwrap();
+    assert_eq!(first.buffer,2);assert!(first.damage.rects().is_empty());assert!(!first.damage.continuous);
+    s.deliver(c,&Request::ImportBuffer{width:32,height:32,stride:132,format:1,offset:4}.encode(3,serial),Some(5000));serial+=1;
+    assert_eq!(s.frame(c,1),Some(first));
+    s.deliver(c,&attach(1,serial,3,vec![r]),None);serial+=1;
+    assert_eq!(s.frame(c,1),Some(first));
+    let failed=s.deliver(c,&commit(1,serial,token+100,0),None);serial+=1;
+    assert_eq!(opcode(&failed[0]),Opcode::Error);assert_eq!(s.frame(c,1),Some(first));
+    s.deliver(c,&commit(1,serial,token,0),None);serial+=1;
+    let frame=s.frame(c,1).unwrap();assert_eq!(frame.buffer,3);
+    assert_eq!((frame.stride,frame.offset),(132,4));assert_eq!(frame.damage.rects(),&[r]);
+    let conf=s.reconfigure(c,1,16,16,1,1);let new_token=u64at(&conf[0].1,24);
+    s.deliver(c,&Request::AckConfigure{configure:new_token}.encode(1,serial),None);serial+=1;
+    s.deliver(c,&import(4,serial,16,16,1),Some(cap_of(16,16)));serial+=1;
+    s.deliver(c,&attach(1,serial,4,vec![r]),None);serial+=1;
+    s.deliver(c,&commit(1,serial,new_token,0),None);serial+=1;
+    assert!(s.frame(c,1).unwrap().damage.rects().is_empty());
+    s.deliver(c,&attach(1,serial,0,vec![]),None);serial+=1;
+    s.deliver(c,&commit(1,serial,new_token,0),None);serial+=1;
+    assert!(s.frame(c,1).is_none());
+    s.deliver(c,&attach(1,serial,4,vec![r]),None);serial+=1;
+    s.deliver(c,&commit(1,serial,new_token,0),None);serial+=1;
+    assert!(s.frame(c,1).unwrap().damage.rects().is_empty());
+    s.deliver(c,&Request::Disconnect.encode(0,serial),None);
+    assert!(s.frame(c,1).is_none());
+}
 fn attach(obj: u64, serial: u64, buffer: u64, damage: Vec<Rect>) -> Vec<u8> {
     Request::AttachBuffer { buffer, damage }.encode(obj, serial)
 }

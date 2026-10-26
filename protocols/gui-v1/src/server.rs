@@ -87,6 +87,8 @@ enum BufState {
 struct Buffer {
     width: u32,
     height: u32,
+    stride: u32,
+    offset: u64,
     format: u32,
     /// Pinned backing size in bytes, returned to the budget on destroy.
     backing: u64,
@@ -113,6 +115,9 @@ struct Surface {
     pending_attach: bool,
     /// Buffer reserved by the pending ATTACH; 0 encodes an unmap attach.
     pending_buffer: ObjectId,
+    pending_damage: crate::frame::Damage,
+    damage: crate::frame::Damage,
+    committed_scale: u32,
     /// Currently committed buffer (0 = none / unmapped).
     committed_buffer: ObjectId,
     /// COMMIT serial of the committed content (reported on its RELEASE).
@@ -136,6 +141,9 @@ impl Surface {
             acked_token: 0,
             pending_attach: false,
             pending_buffer: 0,
+            pending_damage: crate::frame::Damage::full(),
+            damage: crate::frame::Damage::full(),
+            committed_scale: 0,
             committed_buffer: 0,
             committed_token: 0,
             mapped: false,
@@ -510,7 +518,7 @@ impl Server {
                 if c.backing_bytes + cap_size > MAX_BACKING_BYTES_CONN {
                     return error(obj, ser, ErrorCode::LimitExceeded, false);
                 }
-                c.put_buffer(obj, Buffer { width, height, format, backing: cap_size, state: BufState::Available, commit_token: 0 });
+                c.put_buffer(obj, Buffer { width, height, stride, offset, format, backing: cap_size, state: BufState::Available, commit_token: 0 });
                 c.id_watermark = obj;
                 c.buffers += 1;
                 c.backing_bytes += cap_size;
@@ -579,6 +587,7 @@ impl Server {
                 c.put_buffer(buffer, b);
                 s.pending_attach = true;
                 s.pending_buffer = buffer;
+                s.pending_damage = crate::frame::Damage::from_validated(&damage);
                 c.put_surface(obj, s);
                 ok
             }
@@ -658,6 +667,11 @@ impl Server {
                 let old = s.committed_buffer;
                 let old_token = s.committed_token;
                 let pending_buffer = s.pending_buffer;
+                s.damage = s.pending_damage;
+                let same_geometry = c.buffer_of(old).map_or(false, |old|
+                    old.width == b.width && old.height == b.height && s.committed_scale == s.scale);
+                if !s.mapped || !same_geometry { s.damage.force_full(); }
+                s.committed_scale = s.scale;
                 let mut nb = b;
                 nb.state = BufState::Busy;
                 nb.commit_token = ser;
@@ -924,6 +938,18 @@ impl Server {
         }
         self.seat.drop_conn(conn);
         out
+    }
+
+    /// The accepted committed image, never an announcement, import or pending
+    /// attach. Native bindings use this snapshot before selecting a mapping.
+    pub fn frame(&self, conn: ConnId, surface: ObjectId) -> Option<crate::frame::Frame> {
+        let c = self.conns.get(&conn)?;
+        if c.phase != Phase::Active { return None; }
+        let s = c.surface_of(surface).ok()?;
+        if !s.mapped { return None; }
+        let b = c.buffer_of(s.committed_buffer).ok()?;
+        Some(crate::frame::Frame { buffer:s.committed_buffer, commit:s.committed_token,
+            width:b.width,height:b.height,stride:b.stride,offset:b.offset,format:b.format,damage:s.damage })
     }
 
     /// A composition tick: complete every pending frame callback (spec §6).
