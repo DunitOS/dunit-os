@@ -14,11 +14,14 @@ struct Counter {
 #[derive(Clone)]
 enum Msg {
     Increment,
+    Unchanged,
 }
 impl Component for Counter {
     type Message = Msg;
-    fn update(&mut self, _: Msg) {
-        self.count += 1;
+    fn update(&mut self, message: Msg) {
+        if matches!(message, Msg::Increment) {
+            self.count += 1;
+        }
     }
     fn view(&self) -> View<Msg> {
         let line = |id: &str, text: alloc::string::String| {
@@ -73,11 +76,20 @@ fn main() -> dunit::Result<()> {
                     (0, 32, 480, 32)
                 );
                 assert_eq!(ui.last_render().damaged_pixels, 480 * 32);
+                assert_eq!(ui.last_uploaded_pixels(), 480 * 240);
+                ui.update(Msg::Unchanged)?;
+                assert_eq!(ui.last_render().damaged_pixels, 0);
+                assert_eq!(ui.last_uploaded_pixels(), 0);
+                dunit::println!("[SDKUI] unchanged frame skipped OK")?;
+                ui.update(Msg::Increment)?;
+                assert_eq!(ui.component().count, 2);
+                assert_eq!(ui.last_uploaded_pixels(), 480 * 32);
+                dunit::println!("[SDKUI] reused buffer upload OK")?;
                 changed = true;
                 dunit::println!("[SDKUI] partial repaint OK")?;
             }
             Some(WindowEvent::Resized { .. }) => {
-                assert_eq!(ui.component().count, 1);
+                assert_eq!(ui.component().count, 2);
                 if ui.size() != initial {
                     maximized = true;
                     dunit::println!("[SDKUI] resized OK")?;

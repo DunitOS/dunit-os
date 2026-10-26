@@ -2,6 +2,7 @@
 """Build native SDK GUI fixtures and run them through qemu_test.py."""
 import argparse
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -51,6 +52,18 @@ def main(fixture=None):
                 '-Z', 'json-target-spec'], cwd=ROOT / 'kernel', check=True)
             command += ['--build', '--initrd-overlay', str(overlay)]
         status = subprocess.run(command, cwd=ROOT).returncode
+        if not status and fixture == 'component':
+            serial = (ROOT / 'build/qemu-serial.full.log').read_text(errors='replace')
+            frames = re.findall(
+                r'\[DAMAGE\] partial composed=(\d+) presented=(\d+) texture=(\d+) screen=(\d+)',
+                serial)
+            dirty_pixels = 480 * 32
+            if len(frames) != 2 or any(
+                tuple(map(int, frame[:3])) != (dirty_pixels,) * 3
+                or int(frame[3]) <= dirty_pixels for frame in frames
+            ):
+                print(f'Unexpected component presentation counts: {frames}')
+                status=1
         if status:
             print((ROOT / 'build/qemu-serial.log').read_text(errors='replace')[-16000:])
         return status

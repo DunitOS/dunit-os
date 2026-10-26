@@ -442,5 +442,9 @@ even a malformed notification so its bytes cannot fall through as DGUI fields.
 
 Golden-byte tests in `tests/control.rs` verify compatibility, negative
 coordinates, malformed lengths, UTF-8 boundaries and payload-family separation.
-This is the first M7.8 foundation; live damage tracking, a shared SDK event loop,
-and broader application migration are separate work.
+The native binding now selects pixels from `Server::frame`, an accepted committed
+snapshot containing geometry, stride, offset and damage. Pending imports and
+attachments cannot replace the displayed image. The SDK window/event adapter
+and conservative partial composition are described in
+[window.md](../../docs/sdk/window.md) and [components.md](../../docs/sdk/components.md).
+Broader application migration remains separate work; no wire bytes changed.

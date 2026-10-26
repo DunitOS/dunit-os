@@ -78,11 +78,28 @@ event. `component`, `view`, `size` and `last_render` provide read-only access.
 Close the window on `WindowEvent::CloseRequested`. The existing wait-set and
 single-session restrictions still apply; see [window.md](window.md).
 
-Presentation copies the complete private CPU canvas into a **fresh** shared
-buffer. Published shared buffers are never mutated. The live compositor still
-receives a complete frame and empty wire damage; partial composition, partial
-buffer copies and the protocol damage path remain open. This CPU renderer does
-not complete M7.4's compositor-damage requirement.
+Damage now reaches the native compositor through the existing gui-v1 ATTACH
+rectangles. Presentation keeps two shared backings at most. A backing becomes
+writable again only after BUFFER_RELEASE and completed DESTROY_BUFFER. Before
+reuse, the adapter repairs the union of the previous published damage and the
+current damage from its private canvas. Fresh backings and new geometry need a
+full copy. Every published backing therefore contains a complete valid image;
+damage is not permission to leave the rest uninitialized. Unchanged views skip
+copying, import and commit entirely.
+
+The compositor snapshots only accepted committed images, honors stride/offset,
+and copies only declared damage into its CPU texture. Imports and pending
+attachments cannot change the visible image. A stable scene with opaque,
+unscaled, unobscured content patches updates only the affected desktop pixels
+and framebuffer rectangle. Changes to geometry, stacking, theme, overlays or
+animations use the full painter, as do transparent, scaled or occluded patches.
+Legacy clients with empty damage retain conservative continuous full updates
+until they migrate; this preserves their existing in-place writing behaviour.
+
+The counters describe different work: `last_render().damaged_pixels` measures
+CPU invalidation; `last_uploaded_pixels()` includes shared-buffer repair;
+`[DAMAGE]` reports actual texture copies, desktop composition and presentation.
+These counts can differ, especially for a fresh backing or full-scene fallback.
 
 `Window::try_draw` permits a fallible painting callback. Failure happens before
 capability transfer/import/publication and poisons the session. Concurrent
@@ -110,18 +127,26 @@ python3 tools/test_sdk_catalog.py --accel tcg
 
 The native fixture opens a real component window, receives Space from QMP,
 checks the changed model/view and a 480×32 dirty row inside a 480×240 frame,
-maximizes and restores while retaining state, then closes with child exit 0.
+skips an unchanged update, then reuses a retired backing with a 480×32 upload.
+It requires exactly two partial presentations, each copying, composing and
+presenting 15,360 pixels on a larger screen. It maximizes and restores while
+retaining state, then closes with child exit 0.
 Its `[SDKUI] ok` marker is required alongside all intermediate assertions.
 The existing System Monitor refresh/close and catalog resize tests retain their
 previous requirements and additionally require typed-component presentation.
 All guest launches use `qemu_test.py`; the fixture builder is shared with the
 existing resize-during-paint test.
 
-Verified on 26 October 2026: 70 host tests passed across components, rendering,
-styles, widget measurement/events, the native SDK and Python tooling/image
-profiles. ABI generation remained in sync at 89 syscalls, 25 errno and 7 rights.
-The native component fixture passed in KVM and TCG; System Monitor passed the
-same refresh/close contract before and after migration, and catalog discovery
-plus maximize/restore passed in TCG. The existing resize-during-paint TCG and
-full desktop KVM smoke also passed. Every positive guest contract completed
-with its marker budget satisfied. Compiler warnings remained 13/99.
+Damage validation on 26 October 2026: 75 gui-v1 tests, 13 native SDK tests,
+9 component tests, 99 desktop host checks (including 4 damage planner tests),
+and 16 Python tooling/image-profile tests passed. ABI generation remained in
+sync at 89 syscalls, 25 errno and 7 rights. The native component fixture passed
+in KVM and TCG. The TCG GUI workflow passed 201 frames with bounded memory and
+buffer objects, plus expected guest failure exits 1/1/101. Catalog discovery,
+System Monitor refresh/maximize/restore and resize during painting passed in
+TCG. The counters distinguish the first full backing upload from subsequent
+15,360-pixel repairs; an unchanged update produces no extra presentation.
+The KVM desktop smoke satisfied all 30 required markers, with no forbidden
+markers, including the first-frame ordering regression for legacy clients.
+The existing Lua/Genie engine contract also passed all 20 required markers.
+Compiler warnings stayed at 13 within the existing budget of 99.

@@ -1,7 +1,7 @@
 //! Native window adapter for the pure retained component runtime.
 use crate::{
     time::Duration,
-    window::{Window, WindowEvent, IN_KEY},
+    window::{DamageRect, Window, WindowEvent, IN_KEY},
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
@@ -21,13 +21,14 @@ fn native(error: UiError) -> Error {
 
 /// One root component in the existing single-window IPC session. Shortcuts are
 /// dispatched through `update`; resize redraws at the compositor's geometry.
-/// CPU invalidation is retained locally. Presentation still copies a complete
-/// frame into fresh shared storage, since live compositor damage is unfinished.
+/// CPU invalidation drives buffer repair and existing gui-v1 damage metadata.
+/// Unchanged views skip publication; the compositor retains unchanged pixels.
 pub struct ComponentWindow<C: Component> {
     application: Application<C>,
     renderer: Renderer,
     window: Window,
     last_render: RenderStats,
+    uploaded_pixels: u64,
     failed: bool,
 }
 impl<C: Component> ComponentWindow<C> {
@@ -38,6 +39,7 @@ impl<C: Component> ComponentWindow<C> {
             renderer,
             window: Window::open(width, height)?,
             last_render: RenderStats::default(),
+            uploaded_pixels: 0,
             failed: false,
         };
         ui.redraw()?;
@@ -51,6 +53,11 @@ impl<C: Component> ComponentWindow<C> {
     }
     pub fn size(&self) -> (u32, u32) {
         self.window.size()
+    }
+    /// Pixels copied into shared storage by the last painting attempt, including
+    /// repair of a retired buffer's previous contents. Zero for unchanged views.
+    pub fn last_uploaded_pixels(&self) -> u64 {
+        self.uploaded_pixels
     }
     pub fn last_render(&self) -> RenderStats {
         self.last_render
@@ -70,11 +77,27 @@ impl<C: Component> ComponentWindow<C> {
         let renderer = &mut self.renderer;
         let view = self.application.view();
         let last = &mut self.last_render;
-        let result = self.window.try_draw(|frame| {
+        let uploaded = &mut self.uploaded_pixels;
+        let result = self.window.try_draw_damage(|frame| {
             let (w, h) = frame.size();
             *last = renderer.render(view, w, h).map_err(native)?;
-            frame.pixels_mut().copy_from_slice(renderer.pixels());
-            Ok(())
+            if last.damage.is_none() && !frame.requires_full_frame() {
+                *uploaded = 0;
+                return Ok(None);
+            }
+            let damage = if frame.requires_full_frame() {
+                DamageRect { x: 0, y: 0, w, h }
+            } else {
+                let d = last.damage.unwrap();
+                DamageRect {
+                    x: d.x as i32,
+                    y: d.y as i32,
+                    w: d.width,
+                    h: d.height,
+                }
+            };
+            *uploaded = frame.copy_pixels(renderer.pixels(), Some(damage))?;
+            Ok(Some(damage))
         });
         self.failed |= result.is_err();
         result

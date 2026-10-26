@@ -17,6 +17,10 @@
           "timeout": 60
         },
         {
+          "wait_marker": "[DAMAGE] scene reusable",
+          "timeout": 60
+        },
+        {
           "execute": "send-key",
           "arguments": {
             "keys": [
@@ -30,6 +34,10 @@
         },
         {
           "wait_marker": "[SDKUI] partial repaint OK",
+          "timeout": 30
+        },
+        {
+          "wait_marker": "[DAMAGE] partial frame OK",
           "timeout": 30
         },
         {
@@ -229,7 +237,11 @@
     "[SDKUI] resized OK",
     "[SDKUI] restored OK",
     "[SDKUI] ok",
-    "[GUI-EXIT] app=sdk_component_fixture kind=0 code=0"
+    "[GUI-EXIT] app=sdk_component_fixture kind=0 code=0",
+    "[DAMAGE] partial frame OK",
+    "[DAMAGE] partial composed=15360 presented=15360 texture=15360",
+    "[SDKUI] unchanged frame skipped OK",
+    "[SDKUI] reused buffer upload OK"
   ],
   "forbidden": [
     "[PANIC]",

@@ -1,6 +1,7 @@
 //! One top-level window per process, over the existing compositor bootstrap.
 //! This session owns the process IPC inbox. Do not receive IPC independently.
-//! Drawing uses a fresh buffer: published pixels are never mutated again.
+//! Published pixels stay immutable until RELEASE and completed object teardown.
+//! A bounded two-buffer pool repairs retired storage before publishing it again.
 use crate::{
     error::checked,
     event::{EventLoop, Interest},
@@ -16,7 +17,7 @@ use core::{
 pub use gui_protocol_v1::control::{
     Input, IN_DOWN, IN_KEY, IN_LEAVE, IN_MOVE, IN_QUIT, IN_SCROLL, IN_UP,
 };
-pub use gui_protocol_v1::wire::Event as ProtocolEvent;
+pub use gui_protocol_v1::wire::{Event as ProtocolEvent, Rect as DamageRect};
 use gui_protocol_v1::{
     control::{Bootstrap, Capability},
     wire::*,
@@ -41,12 +42,66 @@ pub struct Frame<'a> {
     pixels: &'a mut [u32],
     width: u32,
     height: u32,
+    full_damage: bool,
+    repair: Option<DamageRect>,
+    modified: bool,
 }
 impl Frame<'_> {
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
+    /// A new surface or geometry has no reusable compositor baseline.
+    pub fn requires_full_frame(&self) -> bool {
+        self.full_damage
+    }
+    /// Copy only the repair region into a released, unpublished buffer. A
+    /// fresh backing or lost baseline requires the whole image. The previous
+    /// frame's damage repairs a two-buffer pool's one-frame-old contents.
+    pub fn copy_pixels(&mut self, source: &[u32], dirty: Option<DamageRect>) -> Result<u64> {
+        if source.len() != self.pixels.len() {
+            return Err(Error(libdunit::EINVAL));
+        }
+        let full = DamageRect {
+            x: 0,
+            y: 0,
+            w: self.width,
+            h: self.height,
+        };
+        if dirty.is_none() && !self.full_damage {
+            return Ok(0);
+        }
+        let dirty = dirty.unwrap_or(full);
+        if !valid_damage(dirty, self.width, self.height) {
+            return Err(Error(libdunit::EINVAL));
+        }
+        let region = if self.full_damage || self.repair.is_none() {
+            full
+        } else {
+            let old = self.repair.unwrap();
+            if !valid_damage(old, self.width, self.height) {
+                return Err(Error(libdunit::EINVAL));
+            }
+            let x = old.x.min(dirty.x);
+            let y = old.y.min(dirty.y);
+            DamageRect {
+                x,
+                y,
+                w: ((old.x as u64 + old.w as u64).max(dirty.x as u64 + dirty.w as u64) - x as u64)
+                    as u32,
+                h: ((old.y as u64 + old.h as u64).max(dirty.y as u64 + dirty.h as u64) - y as u64)
+                    as u32,
+            }
+        };
+        self.modified = true;
+        for y in region.y as usize..region.y as usize + region.h as usize {
+            let row = y * self.width as usize + region.x as usize;
+            self.pixels[row..row + region.w as usize]
+                .copy_from_slice(&source[row..row + region.w as usize]);
+        }
+        Ok(region.w as u64 * region.h as u64)
+    }
     pub fn pixels_mut(&mut self) -> &mut [u32] {
+        self.modified = true;
         self.pixels
     }
 }
@@ -55,6 +110,8 @@ struct Buffer {
     address: usize,
     bytes: usize,
     object: u64,
+    size: (u32, u32),
+    valid: bool,
 }
 impl Buffer {
     fn new(width: u32, height: u32, object: u64) -> Result<Self> {
@@ -65,6 +122,8 @@ impl Buffer {
             address: 0,
             bytes,
             object,
+            size: (width, height),
+            valid: false,
         };
         buffer.address = checked(libdunit::handle_map(handle, 0, bytes))?;
         if buffer.address == 0 {
@@ -87,6 +146,14 @@ fn buffer_bytes(width: u32, height: u32) -> Result<usize> {
         .and_then(|n| n.checked_mul(4))
         .ok_or(Error(libdunit::EINVAL))
 }
+fn valid_damage(r: DamageRect, w: u32, h: u32) -> bool {
+    r.x >= 0
+        && r.y >= 0
+        && r.w > 0
+        && r.h > 0
+        && r.x as u64 + r.w as u64 <= w as u64
+        && r.y as u64 + r.h as u64 <= h as u64
+}
 /// A single IPC session. `open` is supported once per process, including after
 /// close/failure: existing gui-v1 bootstrap has no reconnect/session identifier.
 /// This type is deliberately neither Send nor Sync (one inbox and serial stream).
@@ -103,6 +170,8 @@ pub struct Window {
     height: u32,
     next_object: u64,
     current: Option<Buffer>,
+    reusable: Option<Buffer>,
+    last_damage: Option<DamageRect>,
     pending: VecDeque<(Header, Event)>,
     inputs: VecDeque<Input>,
     released: Vec<u64>,
@@ -132,6 +201,8 @@ impl Window {
             height,
             next_object: 2,
             current: None,
+            reusable: None,
+            last_damage: None,
             pending: VecDeque::new(),
             inputs: VecDeque::new(),
             released: Vec::new(),
@@ -362,6 +433,8 @@ impl Window {
             self.live_buffers.pop();
         }
         self.current = None;
+        self.reusable = None;
+        self.last_damage = None;
         self.released.clear();
         let Event::Configure {
             width,
@@ -426,11 +499,28 @@ impl Window {
     /// keep application state updates outside it. Recovery is bounded.
     /// An unrecoverable failure poisons the session; close/drop releases resources.
     pub fn draw(&mut self, mut paint: impl FnMut(&mut Frame<'_>)) -> Result<()> {
-        self.try_draw(|frame| { paint(frame); Ok(()) })
+        self.try_draw(|frame| {
+            paint(frame);
+            Ok(())
+        })
     }
     /// Fallible painting, with the same retry semantics as `draw`. An error prevents transfer/import/publication of the
     /// private buffer and poisons the session like other drawing failures.
     pub fn try_draw(&mut self, mut paint: impl FnMut(&mut Frame<'_>) -> Result<()>) -> Result<()> {
+        self.try_draw_damage(|frame| {
+            paint(frame)?;
+            let (w, h) = frame.size();
+            Ok(Some(DamageRect { x: 0, y: 0, w, h }))
+        })
+    }
+    /// Publish a complete valid image with a bounded damage hint. `None` skips
+    /// an unchanged frame unless a new surface requires a full baseline.
+    /// Published storage stays immutable until retired; drawing may retry after
+    /// CONFIGURE. Use `Frame::copy_pixels` to repair a reused buffer safely.
+    pub fn try_draw_damage(
+        &mut self,
+        mut paint: impl FnMut(&mut Frame<'_>) -> Result<Option<DamageRect>>,
+    ) -> Result<()> {
         let start = Instant::now()?;
         let mut result = Err(Error(libdunit::EAGAIN));
         for _ in 0..MAX_RETRIES {
@@ -449,7 +539,10 @@ impl Window {
         self.failed = true;
         result.and(Err(Error(libdunit::EAGAIN)))
     }
-    fn draw_inner(&mut self, paint: &mut impl FnMut(&mut Frame<'_>) -> Result<()>) -> Result<()> {
+    fn draw_inner(
+        &mut self,
+        paint: &mut impl FnMut(&mut Frame<'_>) -> Result<Option<DamageRect>>,
+    ) -> Result<()> {
         if self.failed {
             return Err(Error(libdunit::EPIPE));
         }
@@ -458,16 +551,54 @@ impl Window {
             .checked_add(1)
             .filter(|n| *n <= u32::MAX as u64)
             .ok_or(Error(libdunit::EINVAL))?;
-        let buffer = Buffer::new(self.width, self.height, object)?;
-        // Owned, aligned kernel mapping; no aliases have been transferred yet.
+        let mut buffer = match self
+            .reusable
+            .take()
+            .filter(|b| b.size == (self.width, self.height))
+        {
+            Some(mut b) => {
+                b.object = object;
+                b
+            }
+            None => Buffer::new(self.width, self.height, object)?,
+        };
+        let repair = if buffer.valid { self.last_damage } else { None };
+        // Owned, aligned mapping; fresh or retired after the last-reader barrier.
         let pixels = unsafe {
             core::slice::from_raw_parts_mut(buffer.address as *mut u32, buffer.bytes / 4)
         };
-        paint(&mut Frame {
+        let full_damage = self
+            .current
+            .as_ref()
+            .map_or(true, |b| b.size != (self.width, self.height));
+        let mut frame = Frame {
             pixels,
             width: self.width,
             height: self.height,
-        })?;
+            full_damage,
+            repair,
+            modified: false,
+        };
+        let damage = paint(&mut frame)?;
+        let modified = frame.modified;
+        if damage.is_none() && !full_damage {
+            buffer.valid &= !modified;
+            self.reusable = Some(buffer);
+            return Ok(());
+        }
+        let damage = if full_damage {
+            DamageRect {
+                x: 0,
+                y: 0,
+                w: self.width,
+                h: self.height,
+            }
+        } else {
+            damage.unwrap()
+        };
+        if !valid_damage(damage, self.width, self.height) {
+            return Err(Error(libdunit::EINVAL));
+        }
         let duplicate = checked(libdunit::handle_dup(
             buffer.handle,
             libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
@@ -500,7 +631,7 @@ impl Window {
             self.surface,
             Request::AttachBuffer {
                 buffer: object,
-                damage: Vec::new(),
+                damage: alloc::vec![damage],
             },
         )?;
         let commit = self.send(
@@ -526,8 +657,13 @@ impl Window {
             }
             self.request(old.object, Request::DestroyBuffer)?;
             self.live_buffers.retain(|id| *id != old.object);
+            // RELEASE + DESTROY_RESULT is the last-reader barrier. This mapping
+            // becomes writable only on the next unpublished drawing callback.
+            self.reusable = Some(old);
         }
         self.released.clear();
+        buffer.valid = true;
+        self.last_damage = Some(damage);
         self.current = Some(buffer);
         Ok(())
     }
@@ -606,6 +742,80 @@ impl Drop for Window {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn released_buffer_repairs_previous_and_current_damage() {
+        let mut pixels = alloc::vec![0;16];
+        let mut source = pixels.clone();
+        source[..2].fill(1);
+        source[8..10].fill(2);
+        let mut frame = Frame {
+            pixels: &mut pixels,
+            width: 4,
+            height: 4,
+            full_damage: false,
+            repair: Some(DamageRect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 1,
+            }),
+            modified: false,
+        };
+        assert_eq!(
+            frame
+                .copy_pixels(
+                    &source,
+                    Some(DamageRect {
+                        x: 0,
+                        y: 2,
+                        w: 2,
+                        h: 1
+                    })
+                )
+                .unwrap(),
+            6
+        );
+        assert_eq!(pixels, source);
+    }
+    #[test]
+    fn fresh_or_resized_buffers_copy_full_and_empty_updates_copy_nothing() {
+        let source = alloc::vec![7;16];
+        let mut pixels = alloc::vec![0;16];
+        let mut frame = Frame {
+            pixels: &mut pixels,
+            width: 4,
+            height: 4,
+            full_damage: false,
+            repair: None,
+            modified: false,
+        };
+        assert_eq!(frame.copy_pixels(&source, None).unwrap(), 0);
+        assert!(!frame.modified);
+        assert_eq!(
+            frame
+                .copy_pixels(
+                    &source,
+                    Some(DamageRect {
+                        x: 1,
+                        y: 1,
+                        w: 1,
+                        h: 1
+                    })
+                )
+                .unwrap(),
+            16
+        );
+        frame.full_damage = true;
+        frame.repair = Some(DamageRect {
+            x: 1,
+            y: 1,
+            w: 1,
+            h: 1,
+        });
+        assert_eq!(frame.copy_pixels(&source, None).unwrap(), 16);
+        assert!(frame.copy_pixels(&source[..8], None).is_err());
+        assert_eq!(pixels, source);
+    }
     #[test]
     fn invalid_geometry_fails_before_consuming_the_session() {
         for (width, height) in [(0, 1), (1, 0), (DIM_MAX + 1, 1), (1, DIM_MAX + 1)] {

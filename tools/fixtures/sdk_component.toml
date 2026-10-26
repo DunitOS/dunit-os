@@ -7,3 +7,13 @@ self_test = false
 cmd_mod = "super"
 win_max = true
 win_close = true
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"

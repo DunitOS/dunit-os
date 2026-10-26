@@ -178,7 +178,9 @@ tests CLI/TUI/GUI apps on the Dunit kernel.
 The [window API](docs/sdk/window.md) handles drawing, resizing, input and cleanup;
 `cargo dunit new demo --kind gui` creates a working GUI starter.
 System Monitor uses [typed components](docs/sdk/components.md), with state
-updates and a retained tree that repaints changed regions locally.
+updates and a retained tree that repaints changed regions. Damage reaches the
+desktop too: stable opaque windows can update just the affected screen area;
+scene changes and effects use a full redraw.
 Widgets and CLI/TUI desktop launching are still being built.
 See the [SDK progress and contract](docs/sdk/m7-start.md).
 

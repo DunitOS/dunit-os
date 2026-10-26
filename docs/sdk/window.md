@@ -41,13 +41,28 @@ input as `Protocol` (match the exported `ProtocolEvent` enum), resize as
 `CloseRequested`. The strict server-event decoder lives in `gui-v1`, beside its
 encoder; application code never reads wire offsets.
 
-`draw` allocates an unpublished buffer and lends its pixels to the callback.
+`draw` obtains an unpublished buffer and lends its pixels to the callback.
 The writable borrow ends before a read-only capability is transferred. A
 successful return requires the matching PRESENTED frame callback, not just a
 successful IPC send. The previous object is destroyed after BUFFER_RELEASE;
-its local mapping and capability are released together. Published buffers are
-never exposed as writable slices. `close` completes DISCONNECT; Drop attempts a
-nonblocking disconnect and releases local storage, including on errors.
+only then can its local mapping enter the bounded two-backing reuse pool.
+Published buffers are never exposed as writable slices. `close` completes
+DISCONNECT; Drop attempts a nonblocking disconnect and releases both local
+backings, including on errors.
+
+`try_draw_damage` accepts a fallible callback returning `Some(DamageRect)` for
+changed pixels or `None` for an unchanged frame. The latter skips publication
+unless a new surface needs its first full image. Rectangles must be nonempty
+and inside the configured size. The whole backing must still be valid: use
+`Frame::copy_pixels` with a complete private canvas to repair both the previous
+frame's damage and the new region in a retired backing. Fresh storage requires
+a full copy. `Frame::requires_full_frame` also forces full damage after surface
+recovery or geometry changes. `draw` and `try_draw` publish explicit full damage.
+The wire format and existing empty-damage semantics are unchanged.
+The compositor completes first-frame notification before sending queued input
+or a policy resize (session restore, window rule or desktop self-test). This keeps
+legacy clients alive while callbacks now follow actual desktop composition.
+Callback-free commits also release queued policy after composition.
 
 This first helper supports **one window/session per process** and owns the
 process IPC inbox. It must not be mixed with independent IPC receivers; it is
@@ -74,8 +89,9 @@ outside it. Frame attempts and surface rebuilds are bounded separately (eight
 attempts each, with monotonic retry budgets);
 persistent failure is returned, never reported as a presented frame. There is
 no wire-format or syscall ABI change. Scale 1 and XRGB8888
-are supported initially. Transparency, multiwindow sessions, reconnect, damage,
-Component diffing and widgets remain separate work.
+are supported initially. Damage and [typed component diffing](components.md)
+are implemented. Transparency, multiwindow sessions, reconnect and interactive
+widgets remain separate work.
 
 System Monitor now uses the [typed component adapter](components.md) over this
 API, including live maximize/restore, timed
@@ -110,11 +126,12 @@ its Super/Ctrl/Alt/Shift flags even if the keys are released before the desktop
 reads it. Host queue tests cover delayed reads, split extended scancodes,
 overflow and ring wrap; the forced-resize test exercises real guest shortcuts.
 
-Verified on 26 October 2026: 131 host tests passed (72 gui-v1, 11 runtime,
-28 desktop configuration, 16 Python tooling/image profiles and 4 keyboard
-queue tests). ABI generation stayed in sync. The complete GUI workflow passed
-under TCG, including expected rejection of empty/error/panic suites with guest
-exit codes 1/1/101. Forced resize, persisted placement restoration and clean
-exit passed under both TCG and KVM. The native API/PTY calculator, monitor
-refresh/close and full desktop resize/reload smoke also passed under KVM on the
-updated kernel. The compiler warning count remained 13 within the budget of 99.
+Damage validation on 26 October 2026: 75 gui-v1 and 13 runtime tests passed,
+alongside component, desktop and tooling checks; ABI generation stayed in sync.
+The native component fixture passed on KVM and TCG, checking partial damage,
+retired-buffer reuse and skipped unchanged updates. The complete GUI workflow
+passed under TCG, including 201 frames with bounded memory/object lifetime and
+expected rejection of empty/error/panic suites with guest exits 1/1/101. Forced
+resize during painting, persisted placement restoration, monitor refresh and
+clean close also passed in TCG. See [components.md](components.md) for the
+composition fallback profile and separate work counters.

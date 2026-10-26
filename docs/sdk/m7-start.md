@@ -180,6 +180,7 @@ Cargo artifact selection, image overlays and guest test discovery through
 `#[dunit::test]`. No new syscall or archive format is needed.
 [GUI launcher/dock manifest discovery](desktop-catalog.md) is implemented.
 The [native window helper and GUI template](window.md) are implemented.
-[Typed root components and CPU invalidation](components.md) are implemented and
-used by System Monitor. Compositor damage, widget behaviour/state, other
+[Typed root components and end-to-end damage](components.md) are implemented and
+used by System Monitor. Partial upload/composition/presentation uses conservative
+full-frame fallbacks for scene changes and effects. Widget behaviour/state, other
 legacy-client migrations and CLI/TUI desktop launching remain open.
