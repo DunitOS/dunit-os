@@ -146,12 +146,16 @@ impl Drop for File {
 }
 impl Read for File {
     fn read(&mut self, output: &mut [u8]) -> Result<usize> {
-        checked(libdunit::read(self.fd.unwrap(), output))
+        let count = output.len().min(crate::io::TRANSFER_CHUNK);
+        checked(libdunit::read(self.fd.unwrap(), &mut output[..count]))
     }
 }
 impl Write for File {
     fn write(&mut self, bytes: &[u8]) -> Result<usize> {
-        checked(libdunit::write(self.fd.unwrap(), bytes))
+        checked(libdunit::write(
+            self.fd.unwrap(),
+            &bytes[..bytes.len().min(crate::io::TRANSFER_CHUNK)],
+        ))
     }
 }
 pub fn read(path: &str) -> Result<Vec<u8>> {

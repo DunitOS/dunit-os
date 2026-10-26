@@ -2,6 +2,9 @@
 use crate::{error::checked, Error, Result};
 use alloc::{string::String, vec::Vec};
 use core::fmt;
+// Deliberately bounded transfers, below the native per-call user-copy limit.
+// Larger logical reads/writes are completed by Read/Write's existing loops.
+pub(crate) const TRANSFER_CHUNK: usize = 4096;
 
 pub trait Read {
     fn read(&mut self, output: &mut [u8]) -> Result<usize>;
@@ -18,7 +21,7 @@ pub trait Read {
     }
     fn read_to_end(&mut self, output: &mut Vec<u8>) -> Result<usize> {
         let start = output.len();
-        let mut chunk = [0; 4096];
+        let mut chunk = [0; TRANSFER_CHUNK];
         loop {
             let count = self.read(&mut chunk)?;
             if count > chunk.len() {
@@ -154,7 +157,8 @@ fn wait_ready(fd: u32, requested: u32) -> Result<()> {
 impl Read for Stdin {
     fn read(&mut self, output: &mut [u8]) -> Result<usize> {
         loop {
-            let result = libdunit::read(0, output);
+            let count = output.len().min(TRANSFER_CHUNK);
+            let result = libdunit::read(0, &mut output[..count]);
             if result != libdunit::EAGAIN {
                 return checked(result);
             }
@@ -164,7 +168,7 @@ impl Read for Stdin {
 }
 fn write_stream(fd: u32, bytes: &[u8]) -> Result<usize> {
     loop {
-        let result = libdunit::write(fd as usize, bytes);
+        let result = libdunit::write(fd as usize, &bytes[..bytes.len().min(TRANSFER_CHUNK)]);
         if result != libdunit::EAGAIN {
             return checked(result);
         }

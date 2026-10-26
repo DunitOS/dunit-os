@@ -54,6 +54,18 @@ fn main() -> dunit::Result<()> {
         assert_eq!(file.read_to_end(&mut last)?, 1);
         assert_eq!(last, b"!");
     }
+    // Both read_exact and write_all must cross the native 64-KiB copy cap.
+    let bulk: Vec<u8> = (0..200_003).map(|i| (i % 251) as u8).collect();
+    fs::write("sdk-api-bulk.bin", &bulk)?;
+    let mut copy = alloc::vec![0; bulk.len()];
+    {
+        let mut file = fs::File::open("sdk-api-bulk.bin")?;
+        file.read_exact(&mut copy)?;
+        assert_eq!(file.read(&mut [0])?, 0);
+    }
+    assert_eq!(copy, bulk);
+    fs::remove_file("sdk-api-bulk.bin")?;
+    dunit::println!("[SDKAPI] bulk exact read write OK")?;
     fs::rename("sdk-api.txt", "sdk-api-renamed.txt")?;
     assert_eq!(
         fs::metadata("sdk-api-renamed.txt")?.file_type,
