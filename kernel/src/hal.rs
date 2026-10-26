@@ -64,6 +64,14 @@ pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
         _ => handle_unknown_interrupt(frame),
     }
 
+    // A pending user fault remains set until the process runner consumes it.
+    // An IRQ may arrive after the escape trampoline's STI/RET, while execution
+    // is already back in the kernel and the escape frame is inactive. Never
+    // consume that user's request from a nested kernel interrupt: escaping a
+    // second time would enter the trampoline's inactive-frame halt path.
+    if frame.cs & 3 != 3 {
+        return 0;
+    }
     if crate::process::preempt_switch_requested() {
         crate::process::clear_preempt_switch();
         2

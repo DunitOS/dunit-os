@@ -1,5 +1,7 @@
 pub mod scheduler;
 mod terminal_stdin;
+#[cfg(feature = "boot-smoke-tests")]
+mod fault_irq_smoke;
 
 use terminal_stdin::TerminalStdin;
 
@@ -2981,6 +2983,9 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
         unsafe {
             Process::reset_syscall_stack_policy();
         }
+
+        #[cfg(feature = "boot-smoke-tests")]
+        fault_irq_smoke::verify();
 
         if take_process_yield_request() {
         } else {
