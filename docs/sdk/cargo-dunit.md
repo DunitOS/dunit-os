@@ -21,9 +21,8 @@ cargo dunit test
 
 `new` creates Cargo.toml, the approved [dunit.toml v1](app-manifest-proposal.md),
 and src/main.rs. `--kind tui`, `--name` and `--id` select metadata. It refuses
-to overwrite existing directories. GUI metadata is valid, and existing GUI
-binaries can be built, but GUI generation/run/test deliberately reports that
-M7's window helper is not implemented yet.
+to overwrite existing directories. GUI generation/run/test uses the native
+window helper and installs metadata for compositor launching.
 
 `build` checks the manifest, resolves the exact Cargo binary target through
 Cargo metadata, then cross-compiles using the same target and build-std options
@@ -71,8 +70,10 @@ cargo dunit run --manifest-path demo/Cargo.toml
 cargo dunit test --manifest-path demo/Cargo.toml
 ```
 
-See the [window API and its initial limits](window.md). The starter is a themed
-canvas; it does not implement the future Component/widget layer.
+See the [window API and its limits](window.md). The starter uses a typed root
+component and the [shared SDK theme](themes.md). Its native buffer-lifetime test
+still issues 201 real low-level commits; it does not substitute unchanged-view
+updates, which correctly skip presentation.
 
 ## Native tests
 

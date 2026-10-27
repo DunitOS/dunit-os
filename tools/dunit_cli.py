@@ -93,8 +93,7 @@ def create(args):
     (destination / "Cargo.toml").write_text(
         f'[package]\nname = {json.dumps(identifier)}\nversion = "0.1.0"\nedition = "2021"\n\n'
         f'[dependencies]\ndunit = {{ path = {json.dumps(str(ROOT / "runtime/dunit"))}'
-        + (', features = ["gui"]' if args.kind == "gui" else '') + ' }\n'
-        + (f'dwm_settings = {{ path = {json.dumps(str(ROOT / "userspace/dwm_settings"))} }}\n' if args.kind == "gui" else ''))
+        + (', features = ["gui"]' if args.kind == "gui" else '') + ' }\n')
     (destination / "dunit.toml").write_text(manifest_text, encoding="utf-8")
     source = TEST_ATTRIBUTES + '''
 #[dunit::main]

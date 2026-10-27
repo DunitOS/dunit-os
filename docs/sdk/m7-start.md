@@ -182,5 +182,7 @@ Cargo artifact selection, image overlays and guest test discovery through
 The [native window helper and GUI template](window.md) are implemented.
 [Typed root components and end-to-end damage](components.md) are implemented and
 used by System Monitor. Partial upload/composition/presentation uses conservative
-full-frame fallbacks for scene changes and effects. Widget behaviour/state, other
+full-frame fallbacks for scene changes and effects. [Named theme tokens and
+automatic SDK theme reload](themes.md) are implemented for themed component
+windows and the GUI starter. Widget behaviour/state, other
 legacy-client migrations and CLI/TUI desktop launching remain open.

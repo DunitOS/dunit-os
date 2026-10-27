@@ -4,38 +4,12 @@
 //! Untrusted System Monitor: typed component state/view over the native SDK.
 extern crate alloc;
 use alloc::{string::String, vec};
-use dunit::ui::{style, Cascade, Component, ComponentWindow, Font, Renderer, View};
+use dunit::ui::{Component, ComponentWindow, View};
 use dunit::{time::Duration, window::WindowEvent};
 
 const W: u32 = 460;
 const H: u32 = 300;
 const POLL_MS: u64 = 500;
-
-/// Load the configured TTF (`[desktop] font`) from the VFS, falling back to the
-/// shipped /assets default font on any error — the desktop font is a live config knob.
-fn load_font() -> Result<Font, ()> {
-    let cfg = dwm_settings::load();
-    if let Some(bytes) = read_font(cfg.desktop.font.as_str()) {
-        if let Ok(f) = Font::parse(bytes) {
-            return Ok(f);
-        }
-    }
-    read_font("/assets/fonts/DejaVuSans.ttf")
-        .ok_or(())
-        .and_then(|b| Font::parse(b).map_err(|_| ()))
-}
-
-fn read_font(path: &str) -> Option<alloc::vec::Vec<u8>> {
-    use dunit::io::Read;
-    let mut file = dunit::fs::File::open(path).ok()?;
-    let size = usize::try_from(file.metadata().ok()?.len).ok()?;
-    if size > 4 * 1024 * 1024 {
-        return None;
-    }
-    let mut bytes = alloc::vec![0; size];
-    file.read_exact(&mut bytes).ok()?;
-    Some(bytes)
-}
 
 /// Human-readable byte size (B / KiB / MiB), matching the legacy stats window.
 fn fmt_size(bytes: u64) -> String {
@@ -134,28 +108,12 @@ impl Component for Monitor {
 
 #[dunit::main]
 fn main() -> dunit::Result<()> {
-    let font = load_font().map_err(|_| dunit::Error(dunit::errno::EIO))?;
-    let dss = dunit::fs::read_to_string("/assets/dwm/apps/gui_stat.dss")?;
-    let sheet = style::parse(&dss).map_err(|_| dunit::Error(dunit::errno::EINVAL))?;
-    let mut cascade = Cascade::new();
-    cascade.push(sheet);
-    let background = cascade
-        .resolve(&style::cascade::NodeStyle {
-            element: "Column",
-            id: Some("win"),
-            classes: &[],
-            states: &[],
-        })
-        .color("background")
-        .ok_or(dunit::Error(dunit::errno::EINVAL))?;
-    let renderer = Renderer::new(font, cascade, background);
-    let mut ui = ComponentWindow::open(
+    let mut ui = ComponentWindow::open_themed(
         W,
         H,
         Monitor {
             stats: dunit::system::stats()?,
         },
-        renderer,
     )?;
     dunit::println!("gui_stat: surface presented OK")?;
     dunit::println!("gui_stat: typed component presented OK")?;

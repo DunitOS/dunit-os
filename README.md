@@ -181,6 +181,9 @@ System Monitor uses [typed components](docs/sdk/components.md), with state
 updates and a retained tree that repaints changed regions. Damage reaches the
 desktop too: stable opaque windows can update just the affected screen area;
 scene changes and effects use a full redraw.
+The [shared SDK theme](docs/sdk/themes.md) supplies colors, typography and
+spacing. Themed component windows update when the profile changes and keep
+their previous appearance if a new profile is invalid.
 Widgets and CLI/TUI desktop launching are still being built.
 See the [SDK progress and contract](docs/sdk/m7-start.md).
 

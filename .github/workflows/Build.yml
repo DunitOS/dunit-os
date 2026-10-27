@@ -66,6 +66,9 @@ jobs:
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
           cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
           bash tools/test_dwm_config_host.sh
+          rustc --edition=2021 --crate-type rlib --crate-name term_theme runtime/term_theme/src/lib.rs -o /tmp/libterm_theme.rlib
+          rustc --edition=2021 --test kernel/tests/terminal_display.rs --extern term_theme=/tmp/libterm_theme.rlib -o /tmp/dunit-terminal-display
+          /tmp/dunit-terminal-display
           cargo test --manifest-path runtime/dunit-macros/Cargo.toml
           cargo test --manifest-path runtime/dunit-render/Cargo.toml
           cargo test --manifest-path runtime/dunit-component/Cargo.toml
@@ -84,6 +87,9 @@ jobs:
 
       - name: Native component input, CPU damage and resize
         run: python3 tools/test_sdk_gui_fixture.py component --accel tcg
+
+      - name: Native SDK theme reload and framebuffer golden
+        run: python3 tools/test_sdk_gui_fixture.py theme --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |

@@ -109,10 +109,10 @@ drop the session.
 
 System Monitor now uses `ComponentWindow` and a typed `View`. Its DUI string
 builder and repeated parse/layout/paint code are removed; counters change only
-through a refresh message. Its style is in
-`assets/dwm/apps/gui_stat.dss`, loaded once on startup. Theme tokens, automatic
-live theme reload, interactive widgets and widget-state reconciliation remain
-separate work. The generated GUI starter remains the lower-level themed canvas.
+through a refresh message. It now uses `open_themed` and the shared
+[SDK token profiles](themes.md), including live reload, without a private DSS
+file or font loader. The generated GUI starter uses the same component path.
+Interactive widgets and widget-state reconciliation remain separate work.
 
 ## Verification
 

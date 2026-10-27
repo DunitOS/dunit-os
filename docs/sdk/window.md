@@ -1,9 +1,9 @@
 # Native window API
 
 Enable `dunit = { path = "…/runtime/dunit", features = ["gui"] }`, or create a
-project with `cargo dunit new demo --kind gui`. The generated canvas uses the
-configured desktop palette; it is a starting point for content, not the future
-Component/widget framework.
+project with `cargo dunit new demo --kind gui`. The generated component uses
+the [configured SDK theme](themes.md), with no application stylesheet. The
+lower-level canvas API remains available for custom rendering.
 
 ```rust
 use dunit::time::Duration;

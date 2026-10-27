@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build native SDK GUI fixtures and run them through qemu_test.py."""
 import argparse
+import json
 import os
 import re
 from pathlib import Path
@@ -15,13 +16,13 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
     fixture = fixture or args.fixture
-    source_name = 'sdk_window_resize' if fixture == 'resize' else 'sdk_component'
-    app_id = 'sdk_resize_fixture' if fixture == 'resize' else 'sdk_component_fixture'
+    source_name = {'resize': 'sdk_window_resize', 'component': 'sdk_component', 'theme': 'sdk_theme'}[fixture]
+    app_id = f'sdk_{fixture}_fixture'
     config_name = f'sdk-{fixture}.toml'
 
     os.environ['RUSTUP_TOOLCHAIN'] = 'nightly'
@@ -36,6 +37,10 @@ def main(fixture=None):
             folder = Path(folder)
             app_folder = folder / 'app'
             create(argparse.Namespace(path=app_folder, id=app_id, name=f'SDK {fixture} fixture', kind='gui'))
+            if fixture in ('component', 'resize'):
+                with (app_folder / 'Cargo.toml').open('a') as manifest_file:
+                    manifest_file.write('dwm_settings = { path = '
+                        + json.dumps(str(ROOT / 'userspace/dwm_settings')) + ' }\n')
             (app_folder / 'src/main.rs').write_text(TEST_ATTRIBUTES + (ROOT / f'tools/fixtures/{source_name}.rs').read_text())
             manifest, package, app = project(app_folder)
             artifact = build(manifest, package, app)
@@ -47,6 +52,8 @@ def main(fixture=None):
             metadata.parent.mkdir(parents=True)
             metadata.write_text(installed_manifest(app))
             shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
+            if fixture == 'theme':
+                shutil.copyfile(ROOT / 'assets/dwm/sdk/dark.dss', overlay / 'sdk-theme.dss')
             subprocess.run([cargo(), 'build', '--release', '--features', 'boot-smoke-tests',
                 '-Z', 'build-std=core,alloc,compiler_builtins', '-Z', 'build-std-features=compiler-builtins-mem',
                 '-Z', 'json-target-spec'], cwd=ROOT / 'kernel', check=True)
@@ -66,6 +73,9 @@ def main(fixture=None):
                 status=1
         if status:
             print((ROOT / 'build/qemu-serial.log').read_text(errors='replace')[-16000:])
+        if not status and fixture == 'theme':
+            from sdk_theme_pixels import verify
+            verify(ROOT)
         return status
 
 

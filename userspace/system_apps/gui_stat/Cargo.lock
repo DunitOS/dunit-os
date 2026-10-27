@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "dunit_component",
  "dunit_macros",
+ "dwm_settings",
  "gui_protocol_v1",
  "libdunit",
 ]
@@ -92,7 +93,6 @@ name = "gui_stat"
 version = "0.1.0"
 dependencies = [
  "dunit",
- "dwm_settings",
 ]
 
 [[package]]

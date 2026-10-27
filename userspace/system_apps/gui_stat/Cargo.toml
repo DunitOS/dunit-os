@@ -6,7 +6,6 @@ edition = "2021"
 
 [dependencies]
 dunit = { path = "../../../runtime/dunit", features = ["gui"] }
-dwm_settings = { path = "../../dwm_settings" }
 
 [[bin]]
 name = "gui_stat"
