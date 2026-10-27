@@ -1,4 +1,6 @@
 use core::cell::UnsafeCell;
+// Every scanout-writing primitive honors the existing display-master lease.
+// Terminal history and serial output continue while userspace owns the display.
 use core::sync::atomic::{AtomicBool, Ordering};
 
 pub struct Framebuffer {
@@ -159,6 +161,7 @@ impl FbConsole {
     }
 
     fn clear_pixels(&mut self) {
+        if crate::handle::display_owner() != 0 { return; }
         unsafe {
             let ptr = self.fb.address;
             let color = self.bg_color;
@@ -303,6 +306,7 @@ impl FbConsole {
     }
 
     pub fn clear_top_area(&mut self, lines: usize) {
+        if crate::handle::display_owner() != 0 { return; }
         unsafe {
             let ptr = self.fb.address;
             let color = self.bg_color;
@@ -530,6 +534,7 @@ impl FbConsole {
     }
 
     fn draw_glyph_color(&mut self, char_x: usize, char_y: usize, ch: u8, fg_color: u32) {
+        if crate::handle::display_owner() != 0 { return; }
         let glyph = get_font_glyph(ch);
         let px_x = char_x * self.char_width;
         let px_y = char_y * self.char_height;
@@ -568,6 +573,7 @@ impl FbConsole {
     }
 
     pub fn draw_cursor(&mut self, visible: bool) {
+        if crate::handle::display_owner() != 0 { return; }
         let px_x = self.cursor_x * self.char_width;
         let px_y = self.cursor_y * self.char_height;
         let color = if visible {

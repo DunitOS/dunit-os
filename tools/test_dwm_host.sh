@@ -20,6 +20,10 @@ done
 
 bash tools/test_dwm_config_host.sh
 
+rustc --edition=2021 --crate-type rlib --crate-name term_theme runtime/term_theme/src/lib.rs -o "$test_dir/libterm_theme.rlib"
+rustc --edition=2021 --test kernel/tests/terminal_display.rs --extern term_theme="$test_dir/libterm_theme.rlib" -o "$test_dir/terminal-display"
+"$test_dir/terminal-display"
+
 rustc --edition=2021 --crate-type rlib --crate-name dunit_style runtime/dunit-style/src/lib.rs -o "$test_dir/libdunit_style.rlib"
 rustc --edition=2021 --test userspace/system_apps/gui_server/src/shell_motion_tests.rs --extern dunit_style="$test_dir/libdunit_style.rlib" -o "$test_dir/scene-motion"
 "$test_dir/scene-motion"
