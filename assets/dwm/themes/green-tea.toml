@@ -56,6 +56,7 @@ dock_padding = 4
 dock_margin = 0
 
 [desktop]
+sdk_theme = "/assets/dwm/sdk/dark.dss"
 icon_theme = "breeze-chameleon-light"
 wallpaper = "/assets/wallpapers/wallpaper.bmp"
 

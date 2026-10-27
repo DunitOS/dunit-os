@@ -144,6 +144,11 @@ fn validate_mode(text: &str, base: &crate::Applications, references_required: bo
                 .filter(|n| *n >= 1 && *n as usize <= MAX_WS)
                 .map(|_| ())
                 .ok_or("workspace count out of range")
+        } else if field == "desktop.sdk_theme" {
+            config_string(input).and_then(|path| {
+                if crate::Desktop::valid_sdk_theme_path(path) { Ok(()) }
+                else { Err("SDK theme path must be absolute without traversal") }
+            })
         } else if section == "scripts" && matches!(key, "runner" | "layout" | "events") {
             config_string(input).and_then(|path| {
                 if (path.is_empty() && key == "events") || (path.starts_with('/') && !path.split('/').any(|part| part == "..")) { Ok(()) }

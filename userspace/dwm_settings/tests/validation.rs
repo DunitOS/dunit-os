@@ -1,5 +1,17 @@
 use dwm_settings::{to_toml, validate, Settings};
 #[test]
+fn sdk_theme_path_roundtrips_and_rejects_invalid_edits() {
+    let settings = Settings::defaults();
+    let next = dwm_settings::edit(&settings, "desktop.sdk_theme", "\"/persist/theme.dss\"").unwrap();
+    assert_eq!(next.desktop.sdk_theme.as_str(), "/persist/theme.dss");
+    assert!(dwm_settings::roundtrip_ok(&next));
+    for path in ["relative.dss", "/tmp/../theme.dss", ""] {
+        let value = format!("\"{path}\"");
+        assert!(validate(&format!("[desktop]\nsdk_theme={value}")).is_err());
+        assert!(dwm_settings::edit(&settings, "desktop.sdk_theme", &value).is_err());
+    }
+}
+#[test]
 fn serializer_and_shipped_presets_validate() {
     validate(&to_toml(&Settings::defaults())).unwrap();
     let root = std::path::Path::new(env!("DUNIT_ROOT"));

@@ -46,6 +46,7 @@ anim = true
 anim_ms = 180
 
 [desktop]
+sdk_theme = "/assets/dwm/sdk/light.dss"
 icon_theme = "breeze-round-chameleon-light"
 wallpaper = "/assets/wallpapers/mojave.svg"
 

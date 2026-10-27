@@ -11,6 +11,8 @@ pub mod fs;
 pub mod window;
 #[cfg(feature = "gui")]
 pub mod ui;
+#[cfg(feature = "gui")]
+mod ui_theme;
 pub mod io;
 pub mod process;
 pub mod system;

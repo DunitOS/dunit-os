@@ -360,6 +360,8 @@ pub struct Desktop {
     /// TrueType font every GUI app loads for text; load failure is diagnosed by
     /// each consumer rather than silently substituting another font.
     pub font: ConfigStr,
+    /// SDK token profile, shared by themed component windows.
+    pub sdk_theme: ConfigStr,
     /// Brand logo blitted into the app-menu wordmark, a 32x32 straight-alpha
     /// `R,G,B,A` raster (circular mask baked into the alpha). Absent/mis-sized →
     /// the compositor draws its flat accent mark instead.
@@ -370,12 +372,16 @@ pub struct Desktop {
 }
 
 impl Desktop {
+    pub(crate) fn valid_sdk_theme_path(path: &str) -> bool {
+        path.starts_with('/') && path.len() <= ConfigStr::CAP && !path.split('/').any(|part| part == "..")
+    }
     /// The built-in baseline: the assets shipped in-tree today.
     pub const fn baseline() -> Self {
         Desktop {
             wallpaper: ConfigStr::new("/assets/wallpapers/wallpaper.bmp"),
             icon_theme: ConfigStr::new("breeze"),
             font: ConfigStr::new("/assets/fonts/DejaVuSans.ttf"),
+            sdk_theme: ConfigStr::new("/assets/dwm/sdk/dark.dss"),
             logo: ConfigStr::new("/assets/images/logo.rgba"),
             palette: ConfigStr::new("/assets/dwm/palettes/default.toml"),
             themes: ConfigStr::new("/assets/dwm/themes"),
@@ -389,6 +395,7 @@ impl Desktop {
             "wallpaper" => self.wallpaper.set(value),
             "icon_theme" => self.icon_theme.set(value),
             "font" => self.font.set(value),
+            "sdk_theme" if Self::valid_sdk_theme_path(value) => self.sdk_theme.set(value),
             "logo" => self.logo.set(value),
             "palette" => self.palette.set(value),
             "themes" => self.themes.set(value),
@@ -1505,6 +1512,7 @@ pub fn to_toml(s: &Settings) -> String {
     push_string(&mut out, "wallpaper", s.desktop.wallpaper.as_str());
     push_string(&mut out, "icon_theme", s.desktop.icon_theme.as_str());
     push_string(&mut out, "font", s.desktop.font.as_str());
+    push_string(&mut out, "sdk_theme", s.desktop.sdk_theme.as_str());
     push_string(&mut out, "logo", s.desktop.logo.as_str());
     push_string(&mut out, "palette", s.desktop.palette.as_str());
     push_string(&mut out, "themes", s.desktop.themes.as_str());
