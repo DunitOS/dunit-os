@@ -27,10 +27,12 @@ use alloc::collections::BTreeMap;
 use crate::value::Value;
 use crate::{Result, StyleError};
 
-/// A parsed stylesheet: an ordered list of rules (variables are expanded away).
+/// A parsed stylesheet: ordered expanded rules and queryable named values.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
+    /// Expanded named values remain available to runtime consumers.
+    pub tokens: crate::Tokens,
 }
 
 /// One selector paired with its declaration block. `order` is the 0-based
@@ -60,13 +62,23 @@ pub struct Selector {
 }
 
 /// Parse a DSS document into a [`Stylesheet`]. Variables (`$name: value;`) are
-/// resolved and dropped; each rule keeps its source order for tie-breaking.
+/// resolved and retained as tokens; each rule keeps its source order for tie-breaking.
 pub fn parse(src: &str) -> Result<Stylesheet> {
+    parse_seeded(src, &crate::Tokens::default(), false)
+}
+
+/// Parse an SDK layer with inherited named values. Missing references are
+/// errors rather than partially expanded declarations. Definitions are ordered.
+pub fn parse_with_tokens(src: &str, tokens: &crate::Tokens) -> Result<Stylesheet> {
+    parse_seeded(src, tokens, true)
+}
+fn parse_seeded(src: &str, tokens: &crate::Tokens, strict: bool) -> Result<Stylesheet> {
     let mut p = Parser {
         chars: src.as_bytes(),
         pos: 0,
         line: 1,
-        vars: BTreeMap::new(),
+        vars: tokens.words.clone(),
+        strict,
     };
     let mut rules = Vec::new();
     let mut order = 0u32;
@@ -88,7 +100,7 @@ pub fn parse(src: &str) -> Result<Stylesheet> {
             order += 1;
         }
     }
-    Ok(Stylesheet { rules })
+    Ok(Stylesheet { rules, tokens: crate::Tokens { words: p.vars } })
 }
 
 struct Parser<'a> {
@@ -97,6 +109,7 @@ struct Parser<'a> {
     line: u32,
     /// Variable name -> expanded value words.
     vars: BTreeMap<String, Vec<String>>,
+    strict: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -303,6 +316,11 @@ impl<'a> Parser<'a> {
                     if let Some(name) = w.strip_prefix('$') {
                         if let Some(vals) = self.vars.get(name) {
                             words.extend(vals.iter().cloned());
+                        } else if self.strict {
+                            return Err(StyleError::Unexpected {
+                                line: self.line,
+                                what: alloc::format!("unknown token ${}", name),
+                            });
                         }
                         // An unknown variable expands to nothing.
                     } else {
@@ -384,7 +402,7 @@ impl<'a> Parser<'a> {
 
 /// Convert value words into a [`Value`]: one word is a scalar, several become a
 /// [`Value::List`].
-fn words_to_value(words: &[String]) -> Value {
+pub(crate) fn words_to_value(words: &[String]) -> Value {
     if words.len() == 1 {
         Value::parse_word(&words[0])
     } else {

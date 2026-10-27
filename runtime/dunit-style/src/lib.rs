@@ -31,10 +31,12 @@ pub mod motion;
 pub mod parse;
 pub mod theme;
 pub mod value;
+mod tokens;
+pub use tokens::Tokens;
 
 pub use cascade::{Cascade, Specificity, Style};
 pub use motion::{Easing, Transition};
-pub use parse::{parse, Declaration, Rule, Selector, Stylesheet};
+pub use parse::{parse, parse_with_tokens, Declaration, Rule, Selector, Stylesheet};
 pub use theme::GREEN_TEA_DSS;
 pub use value::{Color, Value};
 

@@ -5,6 +5,8 @@ extern crate alloc;
 
 mod renderer;
 mod view;
+mod theme;
+pub use theme::Theme;
 pub use dunit_style::value::Color;
 pub use dunit_style::{self as style, Cascade};
 pub use dunit_text::Font;

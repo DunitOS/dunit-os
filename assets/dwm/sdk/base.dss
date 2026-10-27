@@ -1,0 +1,4 @@
+// Structural defaults shared by SDK profiles. Appearance comes from tokens.
+Row, Column, Stack, Grid { background: $window-bg; padding: $space; }
+Text { color: $text; font-size: $font-size; padding: $space-small; }
+Text#title { color: $accent; font-size: $font-title; }

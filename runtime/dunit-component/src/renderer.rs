@@ -59,6 +59,14 @@ impl Renderer {
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
     }
+    /// Apply a fully validated candidate. A font-path change also invalidates
+    /// measurement; application state and stable view keys remain untouched.
+    pub fn set_theme(&mut self, theme: crate::Theme, font: Option<Font>) {
+        if let Some(font) = font {
+            self.font = font;
+        }
+        self.set_style(theme.cascade, theme.background);
+    }
     /// A theme change invalidates the whole canvas on the next render.
     pub fn set_style(&mut self, cascade: Cascade, background: Color) {
         self.cascade = cascade;

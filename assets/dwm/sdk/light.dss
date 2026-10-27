@@ -1,0 +1,14 @@
+// SDK light profile, using the same token contract as the dark profile.
+$window-bg: #f4f6fa;
+$surface: #ffffff;
+$text: #202938;
+$muted: #526278;
+$accent: #005fa8;
+$line: #b7c2d0;
+$font-size: 14;
+$font-title: 20;
+$space: 12;
+$space-small: 4;
+$radius: 6;
+$border: 1;
+$motion-fast: 160ms;

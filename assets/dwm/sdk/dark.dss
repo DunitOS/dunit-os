@@ -1,0 +1,14 @@
+// SDK dark profile. Named values are also available through Theme::tokens.
+$window-bg: #121820;
+$surface: #1c2630;
+$text: #cdd6f4;
+$muted: #96a4b4;
+$accent: #62b5e5;
+$line: #344454;
+$font-size: 14;
+$font-title: 20;
+$space: 12;
+$space-small: 4;
+$radius: 6;
+$border: 1;
+$motion-fast: 160ms;
