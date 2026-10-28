@@ -54,10 +54,16 @@ impl Theme {
                     };
                     let valid = match declaration.property.as_str() {
                         "color" | "background" | "border-color" => value.as_color().is_some(),
-                        "background-gradient" => value.as_keyword() == Some("none")
-                            || style::effects::Gradient::parse(value).is_some(),
-                        "shadow" => value.as_keyword() == Some("none")
-                            || style::effects::Shadow::parse(value).is_some(),
+                        "background-gradient" => {
+                            value.as_keyword() == Some("none")
+                                || style::effects::Gradient::parse(value).is_some()
+                        }
+                        "shadow" => {
+                            value.as_keyword() == Some("none")
+                                || style::effects::Shadow::parse(value).is_some()
+                        }
+                        "backdrop-blur" => valid_number(0., 64.),
+                        "clip" => matches!(value.as_keyword(), Some("rect" | "rounded")),
                         "font-size" => valid_number(1., 512.),
                         "radius" => valid_number(0., 1024.),
                         "border-width" => valid_number(0., 64.),

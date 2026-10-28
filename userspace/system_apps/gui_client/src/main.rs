@@ -239,7 +239,7 @@ fn render_window(px: *mut u8, font: &Font, id: u32, st: UiState, w: u32, h: u32)
 
     let pixels = unsafe { core::slice::from_raw_parts_mut(px as *mut u32, (w * h) as usize) };
     let mut surface = Surface::new(pixels, w as usize, h as usize);
-    paint(&tree, &lay, &style_of, font, &mut surface);
+    paint(&tree, &lay, &style_of, font, &mut surface).expect("GUI paint scratch allocation");
 
     // Report the OK button's rect (client-local) for pointer hit-testing.
     match tree.by_name("ok") {

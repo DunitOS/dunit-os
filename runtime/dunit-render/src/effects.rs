@@ -31,7 +31,7 @@ pub fn visual_bounds(rect: Rect, style: &Style) -> Rect {
     }
 }
 
-fn integer(rect: Rect) -> (i32, i32, i32, i32) {
+pub(crate) fn integer(rect: Rect) -> (i32, i32, i32, i32) {
     let round = |v: f32| {
         // Stay within exact f32 integer precision and signed raster arithmetic.
         let value = (v + 0.5).clamp(-16_777_216., 16_777_216.);
@@ -42,7 +42,7 @@ fn integer(rect: Rect) -> (i32, i32, i32, i32) {
     let y = round(rect.y);
     (x, y, round(rect.x + rect.w) - x, round(rect.y + rect.h) - y)
 }
-fn coverage(px: i32, py: i32, rect: (i32, i32, i32, i32), radius: i32) -> u32 {
+pub(crate) fn coverage(px: i32, py: i32, rect: (i32, i32, i32, i32), radius: i32) -> u32 {
     let (x, y, w, h) = rect;
     if px < x || py < y || px >= x + w || py >= y + h || w <= 0 || h <= 0 {
         return 0;
@@ -70,6 +70,19 @@ impl Surface<'_> {
         gradient: Option<Gradient>,
         border: f32,
         ink: Color,
+    ) {
+        self.paint_box(rect, radius, fill, gradient, border, ink, false);
+    }
+    /// A group mask supplies outer coverage once, after its descendants paint.
+    pub(crate) fn paint_box(
+        &mut self,
+        rect: Rect,
+        radius: f32,
+        fill: Option<Color>,
+        gradient: Option<Gradient>,
+        border: f32,
+        ink: Color,
+        group: bool,
     ) {
         let outer = integer(rect);
         let (x, y, w, h) = outer;
@@ -102,11 +115,17 @@ impl Surface<'_> {
                     })
                     .or(fill);
                 if let Some(color) = color {
-                    self.blend(px, py, color, cov as u8);
+                    self.blend(px, py, color, if group { 255 } else { cov as u8 });
                 }
                 if thickness > 0 {
                     let inside = coverage(px as i32, py as i32, inner, (radius - thickness).max(0));
-                    self.blend(px, py, ink, cov.saturating_sub(inside) as u8);
+                    let ring = cov.saturating_sub(inside);
+                    let ring = if group && cov > 0 {
+                        ring * 255 / cov
+                    } else {
+                        ring
+                    };
+                    self.blend(px, py, ink, ring as u8);
                 }
             }
         }

@@ -120,10 +120,24 @@ impl Renderer {
             height,
         };
         let resized = self.size != (width, height);
-        let damage = match self.previous.as_ref().filter(|_| !resized) {
+        let mut damage = match self.previous.as_ref().filter(|_| !resized) {
             Some(old) => diff(old, &next, width, height),
             None => Some(full),
         };
+        // Blur reads previously painted neighbours. Rebuild the scene whenever
+        // anything changes until a dependency-aware filter-damage planner exists.
+        if damage.is_some()
+            && next
+                .styles
+                .iter()
+                .chain(self.previous.iter().flat_map(|p| p.styles.iter()))
+                .any(|s| {
+                    s.number("backdrop-blur")
+                        .is_some_and(|r| r >= 0.5 && r <= 64.)
+                })
+        {
+            damage = Some(full);
+        }
         if resized {
             let len = (width as usize)
                 .checked_mul(height as usize)
@@ -140,7 +154,7 @@ impl Renderer {
             let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            paint_clipped(
+            let painted = paint_clipped(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
@@ -148,6 +162,12 @@ impl Renderer {
                 &mut surface,
                 rect,
             );
+            if painted.is_err() {
+                // A scratch failure may leave a partially painted private canvas.
+                // Never diff against it or publish it as a completed frame.
+                self.previous = None;
+                return Err(UiError::Allocation);
+            }
         }
         self.previous = Some(next);
         Ok(RenderStats {

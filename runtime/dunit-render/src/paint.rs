@@ -7,7 +7,7 @@ use dunit_ui::layout::Layout;
 use dunit_ui::tree::{NodeId, Tree};
 use dunit_ui::Rect;
 
-use crate::surface::Surface;
+use crate::{surface::Surface, PaintResult};
 
 /// A resolver from a node to its already-cascaded DSS style. Callers build these
 /// from [`dunit_style::cascade`]; the painter treats the result as read-only.
@@ -21,11 +21,17 @@ const DEFAULT_FONT_PX: f32 = 14.0;
 /// Paint the whole tree into `surface`, in document order (parents before
 /// children, so children paint on top). Each node contributes its background
 /// fill, border stroke and text, as declared by its resolved [`Style`].
-pub fn paint(tree: &Tree, layout: &Layout, style_of: StyleOf, font: &Font, surface: &mut Surface) {
+pub fn paint(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+) -> PaintResult {
     if tree.is_empty() {
-        return;
+        return Ok(());
     }
-    paint_node(tree, layout, tree.root(), style_of, font, surface, false);
+    paint_node(tree, layout, tree.root(), style_of, font, surface, false)
 }
 
 /// Paint within `clip`, additionally containing each node and its descendants
@@ -39,12 +45,14 @@ pub fn paint_clipped(
     font: &Font,
     surface: &mut Surface,
     clip: Rect,
-) {
+) -> PaintResult {
+    let mut result = Ok(());
     if !tree.is_empty() {
         surface.with_clip(clip, |s| {
-            paint_node(tree, layout, tree.root(), style_of, font, s, true)
+            result = paint_node(tree, layout, tree.root(), style_of, font, s, true);
         });
     }
+    result
 }
 
 fn paint_node(
@@ -55,7 +63,7 @@ fn paint_node(
     font: &Font,
     surface: &mut Surface,
     contained: bool,
-) {
+) -> PaintResult {
     let rect = layout.rect(id);
     let style = style_of(id);
     if let Some(shadow) = style
@@ -64,12 +72,26 @@ fn paint_node(
     {
         surface.drop_shadow(rect, style.number("radius").unwrap_or(0.), shadow);
     }
-    if contained {
+    let rounded = style.keyword("clip") == Some("rounded");
+    let draw = |s: &mut Surface| {
+        if rounded {
+            s.with_rounded_clip(rect, style.number("radius").unwrap_or(0.), |s| {
+                paint_contents(tree, layout, id, &style, style_of, font, s, contained, true)
+            })
+        } else {
+            paint_contents(
+                tree, layout, id, &style, style_of, font, s, contained, false,
+            )
+        }
+    };
+    if contained || style.keyword("clip") == Some("rect") {
+        let mut result = Ok(());
         surface.with_clip(rect, |s| {
-            paint_contents(tree, layout, id, &style, style_of, font, s, true)
+            result = draw(s);
         });
+        result
     } else {
-        paint_contents(tree, layout, id, &style, style_of, font, surface, false);
+        draw(surface)
     }
 }
 
@@ -82,22 +104,33 @@ fn paint_contents(
     font: &Font,
     surface: &mut Surface,
     contained: bool,
-) {
+    group: bool,
+) -> PaintResult {
     let rect = layout.rect(id);
+    surface.backdrop_blur(
+        rect,
+        style.number("backdrop-blur").unwrap_or(0.),
+        if group {
+            0.
+        } else {
+            style.number("radius").unwrap_or(0.)
+        },
+    )?;
 
     let border = style.number("border-width").unwrap_or(0.0);
     let radius = style.number("radius").unwrap_or(0.0);
     let gradient = style
         .get("background-gradient")
         .and_then(dunit_style::effects::Gradient::parse);
-    if radius > 0. || gradient.is_some() {
-        surface.rounded_box(
+    if group || radius > 0. || gradient.is_some() {
+        surface.paint_box(
             rect,
             radius,
             style.color("background"),
             gradient,
             border,
             style.color("border-color").unwrap_or(DEFAULT_INK),
+            group,
         );
     } else {
         if let Some(bg) = style.color("background") {
@@ -120,8 +153,9 @@ fn paint_contents(
     }
 
     for &c in &tree.node(id).children {
-        paint_node(tree, layout, c, style_of, font, surface, contained);
+        paint_node(tree, layout, c, style_of, font, surface, contained)?;
     }
+    Ok(())
 }
 
 /// The non-empty text of a node, if any.

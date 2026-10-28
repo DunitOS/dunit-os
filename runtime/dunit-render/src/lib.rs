@@ -20,8 +20,13 @@ extern crate alloc;
 mod paint;
 mod surface;
 mod effects;
+mod clip;
+pub mod blur;
 pub mod raster;
 
 pub use paint::{paint, paint_clipped, StyleOf};
 pub use effects::visual_bounds;
 pub use surface::{pack_argb, Surface};
+
+/// Effect scratch allocation failure. A caller must discard a partially painted frame.
+pub type PaintResult = core::result::Result<(), alloc::collections::TryReserveError>;
