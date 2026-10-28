@@ -68,6 +68,13 @@ impl Renderer {
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
     }
+    /// Stable key of the topmost node under the pointer in the last painted
+    /// layout. Ancestor clipping is shared with the existing widget hit tester.
+    pub fn hit_key(&self, x: f32, y: f32) -> Option<&str> {
+        let snapshot = self.previous.as_ref()?;
+        let id = dunit_widgets::hit_test(&snapshot.tree, &snapshot.layout, x, y)?;
+        snapshot.tree.node(id).name.as_deref()
+    }
     /// Apply a fully validated candidate. A font-path change also invalidates
     /// measurement; application state and stable view keys remain untouched.
     pub fn set_theme(&mut self, theme: crate::Theme, font: Option<Font>) {
@@ -139,7 +146,7 @@ impl Renderer {
                     element: n.kind.tag(),
                     id: n.name.as_deref(),
                     classes: &classes,
-                    states: &[],
+                    states: &v.interaction.state_names(),
                 })
             })
             .collect();

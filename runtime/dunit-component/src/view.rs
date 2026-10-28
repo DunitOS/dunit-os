@@ -18,7 +18,8 @@ impl Key {
 }
 
 /// Typed tree description. Keys are global, nonempty and unique within a view.
-/// Initial elements are text and layout containers; widget behaviour is separate.
+/// Elements include text, push buttons and layout containers. The application
+/// owns button interaction; this description owns identity, configuration and messages.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View<Msg> {
     pub(crate) key: String,
@@ -28,6 +29,8 @@ pub struct View<Msg> {
     pub(crate) children: Vec<View<Msg>>,
     pub(crate) classes: Vec<String>,
     pub(crate) bindings: Vec<(Key, Msg)>,
+    pub(crate) activation: Option<Msg>,
+    pub(crate) interaction: dunit_widgets::Interaction,
 }
 impl<Msg> View<Msg> {
     fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
@@ -39,6 +42,8 @@ impl<Msg> View<Msg> {
             children,
             classes: Vec::new(),
             bindings: Vec::new(),
+            activation: None,
+            interaction: dunit_widgets::Interaction::default(),
         }
     }
     pub fn text(key: impl Into<String>, text: impl Into<String>) -> Self {
@@ -48,6 +53,31 @@ impl<Msg> View<Msg> {
             Some(text.into()),
             Vec::new(),
         )
+    }
+    /// A focusable push button. Its label also supplies its accessibility name.
+    pub fn button(key: impl Into<String>, label: impl Into<String>, message: Msg) -> Self {
+        let mut view = Self::new(
+            key,
+            Kind::Element(String::from("Button")),
+            Some(label.into()),
+            Vec::new(),
+        );
+        view.activation = Some(message);
+        view
+    }
+    /// Disabled buttons cannot receive focus, presses or activation.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.interaction.disabled = disabled;
+        self
+    }
+    pub fn interaction(&self) -> dunit_widgets::Interaction {
+        self.interaction
+    }
+    pub fn accessibility_role(&self) -> Option<&'static str> {
+        self.activation.as_ref().map(|_| "button")
+    }
+    pub fn accessibility_label(&self) -> Option<&str> {
+        self.activation.as_ref().and(self.text.as_deref())
     }
     pub fn column(key: impl Into<String>, children: Vec<Self>) -> Self {
         Self::new(key, Kind::Column, None, children)

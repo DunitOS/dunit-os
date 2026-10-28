@@ -3,16 +3,18 @@
 #![forbid(unsafe_code)]
 extern crate alloc;
 
-mod renderer;
+mod interaction;
 mod motion;
-mod view;
+mod renderer;
 mod theme;
-pub use theme::Theme;
+mod view;
 pub use dunit_style::value::Color;
 pub use dunit_style::{self as style, Cascade};
 pub use dunit_text::Font;
 pub use dunit_ui::{Align, Attrs, Edges, Rect, Sizing};
+pub use interaction::PointerEvent;
 pub use renderer::{Damage, RenderStats, Renderer};
+pub use theme::Theme;
 pub use view::{Key, View};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,16 +59,21 @@ impl<C: Component> Application<C> {
     }
     pub fn update(&mut self, message: C::Message) -> Result<()> {
         self.component.update(message);
-        let view = self.component.view();
+        let mut view = self.component.view();
         view.validate()?;
+        view.reconcile(&self.view);
         self.view = view;
         Ok(())
     }
-    /// Root-view application shortcuts, not focused-widget text input.
+    /// Dispatch focused-button navigation/activation before root shortcuts.
+    /// Focused text editing is not yet implemented.
     pub fn key(&mut self, key: Key) -> Result<bool>
     where
         C::Message: Clone,
     {
+        if self.widget_key(key)? {
+            return Ok(true);
+        }
         let message = self
             .view
             .bindings

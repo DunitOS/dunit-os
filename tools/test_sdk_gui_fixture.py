@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()

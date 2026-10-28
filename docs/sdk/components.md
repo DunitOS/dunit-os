@@ -30,14 +30,16 @@ assert_eq!(app.component().0, 1);
 assert_eq!(app.view().children()[1].content(), Some("1"));
 ```
 
-Views contain text and Row/Column/Stack/Grid containers. Text is stored directly;
+Views contain text, [push buttons](buttons.md) and Row/Column/Stack/Grid
+containers. Text is stored directly;
 quotes, braces and Unicode do not need markup escaping. Every node has a
 nonempty unique key, also used as its DSS ID. The current adapter hosts one root
 component. This is not yet a nested component/widget lifecycle system.
 
 `View::class(name)` selects a DSS appearance class from the model. The renderer
 uses these classes during cascade resolution. Supported appearance changes can
-use [timed DSS transitions](motion.md); this does not add automatic widget states.
+use [timed DSS transitions](motion.md). Buttons also supply automatic interaction
+states to the same cascade.
 
 `Application` exposes immutable component/view access. Dispatching a message
 calls `update`, builds and validates the next view, then replaces the previous
@@ -48,8 +50,9 @@ retained for diagnostics. There is no model rollback.
 
 `on_key` binds application shortcuts on the root view. A binding matches the
 cooked character and native modifier mask exactly. `Key::plain` uses no
-modifiers. These shortcuts are not focused-widget editing or button behaviour;
-those remain part of M7.6. Child bindings are rejected instead of being ignored.
+modifiers. Focused buttons consume Tab/Shift+Tab and plain Space/Enter before
+root shortcuts. Text editing remains part of M7.6. Child bindings are rejected
+instead of being ignored.
 
 ## Rendering and native windows
 
@@ -116,7 +119,8 @@ builder and repeated parse/layout/paint code are removed; counters change only
 through a refresh message. It now uses `open_themed` and the shared
 [SDK token profiles](themes.md), including live reload, without a private DSS
 file or font loader. The generated GUI starter uses the same component path.
-Interactive widgets and widget-state reconciliation remain separate work.
+Push buttons reconcile interaction state by stable key and kind. Other interactive
+widgets and nested component lifecycle remain separate work; see [buttons](buttons.md).
 
 ## Verification
 

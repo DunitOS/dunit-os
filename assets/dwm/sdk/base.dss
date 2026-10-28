@@ -2,3 +2,10 @@
 Row, Column, Stack, Grid { background: $window-bg; padding: $space; }
 Text { color: $text; font-size: $font-size; padding: $space-small; }
 Text#title { color: $accent; font-size: $font-title; }
+
+// Button behaviour is supplied by the SDK; DSS describes its states only.
+Button { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; }
+Button:hover { border-color: $accent; }
+Button:focus { border-color: $accent; }
+Button:active { background: $accent; color: $window-bg; }
+Button:disabled { color: $muted; border-color: $line; }

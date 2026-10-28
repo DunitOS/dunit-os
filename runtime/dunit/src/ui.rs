@@ -1,7 +1,7 @@
 //! Native window adapter for the pure retained component runtime.
 use crate::{
     time::Duration,
-    window::{DamageRect, Window, WindowEvent, IN_KEY},
+    window::{DamageRect, Window, WindowEvent, IN_DOWN, IN_KEY, IN_LEAVE, IN_MOVE, IN_UP},
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
@@ -29,8 +29,8 @@ fn native(error: UiError) -> Error {
 // Target interval for automatic sampling, not a proven 16 ms rendering budget.
 const MOTION_FRAME: Duration = Duration::from_millis(16);
 
-/// One root component in the existing single-window IPC session. Shortcuts are
-/// dispatched through `update`; resize redraws at the compositor's geometry.
+/// One root component in the existing single-window IPC session. Button input
+/// and shortcuts dispatch through `update`; resize uses compositor geometry.
 /// CPU invalidation drives buffer repair and existing gui-v1 damage metadata.
 /// Unchanged views skip publication; the compositor retains unchanged pixels.
 pub struct ComponentWindow<C: Component> {
@@ -296,6 +296,23 @@ impl<C: Component> ComponentWindow<C> {
         };
         match &event {
             Some(WindowEvent::Resized { .. }) => self.redraw()?,
+            Some(WindowEvent::Input(input))
+                if matches!(input.kind, IN_MOVE | IN_DOWN | IN_UP | IN_LEAVE) =>
+            {
+                if matches!(input.kind, IN_DOWN | IN_UP) && input.value != 0 {
+                    return Ok(event);
+                }
+                let pointer = match input.kind {
+                    IN_DOWN => PointerEvent::Down,
+                    IN_UP => PointerEvent::Up,
+                    IN_LEAVE => PointerEvent::Leave,
+                    _ => PointerEvent::Move,
+                };
+                let target = self.renderer.hit_key(input.x as f32, input.y as f32);
+                if self.application.pointer(pointer, target).map_err(native)? {
+                    self.redraw()?;
+                }
+            }
             Some(WindowEvent::Input(input)) if input.kind == IN_KEY => {
                 if let (Some(character), Ok(modifiers)) =
                     (char::from_u32(input.value), u8::try_from(input.y))
