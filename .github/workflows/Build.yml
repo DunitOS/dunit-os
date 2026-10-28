@@ -97,6 +97,9 @@ jobs:
       - name: Native SDK backdrop blur and rounded clips
         run: python3 tools/test_sdk_gui_fixture.py backdrop --accel tcg
 
+      - name: Native SDK timed DSS transitions and reduced motion
+        run: python3 tools/test_sdk_gui_fixture.py motion --accel tcg
+
       - name: Optional desktop catalog compatibility
         run: |
           (cd kernel && cargo build --release --features boot-smoke-tests \

@@ -3,8 +3,8 @@
 `ComponentWindow::open_themed(width, height, component)` loads the configured
 font and SDK profile. It gives Text and Row/Column/Stack/Grid a shared default
 appearance without application styles. System Monitor and the generated GUI
-starter use this path. Interactive widget behaviour and animation remain
-separate M7 work.
+starter use this path. Appearance classes support [timed DSS transitions](motion.md);
+interactive widget behaviour remains separate M7 work.
 
 The desktop document selects the profile:
 
@@ -60,7 +60,7 @@ overlay definitions stay local to that layer. Radius and border drive shared
 rounded painting. The optional `cards.dss` layer uses `shadow`, `shadow-y` and
 `shadow-spread`; `glass.dss` uses `glass-tint`, `glass-radius` and `blur-radius`.
 Custom profiles only need these extra names when using those layers. Motion
-values remain queryable; widget animations are separate work.
+values drive SDK paint-property transitions; full widget animations remain separate work.
 
 ## Rounded fills, gradients and shadows
 
@@ -209,12 +209,12 @@ styles without changing pixels, and requires exact initial pixels after restore.
 All four QEMU captures must match both native RGB hashes and the reviewed golden.
 
 
-Verified on 28 October 2026: 184 host checks passed (19 render, 18 component,
-17 style, 13 SDK, 101 desktop/config/console, 8 CLI and 8 image-profile). The
-backdrop fixture passed on TCG and KVM with exact four-state framebuffer/golden
-comparisons. The original theme and effect goldens passed unchanged on TCG.
+Verified on 28 October 2026: 190 host checks passed (19 render, 23 component,
+18 style, 13 SDK, 101 desktop/config/console, 8 CLI and 8 image-profile). The
+[motion fixture](motion.md) passed on TCG and KVM with four endpoint framebuffer
+comparisons. Existing theme and backdrop goldens passed unchanged on TCG.
 The component damage/resize fixture retained its two 15,360-pixel partial frames
 on TCG. Full desktop smoke passed on KVM with all 30 required markers and no
 forbidden markers. ABI generation remained at 89 syscalls, 25 errno and 7 rights.
-This establishes rendering correctness; the whole-scene 16 ms budget remains open.
+The whole-scene 16 ms budget remains open.
 The warnings check remained at 13 against the existing budget of 99.

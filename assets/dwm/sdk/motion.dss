@@ -1,0 +1,22 @@
+/* Appearance classes are chosen by the component's model. */
+Text#card {
+    background: $surface;
+    color: $text;
+    radius: $radius;
+    border-width: $border;
+    border-color: $line;
+    padding: $space;
+    font-size: $font-title;
+    transition: background $motion-fast linear,
+                color $motion-fast linear,
+                radius $motion-fast linear,
+                border-width $motion-fast linear,
+                border-color $motion-fast linear;
+}
+Text#card.active {
+    background: $accent;
+    color: $window-bg;
+    radius: 24;
+    border-width: 4;
+    border-color: $text;
+}

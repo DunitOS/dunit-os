@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "width": 480,
+  "height": 240,
+  "font_sha256": "6038a160b491e121c1f12c7bccb4a9c8730296e3adc1086a059404ed84b7451c",
+  "rgb_fnv1a64": {
+    "idle": "c59c00a34c70bdde",
+    "active": "5af35b5aef294e8d",
+    "restored": "c59c00a34c70bdde",
+    "reduced": "5af35b5aef294e8d"
+  }
+}

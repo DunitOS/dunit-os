@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
@@ -52,8 +52,11 @@ def main(fixture=None):
             metadata.parent.mkdir(parents=True)
             metadata.write_text(installed_manifest(app))
             shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
-            if fixture in ('theme', 'effects', 'backdrop'):
-                shutil.copyfile(ROOT / 'assets/dwm/sdk/dark.dss', overlay / 'sdk-theme.dss')
+            if fixture in ('theme', 'effects', 'backdrop', 'motion'):
+                profile = (ROOT / 'assets/dwm/sdk/dark.dss').read_text()
+                if fixture == 'motion':
+                    profile += (ROOT / 'tools/fixtures/sdk_motion_profile.dss').read_text()
+                (overlay / 'sdk-theme.dss').write_text(profile)
             subprocess.run([cargo(), 'build', '--release', '--features', 'boot-smoke-tests',
                 '-Z', 'build-std=core,alloc,compiler_builtins', '-Z', 'build-std-features=compiler-builtins-mem',
                 '-Z', 'json-target-spec'], cwd=ROOT / 'kernel', check=True)
@@ -73,7 +76,7 @@ def main(fixture=None):
                 status=1
         if status:
             print((ROOT / 'build/qemu-serial.log').read_text(errors='replace')[-16000:])
-        if not status and fixture in ('theme', 'effects', 'backdrop'):
+        if not status and fixture in ('theme', 'effects', 'backdrop', 'motion'):
             from sdk_theme_pixels import verify
             verify(ROOT, fixture)
         return status

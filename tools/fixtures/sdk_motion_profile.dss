@@ -1,0 +1,2 @@
+/* Longer observation window for the native motion regression. */
+$motion-fast: 1200ms;

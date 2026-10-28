@@ -17,6 +17,7 @@ def verify(root: Path, fixture="theme"):
         "theme": ("SDKTHEME", ("dark", "light", "restored")),
         "effects": ("SDKEFFECTS", ("dark", "narrow", "light", "restored")),
         "backdrop": ("SDKBACKDROP", ("dark", "changed", "light", "restored")),
+        "motion": ("SDKMOTION", ("idle", "active", "restored", "reduced")),
     }[fixture]
     labels = set(states)
     pattern = "|".join(states)

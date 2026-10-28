@@ -35,11 +35,15 @@ quotes, braces and Unicode do not need markup escaping. Every node has a
 nonempty unique key, also used as its DSS ID. The current adapter hosts one root
 component. This is not yet a nested component/widget lifecycle system.
 
+`View::class(name)` selects a DSS appearance class from the model. The renderer
+uses these classes during cascade resolution. Supported appearance changes can
+use [timed DSS transitions](motion.md); this does not add automatic widget states.
+
 `Application` exposes immutable component/view access. Dispatching a message
 calls `update`, builds and validates the next view, then replaces the previous
-one. Duplicate keys, duplicate shortcuts, nested shortcuts, invalid dimensions
-and excessive depth/node count are errors. Propagate validation failures: a
-model can already have consumed the message, while its previous valid view is
+one. Duplicate keys, duplicate shortcuts, nested shortcuts, invalid dimensions,
+invalid DSS class names and excessive depth/node count are errors. Propagate
+validation failures: a model can already have consumed the message, while its previous valid view is
 retained for diagnostics. There is no model rollback.
 
 `on_key` binds application shortcuts on the root view. A binding matches the
