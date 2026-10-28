@@ -16,3 +16,7 @@ $motion-fast: 160ms;
 $shadow: #00000090;
 $shadow-y: 4;
 $shadow-spread: 10;
+
+$glass-tint: #12182060;
+$glass-radius: 20;
+$blur-radius: 6;

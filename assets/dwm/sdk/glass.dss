@@ -1,0 +1,15 @@
+/* Optional SDK glass panel and its striped demonstration backdrop. */
+Stack#scene { padding: 0; }
+Row#pattern { padding: 0; }
+Column#frame { background: #00000000; padding: 18 28; }
+Column#glass {
+    background: $glass-tint;
+    padding: 0;
+    radius: $glass-radius;
+    clip: rounded;
+    backdrop-blur: $blur-radius;
+}
+Text#spill { background: $surface; color: $text; padding: $space; }
+Text#caption { color: $text; padding: $space; }
+Text#s0, Text#s2, Text#s4, Text#s6 { background: $accent; padding: 0; }
+Text#s1, Text#s3, Text#s5, Text#s7 { background: $line; padding: 0; }

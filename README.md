@@ -185,7 +185,8 @@ The [shared SDK theme](docs/sdk/themes.md) supplies colors, typography and
 spacing. Themed component windows update when the profile changes and keep
 their previous appearance if a new profile is invalid. DSS can also style
 rounded fills and borders, gradients and soft shadows; the shared renderer
-cleans up the old shadow when an element changes size.
+cleans up the old shadow when an element changes size. Rounded content clips
+and backdrop blur are available inside the application canvas.
 Widgets and CLI/TUI desktop launching are still being built.
 See the [SDK progress and contract](docs/sdk/m7-start.md).
 

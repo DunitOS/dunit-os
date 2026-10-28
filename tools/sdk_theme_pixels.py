@@ -13,12 +13,15 @@ def rgb_hash(data):
 
 
 def verify(root: Path, fixture="theme"):
-    marker = "SDKTHEME" if fixture == "theme" else "SDKEFFECTS"
-    labels = {"dark", "light", "restored"}
-    if fixture == "effects":
-        labels.add("narrow")
+    marker, states = {
+        "theme": ("SDKTHEME", ("dark", "light", "restored")),
+        "effects": ("SDKEFFECTS", ("dark", "narrow", "light", "restored")),
+        "backdrop": ("SDKBACKDROP", ("dark", "changed", "light", "restored")),
+    }[fixture]
+    labels = set(states)
+    pattern = "|".join(states)
     serial = (root / 'build/qemu-serial.full.log').read_text(errors='replace')
-    expected = dict(re.findall(rf'\[{marker}\] (dark|narrow|light|restored) hash=([0-9a-f]{{16}})', serial))
+    expected = dict(re.findall(rf'\[{marker}\] ({pattern}) hash=([0-9a-f]{{16}})', serial))
     if set(expected) != labels:
         raise RuntimeError('Theme fixture did not report all native pixel hashes')
     golden = json.loads((root / f'tools/fixtures/sdk_{fixture}_golden.json').read_text())

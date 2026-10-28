@@ -94,6 +94,9 @@ jobs:
       - name: Native SDK effects and framebuffer goldens
         run: python3 tools/test_sdk_gui_fixture.py effects --accel tcg
 
+      - name: Native SDK backdrop blur and rounded clips
+        run: python3 tools/test_sdk_gui_fixture.py backdrop --accel tcg
+
       - name: Optional desktop catalog compatibility
         run: |
           (cd kernel && cargo build --release --features boot-smoke-tests \
