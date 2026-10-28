@@ -33,3 +33,7 @@ $switch-width: 34;
 $indicator-off: #00000000;
 $indicator-start: 0;
 $indicator-end: 1;
+
+$input-selection: #305777;
+$caret-width: 1;
+$caret-blink: 500ms;

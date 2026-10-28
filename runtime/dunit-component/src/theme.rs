@@ -58,7 +58,10 @@ impl Theme {
                         | "border-color"
                         | "indicator-background"
                         | "indicator-border-color"
-                        | "indicator-mark-color" => value.as_color().is_some(),
+                        | "indicator-mark-color"
+                        | "placeholder-color"
+                        | "selection-color"
+                        | "caret-color" => value.as_color().is_some(),
                         "indicator-width"
                         | "indicator-height"
                         | "indicator-gap"
@@ -67,6 +70,10 @@ impl Theme {
                         | "indicator-inset" => valid_number(0., 1024.),
                         "indicator-border-width" => valid_number(0., 64.),
                         "indicator-position" => valid_number(0., 1.),
+                        "caret-width" => valid_number(0., 64.),
+                        "caret-blink" => value
+                            .as_duration()
+                            .is_some_and(|v| v.is_finite() && (0. ..=60_000.).contains(&v)),
                         "background-gradient" => {
                             value.as_keyword() == Some("none")
                                 || style::effects::Gradient::parse(value).is_some()

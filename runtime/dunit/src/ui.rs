@@ -15,7 +15,8 @@ pub fn load_theme(overlay: &str) -> NativeResult<(Theme, Font)> {
 fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
-        UiError::InvalidRadioGroup
+        UiError::InvalidInput
+        | UiError::InvalidRadioGroup
         | UiError::InvalidClass
         | UiError::DuplicateKey
         | UiError::EmptyKey
@@ -48,6 +49,7 @@ pub struct ComponentWindow<C: Component> {
     motion_clock: crate::time::Instant,
     motion_frame: Option<crate::time::Instant>,
     motion_requested: bool,
+    caret_frame: Option<crate::time::Instant>,
 }
 impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
@@ -66,6 +68,7 @@ impl<C: Component> ComponentWindow<C> {
             motion_clock: crate::time::Instant::now()?,
             motion_frame: None,
             motion_requested: true,
+            caret_frame: None,
         };
         ui.redraw()?;
         Ok(ui)
@@ -163,6 +166,9 @@ impl<C: Component> ComponentWindow<C> {
     pub fn last_uploaded_pixels(&self) -> u64 {
         self.uploaded_pixels
     }
+    pub fn input_scroll_x(&self, key: &str) -> Option<f32> {
+        self.renderer.input_scroll_x(key)
+    }
     pub fn last_render(&self) -> RenderStats {
         self.last_render
     }
@@ -175,6 +181,7 @@ impl<C: Component> ComponentWindow<C> {
             self.failed = true;
             return Err(native(error));
         }
+        self.caret_frame = Some(crate::time::Instant::now()?);
         self.redraw()
     }
     fn redraw(&mut self) -> NativeResult<()> {
@@ -252,7 +259,31 @@ impl<C: Component> ComponentWindow<C> {
             } else {
                 slice
             };
+            let slice = if let Some(ms) = self.renderer.caret_blink_ms() {
+                let interval = Duration::from_millis(ms);
+                let elapsed = self
+                    .caret_frame
+                    .map(|t| t.elapsed())
+                    .transpose()?
+                    .unwrap_or_default();
+                slice.min(interval.saturating_sub(elapsed))
+            } else {
+                slice
+            };
             let event = self.window.next_event(slice)?;
+            if let Some(ms) = self.renderer.caret_blink_ms() {
+                if self
+                    .caret_frame
+                    .map(|t| t.elapsed())
+                    .transpose()?
+                    .is_some_and(|d| d >= Duration::from_millis(ms))
+                {
+                    if self.application.blink_caret() {
+                        self.redraw()?;
+                    }
+                    self.caret_frame = Some(crate::time::Instant::now()?);
+                }
+            }
             if matches!(event, Some(WindowEvent::CloseRequested)) {
                 self.renderer.cancel_motion();
                 break event;
@@ -309,12 +340,51 @@ impl<C: Component> ComponentWindow<C> {
                     IN_LEAVE => PointerEvent::Leave,
                     _ => PointerEvent::Move,
                 };
-                let target = self.renderer.hit_key(input.x as f32, input.y as f32);
-                if self.application.pointer(pointer, target).map_err(native)? {
+                let target = self
+                    .renderer
+                    .hit_key(input.x as f32, input.y as f32)
+                    .map(alloc::string::String::from);
+                let capture = if pointer == PointerEvent::Down {
+                    target.clone()
+                } else {
+                    self.application
+                        .dragging_input_key()
+                        .map(alloc::string::String::from)
+                };
+                let index = capture
+                    .as_deref()
+                    .and_then(|key| self.renderer.input_index(key, input.x as f32));
+                let position = capture.as_deref().zip(index);
+                if self
+                    .application
+                    .pointer_at(pointer, target.as_deref(), position)
+                    .map_err(native)?
+                {
+                    self.caret_frame = Some(crate::time::Instant::now()?);
                     self.redraw()?;
                 }
             }
             Some(WindowEvent::Input(input)) if input.kind == IN_KEY => {
+                if input.value == 0 && input.y & !3 == 0 {
+                    let extend = input.y & 1 != 0;
+                    let word = input.y & 2 != 0;
+                    let command = match input.x {
+                        0x4b => Some(EditCommand::Left { extend, word }),
+                        0x4d => Some(EditCommand::Right { extend, word }),
+                        0x47 => Some(EditCommand::Home { extend }),
+                        0x4f => Some(EditCommand::End { extend }),
+                        0x53 => Some(EditCommand::Delete { word }),
+                        0x0e => Some(EditCommand::Backspace { word }),
+                        _ => None,
+                    };
+                    if let Some(command) = command {
+                        if self.application.edit(command).map_err(native)? {
+                            self.caret_frame = Some(crate::time::Instant::now()?);
+                            self.redraw()?;
+                            return Ok(event);
+                        }
+                    }
+                }
                 // Existing IN_KEY carries PS/2 set-1 scancode and modifiers;
                 // extended arrow keys have no cooked character.
                 let navigation = if input.value == 0 && input.y == 0 {
@@ -345,6 +415,7 @@ impl<C: Component> ComponentWindow<C> {
                         })
                         .map_err(native)?
                     {
+                        self.caret_frame = Some(crate::time::Instant::now()?);
                         self.redraw()?;
                     }
                 }

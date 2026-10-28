@@ -1,0 +1,20 @@
+[meta]
+schema_version = 2
+[startup]
+entries = ["sdk_input_fixture"]
+self_test = false
+[shortcuts]
+cmd_mod = "super"
+win_max = true
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"
+[effects]
+anim = false

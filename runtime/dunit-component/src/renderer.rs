@@ -1,6 +1,6 @@
 use crate::{Color, Result, UiError, View};
 use alloc::vec::Vec;
-use dunit_render::{paint_clipped, Surface};
+use dunit_render::{paint_clipped_with_inputs, Surface, TextInput};
 use dunit_style::{cascade::NodeStyle, Cascade, Style};
 use dunit_text::Font;
 use dunit_ui::{layout_measured, tree::TreeBuilder, Edges, Layout, Rect, Tree};
@@ -39,6 +39,7 @@ struct Snapshot {
     layout: Layout,
     styles: Vec<Style>,
     targets: Vec<Style>,
+    inputs: Vec<Option<TextInput>>,
 }
 
 /// Retains a private CPU canvas; no published shared buffer is ever mutated.
@@ -74,6 +75,35 @@ impl Renderer {
         let snapshot = self.previous.as_ref()?;
         let id = dunit_widgets::hit_test(&snapshot.tree, &snapshot.layout, x, y)?;
         snapshot.tree.node(id).name.as_deref()
+    }
+    /// UTF-8 scalar boundary under a pointer, using the last painted viewport.
+    pub fn input_index(&self, key: &str, x: f32) -> Option<usize> {
+        let snapshot = self.previous.as_ref()?;
+        let id = snapshot.tree.by_name(key)?;
+        let input = snapshot.inputs[id.0 as usize].as_ref()?;
+        Some(input.hit_index(
+            &self.font,
+            &snapshot.styles[id.0 as usize],
+            snapshot.layout.rect(id),
+            x,
+        ))
+    }
+    pub fn input_scroll_x(&self, key: &str) -> Option<f32> {
+        let p = self.previous.as_ref()?;
+        let id = p.tree.by_name(key)?;
+        p.inputs[id.0 as usize].as_ref().map(|i| i.scroll_x)
+    }
+    /// Zero duration disables blinking; absence of focused input needs no timer.
+    pub fn caret_blink_ms(&self) -> Option<u64> {
+        let p = self.previous.as_ref()?;
+        p.inputs
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.as_ref().is_some_and(|i| i.focused))
+            .filter_map(|(n, _)| p.styles[n].get("caret-blink").and_then(|v| v.as_duration()))
+            .filter(|ms| *ms > 0.)
+            .map(|ms| (ms as u64).max(1))
+            .min()
     }
     /// Apply a fully validated candidate. A font-path change also invalidates
     /// measurement; application state and stable view keys remain untouched.
@@ -139,14 +169,18 @@ impl Renderer {
         view.flatten(&mut views);
         let targets: Vec<_> = tree
             .iter()
-            .zip(views)
+            .zip(&views)
             .map(|(n, v)| {
                 let classes: Vec<_> = v.classes.iter().map(|c| c.as_str()).collect();
+                let mut states = v.interaction.state_names();
+                if v.input.as_ref().is_some_and(|i| i.options.read_only) {
+                    states.push("read-only");
+                }
                 self.cascade.resolve(&NodeStyle {
                     element: n.kind.tag(),
                     id: n.name.as_deref(),
                     classes: &classes,
-                    states: &v.interaction.state_names(),
+                    states: &states,
                 })
             })
             .collect();
@@ -167,7 +201,18 @@ impl Renderer {
         let layout = layout_measured(&tree, width as f32, height as f32, &|id| {
             let n = tree.node(id);
             Widget::from_tag(n.kind.tag())
-                .map(|w| intrinsic_size(w, n.text.as_deref(), &styles[id.0 as usize], &fm))
+                .map(|w| {
+                    intrinsic_size(
+                        w,
+                        if views[id.0 as usize].input.is_some() {
+                            None
+                        } else {
+                            n.text.as_deref()
+                        },
+                        &styles[id.0 as usize],
+                        &fm,
+                    )
+                })
                 .unwrap_or((0.0, 0.0))
         });
         if tree.iter().any(|n| {
@@ -176,7 +221,37 @@ impl Renderer {
         }) {
             return Err(UiError::InvalidLayout);
         }
+        let inputs = tree
+            .iter()
+            .map(|n| {
+                let view = views[n.id.0 as usize];
+                view.input.as_ref().map(|input| {
+                    let previous = self.previous.as_ref().and_then(|p| {
+                        p.tree
+                            .by_name(&view.key)
+                            .and_then(|id| p.inputs[id.0 as usize].as_ref())
+                    });
+                    let mut paint = TextInput {
+                        value: input.editor.text().into(),
+                        placeholder: input.options.placeholder.clone(),
+                        password: input.options.password,
+                        cursor: input.editor.cursor(),
+                        anchor: input.editor.anchor(),
+                        focused: view.interaction.focused && !view.interaction.disabled,
+                        caret_visible: input.caret_visible
+                            || styles[n.id.0 as usize]
+                                .get("caret-blink")
+                                .and_then(|v| v.as_duration())
+                                .map_or(true, |v| v == 0.),
+                        scroll_x: previous.map_or(0., |p| p.scroll_x),
+                    };
+                    paint.fit_scroll(&self.font, &styles[n.id.0 as usize], layout.rect(n.id));
+                    paint
+                })
+            })
+            .collect();
         let next = Snapshot {
+            inputs,
             tree,
             layout,
             styles,
@@ -221,13 +296,14 @@ impl Renderer {
             let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            let painted = paint_clipped(
+            let painted = paint_clipped_with_inputs(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
                 &self.font,
                 &mut surface,
                 rect,
+                &|id| next.inputs[id.0 as usize].as_ref(),
             );
             if painted.is_err() {
                 // A scratch failure may leave a partially painted private canvas.
@@ -326,6 +402,7 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
             && a.attrs == b.attrs
             && ra == rb
             && old.styles[a.id.0 as usize] == new.styles[b.id.0 as usize]
+            && old.inputs[a.id.0 as usize] == new.inputs[b.id.0 as usize]
         {
             continue;
         }

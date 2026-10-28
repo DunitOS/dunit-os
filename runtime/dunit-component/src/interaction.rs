@@ -1,4 +1,4 @@
-//! Button interaction and stable-key reconciliation, independent of native I/O.
+//! Control interaction and stable-key reconciliation, independent of native I/O.
 use crate::{Application, Component, Key, Result, View};
 use alloc::{collections::BTreeMap, vec::Vec};
 
@@ -18,13 +18,13 @@ impl<M> View<M> {
         old.flatten(&mut nodes);
         let states: BTreeMap<_, _> = nodes
             .into_iter()
-            .filter(|v| v.activation.is_some())
+            .filter(|v| v.focusable())
             .map(|v| (v.key.as_str(), v))
             .collect();
         self.restore(&states);
     }
     fn restore(&mut self, states: &BTreeMap<&str, &Self>) {
-        if self.activation.is_some() && !self.interaction.disabled {
+        if self.focusable() && !self.interaction.disabled {
             if let Some(old) = states.get(self.key.as_str()) {
                 if old.kind == self.kind
                     && old.radio_group == self.radio_group
@@ -34,6 +34,11 @@ impl<M> View<M> {
                     self.interaction.hovered = old.interaction.hovered;
                     self.interaction.focused = old.interaction.focused;
                     self.interaction.pressed = old.interaction.pressed;
+                    if let (Some(input), Some(previous)) = (&mut self.input, &old.input) {
+                        input.editor = previous.editor.clone();
+                        input.editor.sync(self.text.as_deref().unwrap_or(""));
+                        input.dragging = previous.dragging;
+                    }
                 }
             }
         }
@@ -50,8 +55,8 @@ impl<M> View<M> {
 }
 
 impl<C: Component> Application<C> {
-    /// Route a pointer event using Renderer::hit_key. Only enabled buttons
-    /// participate. Returns whether state changed or a message was dispatched.
+    /// Route a pointer event using Renderer::hit_key. Only enabled controls
+    /// participate. Use pointer_at for text cursor coordinates. Returns whether state changed or a message was dispatched.
     pub fn pointer(&mut self, event: PointerEvent, target: Option<&str>) -> Result<bool>
     where
         C::Message: Clone,
@@ -59,7 +64,7 @@ impl<C: Component> Application<C> {
         let mut message = None;
         let mut changed = false;
         self.view.visit_mut(&mut |v| {
-            if v.activation.is_none() || v.interaction.disabled {
+            if !v.focusable() || v.interaction.disabled {
                 return;
             }
             let old = v.interaction;
@@ -68,17 +73,30 @@ impl<C: Component> Application<C> {
             match event {
                 PointerEvent::Down => {
                     v.interaction.focused = hit;
-                    v.interaction.pressed = hit;
+                    v.interaction.pressed = hit && v.activation.is_some();
+                    if let Some(input) = &mut v.input {
+                        input.dragging = hit;
+                        changed |= hit && !input.caret_visible;
+                        input.caret_visible = true;
+                    }
                 }
                 PointerEvent::Up => {
                     if hit && v.interaction.pressed {
                         message = v.activation_message();
                     }
                     v.interaction.pressed = false;
+                    if let Some(input) = &mut v.input {
+                        input.dragging = false;
+                    }
                 }
                 PointerEvent::Move | PointerEvent::Leave => {
                     if !hit {
                         v.interaction.pressed = false;
+                    }
+                    if event == PointerEvent::Leave {
+                        if let Some(input) = &mut v.input {
+                            input.dragging = false;
+                        }
                     }
                 }
             }

@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod paint;
+mod text_input;
 mod indicator;
 mod surface;
 mod effects;
@@ -25,7 +26,8 @@ mod clip;
 pub mod blur;
 pub mod raster;
 
-pub use paint::{paint, paint_clipped, StyleOf};
+pub use paint::{paint, paint_clipped, paint_clipped_with_inputs, InputOf, StyleOf};
+pub use text_input::{TextInput, input_content_rect};
 pub use effects::visual_bounds;
 pub use surface::{pack_argb, Surface};
 

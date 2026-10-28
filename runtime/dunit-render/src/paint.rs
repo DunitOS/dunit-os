@@ -7,7 +7,10 @@ use dunit_ui::layout::Layout;
 use dunit_ui::tree::{NodeId, Tree};
 use dunit_ui::Rect;
 
-use crate::{surface::Surface, PaintResult};
+use crate::{surface::Surface, PaintResult, TextInput};
+
+/// Resolve retained input snapshots at their place in document paint order.
+pub type InputOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a TextInput>;
 
 /// A resolver from a node to its already-cascaded DSS style. Callers build these
 /// from [`dunit_style::cascade`]; the painter treats the result as read-only.
@@ -31,7 +34,16 @@ pub fn paint(
     if tree.is_empty() {
         return Ok(());
     }
-    paint_node(tree, layout, tree.root(), style_of, font, surface, false)
+    paint_node(
+        tree,
+        layout,
+        tree.root(),
+        style_of,
+        font,
+        surface,
+        false,
+        &|_| None,
+    )
 }
 
 /// Paint within `clip`, additionally containing each node and its descendants
@@ -46,10 +58,23 @@ pub fn paint_clipped(
     surface: &mut Surface,
     clip: Rect,
 ) -> PaintResult {
+    paint_clipped_with_inputs(tree, layout, style_of, font, surface, clip, &|_| None)
+}
+
+/// Paint retained input snapshots in document order, respecting ancestor clips.
+pub fn paint_clipped_with_inputs(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    clip: Rect,
+    input_of: InputOf<'_>,
+) -> PaintResult {
     let mut result = Ok(());
     if !tree.is_empty() {
         surface.with_clip(clip, |s| {
-            result = paint_node(tree, layout, tree.root(), style_of, font, s, true);
+            result = paint_node(tree, layout, tree.root(), style_of, font, s, true, input_of);
         });
     }
     result
@@ -63,6 +88,7 @@ fn paint_node(
     font: &Font,
     surface: &mut Surface,
     contained: bool,
+    input_of: InputOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     let style = style_of(id);
@@ -76,11 +102,13 @@ fn paint_node(
     let draw = |s: &mut Surface| {
         if rounded {
             s.with_rounded_clip(rect, style.number("radius").unwrap_or(0.), |s| {
-                paint_contents(tree, layout, id, &style, style_of, font, s, contained, true)
+                paint_contents(
+                    tree, layout, id, &style, style_of, font, s, contained, true, input_of,
+                )
             })
         } else {
             paint_contents(
-                tree, layout, id, &style, style_of, font, s, contained, false,
+                tree, layout, id, &style, style_of, font, s, contained, false, input_of,
             )
         }
     };
@@ -105,6 +133,7 @@ fn paint_contents(
     surface: &mut Surface,
     contained: bool,
     group: bool,
+    input_of: InputOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     surface.backdrop_blur(
@@ -149,7 +178,9 @@ fn paint_contents(
     }
 
     let tag = tree.node(id).kind.tag();
-    if dunit_style::indicator::Indicator::supports(tag) {
+    if let Some(input) = (tag == "Input").then(|| input_of(id)).flatten() {
+        input.paint(font, style, rect, surface);
+    } else if dunit_style::indicator::Indicator::supports(tag) {
         let [top, right, bottom, left] = style.padding().unwrap_or([0.; 4]);
         let content = Rect {
             x: rect.x + border + left,
@@ -183,7 +214,9 @@ fn paint_contents(
     }
 
     for &c in &tree.node(id).children {
-        paint_node(tree, layout, c, style_of, font, surface, contained)?;
+        paint_node(
+            tree, layout, c, style_of, font, surface, contained, input_of,
+        )?;
     }
     Ok(())
 }

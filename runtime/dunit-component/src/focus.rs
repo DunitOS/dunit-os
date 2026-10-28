@@ -49,7 +49,7 @@ impl<C: Component> Application<C> {
             .iter()
             .enumerate()
             .filter(|(index, v)| {
-                v.activation.is_some()
+                v.focusable()
                     && !v.interaction.disabled
                     && v.radio_group
                         .as_deref()
@@ -75,9 +75,12 @@ impl<C: Component> Application<C> {
     }
     fn set_focus(&mut self, target: &str) {
         self.view.visit_mut(&mut |v| {
-            v.interaction.focused =
-                v.activation.is_some() && !v.interaction.disabled && v.key == target;
+            v.interaction.focused = v.focusable() && !v.interaction.disabled && v.key == target;
             v.interaction.pressed = false;
+            if let Some(input) = &mut v.input {
+                input.dragging = false;
+                input.caret_visible = true;
+            }
         });
     }
     /// Arrow navigation selects an enabled member of the focused radio group.

@@ -4,6 +4,7 @@
 extern crate alloc;
 
 mod focus;
+mod input;
 mod interaction;
 mod motion;
 mod renderer;
@@ -14,6 +15,7 @@ pub use dunit_style::{self as style, Cascade};
 pub use dunit_text::Font;
 pub use dunit_ui::{Align, Attrs, Edges, Rect, Sizing};
 pub use focus::Navigation;
+pub use input::{EditCommand, InputOptions, TextEditor};
 pub use interaction::PointerEvent;
 pub use renderer::{Damage, RenderStats, Renderer};
 pub use theme::Theme;
@@ -28,6 +30,7 @@ pub enum UiError {
     TreeLimit,
     InvalidClass,
     InvalidRadioGroup,
+    InvalidInput,
     InvalidLayout,
     InvalidSize,
     Allocation,
@@ -68,13 +71,12 @@ impl<C: Component> Application<C> {
         self.view = view;
         Ok(())
     }
-    /// Dispatch focused-button navigation/activation before root shortcuts.
-    /// Focused text editing is not yet implemented.
+    /// Dispatch focused text editing and control navigation before root shortcuts.
     pub fn key(&mut self, key: Key) -> Result<bool>
     where
         C::Message: Clone,
     {
-        if self.widget_key(key)? {
+        if self.text_key(key)? || self.widget_key(key)? {
             return Ok(true);
         }
         let message = self

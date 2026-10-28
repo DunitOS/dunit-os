@@ -32,6 +32,7 @@ pub struct View<Msg> {
     pub(crate) activation: Option<Msg>,
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
+    pub(crate) input: Option<crate::input::InputBinding<Msg>>,
 }
 impl<Msg> View<Msg> {
     fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
@@ -46,6 +47,7 @@ impl<Msg> View<Msg> {
             activation: None,
             interaction: dunit_widgets::Interaction::default(),
             radio_group: None,
+            input: None,
         }
     }
     pub fn text(key: impl Into<String>, text: impl Into<String>) -> Self {
@@ -117,6 +119,32 @@ impl<Msg> View<Msg> {
         view.radio_group = Some(group.into());
         view
     }
+    /// Controlled single-line field. The callback maps a proposed value to a
+    /// model message; the next view determines whether that edit is accepted.
+    pub fn input(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        value: impl Into<String>,
+        on_change: fn(String) -> Msg,
+        options: crate::InputOptions,
+    ) -> Self {
+        let value = value.into();
+        let mut view = Self::new(
+            key,
+            Kind::Element(String::from("Input")),
+            Some(value.clone()),
+            Vec::new(),
+        );
+        view.input = Some(crate::input::InputBinding {
+            label: label.into(),
+            options,
+            editor: crate::TextEditor::new(value),
+            on_change,
+            dragging: false,
+            caret_visible: true,
+        });
+        view
+    }
     /// Disabled buttons cannot receive focus, presses or activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.interaction.disabled = disabled;
@@ -126,6 +154,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.input.is_some() {
+            return Some("textbox");
+        }
         self.activation.as_ref()?;
         Some(match self.kind.tag() {
             "Checkbox" => "checkbox",
@@ -142,6 +173,9 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(input) = &self.input {
+            return Some(&input.label);
+        }
         self.activation.as_ref().and(self.text.as_deref())
     }
     pub fn column(key: impl Into<String>, children: Vec<Self>) -> Self {
@@ -214,6 +248,15 @@ impl<Msg> View<Msg> {
         }
         if !names.insert(&self.key) {
             return Err(UiError::DuplicateKey);
+        }
+        if let Some(input) = &self.input {
+            let value = self.text.as_deref().unwrap_or("");
+            if !crate::TextEditor::valid_text(value)
+                || !crate::TextEditor::valid_text(&input.options.placeholder)
+                || value.chars().count() > input.options.max_chars
+            {
+                return Err(UiError::InvalidInput);
+            }
         }
         if let Some(group) = self.radio_group.as_deref() {
             if group.trim().is_empty()
