@@ -23,7 +23,12 @@ pub struct NodeStyle<'a> {
 impl<'a> NodeStyle<'a> {
     /// A node with just an element tag (no id, classes or states).
     pub fn element(tag: &'a str) -> NodeStyle<'a> {
-        NodeStyle { element: tag, id: None, classes: &[], states: &[] }
+        NodeStyle {
+            element: tag,
+            id: None,
+            classes: &[],
+            states: &[],
+        }
     }
 }
 
@@ -83,6 +88,12 @@ impl Style {
     /// The raw value for `property`, if set.
     pub fn get(&self, property: &str) -> Option<&Value> {
         self.props.get(property)
+    }
+
+    /// Override one resolved value. Callers are responsible for type/range
+    /// validation; animation uses this only with interpolated validated values.
+    pub fn set(&mut self, property: impl Into<String>, value: Value) -> Option<Value> {
+        self.props.insert(property.into(), value)
     }
 
     /// A colour-typed property.
@@ -168,9 +179,7 @@ impl Cascade {
                 }
             }
         }
-        matched.sort_by(|a, b| {
-            a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2))
-        });
+        matched.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
 
         let mut props: BTreeMap<String, Value> = BTreeMap::new();
         for (_, _, _, li, ri) in matched {
@@ -181,4 +190,3 @@ impl Cascade {
         Style { props }
     }
 }
-

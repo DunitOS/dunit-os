@@ -20,9 +20,9 @@
 //! A selector is one compound of an optional element tag followed by any mix of
 //! `#id`, `.class` and `:state`. Comma separates selectors that share a block.
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::collections::BTreeMap;
 
 use crate::value::Value;
 use crate::{Result, StyleError};
@@ -96,11 +96,18 @@ fn parse_seeded(src: &str, tokens: &crate::Tokens, strict: bool) -> Result<Style
         let selectors = p.parse_selector_list()?;
         let decls = p.parse_block()?;
         for sel in selectors {
-            rules.push(Rule { selector: sel, declarations: decls.clone(), order });
+            rules.push(Rule {
+                selector: sel,
+                declarations: decls.clone(),
+                order,
+            });
             order += 1;
         }
     }
-    Ok(Stylesheet { rules, tokens: crate::Tokens { words: p.vars } })
+    Ok(Stylesheet {
+        rules,
+        tokens: crate::Tokens { words: p.vars },
+    })
 }
 
 struct Parser<'a> {
@@ -157,18 +164,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn is_ident_start(c: u8) -> bool {
-        c.is_ascii_alphabetic() || c == b'_'
-    }
-
-    fn is_ident_char(c: u8) -> bool {
-        c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
-    }
-
     fn parse_ident(&mut self) -> Result<String> {
         let start = self.pos;
         match self.peek() {
-            Some(c) if Self::is_ident_start(c) => {}
+            Some(c) if is_ident_start(c) => {}
             _ => {
                 return Err(StyleError::Unexpected {
                     line: self.line,
@@ -177,7 +176,7 @@ impl<'a> Parser<'a> {
             }
         }
         while let Some(c) = self.peek() {
-            if Self::is_ident_char(c) {
+            if is_ident_char(c) {
                 self.bump();
             } else {
                 break;
@@ -227,7 +226,7 @@ impl<'a> Parser<'a> {
     fn parse_selector(&mut self) -> Result<Selector> {
         let mut sel = Selector::default();
         if let Some(c) = self.peek() {
-            if Self::is_ident_start(c) {
+            if is_ident_start(c) {
                 sel.element = Some(self.parse_ident()?);
             }
         }
@@ -276,7 +275,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 None => {
-                    return Err(StyleError::UnexpectedEof(String::from("unterminated block")))
+                    return Err(StyleError::UnexpectedEof(String::from(
+                        "unterminated block",
+                    )))
                 }
                 _ => decls.push(self.parse_declaration()?),
             }
@@ -297,7 +298,10 @@ impl<'a> Parser<'a> {
                 what: String::from("empty declaration value"),
             });
         }
-        Ok(Declaration { property, value: words_to_value(&words) })
+        Ok(Declaration {
+            property,
+            value: words_to_value(&words),
+        })
     }
 
     /// Read the value words up to `;` or `}`, expanding `$var` references and
@@ -308,7 +312,9 @@ impl<'a> Parser<'a> {
             self.skip_value_ws();
             match self.peek() {
                 None => {
-                    return Err(StyleError::UnexpectedEof(String::from("unterminated value")))
+                    return Err(StyleError::UnexpectedEof(String::from(
+                        "unterminated value",
+                    )))
                 }
                 Some(b';') | Some(b'}') => break,
                 _ => {
@@ -366,7 +372,11 @@ impl<'a> Parser<'a> {
         loop {
             let c = match self.bump() {
                 Some(c) => c,
-                None => return Err(StyleError::UnexpectedEof(String::from("unterminated string"))),
+                None => {
+                    return Err(StyleError::UnexpectedEof(String::from(
+                        "unterminated string",
+                    )))
+                }
             };
             match c {
                 b'"' => return Ok(out),
@@ -410,6 +420,15 @@ pub(crate) fn words_to_value(words: &[String]) -> Value {
     }
 }
 
+fn is_ident_start(c: u8) -> bool {
+    c.is_ascii_alphabetic() || c == b'_'
+}
 
+fn is_ident_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'-'
+}
 
-
+/// Whether a complete name follows the DSS identifier grammar.
+pub fn valid_identifier(name: &str) -> bool {
+    name.as_bytes().first().copied().is_some_and(is_ident_start) && name.bytes().all(is_ident_char)
+}

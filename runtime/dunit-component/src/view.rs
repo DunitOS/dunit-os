@@ -26,6 +26,7 @@ pub struct View<Msg> {
     pub(crate) attrs: Attrs,
     pub(crate) text: Option<String>,
     pub(crate) children: Vec<View<Msg>>,
+    pub(crate) classes: Vec<String>,
     pub(crate) bindings: Vec<(Key, Msg)>,
 }
 impl<Msg> View<Msg> {
@@ -36,6 +37,7 @@ impl<Msg> View<Msg> {
             attrs: Attrs::default(),
             text,
             children,
+            classes: Vec::new(),
             bindings: Vec::new(),
         }
     }
@@ -63,6 +65,21 @@ impl<Msg> View<Msg> {
         self.attrs = attrs;
         self
     }
+    /// Add a DSS appearance class chosen by the model. This does not add widget
+    /// interaction behaviour. Names follow the stylesheet identifier grammar.
+    pub fn class(mut self, name: impl Into<String>) -> Self {
+        self.classes.push(name.into());
+        self
+    }
+    pub fn classes(&self) -> &[String] {
+        &self.classes
+    }
+    pub(crate) fn flatten<'a>(&'a self, output: &mut Vec<&'a Self>) {
+        output.push(self);
+        for child in &self.children {
+            child.flatten(output);
+        }
+    }
     /// Bind a root-view shortcut. Duplicate or nested bindings are errors.
     pub fn on_key(mut self, key: Key, message: Msg) -> Self {
         self.bindings.push((key, message));
@@ -84,6 +101,13 @@ impl<Msg> View<Msg> {
     fn check<'a>(&'a self, depth: usize, names: &mut BTreeSet<&'a str>) -> Result<()> {
         if depth >= 64 || names.len() >= 4096 {
             return Err(UiError::TreeLimit);
+        }
+        if self
+            .classes
+            .iter()
+            .any(|name| !dunit_style::parse::valid_identifier(name))
+        {
+            return Err(UiError::InvalidClass);
         }
         if self.key.is_empty() {
             return Err(UiError::EmptyKey);

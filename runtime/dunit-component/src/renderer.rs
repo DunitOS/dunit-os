@@ -29,11 +29,16 @@ pub struct RenderStats {
     pub damage: Option<Damage>,
     /// Number of distinct pixels reset/repainted, not a composition/frame time.
     pub damaged_pixels: u64,
+    /// Number of paint-property transitions still in progress after this sample.
+    pub active_transitions: usize,
+    /// Caller-supplied monotonic milliseconds; None for immediate rendering.
+    pub animation_time_ms: Option<u64>,
 }
 struct Snapshot {
     tree: Tree,
     layout: Layout,
     styles: Vec<Style>,
+    targets: Vec<Style>,
 }
 
 /// Retains a private CPU canvas; no published shared buffer is ever mutated.
@@ -44,6 +49,8 @@ pub struct Renderer {
     size: (u32, u32),
     pixels: Vec<u32>,
     previous: Option<Snapshot>,
+    motion: crate::motion::Motion,
+    motion_enabled: bool,
 }
 impl Renderer {
     pub fn new(font: Font, cascade: Cascade, background: Color) -> Self {
@@ -54,6 +61,8 @@ impl Renderer {
             size: (0, 0),
             pixels: Vec::new(),
             previous: None,
+            motion: crate::motion::Motion::default(),
+            motion_enabled: true,
         }
     }
     pub fn pixels(&self) -> &[u32] {
@@ -72,6 +81,22 @@ impl Renderer {
         self.cascade = cascade;
         self.background = background;
         self.previous = None;
+        self.motion.clear();
+    }
+    /// Stop sampling. The next render settles to the current target values.
+    pub fn cancel_motion(&mut self) {
+        self.motion.clear();
+    }
+    pub fn is_animating(&self) -> bool {
+        self.motion.active() > 0
+    }
+    /// Disable transitions or allow future timed changes. The next render
+    /// settles disabled motion to its target, preserving application state.
+    pub fn set_motion_enabled(&mut self, enabled: bool) {
+        self.motion_enabled = enabled;
+        if !enabled {
+            self.motion.clear();
+        }
     }
     pub fn render<Msg>(
         &mut self,
@@ -79,21 +104,57 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<RenderStats> {
+        self.render_inner(view, width, height, None)
+    }
+    /// Render using an explicit monotonic clock. Immediate `render` remains
+    /// deterministic and settles all properties to their targets.
+    pub fn render_at<Msg>(
+        &mut self,
+        view: &View<Msg>,
+        width: u32,
+        height: u32,
+        now_ms: u64,
+    ) -> Result<RenderStats> {
+        self.render_inner(view, width, height, Some(now_ms))
+    }
+    fn render_inner<Msg>(
+        &mut self,
+        view: &View<Msg>,
+        width: u32,
+        height: u32,
+        now: Option<u64>,
+    ) -> Result<RenderStats> {
         if width == 0 || height == 0 {
             return Err(UiError::InvalidSize);
         }
         let tree = view.tree()?;
-        let styles: Vec<_> = tree
+        let mut views = Vec::new();
+        view.flatten(&mut views);
+        let targets: Vec<_> = tree
             .iter()
-            .map(|n| {
+            .zip(views)
+            .map(|(n, v)| {
+                let classes: Vec<_> = v.classes.iter().map(|c| c.as_str()).collect();
                 self.cascade.resolve(&NodeStyle {
                     element: n.kind.tag(),
                     id: n.name.as_deref(),
-                    classes: &[],
+                    classes: &classes,
                     states: &[],
                 })
             })
             .collect();
+        let resized = self.size != (width, height);
+        if resized {
+            self.motion.clear();
+        }
+        let old = self
+            .previous
+            .as_ref()
+            .filter(|_| !resized)
+            .map(|p| (&p.tree, &p.targets[..], &p.styles[..]));
+        let styles = self
+            .motion
+            .styles(&tree, &targets, old, now, self.motion_enabled);
         let tree = container_padding(&tree, &styles)?;
         let fm = FontMeasure { font: &self.font };
         let layout = layout_measured(&tree, width as f32, height as f32, &|id| {
@@ -112,6 +173,7 @@ impl Renderer {
             tree,
             layout,
             styles,
+            targets,
         };
         let full = Damage {
             x: 0,
@@ -119,7 +181,6 @@ impl Renderer {
             width,
             height,
         };
-        let resized = self.size != (width, height);
         let mut damage = match self.previous.as_ref().filter(|_| !resized) {
             Some(old) => diff(old, &next, width, height),
             None => Some(full),
@@ -166,6 +227,7 @@ impl Renderer {
                 // A scratch failure may leave a partially painted private canvas.
                 // Never diff against it or publish it as a completed frame.
                 self.previous = None;
+                self.motion.clear();
                 return Err(UiError::Allocation);
             }
         }
@@ -173,6 +235,8 @@ impl Renderer {
         Ok(RenderStats {
             damaged_pixels: damage.map_or(0, |d| d.width as u64 * d.height as u64),
             damage,
+            active_transitions: self.motion.active(),
+            animation_time_ms: now,
         })
     }
 }

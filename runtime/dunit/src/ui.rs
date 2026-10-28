@@ -15,7 +15,8 @@ pub fn load_theme(overlay: &str) -> NativeResult<(Theme, Font)> {
 fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
-        UiError::DuplicateKey
+        UiError::InvalidClass
+        | UiError::DuplicateKey
         | UiError::EmptyKey
         | UiError::DuplicateBinding
         | UiError::ChildBinding
@@ -24,6 +25,9 @@ fn native(error: UiError) -> Error {
         | UiError::InvalidSize => libdunit::EINVAL,
     })
 }
+
+// Target interval for automatic sampling, not a proven 16 ms rendering budget.
+const MOTION_FRAME: Duration = Duration::from_millis(16);
 
 /// One root component in the existing single-window IPC session. Shortcuts are
 /// dispatched through `update`; resize redraws at the compositor's geometry.
@@ -40,6 +44,9 @@ pub struct ComponentWindow<C: Component> {
     theme_error: Option<Error>,
     theme_error_detail: Option<alloc::string::String>,
     theme_checked: Option<crate::time::Instant>,
+    motion_clock: crate::time::Instant,
+    motion_frame: Option<crate::time::Instant>,
+    motion_requested: bool,
 }
 impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
@@ -55,6 +62,9 @@ impl<C: Component> ComponentWindow<C> {
             theme_error: None,
             theme_error_detail: None,
             theme_checked: None,
+            motion_clock: crate::time::Instant::now()?,
+            motion_frame: None,
+            motion_requested: true,
         };
         ui.redraw()?;
         Ok(ui)
@@ -71,7 +81,8 @@ impl<C: Component> ComponentWindow<C> {
         overlay: &str,
     ) -> NativeResult<Self> {
         let (watcher, theme, font) = crate::ui_theme::Watcher::open(overlay)?;
-        let renderer = Renderer::new(font, theme.cascade, theme.background);
+        let mut renderer = Renderer::new(font, theme.cascade, theme.background);
+        renderer.set_motion_enabled(watcher.animations_enabled());
         let mut ui = Self::open(width, height, component, renderer)?;
         ui.theme = Some(watcher);
         ui.theme_checked = Some(crate::time::Instant::now()?);
@@ -108,11 +119,30 @@ impl<C: Component> ComponentWindow<C> {
             return Ok(false);
         };
         self.renderer.set_theme(theme, font);
+        self.renderer
+            .set_motion_enabled(self.motion_requested && watcher.animations_enabled());
         self.redraw()?;
         self.theme = Some(watcher);
         self.theme_error = None;
         self.theme_error_detail = None;
         Ok(true)
+    }
+    pub fn is_animating(&self) -> bool {
+        self.renderer.is_animating()
+    }
+    /// Applications may reduce motion. Themed windows also honor the desktop's
+    /// [effects] anim setting; changing the mode settles the next frame.
+    pub fn set_motion_enabled(&mut self, enabled: bool) -> NativeResult<()> {
+        if self.failed {
+            return Err(Error(libdunit::EPIPE));
+        }
+        self.motion_requested = enabled;
+        let global = self
+            .theme
+            .as_ref()
+            .map_or(true, |theme| theme.animations_enabled());
+        self.renderer.set_motion_enabled(enabled && global);
+        self.redraw()
     }
     pub fn component(&self) -> &C {
         self.application.component()
@@ -147,13 +177,18 @@ impl<C: Component> ComponentWindow<C> {
         self.redraw()
     }
     fn redraw(&mut self) -> NativeResult<()> {
+        let clock = self.motion_clock;
+        let mut sampled = None;
         let renderer = &mut self.renderer;
         let view = self.application.view();
         let last = &mut self.last_render;
         let uploaded = &mut self.uploaded_pixels;
         let result = self.window.try_draw_damage(|frame| {
             let (w, h) = frame.size();
-            *last = renderer.render(view, w, h).map_err(native)?;
+            sampled = Some(crate::time::Instant::now()?);
+            let now =
+                u64::try_from(clock.elapsed()?.as_millis()).map_err(|_| Error(libdunit::EINVAL))?;
+            *last = renderer.render_at(view, w, h, now).map_err(native)?;
             if last.damage.is_none() && !frame.requires_full_frame() {
                 *uploaded = 0;
                 return Ok(None);
@@ -173,6 +208,9 @@ impl<C: Component> ComponentWindow<C> {
             Ok(Some(damage))
         });
         self.failed |= result.is_err();
+        if result.is_ok() {
+            self.motion_frame = sampled;
+        }
         result
     }
     pub fn next_event(&mut self, timeout: Duration) -> NativeResult<Option<WindowEvent>>
@@ -203,7 +241,21 @@ impl<C: Component> ComponentWindow<C> {
             } else {
                 remaining
             };
+            let slice = if self.renderer.is_animating() {
+                let elapsed = self
+                    .motion_frame
+                    .map(|t| t.elapsed())
+                    .transpose()?
+                    .unwrap_or_default();
+                slice.min(MOTION_FRAME.saturating_sub(elapsed))
+            } else {
+                slice
+            };
             let event = self.window.next_event(slice)?;
+            if matches!(event, Some(WindowEvent::CloseRequested)) {
+                self.renderer.cancel_motion();
+                break event;
+            }
             if self.theme.is_some()
                 && self
                     .theme_checked
@@ -228,6 +280,15 @@ impl<C: Component> ComponentWindow<C> {
                     self.theme_error = Some(error);
                 }
                 self.theme_checked = Some(crate::time::Instant::now()?);
+            }
+            if self.renderer.is_animating()
+                && self
+                    .motion_frame
+                    .map(|t| t.elapsed())
+                    .transpose()?
+                    .map_or(true, |elapsed| elapsed >= MOTION_FRAME)
+            {
+                self.redraw()?;
             }
             if event.is_some() || start.elapsed()? >= timeout {
                 break event;

@@ -35,6 +35,7 @@ struct Source {
     font: String,
     profile: String,
     base: String,
+    animations: bool,
 }
 impl Source {
     fn read() -> Result<Self> {
@@ -49,6 +50,7 @@ impl Source {
             font: desktop.font.as_str().into(),
             profile: text(desktop.sdk_theme.as_str())?,
             base: text(BASE)?,
+            animations: config.settings.effects.anim,
         })
     }
     fn theme(&self, overlay: &str) -> core::result::Result<Theme, Failure> {
@@ -66,6 +68,9 @@ pub(crate) struct Watcher {
     overlay: String,
 }
 impl Watcher {
+    pub fn animations_enabled(&self) -> bool {
+        self.source.animations
+    }
     pub fn open(overlay: &str) -> Result<(Self, Theme, Font)> {
         let source = Source::read()?;
         let theme = source.theme(overlay).map_err(|failure| {

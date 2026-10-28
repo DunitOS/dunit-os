@@ -63,6 +63,7 @@ impl Theme {
                                 || style::effects::Shadow::parse(value).is_some()
                         }
                         "backdrop-blur" => valid_number(0., 64.),
+                        "transition" => crate::motion::declarations(value).is_some(),
                         "clip" => matches!(value.as_keyword(), Some("rect" | "rounded")),
                         "font-size" => valid_number(1., 512.),
                         "radius" => valid_number(0., 1024.),

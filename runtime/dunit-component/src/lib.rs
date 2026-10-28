@@ -4,6 +4,7 @@
 extern crate alloc;
 
 mod renderer;
+mod motion;
 mod view;
 mod theme;
 pub use theme::Theme;
@@ -21,6 +22,7 @@ pub enum UiError {
     DuplicateBinding,
     ChildBinding,
     TreeLimit,
+    InvalidClass,
     InvalidLayout,
     InvalidSize,
     Allocation,

@@ -32,7 +32,13 @@ impl Easing {
 
     /// Apply the curve to a normalised time, clamping to `0..=1`.
     pub fn apply(self, t: f32) -> f32 {
-        let t = if t < 0.0 { 0.0 } else if t > 1.0 { 1.0 } else { t };
+        let t = if t < 0.0 {
+            0.0
+        } else if t > 1.0 {
+            1.0
+        } else {
+            t
+        };
         match self {
             Easing::Linear => t,
             Easing::EaseIn => t * t,
@@ -112,7 +118,13 @@ pub fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 pub fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     let ch = |x: u8, y: u8| -> u8 {
         let v = lerp_f32(x as f32, y as f32, t) + 0.5;
-        let v = if v < 0.0 { 0.0 } else if v > 255.0 { 255.0 } else { v };
+        let v = if v < 0.0 {
+            0.0
+        } else if v > 255.0 {
+            255.0
+        } else {
+            v
+        };
         v as u8
     };
     Color::rgba(ch(a.r, b.r), ch(a.g, b.g), ch(a.b, b.b), ch(a.a, b.a))
@@ -139,4 +151,51 @@ pub fn lerp_value(from: &Value, to: &Value, t: f32) -> Value {
 /// Interpolate from `from` to `to` at raw progress `t`, shaped by `easing`.
 pub fn interpolate(from: &Value, to: &Value, t: f32, easing: Easing) -> Value {
     lerp_value(from, to, easing.apply(t))
+}
+
+impl Transition {
+    /// Strict transition grammar for SDK declarations. The legacy decoder stays
+    /// permissive for existing desktop users. Durations are mandatory, finite,
+    /// and within 0..=60 seconds; repeated properties are rejected.
+    pub fn parse_strict(value: &Value) -> Option<Vec<Self>> {
+        if value.as_keyword() == Some("none") {
+            return Some(Vec::new());
+        }
+        let items = value
+            .as_list()
+            .unwrap_or_else(|| core::slice::from_ref(value));
+        let mut transitions = Vec::new();
+        let mut names = alloc::collections::BTreeSet::new();
+        let mut index = 0;
+        while index < items.len() {
+            let property = items[index].as_keyword()?;
+            if !crate::parse::valid_identifier(property) || !names.insert(property) {
+                return None;
+            }
+            index += 1;
+            let duration = items.get(index)?;
+            let duration_ms = duration.as_duration().or_else(|| duration.as_number())?;
+            if !duration_ms.is_finite() || !(0. ..=60_000.).contains(&duration_ms) {
+                return None;
+            }
+            index += 1;
+            let easing = items
+                .get(index)
+                .and_then(Value::as_keyword)
+                .and_then(Easing::parse);
+            if easing.is_some() {
+                index += 1;
+            }
+            transitions.push(Self {
+                property: property.into(),
+                duration_ms,
+                easing: easing.unwrap_or_default(),
+            });
+        }
+        if transitions.is_empty() {
+            None
+        } else {
+            Some(transitions)
+        }
+    }
 }
