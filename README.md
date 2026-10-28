@@ -133,7 +133,7 @@ To build and check the desktop in QEMU:
 ```bash
 python3 tools/qemu_test.py --build --config limine_test_gui.conf \
   --markers-file tools/gui_smoke_markers.json \
-  --ready-marker 'gui_server: desktop ready' --timeout 300 --linger 8
+  --ready-marker 'gui_server: desktop ready' --timeout 300 --linger 25
 ```
 
 ## A look around
@@ -183,7 +183,9 @@ desktop too: stable opaque windows can update just the affected screen area;
 scene changes and effects use a full redraw.
 The [shared SDK theme](docs/sdk/themes.md) supplies colors, typography and
 spacing. Themed component windows update when the profile changes and keep
-their previous appearance if a new profile is invalid.
+their previous appearance if a new profile is invalid. DSS can also style
+rounded fills and borders, gradients and soft shadows; the shared renderer
+cleans up the old shadow when an element changes size.
 Widgets and CLI/TUI desktop launching are still being built.
 See the [SDK progress and contract](docs/sdk/m7-start.md).
 

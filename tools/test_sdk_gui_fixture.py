@@ -16,12 +16,12 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
     fixture = fixture or args.fixture
-    source_name = {'resize': 'sdk_window_resize', 'component': 'sdk_component', 'theme': 'sdk_theme'}[fixture]
+    source_name = {'resize': 'sdk_window_resize', 'component': 'sdk_component', 'theme': 'sdk_theme', 'effects': 'sdk_effects'}[fixture]
     app_id = f'sdk_{fixture}_fixture'
     config_name = f'sdk-{fixture}.toml'
 
@@ -52,7 +52,7 @@ def main(fixture=None):
             metadata.parent.mkdir(parents=True)
             metadata.write_text(installed_manifest(app))
             shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
-            if fixture == 'theme':
+            if fixture in ('theme', 'effects'):
                 shutil.copyfile(ROOT / 'assets/dwm/sdk/dark.dss', overlay / 'sdk-theme.dss')
             subprocess.run([cargo(), 'build', '--release', '--features', 'boot-smoke-tests',
                 '-Z', 'build-std=core,alloc,compiler_builtins', '-Z', 'build-std-features=compiler-builtins-mem',
@@ -73,9 +73,9 @@ def main(fixture=None):
                 status=1
         if status:
             print((ROOT / 'build/qemu-serial.log').read_text(errors='replace')[-16000:])
-        if not status and fixture == 'theme':
+        if not status and fixture in ('theme', 'effects'):
             from sdk_theme_pixels import verify
-            verify(ROOT)
+            verify(ROOT, fixture)
         return status
 
 

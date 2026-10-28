@@ -3,7 +3,7 @@
 `ComponentWindow::open_themed(width, height, component)` loads the configured
 font and SDK profile. It gives Text and Row/Column/Stack/Grid a shared default
 appearance without application styles. System Monitor and the generated GUI
-starter use this path. Interactive widget behaviour and advanced painting
+starter use this path. Interactive widget behaviour, backdrop blur and animation
 remain separate M7 work.
 
 The desktop document selects the profile:
@@ -53,11 +53,47 @@ A complete SDK profile defines:
 
 `Theme::parse(profile, base, overlay)` is pure and shared by host and guest.
 It validates tokens and the supported color, font-size, padding, border-width
-and radius declarations before constructing the cascade. Optional application
+radius, background-gradient and shadow declarations before constructing the cascade. Optional application
 rules use `open_themed_with_style(..., overlay)`; they can reference profile
-values. Local overlay definitions stay local to that layer. Radius, border and
-motion values are queryable; their presence does not implement rounded widget
-painting or widget animations yet.
+values. Local overlay definitions stay local to that layer. Radius and border now drive shared rounded painting. The packaged optional
+`cards.dss` layer also uses `shadow`, `shadow-y` and `shadow-spread` profile
+values; custom profiles only need these additional names when using that layer.
+Motion values remain queryable; widget animations are separate work.
+
+## Rounded fills, gradients and shadows
+
+```css
+Text#card {
+    radius: $radius;
+    border-width: $border;
+    border-color: $line;
+    background-gradient: vertical $surface $line;
+    shadow: 0 $shadow-y $shadow-spread $shadow;
+}
+```
+
+`background-gradient` accepts `vertical` or `horizontal` followed by exactly two
+colors. It replaces `background`; `none` restores the flat fill. Endpoints stay
+anchored to the original layout box during clipped repaint. RGBA values are
+interpolated linearly per channel. `radius` rounds the fill and inside border;
+text and descendants retain rectangular layout clips, rather than acquiring a
+rounded overflow mask. Radius is clamped to half the smaller box dimension.
+
+`shadow` accepts x/y offset, spread and color, or `none`. Offsets range from
+−1024 to 1024 pixels and spread from 0 to 64. Spread is a bounded nested-layer
+falloff, not a Gaussian blur. The shadow excludes the node silhouette and may
+extend beyond its box, but remains inside its ancestor layout clip and the
+window canvas. The painter skips the covered centre of each layer. Transparent
+or zero-spread shadows paint nothing.
+
+Retained rendering invalidates both old and new visual bounds, including shadow
+extent and pixel rounding. It then restores the background and repaints all
+intersections in stacking order. This removes old shadows after shrinking or
+moving a node and preserves no-op frame skipping. The desktop decoration painter
+and SDK use the same integer rounded-corner coverage and RGB interpolation
+kernels from `dunit_render::raster`; the desktop keeps its existing shadow policy.
+These effects add no syscall or GUI protocol changes. Backdrop blur, rounded
+window shapes, widget animations and the whole-scene 16 ms budget remain open.
 
 ## Reload and errors
 
@@ -113,3 +149,23 @@ on TCG; boot/runtime stress/IPC and full desktop smoke passed on KVM. The prior
 component-damage contract passed on TCG. ABI generation stayed in sync at 89
 syscalls, 25 errno and 7 rights.
 Compiler warnings remained 13 within the existing budget of 99.
+
+
+The effects gallery has a separate reviewed baseline in
+`tools/fixtures/sdk_effects_golden.json`. Run
+`python3 tools/test_sdk_gui_fixture.py effects --accel tcg` to check four actual
+framebuffer captures: dark, a partially repainted narrower card, light, and dark
+restored. The native fixture also compares the narrowed retained canvas against
+a fresh full render and requires less than full-window CPU damage. The original
+no-application-style theme golden remains a separate unchanged regression.
+
+
+Verified effects on 28 October 2026: 174 host checks passed (13 render, 14
+component, 17 style, 13 SDK, 101 desktop/config/console, 8 CLI and 8 image-profile).
+The effects gallery passed on TCG and KVM, with all four actual framebuffer
+captures matching the reviewed baseline. The original theme golden and component
+damage/resize fixture passed on TCG, including two 15,360-pixel partial frames.
+Full desktop smoke passed on KVM with all 30 required markers and no forbidden
+markers. The ABI remained at 89 syscalls, 25 errno and 7 rights. This verifies
+correctness; it does not establish the remaining whole-scene 16 ms frame budget.
+The warnings check remained at 13 against the existing budget of 99.

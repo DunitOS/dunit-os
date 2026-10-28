@@ -12,3 +12,7 @@ $space-small: 4;
 $radius: 6;
 $border: 1;
 $motion-fast: 160ms;
+
+$shadow: #00000090;
+$shadow-y: 4;
+$shadow-spread: 10;

@@ -1,0 +1,11 @@
+/* Optional SDK card appearance, layered over base.dss. */
+Text#card {
+    background-gradient: vertical $surface $line;
+    color: $text;
+    font-size: $font-title;
+    padding: $space;
+    radius: $radius;
+    border-width: $border;
+    border-color: $line;
+    shadow: 0 $shadow-y $shadow-spread $shadow;
+}

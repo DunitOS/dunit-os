@@ -12,19 +12,23 @@ def rgb_hash(data):
     return value
 
 
-def verify(root: Path):
+def verify(root: Path, fixture="theme"):
+    marker = "SDKTHEME" if fixture == "theme" else "SDKEFFECTS"
+    labels = {"dark", "light", "restored"}
+    if fixture == "effects":
+        labels.add("narrow")
     serial = (root / 'build/qemu-serial.full.log').read_text(errors='replace')
-    expected = dict(re.findall(r'\[SDKTHEME\] (dark|light|restored) hash=([0-9a-f]{16})', serial))
-    if set(expected) != {'dark', 'light', 'restored'}:
+    expected = dict(re.findall(rf'\[{marker}\] (dark|narrow|light|restored) hash=([0-9a-f]{{16}})', serial))
+    if set(expected) != labels:
         raise RuntimeError('Theme fixture did not report all native pixel hashes')
-    golden = json.loads((root / 'tools/fixtures/sdk_theme_golden.json').read_text())
+    golden = json.loads((root / f'tools/fixtures/sdk_{fixture}_golden.json').read_text())
     if golden['version'] != 1 or expected != golden['rgb_fnv1a64']:
         raise RuntimeError('Rendered defaults differ from the reviewed theme golden')
     if hashlib.sha256((root / 'assets/fonts/DejaVuSans.ttf').read_bytes()).hexdigest() != golden['font_sha256']:
         raise RuntimeError('Theme golden font changed; review the visual baseline')
     cw, ch = golden['width'], golden['height']
     for label, digest in expected.items():
-        raw = (root / f'build/sdk-theme-{label}.ppm').read_bytes()
+        raw = (root / f'build/sdk-{fixture}-{label}.ppm').read_bytes()
         header = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s', raw)
         if not header:
             raise RuntimeError('Unexpected QEMU screendump format')
@@ -52,4 +56,4 @@ def verify(root: Path):
                 break
         if matched is None:
             raise RuntimeError(f'{label}: actual framebuffer differs from the native rendered canvas')
-        print(f'[SDKTHEME] framebuffer {label} {cw}x{ch} at {matched}: exact pixels OK')
+        print(f'[{marker}] framebuffer {label} {cw}x{ch} at {matched}: exact pixels OK')
