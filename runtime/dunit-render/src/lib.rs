@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod paint;
+mod indicator;
 mod surface;
 mod effects;
 mod clip;

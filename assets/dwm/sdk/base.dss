@@ -4,8 +4,22 @@ Text { color: $text; font-size: $font-size; padding: $space-small; }
 Text#title { color: $accent; font-size: $font-title; }
 
 // Button behaviour is supplied by the SDK; DSS describes its states only.
-Button { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; }
-Button:hover { border-color: $accent; }
-Button:focus { border-color: $accent; }
-Button:active { background: $accent; color: $window-bg; }
-Button:disabled { color: $muted; border-color: $line; }
+Button, ToggleButton { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; }
+Button:hover, ToggleButton:hover { border-color: $accent; }
+Button:focus, ToggleButton:focus { border-color: $accent; }
+Button:active, ToggleButton:active { background: $accent; color: $window-bg; }
+Button:disabled, ToggleButton:disabled { color: $muted; border-color: $line; }
+
+ToggleButton:checked { background: $accent; color: $window-bg; }
+ToggleButton:disabled:checked { color: $muted; }
+Checkbox, Radio, Switch { border-width: $border; border-color: $indicator-off; radius: $radius; color: $text; font-size: $font-size; padding: $space-small; indicator-width: $indicator-size; indicator-height: $indicator-size; indicator-gap: $indicator-gap; indicator-border-width: $border; indicator-radius: $indicator-radius; indicator-background: $surface; indicator-border-color: $line; indicator-mark-color: $indicator-off; indicator-mark-size: $indicator-mark-size; indicator-inset: $indicator-inset; indicator-position: $indicator-start; }
+Radio { indicator-radius: $indicator-round-radius; indicator-mark-size: $indicator-dot-size; }
+Switch { indicator-width: $switch-width; indicator-radius: $indicator-round-radius; indicator-mark-color: $text; }
+Checkbox:hover, Radio:hover, Switch:hover { indicator-border-color: $accent; }
+Checkbox:focus, Radio:focus, Switch:focus { border-color: $accent; }
+Checkbox:checked, Radio:checked { indicator-mark-color: $accent; }
+Switch:checked { indicator-background: $accent; indicator-position: $indicator-end; }
+Checkbox:active, Radio:active, Switch:active { indicator-background: $line; indicator-border-color: $accent; }
+Checkbox:disabled, Radio:disabled, Switch:disabled { color: $muted; indicator-background: $surface; indicator-border-color: $line; }
+Switch:disabled:checked { indicator-background: $accent; }
+Checkbox:disabled:checked, Radio:disabled:checked, Switch:disabled { indicator-mark-color: $muted; }

@@ -52,7 +52,17 @@ pub fn intrinsic_size(
 
     let (cw, ch) = match widget {
         Widget::Text => text_size(text, font, measure),
-        Widget::Button | Widget::Notification => text_size(text, font, measure),
+        Widget::Button | Widget::ToggleButton | Widget::Notification => {
+            text_size(text, font, measure)
+        }
+        Widget::Checkbox | Widget::Radio | Widget::Switch => {
+            let (tw, th) = text_size(text, font, measure);
+            let indicator = dunit_style::indicator::Indicator::from_style(style);
+            (
+                indicator.label_offset(text.is_some_and(|t| !t.is_empty())) + tw,
+                fmax(indicator.height, th),
+            )
+        }
         Widget::Icon => {
             let s = style.number("icon-size").unwrap_or(font);
             (s, s)

@@ -42,9 +42,9 @@ DSS motion; no separate widget painting pipeline is introduced.
 
 ## Current limits
 
-This slice implements ordinary push buttons. Toggle/checkbox/radio/switch,
-text fields, scrolling, nested lifecycle, mnemonics, event bubbling and system
-clipboard remain open roadmap work.
+Ordinary push buttons are complemented by [checkable controls](checkable-controls.md):
+toggle, checkbox, radio and switch. Text fields, scrolling, nested lifecycle,
+mnemonics, event bubbling and system clipboard remain open roadmap work.
 
 The current native control channel forwards cooked key presses, including
 repeat, and omits key releases. Keyboard activation therefore occurs per

@@ -10,7 +10,10 @@ struct Mono;
 
 impl TextMeasure for Mono {
     fn measure(&self, text: &str, font_size: f32) -> (f32, f32) {
-        (text.chars().count() as f32 * (font_size * 0.5), font_size + 4.0)
+        (
+            text.chars().count() as f32 * (font_size * 0.5),
+            font_size + 4.0,
+        )
     }
 }
 
@@ -25,7 +28,10 @@ fn style_for(tag: &str, css: &str) -> dunit_style::Style {
 #[test]
 fn button_adds_padding_and_border() {
     // padding: 6 10 -> vertical 6, horizontal 10 (CSS 2-value shorthand).
-    let style = style_for("Button", "Button { font-size: 14; padding: 6 10; border-width: 1; }");
+    let style = style_for(
+        "Button",
+        "Button { font-size: 14; padding: 6 10; border-width: 1; }",
+    );
     let (w, h) = intrinsic_size(Widget::Button, Some("OK"), &style, &Mono);
     // text: 2 * 7 = 14 wide, 18 tall.
     // frame: pad_h = 2*10 = 20, pad_v = 2*6 = 12; border adds 2 on each axis.
@@ -53,8 +59,35 @@ fn empty_text_still_reserves_a_line() {
 fn tracks_use_minimum_width() {
     // No matching rule -> empty style, defaults apply (font 14).
     let style = style_for("Nope", "Button { font-size: 99; }");
-    assert_eq!(intrinsic_size(Widget::Slider, None, &style, &Mono), (120.0, 16.0));
-    assert_eq!(intrinsic_size(Widget::Progress, None, &style, &Mono), (120.0, 6.0));
+    assert_eq!(
+        intrinsic_size(Widget::Slider, None, &style, &Mono),
+        (120.0, 16.0)
+    );
+    assert_eq!(
+        intrinsic_size(Widget::Progress, None, &style, &Mono),
+        (120.0, 6.0)
+    );
     // Input fits content but never below the track minimum.
-    assert_eq!(intrinsic_size(Widget::Input, Some("x"), &style, &Mono).0, 120.0);
+    assert_eq!(
+        intrinsic_size(Widget::Input, Some("x"), &style, &Mono).0,
+        120.0
+    );
+}
+
+#[test]
+fn indicators_reserve_geometry_and_only_separate_nonempty_labels() {
+    let style = style_for("Checkbox", "Checkbox { font-size: 14; padding: 2 3; border-width: 1; indicator-width: 24; indicator-height: 30; indicator-gap: 7; }");
+    for widget in [Widget::Checkbox, Widget::Radio, Widget::Switch] {
+        assert_eq!(
+            intrinsic_size(widget, Some("OK"), &style, &Mono),
+            (53., 36.)
+        );
+        assert_eq!(intrinsic_size(widget, None, &style, &Mono), (32., 36.));
+        assert_eq!(intrinsic_size(widget, Some(""), &style, &Mono), (32., 36.));
+    }
+    let toggle = intrinsic_size(Widget::ToggleButton, Some("OK"), &style, &Mono);
+    assert_eq!(
+        toggle,
+        intrinsic_size(Widget::Button, Some("OK"), &style, &Mono)
+    );
 }

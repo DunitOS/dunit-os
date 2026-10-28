@@ -148,8 +148,38 @@ fn paint_contents(
         }
     }
 
-    if let Some(text) = node_text(tree, id) {
-        paint_text(style, rect, border, text, font, surface);
+    let tag = tree.node(id).kind.tag();
+    if dunit_style::indicator::Indicator::supports(tag) {
+        let [top, right, bottom, left] = style.padding().unwrap_or([0.; 4]);
+        let content = Rect {
+            x: rect.x + border + left,
+            y: rect.y + border + top,
+            w: (rect.w - 2. * border - left - right).max(0.),
+            h: (rect.h - 2. * border - top - bottom).max(0.),
+        };
+        surface.with_clip(rect, |surface| {
+            crate::indicator::paint(tag, style, content, font, surface);
+            if let Some(text) = node_text(tree, id) {
+                let offset =
+                    dunit_style::indicator::Indicator::from_style(style).label_offset(true);
+                let label = Rect {
+                    x: rect.x + offset,
+                    w: (rect.w - offset).max(0.),
+                    ..rect
+                };
+                paint_text(style, label, border, text, font, surface, true);
+            }
+        });
+    } else if let Some(text) = node_text(tree, id) {
+        paint_text(
+            style,
+            rect,
+            border,
+            text,
+            font,
+            surface,
+            matches!(tag, "Button" | "ToggleButton"),
+        );
     }
 
     for &c in &tree.node(id).children {
@@ -175,12 +205,20 @@ fn paint_text(
     text: &str,
     font: &Font,
     surface: &mut Surface,
+    center: bool,
 ) {
     let px = style.number("font-size").unwrap_or(DEFAULT_FONT_PX);
     let ink = style.color("color").unwrap_or(DEFAULT_INK);
-    let (pad_l, pad_t) = pad_left_top(style);
+    let [pad_t, _, pad_b, pad_l] = style.padding().unwrap_or([0.0; 4]);
     let origin_x = rect.x + border + pad_l;
-    let baseline = rect.y + border + pad_t + font.line_metrics(px).ascent;
+    let metrics = font.line_metrics(px);
+    let offset_y = if center {
+        let content_height = (rect.h - 2. * border - pad_t - pad_b).max(0.);
+        (content_height - metrics.line_height()).max(0.) / 2.
+    } else {
+        0.
+    };
+    let baseline = rect.y + border + pad_t + offset_y + metrics.ascent;
 
     let (glyphs, _advance) = font.layout_line(text, px);
     for g in glyphs {
@@ -190,12 +228,6 @@ fn paint_text(
             surface.blit_glyph(&bmp, ox, oy, ink);
         }
     }
-}
-
-/// The left and top padding declared by the `padding` shorthand (CSS 1/2/4).
-fn pad_left_top(style: &Style) -> (f32, f32) {
-    let [top, _, _, left] = style.padding().unwrap_or([0.0; 4]);
-    (left, top)
 }
 
 fn round_i32(v: f32) -> i32 {

@@ -19,15 +19,21 @@ impl<M> View<M> {
         let states: BTreeMap<_, _> = nodes
             .into_iter()
             .filter(|v| v.activation.is_some())
-            .map(|v| (v.key.as_str(), (v.kind.clone(), v.interaction)))
+            .map(|v| (v.key.as_str(), v))
             .collect();
         self.restore(&states);
     }
-    fn restore(&mut self, states: &BTreeMap<&str, (dunit_ui::Kind, dunit_widgets::Interaction)>) {
+    fn restore(&mut self, states: &BTreeMap<&str, &Self>) {
         if self.activation.is_some() && !self.interaction.disabled {
-            if let Some((kind, state)) = states.get(self.key.as_str()) {
-                if *kind == self.kind && !state.disabled {
-                    self.interaction = *state;
+            if let Some(old) = states.get(self.key.as_str()) {
+                if old.kind == self.kind
+                    && old.radio_group == self.radio_group
+                    && !old.interaction.disabled
+                {
+                    // Checked is model-owned. Restore only transient interaction.
+                    self.interaction.hovered = old.interaction.hovered;
+                    self.interaction.focused = old.interaction.focused;
+                    self.interaction.pressed = old.interaction.pressed;
                 }
             }
         }
@@ -35,7 +41,7 @@ impl<M> View<M> {
             child.restore(states);
         }
     }
-    fn visit_mut(&mut self, visit: &mut impl FnMut(&mut Self)) {
+    pub(crate) fn visit_mut(&mut self, visit: &mut impl FnMut(&mut Self)) {
         visit(self);
         for child in &mut self.children {
             child.visit_mut(visit);
@@ -66,7 +72,7 @@ impl<C: Component> Application<C> {
                 }
                 PointerEvent::Up => {
                     if hit && v.interaction.pressed {
-                        message = v.activation.clone();
+                        message = v.activation_message();
                     }
                     v.interaction.pressed = false;
                 }
@@ -92,34 +98,7 @@ impl<C: Component> Application<C> {
         // Shift is bit 0 in the native keyboard modifier contract. Other
         // modifiers belong to application shortcuts, not button activation.
         if key.character == '\t' && key.modifiers & !1 == 0 {
-            let mut nodes = Vec::new();
-            self.view.flatten(&mut nodes);
-            // Flattening uses the same preorder as View::tree. Reuse the
-            // widget layer's focus navigation instead of a second cycle policy.
-            let order: Vec<_> = nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, v)| v.activation.is_some() && !v.interaction.disabled)
-                .map(|(i, _)| dunit_ui::NodeId(i as u32))
-                .collect();
-            let current = order
-                .iter()
-                .copied()
-                .find(|id| nodes[id.0 as usize].interaction.focused);
-            let next = if key.modifiers == 1 {
-                dunit_widgets::focus_prev(&order, current)
-            } else {
-                dunit_widgets::focus_next(&order, current)
-            };
-            let Some(next) = next else {
-                return Ok(false);
-            };
-            let target = nodes[next.0 as usize].key.clone();
-            self.view.visit_mut(&mut |v| {
-                v.interaction.focused = v.activation.is_some() && v.key == target;
-                v.interaction.pressed = false;
-            });
-            return Ok(true);
+            return Ok(self.tab_focus(key.modifiers == 1));
         }
         if key.modifiers != 0 {
             return Ok(false);
@@ -136,9 +115,11 @@ impl<C: Component> Application<C> {
             return Ok(false);
         }
         let mut message = None;
+        let mut consumed = false;
         self.view.visit_mut(&mut |v| {
-            if v.interaction.focused && !v.interaction.disabled {
-                message = v.activation.clone();
+            if v.interaction.focused && !v.interaction.disabled && v.activation.is_some() {
+                consumed = true;
+                message = v.activation_message();
             }
             v.interaction.pressed = false;
         });
@@ -146,7 +127,7 @@ impl<C: Component> Application<C> {
             self.update(message)?;
             return Ok(true);
         }
-        Ok(false)
+        Ok(consumed)
     }
 
     /// Stable identity of the currently focused button, if any.

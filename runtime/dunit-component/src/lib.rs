@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 extern crate alloc;
 
+mod focus;
 mod interaction;
 mod motion;
 mod renderer;
@@ -12,6 +13,7 @@ pub use dunit_style::value::Color;
 pub use dunit_style::{self as style, Cascade};
 pub use dunit_text::Font;
 pub use dunit_ui::{Align, Attrs, Edges, Rect, Sizing};
+pub use focus::Navigation;
 pub use interaction::PointerEvent;
 pub use renderer::{Damage, RenderStats, Renderer};
 pub use theme::Theme;
@@ -25,6 +27,7 @@ pub enum UiError {
     ChildBinding,
     TreeLimit,
     InvalidClass,
+    InvalidRadioGroup,
     InvalidLayout,
     InvalidSize,
     Allocation,

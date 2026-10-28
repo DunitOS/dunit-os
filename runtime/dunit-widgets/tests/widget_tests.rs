@@ -57,3 +57,33 @@ fn widget_value_helpers() {
     assert_eq!(WidgetValue::Selection(Some(3)).as_selection(), Some(3));
     assert_eq!(WidgetValue::Selection(None).as_selection(), None);
 }
+
+#[test]
+fn checkable_tags_are_focusable_values_and_keep_checked_while_disabled() {
+    for widget in [
+        Widget::ToggleButton,
+        Widget::Checkbox,
+        Widget::Radio,
+        Widget::Switch,
+    ] {
+        assert_eq!(Widget::from_tag(widget.tag()), Some(widget));
+        assert!(widget.focusable() && widget.interactive() && widget.has_value());
+    }
+    let mut interaction = Interaction {
+        hovered: true,
+        focused: true,
+        pressed: true,
+        selected: true,
+        checked: true,
+        ..Interaction::default()
+    };
+    assert_eq!(
+        interaction.state_names(),
+        ["hover", "focus", "active", "selected", "checked"]
+    );
+    interaction.disabled = true;
+    assert_eq!(
+        interaction.state_names(),
+        ["disabled", "selected", "focus", "checked"]
+    );
+}

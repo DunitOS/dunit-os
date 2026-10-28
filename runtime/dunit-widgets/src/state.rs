@@ -1,14 +1,15 @@
 //! Per-widget interaction state and value.
 //!
 //! [`Interaction`] tracks the transient states DSS selectors key off
-//! (`:hover`, `:focus`, `:active`, `:disabled`, `:selected`) and produces the
+//! (`:hover`, `:focus`, `:active`, `:disabled`, `:selected`) plus model-owned
+//! `:checked`, and produces the
 //! state-name list the [`dunit_style`] cascade consumes. [`WidgetValue`] holds
 //! the mutable value of value-bearing widgets.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// The transient interaction state of a widget. Each flag maps to a DSS state
+/// Interaction and model-owned checkable state. Each flag maps to a DSS state
 /// selector of the same name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Interaction {
@@ -18,6 +19,8 @@ pub struct Interaction {
     pub pressed: bool,
     pub disabled: bool,
     pub selected: bool,
+    /// Persistent checkable value, supplied by the component model.
+    pub checked: bool,
 }
 
 impl Interaction {
@@ -26,8 +29,7 @@ impl Interaction {
     }
 
     /// The active state names, ordered, for building a
-    /// [`dunit_style::cascade::NodeStyle`]. A disabled widget reports only
-    /// `disabled` (hover/press are suppressed while disabled).
+    /// [`dunit_style::cascade::NodeStyle`]. Disabled widgets suppress hover/press but retain focus, selection and checked.
     pub fn state_names(&self) -> Vec<&'static str> {
         let mut v = Vec::new();
         if self.disabled {
@@ -37,6 +39,9 @@ impl Interaction {
             }
             if self.focused {
                 v.push("focus");
+            }
+            if self.checked {
+                v.push("checked");
             }
             return v;
         }
@@ -51,6 +56,9 @@ impl Interaction {
         }
         if self.selected {
             v.push("selected");
+        }
+        if self.checked {
+            v.push("checked");
         }
         v
     }

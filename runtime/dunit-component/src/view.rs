@@ -31,6 +31,7 @@ pub struct View<Msg> {
     pub(crate) bindings: Vec<(Key, Msg)>,
     pub(crate) activation: Option<Msg>,
     pub(crate) interaction: dunit_widgets::Interaction,
+    pub(crate) radio_group: Option<String>,
 }
 impl<Msg> View<Msg> {
     fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
@@ -44,6 +45,7 @@ impl<Msg> View<Msg> {
             bindings: Vec::new(),
             activation: None,
             interaction: dunit_widgets::Interaction::default(),
+            radio_group: None,
         }
     }
     pub fn text(key: impl Into<String>, text: impl Into<String>) -> Self {
@@ -65,6 +67,56 @@ impl<Msg> View<Msg> {
         view.activation = Some(message);
         view
     }
+    fn checkable(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        tag: &str,
+        checked: bool,
+        message: Msg,
+    ) -> Self {
+        let mut view = Self::button(key, label, message);
+        view.kind = Kind::Element(String::from(tag));
+        view.interaction.checked = checked;
+        view
+    }
+    /// Controlled toggle: `checked` is read from the model after activation.
+    pub fn toggle_button(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        checked: bool,
+        message: Msg,
+    ) -> Self {
+        Self::checkable(key, label, "ToggleButton", checked, message)
+    }
+    pub fn checkbox(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        checked: bool,
+        message: Msg,
+    ) -> Self {
+        Self::checkable(key, label, "Checkbox", checked, message)
+    }
+    pub fn switch(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        checked: bool,
+        message: Msg,
+    ) -> Self {
+        Self::checkable(key, label, "Switch", checked, message)
+    }
+    /// At most one member of a nonempty group may be checked. The model owns
+    /// selection; activating an already checked radio does not dispatch again.
+    pub fn radio(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        group: impl Into<String>,
+        checked: bool,
+        message: Msg,
+    ) -> Self {
+        let mut view = Self::checkable(key, label, "Radio", checked, message);
+        view.radio_group = Some(group.into());
+        view
+    }
     /// Disabled buttons cannot receive focus, presses or activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.interaction.disabled = disabled;
@@ -74,7 +126,20 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
-        self.activation.as_ref().map(|_| "button")
+        self.activation.as_ref()?;
+        Some(match self.kind.tag() {
+            "Checkbox" => "checkbox",
+            "Radio" => "radio",
+            "Switch" => "switch",
+            _ => "button",
+        })
+    }
+    pub fn accessibility_checked(&self) -> Option<bool> {
+        matches!(self.kind.tag(), "Checkbox" | "Radio" | "Switch")
+            .then_some(self.interaction.checked)
+    }
+    pub fn accessibility_pressed(&self) -> Option<bool> {
+        (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
         self.activation.as_ref().and(self.text.as_deref())
@@ -126,9 +191,14 @@ impl<Msg> View<Msg> {
     }
     pub fn validate(&self) -> Result<()> {
         let mut names = BTreeSet::new();
-        self.check(0, &mut names)
+        self.check(0, &mut names, &mut BTreeSet::new())
     }
-    fn check<'a>(&'a self, depth: usize, names: &mut BTreeSet<&'a str>) -> Result<()> {
+    fn check<'a>(
+        &'a self,
+        depth: usize,
+        names: &mut BTreeSet<&'a str>,
+        checked_groups: &mut BTreeSet<&'a str>,
+    ) -> Result<()> {
         if depth >= 64 || names.len() >= 4096 {
             return Err(UiError::TreeLimit);
         }
@@ -144,6 +214,13 @@ impl<Msg> View<Msg> {
         }
         if !names.insert(&self.key) {
             return Err(UiError::DuplicateKey);
+        }
+        if let Some(group) = self.radio_group.as_deref() {
+            if group.trim().is_empty()
+                || (self.interaction.checked && !checked_groups.insert(group))
+            {
+                return Err(UiError::InvalidRadioGroup);
+            }
         }
         if depth != 0 && !self.bindings.is_empty() {
             return Err(UiError::ChildBinding);
@@ -181,7 +258,7 @@ impl<Msg> View<Msg> {
             return Err(UiError::InvalidLayout);
         }
         for child in &self.children {
-            child.check(depth + 1, names)?;
+            child.check(depth + 1, names, checked_groups)?;
         }
         Ok(())
     }

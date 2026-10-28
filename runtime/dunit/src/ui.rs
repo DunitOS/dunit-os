@@ -15,7 +15,8 @@ pub fn load_theme(overlay: &str) -> NativeResult<(Theme, Font)> {
 fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
-        UiError::InvalidClass
+        UiError::InvalidRadioGroup
+        | UiError::InvalidClass
         | UiError::DuplicateKey
         | UiError::EmptyKey
         | UiError::DuplicateBinding
@@ -314,6 +315,25 @@ impl<C: Component> ComponentWindow<C> {
                 }
             }
             Some(WindowEvent::Input(input)) if input.kind == IN_KEY => {
+                // Existing IN_KEY carries PS/2 set-1 scancode and modifiers;
+                // extended arrow keys have no cooked character.
+                let navigation = if input.value == 0 && input.y == 0 {
+                    match input.x {
+                        0x4b => Some(Navigation::Left),
+                        0x4d => Some(Navigation::Right),
+                        0x48 => Some(Navigation::Up),
+                        0x50 => Some(Navigation::Down),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(direction) = navigation {
+                    if self.application.navigate(direction).map_err(native)? {
+                        self.redraw()?;
+                        return Ok(event);
+                    }
+                }
                 if let (Some(character), Ok(modifiers)) =
                     (char::from_u32(input.value), u8::try_from(input.y))
                 {

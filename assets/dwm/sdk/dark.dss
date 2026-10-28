@@ -20,3 +20,16 @@ $shadow-spread: 10;
 $glass-tint: #12182060;
 $glass-radius: 20;
 $blur-radius: 6;
+
+// Shared checkable-control geometry and state values.
+$indicator-size: 18;
+$indicator-gap: 8;
+$indicator-radius: 3;
+$indicator-round-radius: 9;
+$indicator-mark-size: 14;
+$indicator-dot-size: 8;
+$indicator-inset: 2;
+$switch-width: 34;
+$indicator-off: #00000000;
+$indicator-start: 0;
+$indicator-end: 1;

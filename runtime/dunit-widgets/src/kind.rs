@@ -11,6 +11,14 @@ pub enum Widget {
     Icon,
     /// A clickable button.
     Button,
+    /// A button retaining a checked value.
+    ToggleButton,
+    /// An independent checkable option.
+    Checkbox,
+    /// An exclusive option within a named group.
+    Radio,
+    /// A boolean track and thumb control.
+    Switch,
     /// A single-line text input.
     Input,
     /// A vertical list of selectable rows.
@@ -33,6 +41,10 @@ impl Widget {
             "Text" | "Label" => Widget::Text,
             "Icon" => Widget::Icon,
             "Button" => Widget::Button,
+            "ToggleButton" => Widget::ToggleButton,
+            "Checkbox" => Widget::Checkbox,
+            "Radio" => Widget::Radio,
+            "Switch" => Widget::Switch,
             "Input" | "TextInput" => Widget::Input,
             "List" => Widget::List,
             "Menu" => Widget::Menu,
@@ -49,6 +61,10 @@ impl Widget {
             Widget::Text => "Text",
             Widget::Icon => "Icon",
             Widget::Button => "Button",
+            Widget::ToggleButton => "ToggleButton",
+            Widget::Checkbox => "Checkbox",
+            Widget::Radio => "Radio",
+            Widget::Switch => "Switch",
             Widget::Input => "Input",
             Widget::List => "List",
             Widget::Menu => "Menu",
@@ -62,7 +78,15 @@ impl Widget {
     pub fn focusable(self) -> bool {
         matches!(
             self,
-            Widget::Button | Widget::Input | Widget::List | Widget::Menu | Widget::Slider
+            Widget::Button
+                | Widget::ToggleButton
+                | Widget::Checkbox
+                | Widget::Radio
+                | Widget::Switch
+                | Widget::Input
+                | Widget::List
+                | Widget::Menu
+                | Widget::Slider
         )
     }
 
@@ -75,7 +99,15 @@ impl Widget {
     pub fn has_value(self) -> bool {
         matches!(
             self,
-            Widget::Input | Widget::Slider | Widget::Progress | Widget::List | Widget::Menu
+            Widget::ToggleButton
+                | Widget::Checkbox
+                | Widget::Radio
+                | Widget::Switch
+                | Widget::Input
+                | Widget::Slider
+                | Widget::Progress
+                | Widget::List
+                | Widget::Menu
         )
     }
 }

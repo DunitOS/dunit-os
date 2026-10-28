@@ -53,3 +53,6 @@ pub enum StyleError {
 pub type Result<T> = core::result::Result<T, StyleError>;
 
 pub mod effects;
+
+/// Shared geometry for checkable indicators and their labels.
+pub mod indicator;

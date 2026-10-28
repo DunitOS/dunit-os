@@ -53,7 +53,20 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
-                        "color" | "background" | "border-color" => value.as_color().is_some(),
+                        "color"
+                        | "background"
+                        | "border-color"
+                        | "indicator-background"
+                        | "indicator-border-color"
+                        | "indicator-mark-color" => value.as_color().is_some(),
+                        "indicator-width"
+                        | "indicator-height"
+                        | "indicator-gap"
+                        | "indicator-radius"
+                        | "indicator-mark-size"
+                        | "indicator-inset" => valid_number(0., 1024.),
+                        "indicator-border-width" => valid_number(0., 64.),
+                        "indicator-position" => valid_number(0., 1.),
                         "background-gradient" => {
                             value.as_keyword() == Some("none")
                                 || style::effects::Gradient::parse(value).is_some()
