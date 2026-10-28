@@ -29,12 +29,21 @@ pub fn paint(tree: &Tree, layout: &Layout, style_of: StyleOf, font: &Font, surfa
 }
 
 /// Paint within `clip`, additionally containing each node and its descendants
-/// in its layout box. Retained renderers use this to bound invalidation: glyph
+/// in its layout box, with its shadow clipped by its parent. Retained
+/// renderers invalidate visual bounds including shadows: glyph
 /// overhang and oversized children cannot paint outside the recorded bounds.
-pub fn paint_clipped(tree: &Tree, layout: &Layout, style_of: StyleOf, font: &Font,
-                     surface: &mut Surface, clip: Rect) {
+pub fn paint_clipped(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    clip: Rect,
+) {
     if !tree.is_empty() {
-        surface.with_clip(clip, |s| paint_node(tree, layout, tree.root(), style_of, font, s, true));
+        surface.with_clip(clip, |s| {
+            paint_node(tree, layout, tree.root(), style_of, font, s, true)
+        });
     }
 }
 
@@ -48,30 +57,66 @@ fn paint_node(
     contained: bool,
 ) {
     let rect = layout.rect(id);
+    let style = style_of(id);
+    if let Some(shadow) = style
+        .get("shadow")
+        .and_then(dunit_style::effects::Shadow::parse)
+    {
+        surface.drop_shadow(rect, style.number("radius").unwrap_or(0.), shadow);
+    }
     if contained {
-        surface.with_clip(rect, |s| paint_contents(tree, layout, id, style_of, font, s, true));
+        surface.with_clip(rect, |s| {
+            paint_contents(tree, layout, id, &style, style_of, font, s, true)
+        });
     } else {
-        paint_contents(tree, layout, id, style_of, font, surface, false);
+        paint_contents(tree, layout, id, &style, style_of, font, surface, false);
     }
 }
 
-fn paint_contents(tree: &Tree, layout: &Layout, id: NodeId, style_of: StyleOf,
-                  font: &Font, surface: &mut Surface, contained: bool) {
+fn paint_contents(
+    tree: &Tree,
+    layout: &Layout,
+    id: NodeId,
+    style: &Style,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    contained: bool,
+) {
     let rect = layout.rect(id);
-    let style = style_of(id);
-
-    if let Some(bg) = style.color("background") {
-        surface.fill_rect(rect.x, rect.y, rect.w, rect.h, bg);
-    }
 
     let border = style.number("border-width").unwrap_or(0.0);
-    if border > 0.0 {
-        let bc = style.color("border-color").unwrap_or(DEFAULT_INK);
-        surface.stroke_rect(rect.x, rect.y, rect.w, rect.h, border, bc);
+    let radius = style.number("radius").unwrap_or(0.0);
+    let gradient = style
+        .get("background-gradient")
+        .and_then(dunit_style::effects::Gradient::parse);
+    if radius > 0. || gradient.is_some() {
+        surface.rounded_box(
+            rect,
+            radius,
+            style.color("background"),
+            gradient,
+            border,
+            style.color("border-color").unwrap_or(DEFAULT_INK),
+        );
+    } else {
+        if let Some(bg) = style.color("background") {
+            surface.fill_rect(rect.x, rect.y, rect.w, rect.h, bg);
+        }
+        if border > 0. {
+            surface.stroke_rect(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                border,
+                style.color("border-color").unwrap_or(DEFAULT_INK),
+            );
+        }
     }
 
     if let Some(text) = node_text(tree, id) {
-        paint_text(&style, rect, border, text, font, surface);
+        paint_text(style, rect, border, text, font, surface);
     }
 
     for &c in &tree.node(id).children {
@@ -89,7 +134,14 @@ fn node_text(tree: &Tree, id: NodeId) -> Option<&str> {
 
 /// Draw a single line of text inside `rect`'s content box (inset by border and
 /// padding), on the font baseline.
-fn paint_text(style: &Style, rect: Rect, border: f32, text: &str, font: &Font, surface: &mut Surface) {
+fn paint_text(
+    style: &Style,
+    rect: Rect,
+    border: f32,
+    text: &str,
+    font: &Font,
+    surface: &mut Surface,
+) {
     let px = style.number("font-size").unwrap_or(DEFAULT_FONT_PX);
     let ink = style.color("color").unwrap_or(DEFAULT_INK);
     let (pad_l, pad_t) = pad_left_top(style);

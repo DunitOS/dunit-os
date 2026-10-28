@@ -51,3 +51,5 @@ pub enum StyleError {
 
 /// Convenience result alias for the crate.
 pub type Result<T> = core::result::Result<T, StyleError>;
+
+pub mod effects;

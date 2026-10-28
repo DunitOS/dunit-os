@@ -63,6 +63,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunit_render"
+version = "0.1.0"
+dependencies = [
+ "dunit_style",
+ "dunit_text",
+ "dunit_ui",
+]
+
+[[package]]
 name = "dunit_style"
 version = "0.1.0"
 
@@ -115,6 +124,7 @@ name = "gui_server"
 version = "0.1.0"
 dependencies = [
  "dunit_image",
+ "dunit_render",
  "dunit_style",
  "dunit_text",
  "dunit_ui",

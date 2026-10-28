@@ -217,7 +217,10 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
         {
             continue;
         }
-        for r in [ra, rb] {
+        for r in [
+            dunit_render::visual_bounds(ra, &old.styles[a.id.0 as usize]),
+            dunit_render::visual_bounds(rb, &new.styles[b.id.0 as usize]),
+        ] {
             // Outward rounding also contains the painter's nearest-pixel bounds.
             let x0 = r.x.max(0.0).min(width as f32) as u32;
             let y0 = r.y.max(0.0).min(height as f32) as u32;

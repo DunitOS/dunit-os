@@ -47,7 +47,7 @@ impl<'a> Surface<'a> {
 
     /// Alpha-blend `color` over the pixel at `(x, y)` (src-over). Out-of-bounds
     /// and fully transparent writes are no-ops.
-    fn blend(&mut self, x: usize, y: usize, color: Color, cov: u8) {
+    pub(crate) fn blend(&mut self, x: usize, y: usize, color: Color, cov: u8) {
         if x < self.clip.0 || y < self.clip.1 || x >= self.clip.2 || y >= self.clip.3 {
             return;
         }
@@ -170,7 +170,7 @@ impl<'a> Surface<'a> {
     }
 
     /// Round `(x, y, w, h)` to integer pixels and clip to the surface.
-    fn clip_rect(&self, x: f32, y: f32, w: f32, h: f32) -> (usize, usize, usize, usize) {
+    pub(crate) fn clip_rect(&self, x: f32, y: f32, w: f32, h: f32) -> (usize, usize, usize, usize) {
         let x0 = clamp_usize(round_i32(x), self.width).max(self.clip.0);
         let y0 = clamp_usize(round_i32(y), self.height).max(self.clip.1);
         let x1 = clamp_usize(round_i32(x + w), self.width).min(self.clip.2);

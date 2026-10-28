@@ -44,16 +44,7 @@ pub(super) fn shade(c: u32, delta: i32) -> u32 {
     (cl(r) << 16) | (cl(g) << 8) | cl(b)
 }
 
-/// Linear RGB interpolation between `a` and `b`; `t` in 0..=255 (0 = a, 255 = b).
-#[inline]
-pub(super) fn lerp_color(a: u32, b: u32, t: u32) -> u32 {
-    let t = t.min(255);
-    let inv = 255 - t;
-    let r = (((a >> 16) & 0xFF) * inv + ((b >> 16) & 0xFF) * t) / 255;
-    let g = (((a >> 8) & 0xFF) * inv + ((b >> 8) & 0xFF) * t) / 255;
-    let bl = ((a & 0xFF) * inv + (b & 0xFF) * t) / 255;
-    (r << 16) | (g << 8) | bl
-}
+pub(super) use dunit_render::raster::lerp_color;
 
 /// Blend a translucent solid ARGB rect into the buffer.
 pub(super) fn fill_rect_alpha(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, color: u32) {
@@ -81,62 +72,7 @@ pub(super) fn animation_time_ms() -> Option<u64> {
         .saturating_add((stats.uptime_ticks % stats.uptime_hz) * 1000 / stats.uptime_hz))
 }
 
-// Rounded-corner selection bitmask for `fill_rrect*` (which corners get the arc).
-pub(super) const RR_TL: u8 = 1;
-pub(super) const RR_TR: u8 = 2;
-pub(super) const RR_BL: u8 = 4;
-pub(super) const RR_BR: u8 = 8;
-pub(super) const RR_ALL: u8 = RR_TL | RR_TR | RR_BL | RR_BR;
-pub(super) const RR_TOP: u8 = RR_TL | RR_TR;
-
-/// Coverage 0..255 of pixel (px,py) inside rounded-rect [x,y,w,h] radius `r`.
-/// Straight edges and non-selected corners return 255; a selected corner is
-/// 4x4-supersampled in 1/8-px units for a cheap anti-aliased arc (integer only).
-pub(super) fn rr_cov(px: i32, py: i32, x: i32, y: i32, w: i32, h: i32, r: i32, corners: u8) -> u32 {
-    if r <= 0 {
-        return 255;
-    }
-    let (cx, cy, bit);
-    if px < x + r && py < y + r {
-        cx = x + r;
-        cy = y + r;
-        bit = RR_TL;
-    } else if px >= x + w - r && py < y + r {
-        cx = x + w - r;
-        cy = y + r;
-        bit = RR_TR;
-    } else if px < x + r && py >= y + h - r {
-        cx = x + r;
-        cy = y + h - r;
-        bit = RR_BL;
-    } else if px >= x + w - r && py >= y + h - r {
-        cx = x + w - r;
-        cy = y + h - r;
-        bit = RR_BR;
-    } else {
-        return 255;
-    }
-    if corners & bit == 0 {
-        return 255;
-    }
-    let r8 = (r * 8) as i64;
-    let r2 = r8 * r8;
-    let mut inside = 0u32;
-    let mut sy = 0;
-    while sy < 4 {
-        let dy = (py * 8 + (sy * 2 + 1) - cy * 8) as i64;
-        let mut sx = 0;
-        while sx < 4 {
-            let dx = (px * 8 + (sx * 2 + 1) - cx * 8) as i64;
-            if dx * dx + dy * dy <= r2 {
-                inside += 1;
-            }
-            sx += 1;
-        }
-        sy += 1;
-    }
-    inside * 255 / 16
-}
+pub(super) use dunit_render::raster::{rr_cov, RR_ALL, RR_TOP};
 
 /// Fill a rounded rect with a flat (alpha-aware) `color`. `corners` selects which
 /// corners get the arc (e.g. `RR_TOP` for a title bar). `r <= 0` = plain rect.

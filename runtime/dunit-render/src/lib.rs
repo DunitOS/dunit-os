@@ -5,7 +5,7 @@
 //! and [`Surface::stroke_rect`] primitives and glyph-coverage blitting. [`paint`]
 //! walks a laid-out [`dunit_ui`] tree and, using a caller-supplied per-node DSS
 //! [`dunit_style::Style`] resolver and a [`dunit_text::Font`], draws each node's
-//! background, border and text into the surface.
+//! rounded background, gradient, shadow, border and text into the surface.
 //!
 //! The painter is pure mechanism: it does not resolve the cascade or lay out the
 //! tree itself (callers pass the results in), which keeps it decoupled from the
@@ -19,6 +19,9 @@ extern crate alloc;
 
 mod paint;
 mod surface;
+mod effects;
+pub mod raster;
 
 pub use paint::{paint, paint_clipped, StyleOf};
+pub use effects::visual_bounds;
 pub use surface::{pack_argb, Surface};
