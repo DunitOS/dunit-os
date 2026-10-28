@@ -6,8 +6,9 @@ use dunit::{time::Duration, window::WindowEvent};
 enum Msg {
     Next,
     Noop,
+    ToggleTitle,
 }
-struct Gallery(u32);
+struct Gallery(u32, bool);
 fn size(width: f32, height: f32) -> Attrs {
     Attrs {
         width: Sizing::Px(width),
@@ -18,8 +19,10 @@ fn size(width: f32, height: f32) -> Attrs {
 impl Component for Gallery {
     type Message = Msg;
     fn update(&mut self, message: Msg) {
-        if matches!(message, Msg::Next) {
-            self.0 += 1;
+        match message {
+            Msg::Next => self.0 += 1,
+            Msg::ToggleTitle => self.1 = !self.1,
+            Msg::Noop => {}
         }
     }
     fn view(&self) -> View<Msg> {
@@ -34,7 +37,7 @@ impl Component for Gallery {
         View::column(
             "root",
             vec![
-                View::text("title", "Dunit SDK glass"),
+                View::text("title", "Dunit SDK glass").class(if self.1 { "probe" } else { "idle" }),
                 View::stack(
                     "scene",
                     vec![
@@ -76,11 +79,37 @@ fn report(label: &str, pixels: &[u32]) -> dunit::Result<()> {
 }
 #[dunit::main]
 fn main() -> dunit::Result<()> {
-    let overlay = dunit::fs::read_to_string("/assets/dwm/sdk/glass.dss")?;
+    let overlay = alloc::format!(
+        "{}\nText#title.probe {{color:$text;}}",
+        dunit::fs::read_to_string("/assets/dwm/sdk/glass.dss")?
+    );
     let dark = dunit::fs::read_to_string("/assets/dwm/sdk/dark.dss")?;
     let light = dunit::fs::read_to_string("/assets/dwm/sdk/light.dss")?;
-    let mut ui = ComponentWindow::open_themed_with_style(480, 240, Gallery(0), &overlay)?;
+    let mut ui = ComponentWindow::open_themed_with_style(480, 240, Gallery(0, false), &overlay)?;
     let initial = hash(ui.pixels());
+    for (index, changed) in [true, false, true, false].into_iter().enumerate() {
+        ui.update(Msg::ToggleTitle)?;
+        let pixels = ui.last_render().damaged_pixels;
+        assert!(pixels > 0 && pixels < 480 * 240);
+        let uploaded = ui.last_uploaded_pixels();
+        // The second backing needs an initial complete image. Thereafter both
+        // retained buffers repair only this same independent title rectangle.
+        assert_eq!(uploaded, if index == 0 { 480 * 240 } else { pixels });
+        let (theme, font) = dunit::ui::load_theme(&overlay)?;
+        let mut full = Renderer::new(font, theme.cascade, theme.background);
+        full.render(&ui.component().view(), 480, 240).unwrap();
+        assert_eq!(ui.pixels(), full.pixels());
+        assert_eq!(hash(ui.pixels()) != initial, changed);
+        ui.update(Msg::Noop)?;
+        assert_eq!(ui.last_render().damaged_pixels, 0);
+        dunit::println!(
+            "{}",
+            alloc::format!(
+                "[SDKBACKDROP] independent damage={pixels} uploaded={uploaded} canvas=115200"
+            )
+        )?;
+    }
+    dunit::println!("[SDKBACKDROP] independent partial and restore OK")?;
     report("dark", ui.pixels())?;
     let mut stage = 0;
     loop {

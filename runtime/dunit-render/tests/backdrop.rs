@@ -196,3 +196,23 @@ fn rounded_group_keeps_straight_alpha_and_exact_pixels_outside_mask() {
         }
     }
 }
+
+#[test]
+fn backdrop_support_uses_the_painters_quantization_and_limits() {
+    use dunit_render::blur::backdrop_support;
+    for (radius, support) in [
+        (0., 0),
+        (0.49, 0),
+        (0.5, 2),
+        (1.49, 2),
+        (1.5, 4),
+        (63.5, 128),
+        (64., 128),
+        (64.1, 0),
+        (-1., 0),
+        (f32::NAN, 0),
+        (f32::INFINITY, 0),
+    ] {
+        assert_eq!(backdrop_support(radius), support);
+    }
+}

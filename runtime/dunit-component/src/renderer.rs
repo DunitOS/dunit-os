@@ -185,19 +185,18 @@ impl Renderer {
             Some(old) => diff(old, &next, width, height),
             None => Some(full),
         };
-        // Blur reads previously painted neighbours. Rebuild the scene whenever
-        // anything changes until a dependency-aware filter-damage planner exists.
-        if damage.is_some()
-            && next
-                .styles
-                .iter()
-                .chain(self.previous.iter().flat_map(|p| p.styles.iter()))
-                .any(|s| {
-                    s.number("backdrop-blur")
-                        .is_some_and(|r| r >= 0.5 && r <= 64.)
-                })
-        {
-            damage = Some(full);
+        if let Some(dirty) = damage {
+            // A retained final canvas is not a valid pre-filter backdrop.
+            // Rebuild when damage touches any filter output or sampled halo.
+            // Disjoint edits cannot affect a filter and need no blur scratch.
+            if touches_backdrop(&next, dirty)
+                || self
+                    .previous
+                    .as_ref()
+                    .is_some_and(|p| touches_backdrop(p, dirty))
+            {
+                damage = Some(full);
+            }
         }
         if resized {
             let len = (width as usize)
@@ -239,6 +238,28 @@ impl Renderer {
             animation_time_ms: now,
         })
     }
+}
+
+fn touches_backdrop(snapshot: &Snapshot, dirty: Damage) -> bool {
+    snapshot.tree.iter().any(|node| {
+        let support = dunit_render::blur::backdrop_support(
+            snapshot.styles[node.id.0 as usize]
+                .number("backdrop-blur")
+                .unwrap_or(0.),
+        );
+        if support == 0 {
+            return false;
+        }
+        let rect = snapshot.layout.rect(node.id);
+        // Enclose nearest-pixel output rounding. Ancestor clips/rounded masks
+        // may reduce this dependency, never enlarge it; using the whole box
+        // deliberately keeps nested and overlapping filters conservative.
+        let halo = support as f32 + 1.;
+        (dirty.x as f32) < rect.x + rect.w + halo
+            && (dirty.y as f32) < rect.y + rect.h + halo
+            && ((dirty.x + dirty.width) as f32) > rect.x - halo
+            && ((dirty.y + dirty.height) as f32) > rect.y - halo
+    })
 }
 
 fn container_padding(tree: &Tree, styles: &[Style]) -> Result<Tree> {

@@ -1,5 +1,5 @@
 {
-  "description": "SDK backdrop blur and rounded group clips: changing sampled background, no feedback, reload rollback, and actual framebuffer goldens.",
+  "description": "SDK backdrop blur and rounded group clips: independent partial damage, changing sampled background, no feedback, reload rollback, and actual framebuffer goldens.",
   "run": {
     "config": "limine_test_terminal.conf",
     "cmd": [
@@ -136,7 +136,8 @@
     "[GUI-EXIT] app=sdk_backdrop_fixture kind=0 code=0",
     "[SDKBACKDROP] changed hash=",
     "[SDKBACKDROP] scene rebuild and noop OK",
-    "[SDKBACKDROP] invalid retained OK"
+    "[SDKBACKDROP] invalid retained OK",
+    "[SDKBACKDROP] independent partial and restore OK"
   ],
   "forbidden": [
     "[PANIC]",

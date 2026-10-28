@@ -98,15 +98,30 @@ fn scratch(length: usize) -> Result<Vec<u32>, TryReserveError> {
     pixels.resize(length, 0);
     Ok(pixels)
 }
+
+const BACKDROP_PASSES: usize = 2;
+
+fn backdrop_radius(radius: f32) -> usize {
+    if radius.is_finite() && (0. ..=64.).contains(&radius) {
+        (radius + 0.5) as usize
+    } else {
+        0
+    }
+}
+
+/// Maximum distance sampled beyond a backdrop's output, in canvas pixels.
+/// Uses the same quantization, validity limits and pass count as the painter.
+/// Zero means the effect is disabled (or its radius is invalid).
+pub fn backdrop_support(radius: f32) -> usize {
+    backdrop_radius(radius) * BACKDROP_PASSES
+}
+
 impl Surface<'_> {
     /// Blur the already-painted opaque canvas behind a node, using two shared
     /// horizontal/vertical box passes. Samples include the complete filter halo
     /// beyond the output clip; only output pixels inside the shape are changed.
     pub fn backdrop_blur(&mut self, rect: Rect, radius: f32, corner: f32) -> PaintResult {
-        if !radius.is_finite() || !(0. ..=64.).contains(&radius) {
-            return Ok(());
-        }
-        let radius = (radius + 0.5) as usize;
+        let radius = backdrop_radius(radius);
         if radius == 0 {
             return Ok(());
         }
@@ -116,7 +131,7 @@ impl Surface<'_> {
         }
         // Two passes have a support radius of 2*r. Cropping there produces the
         // same output as filtering the whole canvas, including at window edges.
-        let halo = radius * 2;
+        let halo = radius * BACKDROP_PASSES;
         let sx0 = x0.saturating_sub(halo);
         let sy0 = y0.saturating_sub(halo);
         let sx1 = x1.saturating_add(halo).min(self.width);
@@ -128,7 +143,7 @@ impl Surface<'_> {
             let source = (sy0 + row) * self.stride + sx0;
             a[row * w..(row + 1) * w].copy_from_slice(&self.pixels[source..source + w]);
         }
-        for _ in 0..2 {
+        for _ in 0..BACKDROP_PASSES {
             box_h(&a, &mut b, w, h, radius);
             box_v(&b, &mut a, w, h, radius);
         }

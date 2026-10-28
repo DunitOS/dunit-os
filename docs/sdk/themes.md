@@ -129,13 +129,21 @@ not read the desktop behind the application window.
 
 The desktop and SDK share the production RGB box-filter kernels in
 `dunit_render::blur`. Existing desktop blur configuration and buffer ownership
-stay in the compositor. SDK blur allocates two bounded region buffers. A scene
-with active blur redraws the entire client canvas whenever anything changes,
-including a change behind the blurred node. Rebuilding from the scene prevents
-blur feedback and stale sampled neighbours. Unchanged scenes still skip painting
-and publication. Scenes without blur retain partial damage, including rounded
-content masks. A narrower filter dependency planner and the frame-time budget
-remain performance work.
+stay in the compositor. SDK blur allocates two bounded region buffers when its
+output is repainted. The retained renderer checks damage against every old and
+new blur rectangle expanded by the shared filter support (`2 * rounded radius`)
+and a conservative pixel-rounding guard. Changes disjoint from all of these
+regions retain partial painting and avoid blur scratch allocation. This includes
+an independently changing label beside a glass panel.
+
+Damage touching any filter output or sampled halo still rebuilds the complete
+client canvas. Replaying from the scene prevents feedback from the previous
+frame. Both snapshots matter when a filter moves, changes radius or disappears.
+Ancestor clips and paint order can reduce dependencies; this check deliberately
+overencloses them, including nested and overlapping filters. Unchanged scenes
+still skip painting and publication. Filter-local reconstruction and the
+whole-scene frame-time budget remain performance work. Pixel counts describe
+invalidated canvas area, not paint stores or elapsed time.
 
 `paint`, `paint_clipped`, `Surface::backdrop_blur` and
 `Surface::with_rounded_clip` return allocation errors rather than silently
@@ -203,13 +211,18 @@ no-application-style theme golden remains a separate unchanged regression.
 The backdrop fixture has a separate reviewed baseline in
 `tools/fixtures/sdk_backdrop_golden.json`. Run
 `python3 tools/test_sdk_gui_fixture.py backdrop --accel tcg` to capture dark,
-changed background, light and restored states. It compares the rebuilt canvas
-to a fresh render, verifies zero damage for a no-op, rejects invalid blur/clip
+changed background, light and restored states. Before the first capture it
+changes an independent title four times, compares each retained canvas with a
+fresh full render, requires partial CPU damage, initializes the second backing
+fully and then requires partial uploads on buffer reuse. The title returns to
+the original pixels, so all four reviewed goldens remain unchanged. The fixture
+also compares the rebuilt canvas to a fresh render, verifies zero damage for a
+no-op, rejects invalid blur/clip
 styles without changing pixels, and requires exact initial pixels after restore.
 All four QEMU captures must match both native RGB hashes and the reviewed golden.
 
 
-Verified on 28 October 2026: 190 host checks passed (19 render, 23 component,
+The motion integration regression on 28 October 2026 passed 190 host checks (19 render, 23 component,
 18 style, 13 SDK, 101 desktop/config/console, 8 CLI and 8 image-profile). The
 [motion fixture](motion.md) passed on TCG and KVM with four endpoint framebuffer
 comparisons. Existing theme and backdrop goldens passed unchanged on TCG.
@@ -218,3 +231,21 @@ on TCG. Full desktop smoke passed on KVM with all 30 required markers and no
 forbidden markers. ABI generation remained at 89 syscalls, 25 errno and 7 rights.
 The whole-scene 16 ms budget remains open.
 The warnings check remained at 13 against the existing budget of 99.
+
+The independent blur-damage extension was verified on 28 October 2026 with
+178 host checks (20 render, 26 component, 18 style, 13 SDK and 101
+desktop/config/console). The updated backdrop fixture passed on both TCG and
+KVM, including all four unchanged framebuffer goldens on each accelerator.
+Its independent title change invalidated 14,592 of 115,200 pixels; after the
+second backing's initial fill, uploads also contained exactly 14,592 pixels.
+This reduces the invalidated area by about 87%, without claiming the same
+reduction in frame time. The component fixture passed on TCG with exactly two
+15,360-pixel partial texture/composition/presentation updates and resize/restore.
+ABI generation stayed in sync and warnings remained at 13 against budget 99.
+The final rebuilt desktop smoke passed on KVM with all 30 required markers.
+An initial desktop smoke run failed during client recycling with a kernel
+instruction-fetch page fault at RIP/address 0. The identical image passed on
+retry; two control runs with the production renderer/filter restored to
+`fc5eda9` also passed. The failure was not reproduced consistently, and neither
+its cause nor a fix was established. This remains an unresolved stability
+finding; successful SDK pixel tests do not resolve it or prove the 16 ms budget.

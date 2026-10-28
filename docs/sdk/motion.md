@@ -75,8 +75,9 @@ sampling; the next render reaches the target. `cancel_motion()` cancels the
 current tracks without changing the policy. `RenderStats::active_transitions`
 and `animation_time_ms` expose the current sample; they are not frame-cost or
 performance-budget measurements. Damage includes old/new sampled geometry and
-shadow bounds. As with other rendering, blur scenes use full client invalidation
-when changed; ordinary paint transitions retain partial damage.
+shadow bounds. Changes outside every old/new blur rectangle and its sampled
+halo retain partial damage. Changes touching these filter dependencies rebuild
+the client canvas to avoid blur feedback; see [the blur contract](themes.md#backdrop-blur-and-rounded-content-clips).
 
 ## Native windows and reduced motion
 
