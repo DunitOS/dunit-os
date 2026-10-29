@@ -178,7 +178,10 @@ fn paint_contents(
     }
 
     let tag = tree.node(id).kind.tag();
-    if let Some(input) = (tag == "Input").then(|| input_of(id)).flatten() {
+    if let Some(input) = matches!(tag, "Input" | "Textarea")
+        .then(|| input_of(id))
+        .flatten()
+    {
         input.paint(font, style, rect, surface);
     } else if dunit_style::indicator::Indicator::supports(tag) {
         let [top, right, bottom, left] = style.padding().unwrap_or([0.; 4]);

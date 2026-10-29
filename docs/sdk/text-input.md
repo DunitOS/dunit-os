@@ -98,7 +98,8 @@ Ctrl+Backspace, Shift selection, Home/Delete, undo/redo, long-line scrolling,
 password/limit/read-only, resize, pointer selection/replacement, `[INPUT] ok`
 and guest exit 0. All guest launches use `tools/qemu_test.py`.
 
-Multiline fields, double/triple click, native pointer modifiers, grapheme/IME,
+[Multiline fields](multiline-input.md) extend the same editor with LF lines and
+a vertical viewport. Double/triple click, native pointer modifiers, grapheme/IME,
 clipboard and integration into migrated applications remain open. There is no
 local imitation of the system clipboard; Ctrl+C/V depend on M7.7.
 

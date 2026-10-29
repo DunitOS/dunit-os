@@ -45,7 +45,7 @@ impl Widget {
             "Checkbox" => Widget::Checkbox,
             "Radio" => Widget::Radio,
             "Switch" => Widget::Switch,
-            "Input" | "TextInput" => Widget::Input,
+            "Input" | "TextInput" | "Textarea" => Widget::Input,
             "List" => Widget::List,
             "Menu" => Widget::Menu,
             "Slider" => Widget::Slider,

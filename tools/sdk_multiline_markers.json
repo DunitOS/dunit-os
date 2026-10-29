@@ -1,0 +1,465 @@
+{
+  "description": "Native LF text area: keyboard split/join/history/selection, vertical viewport, real mouse wheel, blink stability, multiline pointer hit and resize.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /sdk-multiline.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[MULTILINE] ready",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] focus OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] enter split OK",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "type_text": "tail",
+          "submit": false,
+          "key_interval_ms": 60
+        },
+        {
+          "wait_marker": "[MULTILINE] typed line OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "shift"
+              },
+              {
+                "type": "qcode",
+                "data": "up"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "type_text": "Z",
+          "submit": false,
+          "key_interval_ms": 60
+        },
+        {
+          "wait_marker": "[MULTILINE] shift up replaced OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] undo LF selection OK",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "y"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] redo OK",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "backspace"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] line navigation UTF8 OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] long document ready",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] caret vertical scroll OK",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "wheel-up",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 100
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "wheel-up",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] wheel scroll OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[MULTILINE] wheel survives blink OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] document home OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 2,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 76,
+            "y": -77,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "relative_motion": {
+            "x": 80,
+            "y": 36,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] pointer across lines OK",
+          "timeout": 60
+        },
+        {
+          "type_text": "X",
+          "submit": false,
+          "key_interval_ms": 60
+        },
+        {
+          "wait_marker": "[MULTILINE] pointer replaced OK",
+          "timeout": 60
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-multiline-editor.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MULTILINE] resize retained OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[MULTILINE] ok",
+          "timeout": 60
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[MULTILINE] ready",
+    "[MULTILINE] focus OK",
+    "[MULTILINE] enter split OK",
+    "[MULTILINE] typed line OK",
+    "[MULTILINE] shift up replaced OK",
+    "[MULTILINE] undo LF selection OK",
+    "[MULTILINE] redo OK",
+    "[MULTILINE] line navigation UTF8 OK",
+    "[MULTILINE] long document ready",
+    "[MULTILINE] caret vertical scroll OK",
+    "[MULTILINE] wheel scroll OK",
+    "[MULTILINE] wheel survives blink OK",
+    "[MULTILINE] document home OK",
+    "[MULTILINE] pointer across lines OK",
+    "[MULTILINE] pointer replaced OK",
+    "[MULTILINE] resize retained OK",
+    "[MULTILINE] ok",
+    "[GUI-EXIT] app=sdk_multiline_fixture kind=0 code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "application failed:",
+    "gui_server: FAIL",
+    "gui_server: PANIC"
+  ]
+}

@@ -37,3 +37,5 @@ $indicator-end: 1;
 $input-selection: #305777;
 $caret-width: 1;
 $caret-blink: 500ms;
+
+$input-scroll-step: 3;

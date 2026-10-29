@@ -25,7 +25,7 @@ Switch:disabled:checked { indicator-background: $accent; }
 Checkbox:disabled:checked, Radio:disabled:checked, Switch:disabled { indicator-mark-color: $muted; }
 
 // Input editing is retained by the SDK; every visual metric is theme supplied.
-Input { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; placeholder-color: $muted; selection-color: $input-selection; caret-color: $text; caret-width: $caret-width; caret-blink: $caret-blink; }
-Input:hover, Input:focus { border-color: $accent; }
-Input:read-only { background: $window-bg; }
-Input:disabled { color: $muted; caret-color: $indicator-off; border-color: $line; }
+Input, Textarea { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; placeholder-color: $muted; selection-color: $input-selection; caret-color: $text; caret-width: $caret-width; caret-blink: $caret-blink; scroll-step: $input-scroll-step; }
+Input:hover, Input:focus, Textarea:hover, Textarea:focus { border-color: $accent; }
+Input:read-only, Textarea:read-only { background: $window-bg; }
+Input:disabled, Textarea:disabled { color: $muted; caret-color: $indicator-off; border-color: $line; }

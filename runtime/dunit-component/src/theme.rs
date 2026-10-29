@@ -71,6 +71,7 @@ impl Theme {
                         "indicator-border-width" => valid_number(0., 64.),
                         "indicator-position" => valid_number(0., 1.),
                         "caret-width" => valid_number(0., 64.),
+                        "scroll-step" => valid_number(0., 1024.),
                         "caret-blink" => value
                             .as_duration()
                             .is_some_and(|v| v.is_finite() && (0. ..=60_000.).contains(&v)),

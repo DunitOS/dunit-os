@@ -71,6 +71,8 @@ enum Cmap {
 pub struct Font {
     data: Vec<u8>,
     units_per_em: u16,
+    horizontal_bounds: (i16, i16),
+    vertical_bounds: (i16, i16),
     num_glyphs: u16,
     long_loca: bool,
     num_h_metrics: u16,
@@ -93,9 +95,15 @@ impl Font {
         let mut hr = Reader::new(head);
         hr.skip(18)?; // version..fontRevision..checkSumAdjustment..magic..flags
         let units_per_em = hr.u16()?;
-        // skip created(8)+modified(8)+xMin/yMin/xMax/yMax(8)+macStyle(2)
-        // +lowestRecPPEM(2)+fontDirectionHint(2) = 30 bytes to indexToLocFormat
-        hr.skip(30)?;
+        hr.skip(16)?; // created + modified
+        let x_min = hr.i16()?;
+        let y_min = hr.i16()?;
+        let x_max = hr.i16()?;
+        let y_max = hr.i16()?;
+        if x_min > x_max || y_min > y_max {
+            return Err(TextError::UnsupportedFormat("head bounds"));
+        }
+        hr.skip(6)?; // macStyle + lowestRecPPEM + fontDirectionHint
         let index_to_loc_format = hr.i16()?;
         let long_loca = index_to_loc_format == 1;
 
@@ -121,6 +129,8 @@ impl Font {
         Ok(Font {
             data,
             units_per_em,
+            horizontal_bounds: (x_min, x_max),
+            vertical_bounds: (y_min, y_max),
             num_glyphs,
             long_loca,
             num_h_metrics,
@@ -137,6 +147,21 @@ impl Font {
     /// Font design units per em (the coordinate space of glyph outlines).
     pub fn units_per_em(&self) -> u16 {
         self.units_per_em
+    }
+
+    /// Declared font-wide horizontal ink bounds relative to the glyph origin.
+    /// These include overhang outside the advance; callers doing pixel culling
+    /// must additionally account for their rasterizer padding and rounding.
+    pub fn horizontal_bounds_px(&self, px: f32) -> (f32, f32) {
+        let scale = self.scale_for_px(px);
+        (self.horizontal_bounds.0 as f32 * scale, self.horizontal_bounds.1 as f32 * scale)
+    }
+
+    /// Declared font-wide vertical ink bounds relative to the baseline, with
+    /// positive coordinates pointing upwards (the TrueType coordinate space).
+    pub fn vertical_bounds_px(&self, px: f32) -> (f32, f32) {
+        let scale = self.scale_for_px(px);
+        (self.vertical_bounds.0 as f32 * scale, self.vertical_bounds.1 as f32 * scale)
     }
 
     /// Number of glyphs in the font.

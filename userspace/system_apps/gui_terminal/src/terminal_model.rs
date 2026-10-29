@@ -125,11 +125,18 @@ impl Term {
     pub(super) fn scroll_by(&mut self, rows: usize, up: bool) {
         let max = self.scrollback.len();
         self.scroll = if up {
-            (self.scroll + rows).min(max)
+            self.scroll.saturating_add(rows).min(max)
         } else {
             self.scroll.saturating_sub(rows)
         };
         self.dirty = true;
+    }
+
+    /// Native wheel deltas are negative upward and positive downward.
+    pub(super) fn scroll_wheel(&mut self, delta: i32, rows_per_notch: usize) {
+        if delta != 0 {
+            self.scroll_by((delta.unsigned_abs() as usize).saturating_mul(rows_per_notch), delta < 0);
+        }
     }
 
     /// Push the top grid row into scrollback and open a fresh blank bottom row —

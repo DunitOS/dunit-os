@@ -1,7 +1,9 @@
 //! Native window adapter for the pure retained component runtime.
 use crate::{
     time::Duration,
-    window::{DamageRect, Window, WindowEvent, IN_DOWN, IN_KEY, IN_LEAVE, IN_MOVE, IN_UP},
+    window::{
+        DamageRect, Window, WindowEvent, IN_DOWN, IN_KEY, IN_LEAVE, IN_MOVE, IN_SCROLL, IN_UP,
+    },
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
@@ -50,6 +52,7 @@ pub struct ComponentWindow<C: Component> {
     motion_frame: Option<crate::time::Instant>,
     motion_requested: bool,
     caret_frame: Option<crate::time::Instant>,
+    pointer_position: Option<(i32, i32)>,
 }
 impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
@@ -69,6 +72,7 @@ impl<C: Component> ComponentWindow<C> {
             motion_frame: None,
             motion_requested: true,
             caret_frame: None,
+            pointer_position: None,
         };
         ui.redraw()?;
         Ok(ui)
@@ -165,6 +169,9 @@ impl<C: Component> ComponentWindow<C> {
     /// repair of a retired buffer's previous contents. Zero for unchanged views.
     pub fn last_uploaded_pixels(&self) -> u64 {
         self.uploaded_pixels
+    }
+    pub fn input_scroll_y(&self, key: &str) -> Option<f32> {
+        self.renderer.input_scroll_y(key)
     }
     pub fn input_scroll_x(&self, key: &str) -> Option<f32> {
         self.renderer.input_scroll_x(key)
@@ -334,6 +341,11 @@ impl<C: Component> ComponentWindow<C> {
                 if matches!(input.kind, IN_DOWN | IN_UP) && input.value != 0 {
                     return Ok(event);
                 }
+                self.pointer_position = if input.kind == IN_LEAVE {
+                    None
+                } else {
+                    Some((input.x, input.y))
+                };
                 let pointer = match input.kind {
                     IN_DOWN => PointerEvent::Down,
                     IN_UP => PointerEvent::Up,
@@ -351,9 +363,10 @@ impl<C: Component> ComponentWindow<C> {
                         .dragging_input_key()
                         .map(alloc::string::String::from)
                 };
-                let index = capture
-                    .as_deref()
-                    .and_then(|key| self.renderer.input_index(key, input.x as f32));
+                let index = capture.as_deref().and_then(|key| {
+                    self.renderer
+                        .input_index_at(key, input.x as f32, input.y as f32)
+                });
                 let position = capture.as_deref().zip(index);
                 if self
                     .application
@@ -364,6 +377,22 @@ impl<C: Component> ComponentWindow<C> {
                     self.redraw()?;
                 }
             }
+            Some(WindowEvent::Input(input)) if input.kind == IN_SCROLL => {
+                let hovered = self
+                    .pointer_position
+                    .and_then(|(x, y)| self.renderer.hit_key(x as f32, y as f32))
+                    .map(alloc::string::String::from);
+                let target = hovered.or_else(|| {
+                    self.application
+                        .focused_input_key()
+                        .map(alloc::string::String::from)
+                });
+                if let Some(key) = target {
+                    if self.renderer.scroll_input_wheel(&key, input.x) {
+                        self.redraw()?;
+                    }
+                }
+            }
             Some(WindowEvent::Input(input)) if input.kind == IN_KEY => {
                 if input.value == 0 && input.y & !3 == 0 {
                     let extend = input.y & 1 != 0;
@@ -371,8 +400,12 @@ impl<C: Component> ComponentWindow<C> {
                     let command = match input.x {
                         0x4b => Some(EditCommand::Left { extend, word }),
                         0x4d => Some(EditCommand::Right { extend, word }),
+                        0x47 if word => Some(EditCommand::DocumentHome { extend }),
+                        0x4f if word => Some(EditCommand::DocumentEnd { extend }),
                         0x47 => Some(EditCommand::Home { extend }),
                         0x4f => Some(EditCommand::End { extend }),
+                        0x48 => Some(EditCommand::Up { extend }),
+                        0x50 => Some(EditCommand::Down { extend }),
                         0x53 => Some(EditCommand::Delete { word }),
                         0x0e => Some(EditCommand::Backspace { word }),
                         _ => None,

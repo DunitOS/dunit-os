@@ -38,6 +38,7 @@ impl<M> View<M> {
                         input.editor = previous.editor.clone();
                         input.editor.sync(self.text.as_deref().unwrap_or(""));
                         input.dragging = previous.dragging;
+                        input.caret_revision = previous.caret_revision;
                     }
                 }
             }

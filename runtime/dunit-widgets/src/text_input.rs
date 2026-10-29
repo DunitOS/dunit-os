@@ -1,4 +1,4 @@
-//! Pure single-line UTF-8 editing. Indices are byte offsets at scalar boundaries;
+//! Pure single-line and logical multiline UTF-8 editing. Indices are byte offsets at scalar boundaries;
 //! word operations use whitespace runs, not linguistic or grapheme segmentation.
 
 use alloc::{string::String, vec::Vec};
@@ -20,6 +20,10 @@ pub enum EditCommand {
     Right { extend: bool, word: bool },
     Home { extend: bool },
     End { extend: bool },
+    Up { extend: bool },
+    Down { extend: bool },
+    DocumentHome { extend: bool },
+    DocumentEnd { extend: bool },
     SelectAll,
     Undo,
     Redo,
@@ -34,6 +38,8 @@ struct Snapshot {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextEditor {
+    multiline: bool,
+    preferred_column: Option<usize>,
     value: Snapshot,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
@@ -45,6 +51,8 @@ impl TextEditor {
         let text = text.into();
         let cursor = text.len();
         Self {
+            multiline: false,
+            preferred_column: None,
             value: Snapshot {
                 text,
                 cursor,
@@ -52,6 +60,29 @@ impl TextEditor {
             },
             undo: Vec::new(),
             redo: Vec::new(),
+        }
+    }
+
+    /// Preserve LF-separated logical lines; CR, tabs and other controls remain invalid.
+    pub fn new_multiline(text: impl Into<String>) -> Self {
+        let mut editor = Self::new(text);
+        editor.multiline = true;
+        editor
+    }
+
+    pub fn is_multiline(&self) -> bool {
+        self.multiline
+    }
+
+    pub fn valid_multiline_text(text: &str) -> bool {
+        text.len() <= MAX_INPUT_BYTES && text.chars().all(|ch| ch == '\n' || valid_character(ch))
+    }
+
+    fn accepts(&self, text: &str) -> bool {
+        if self.multiline {
+            Self::valid_multiline_text(text)
+        } else {
+            Self::valid_text(text)
         }
     }
 
@@ -80,7 +111,7 @@ impl TextEditor {
 
     /// External valid changes reset history. Invalid values are rejected atomically.
     pub fn sync(&mut self, value: &str) {
-        if value == self.text() || !Self::valid_text(value) {
+        if value == self.text() || !self.accepts(value) {
             return;
         }
         self.value.text = String::from(value);
@@ -88,6 +119,7 @@ impl TextEditor {
         self.value.anchor = self.boundary(self.anchor());
         self.undo.clear();
         self.redo.clear();
+        self.preferred_column = None;
     }
 
     fn boundary(&self, index: usize) -> usize {
@@ -99,6 +131,7 @@ impl TextEditor {
     }
 
     pub fn place(&mut self, index: usize, extend: bool) -> bool {
+        self.preferred_column = None;
         let index = self.boundary(index);
         let anchor = if extend { self.anchor() } else { index };
         let changed = index != self.cursor() || anchor != self.anchor();
@@ -108,6 +141,7 @@ impl TextEditor {
     }
 
     pub fn select_all(&mut self) -> bool {
+        self.preferred_column = None;
         let changed = self.anchor() != 0 || self.cursor() != self.text().len();
         self.value.anchor = 0;
         self.value.cursor = self.text().len();
@@ -117,6 +151,7 @@ impl TextEditor {
     /// Select the whitespace or non-whitespace run under the supplied offset.
     /// An offset at the end selects the preceding run.
     pub fn select_word(&mut self, index: usize) -> bool {
+        self.preferred_column = None;
         if self.text().is_empty() {
             return false;
         }
@@ -151,6 +186,47 @@ impl TextEditor {
         let changed = self.anchor() != start || self.cursor() != end;
         self.value.anchor = start;
         self.value.cursor = end;
+        changed
+    }
+
+    fn line_start(&self, index: usize) -> usize {
+        self.text()[..index].rfind('\n').map_or(0, |i| i + 1)
+    }
+
+    fn line_end(&self, index: usize) -> usize {
+        self.text()[index..]
+            .find('\n')
+            .map_or(self.text().len(), |i| index + i)
+    }
+
+    /// Vertical movement counts Unicode scalars, with no wrapping or grapheme model.
+    fn vertical(&mut self, down: bool, extend: bool) -> bool {
+        if !self.multiline {
+            return false;
+        }
+        let start = self.line_start(self.cursor());
+        let column = self
+            .preferred_column
+            .unwrap_or_else(|| self.text()[start..self.cursor()].chars().count());
+        let target_start = if down {
+            let end = self.line_end(self.cursor());
+            if end == self.text().len() {
+                return false;
+            }
+            end + 1
+        } else {
+            if start == 0 {
+                return false;
+            }
+            self.line_start(start - 1)
+        };
+        let target_end = self.line_end(target_start);
+        let offset = self.text()[target_start..target_end]
+            .char_indices()
+            .nth(column)
+            .map_or(target_end, |(i, _)| target_start + i);
+        let changed = self.place(offset, extend);
+        self.preferred_column = Some(column);
         changed
     }
 
@@ -214,6 +290,7 @@ impl TextEditor {
             // gesture, but must not create an undo entry or a model change.
             return self.place(range.start + insert.len(), false);
         }
+        self.preferred_column = None;
         Self::push(&mut self.undo, self.value.clone());
         self.redo.clear();
         let cursor = range.start + insert.len();
@@ -228,7 +305,7 @@ impl TextEditor {
     /// but reject edits and history traversal.
     pub fn apply(&mut self, command: EditCommand, max_chars: usize, read_only: bool) -> bool {
         use EditCommand::*;
-        if !Self::valid_text(self.text()) {
+        if !self.accepts(self.text()) {
             return false;
         }
         match command {
@@ -252,11 +329,29 @@ impl TextEditor {
                 };
                 self.place(index, extend)
             }
-            Home { extend } => self.place(0, extend),
-            End { extend } => self.place(self.text().len(), extend),
+            Home { extend } => self.place(
+                if self.multiline {
+                    self.line_start(self.cursor())
+                } else {
+                    0
+                },
+                extend,
+            ),
+            End { extend } => self.place(
+                if self.multiline {
+                    self.line_end(self.cursor())
+                } else {
+                    self.text().len()
+                },
+                extend,
+            ),
+            DocumentHome { extend } => self.place(0, extend),
+            DocumentEnd { extend } => self.place(self.text().len(), extend),
+            Up { extend } => self.vertical(false, extend),
+            Down { extend } => self.vertical(true, extend),
             SelectAll => self.select_all(),
             Insert(ch) => {
-                if read_only || !valid_character(ch) {
+                if read_only || !(valid_character(ch) || (self.multiline && ch == '\n')) {
                     return false;
                 }
                 let mut encoded = [0; 4];
@@ -299,6 +394,7 @@ impl TextEditor {
                 if previous.text.chars().count() > max_chars {
                     return false;
                 }
+                self.preferred_column = None;
                 let previous = source.pop().unwrap();
                 let current = core::mem::replace(&mut self.value, previous);
                 Self::push(destination, current);

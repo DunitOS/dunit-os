@@ -80,6 +80,7 @@ impl Capability {
 pub struct Input {
     pub kind: u8,
     /// Pointer x, wheel delta or key scancode, depending on kind.
+    /// For IN_SCROLL, negative is up and positive is down.
     pub x: i32,
     /// Pointer y or keyboard modifiers, depending on kind.
     pub y: i32,

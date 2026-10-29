@@ -100,6 +100,8 @@ _SHIFTED = {
 
 def char_to_keys(ch: str) -> list[str] | None:
     """Return the list of qcodes needed to type `ch`, or None if unsupported."""
+    if ch == "\n":
+        return ["ret"]
     if ch in _BASE:
         return [_BASE[ch]]
     if ch.isalpha() and ch.isupper():
@@ -352,7 +354,7 @@ def build_disk(config: str, workdir: Path) -> Path:
     return image
 
 
-def type_command(qmp: Qmp, text: str, key_interval: float = 0.05) -> None:
+def type_command(qmp: Qmp, text: str, key_interval: float = 0.05, submit: bool = True) -> None:
     for ch in text:
         keys = char_to_keys(ch)
         if keys is None:
@@ -364,8 +366,9 @@ def type_command(qmp: Qmp, text: str, key_interval: float = 0.05) -> None:
         # character can leave Shift held after an underscore/quote and corrupt
         # the command. Let the 40 ms press finish before sending another key.
         time.sleep(key_interval)
-    qmp.send_key(["ret"])
-    time.sleep(0.05)
+    if submit:
+        qmp.send_key(["ret"])
+        time.sleep(0.05)
 
 
 def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
@@ -394,7 +397,10 @@ def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
             interval = float(step.get("key_interval_ms", 50)) / 1000
             if not 0.05 <= interval <= 1:
                 raise ValueError("key interval must be between 50 and 1000 ms")
-            type_command(qmp, str(step["type_text"]), interval)
+            submit = step.get("submit", True)
+            if not isinstance(submit, bool):
+                raise ValueError("type_text submit must be a boolean")
+            type_command(qmp, str(step["type_text"]), interval, submit)
         elif "delay_ms" in step:
             delay = float(step["delay_ms"]) / 1000
             if not 0 <= delay <= 5:

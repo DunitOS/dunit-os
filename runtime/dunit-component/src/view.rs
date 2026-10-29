@@ -142,7 +142,25 @@ impl<Msg> View<Msg> {
             on_change,
             dragging: false,
             caret_visible: true,
+            caret_revision: 0,
         });
+        view
+    }
+    /// LF-delimited, controlled multiline field. It fills available height by
+    /// default; explicit layout may choose a fixed viewport instead.
+    pub fn text_area(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        value: impl Into<String>,
+        on_change: fn(String) -> Msg,
+        options: crate::InputOptions,
+    ) -> Self {
+        let mut view = Self::input(key, label, value, on_change, options);
+        view.kind = Kind::Element(String::from("Textarea"));
+        view.attrs.height = dunit_ui::Sizing::Grow(1.);
+        if let Some(input) = &mut view.input {
+            input.editor = crate::TextEditor::new_multiline(view.text.as_deref().unwrap_or(""));
+        }
         view
     }
     /// Disabled buttons cannot receive focus, presses or activation.
@@ -251,8 +269,15 @@ impl<Msg> View<Msg> {
         }
         if let Some(input) = &self.input {
             let value = self.text.as_deref().unwrap_or("");
-            if !crate::TextEditor::valid_text(value)
-                || !crate::TextEditor::valid_text(&input.options.placeholder)
+            let valid = if input.editor.is_multiline() {
+                crate::TextEditor::valid_multiline_text
+            } else {
+                crate::TextEditor::valid_text
+            };
+            if input.editor.is_multiline() != (self.kind.tag() == "Textarea")
+                || !valid(value)
+                || !valid(&input.options.placeholder)
+                || (input.editor.is_multiline() && input.options.password)
                 || value.chars().count() > input.options.max_chars
             {
                 return Err(UiError::InvalidInput);

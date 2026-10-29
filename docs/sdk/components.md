@@ -31,7 +31,7 @@ assert_eq!(app.view().children()[1].content(), Some("1"));
 ```
 
 Views contain text, [push buttons](buttons.md), [checkable controls](checkable-controls.md),
-[single-line fields](text-input.md) and Row/Column/Stack/Grid
+[single-line fields](text-input.md), [multiline fields](multiline-input.md) and Row/Column/Stack/Grid
 containers. Text is stored directly;
 quotes, braces and Unicode do not need markup escaping. Every node has a
 nonempty unique key, also used as its DSS ID. The current adapter hosts one root

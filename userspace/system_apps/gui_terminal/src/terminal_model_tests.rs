@@ -120,3 +120,20 @@ fn fractional_pitch_rounds_up_without_color_run_drift() {
     t.scroll_by(1, false);
     assert_eq!(t.scroll, 0);
 }
+
+#[test]
+fn native_wheel_up_enters_backlog_and_down_returns_to_live_bottom() {
+    let mut t = term(4, 2);
+    t.feed(b"one\ntwo\nthree\nfour\nfive\nsix\n");
+    assert!(t.scrollback.len() > 3);
+    t.scroll_wheel(-1, 3);
+    assert_eq!(t.scroll, 3);
+    t.scroll_wheel(1, 2);
+    assert_eq!(t.scroll, 1);
+    t.scroll_wheel(0, 3);
+    assert_eq!(t.scroll, 1);
+    t.scroll_wheel(i32::MIN, usize::MAX);
+    assert_eq!(t.scroll, t.scrollback.len());
+    t.scroll_wheel(i32::MAX, usize::MAX);
+    assert_eq!(t.scroll, 0);
+}

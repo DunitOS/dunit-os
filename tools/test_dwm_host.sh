@@ -8,6 +8,7 @@ for source in kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     userspace/system_apps/gui_server/src/lua_policy.rs \
     userspace/system_apps/gui_server/src/shell_geometry.rs \
     userspace/system_apps/gui_settings/src/document_editor.rs \
+    userspace/system_apps/gui_terminal/src/terminal_model_tests.rs \
     userspace/system_apps/gui_server/src/composite.rs \
     userspace/system_apps/gui_server/src/damage_plan.rs \
     userspace/system_apps/gui_server/src/window_effects_tests.rs \

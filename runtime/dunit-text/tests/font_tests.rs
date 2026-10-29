@@ -96,3 +96,49 @@ fn layout_line_accumulates_advances() {
         .sum();
     assert!((width - expected).abs() < 0.01, "width {} vs expected {}", width, expected);
 }
+
+#[test]
+fn font_wide_bounds_cover_negative_bearings_and_positive_overhang() {
+    let font = load_font();
+    let (left, right) = font.horizontal_bounds_px(64.);
+    assert!(left < 0.);
+    for ch in ['J', 'j', 'f', 'Ж', 'é'] {
+        let outline = font.outline(font.glyph_index(ch));
+        let scale = font.scale_for_px(64.);
+        assert!(left <= outline.x_min * scale);
+        assert!(right >= outline.x_max * scale);
+    }
+    let (twice_left, twice_right) = font.horizontal_bounds_px(128.);
+    assert_eq!((twice_left, twice_right), (left * 2., right * 2.));
+}
+
+#[test]
+fn reversed_head_bounds_are_rejected() {
+    let original = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/DejaVuSans.ttf")).unwrap();
+    let count = u16::from_be_bytes(original[4..6].try_into().unwrap()) as usize;
+    let record = (0..count).map(|i| 12 + i * 16).find(|&i| &original[i..i + 4] == b"head").unwrap();
+    let head = u32::from_be_bytes(original[record + 8..record + 12].try_into().unwrap()) as usize;
+    for (min, max) in [(36, 40), (38, 42)] {
+        let mut bytes = original.clone();
+        bytes[head + min..head + min + 2].copy_from_slice(&1i16.to_be_bytes());
+        bytes[head + max..head + max + 2].copy_from_slice(&0i16.to_be_bytes());
+        assert!(matches!(Font::parse(bytes), Err(dunit_text::TextError::UnsupportedFormat("head bounds"))));
+    }
+}
+
+#[test]
+fn vertical_ink_bounds_cover_glyphs_extending_past_logical_rows() {
+    let font = load_font();
+    let (bottom, top) = font.vertical_bounds_px(64.);
+    let metrics = font.line_metrics(64.);
+    assert!(top > metrics.ascent);
+    assert!(bottom < metrics.descent);
+    for ch in ['\u{1eb2}', '\u{06b8}'] {
+        let outline = font.outline(font.glyph_index(ch));
+        let scale = font.scale_for_px(64.);
+        assert!(bottom <= outline.y_min * scale);
+        assert!(top >= outline.y_max * scale);
+    }
+    let (twice_bottom, twice_top) = font.vertical_bounds_px(128.);
+    assert_eq!((twice_bottom, twice_top), (bottom * 2., top * 2.));
+}

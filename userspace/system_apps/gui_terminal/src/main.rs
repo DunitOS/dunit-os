@@ -599,12 +599,7 @@ pub extern "C" fn _start() -> ! {
             match input.kind {
                 IN_QUIT => break,
                 IN_SCROLL => {
-                    // Wheel delta (i32) in the lx field: positive = scroll up
-                    // into the backlog, negative = back toward the live bottom.
-                    let delta = input.x;
-                    if delta != 0 {
-                        term.scroll_by(delta.unsigned_abs() as usize * 3, delta > 0);
-                    }
+                    term.scroll_wheel(input.x, 3);
                 }
                 IN_KEY => {
                     // IN_KEY carries scancode, modifiers and cooked ASCII. Decode

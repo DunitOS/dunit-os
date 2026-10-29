@@ -1,4 +1,4 @@
-//! Controlled single-line fields and editing dispatch.
+//! Controlled text fields and editing dispatch.
 use crate::{Application, Component, Key, PointerEvent, Result, View};
 use alloc::string::String;
 pub use dunit_widgets::text_input::{EditCommand, TextEditor, MAX_INPUT_BYTES};
@@ -29,6 +29,7 @@ pub(crate) struct InputBinding<M> {
     pub on_change: fn(String) -> M,
     pub dragging: bool,
     pub caret_visible: bool,
+    pub caret_revision: u64,
 }
 impl<M> PartialEq for InputBinding<M> {
     fn eq(&self, other: &Self) -> bool {
@@ -38,6 +39,7 @@ impl<M> PartialEq for InputBinding<M> {
             && core::ptr::fn_addr_eq(self.on_change, other.on_change)
             && self.dragging == other.dragging
             && self.caret_visible == other.caret_visible
+            && self.caret_revision == other.caret_revision
     }
 }
 impl<M> View<M> {
@@ -63,6 +65,7 @@ impl<C: Component> Application<C> {
                 return;
             };
             consumed = true;
+            input.caret_revision = input.caret_revision.wrapping_add(1);
             let old = input.editor.clone();
             input
                 .editor
@@ -82,7 +85,9 @@ impl<C: Component> Application<C> {
                         && (result.is_err() || v.text.as_deref() == Some(old.text()))
                     {
                         if let Some(input) = &mut v.input {
-                            input.editor = old.clone();
+                            if input.editor.is_multiline() == old.is_multiline() {
+                                input.editor = old.clone();
+                            }
                         }
                     }
                 });
@@ -101,6 +106,12 @@ impl<C: Component> Application<C> {
         if key.modifiers & !3 != 0 {
             return Ok(false);
         }
+        let mut multiline = false;
+        self.view.visit_mut(&mut |v| {
+            if v.interaction.focused {
+                multiline = v.input.as_ref().is_some_and(|i| i.editor.is_multiline());
+            }
+        });
         let command = if ctrl {
             match key.character {
                 'a' | 'A' | '\u{1}' => Some(EditCommand::SelectAll),
@@ -113,6 +124,7 @@ impl<C: Component> Application<C> {
             }
         } else {
             match key.character {
+                '\n' | '\r' if multiline => Some(EditCommand::Insert('\n')),
                 '\u{8}' => Some(EditCommand::Backspace { word: false }),
                 '\u{7f}' => Some(EditCommand::Delete { word: false }),
                 c if !c.is_control() => Some(EditCommand::Insert(c)),
@@ -158,8 +170,10 @@ impl<C: Component> Application<C> {
                         return;
                     }
                     if let Some(input) = &mut v.input {
-                        changed |= input.editor.place(index, event != PointerEvent::Down);
-                        changed |= !input.caret_visible;
+                        input.caret_revision = input.caret_revision.wrapping_add(1);
+                        input.editor.place(index, event != PointerEvent::Down);
+                        // Revision-only activity must schedule a render to reveal the caret.
+                        changed = true;
                         input.caret_visible = true;
                     }
                 });
