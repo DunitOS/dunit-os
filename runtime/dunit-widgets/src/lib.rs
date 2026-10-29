@@ -29,11 +29,15 @@ extern crate alloc;
 pub mod event;
 pub mod kind;
 pub mod measure;
+pub mod scroll;
 pub mod state;
 pub mod text_input;
 
-pub use event::{event_path, focus_next, focus_order, focus_prev, hit_test, Event, Key};
+pub use event::{
+    event_path, focus_next, focus_order, focus_prev, hit_test, hit_test_with_clips, Event, Key,
+};
 pub use kind::Widget;
 pub use measure::{intrinsic_size, FontMeasure, TextMeasure};
+pub use scroll::{ScrollAxis, ScrollCommand, Thumb};
 pub use state::{Interaction, WidgetValue};
 pub use text_input::{EditCommand, TextEditor, MAX_INPUT_BYTES};

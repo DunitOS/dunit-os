@@ -271,7 +271,7 @@ class SerialTail:
 
 def load_markers(markers_file: str | None,
                  require: list[str] | None,
-                 forbid: list[str] | None) -> tuple[list[str], list[str], dict]:
+                 forbid: list[str] | None) -> tuple[list[str], list[str | dict], dict]:
     """Merge a markers manifest file with CLI --require/--forbid markers.
 
     Returns (required, forbidden, run_defaults). `run_defaults` carries an
@@ -279,18 +279,42 @@ def load_markers(markers_file: str | None,
     describes how to boot and what must be observed.
     """
     required: list[str] = []
-    forbidden: list[str] = []
+    forbidden: list[str | dict] = []
     run_defaults: dict = {}
     if markers_file:
         data = json.loads(Path(markers_file).read_text(encoding="utf-8"))
         for entry in data.get("required", []):
             required.append(entry["marker"] if isinstance(entry, dict) else entry)
         for entry in data.get("forbidden", []):
-            forbidden.append(entry["marker"] if isinstance(entry, dict) else entry)
+            if isinstance(entry, dict) and "after" in entry:
+                if not isinstance(entry["after"], str) or not entry["after"]:
+                    raise ValueError("forbidden marker phase must be a nonempty string")
+                forbidden.append({"marker": entry["marker"], "after": entry["after"]})
+                if entry["after"] not in required:
+                    required.append(entry["after"])
+            else:
+                forbidden.append(entry["marker"] if isinstance(entry, dict) else entry)
         run_defaults = data.get("run", {}) or {}
     required.extend(require or [])
     forbidden.extend(forbid or [])
     return required, forbidden, run_defaults
+
+
+def forbidden_marker_hits(text: str, markers: list[str | dict]) -> list[str]:
+    """Global failures or failures after an explicitly required phase boundary."""
+    hits = []
+    for entry in markers:
+        marker = entry["marker"] if isinstance(entry, dict) else entry
+        start = 0
+        if isinstance(entry, dict):
+            boundary = entry["after"]
+            offset = text.find(boundary)
+            if offset < 0:  # load_markers also requires the boundary itself
+                continue
+            start = offset + len(boundary)
+        if marker in text[start:]:
+            hits.append(marker)
+    return hits
 
 
 def build_iso(config: str, variant: str | None = None, overlay: Path | None = None) -> Path:
@@ -703,7 +727,7 @@ def run(args: argparse.Namespace) -> RunResult:
             result.markers_checked = True
             text = serial.text
             result.missing_markers = [m for m in required if m not in text]
-            result.forbidden_hits = [m for m in forbidden if m in text]
+            result.forbidden_hits = forbidden_marker_hits(text, forbidden)
             if result.missing_markers or result.forbidden_hits:
                 marker_reason = (
                     f"marker budget failed: {len(result.missing_markers)} missing, "

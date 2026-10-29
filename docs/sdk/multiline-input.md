@@ -74,8 +74,9 @@ both paths. GUI terminal wheel consumption follows the same documented native
 sign convention, with regression coverage for backlog direction and clamping.
 
 Soft wrapping, grapheme/IME, double/triple click, native pointer modifiers,
-clipboard (M7.7), generic scroll containers/bars and application migration
-remain open roadmap work.
+clipboard (M7.7), bars inside Textarea and application migration
+remain open roadmap work. Generic vertical [scroll regions](scroll-areas.md) are
+available for child controls and content.
 
 Validation on 29 October 2026: 55 component, 28 widget, 43 renderer, 10 text,
 13 native SDK, 18 style, 75 protocol and 19 Python tooling checks passed.

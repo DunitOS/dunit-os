@@ -17,6 +17,7 @@ path = "src/lib.rs"
 dunit_ui = { path = "../dunit-ui" }
 dunit_style = { path = "../dunit-style" }
 dunit_text = { path = "../dunit-text" }
+dunit_widgets = { path = "../dunit-widgets" }
 
 [profile.release]
 panic = "abort"

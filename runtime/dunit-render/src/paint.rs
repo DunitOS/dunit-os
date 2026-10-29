@@ -7,10 +7,13 @@ use dunit_ui::layout::Layout;
 use dunit_ui::tree::{NodeId, Tree};
 use dunit_ui::Rect;
 
-use crate::{surface::Surface, PaintResult, TextInput};
+use crate::{surface::Surface, PaintResult, ScrollArea, TextInput};
 
 /// Resolve retained input snapshots at their place in document paint order.
 pub type InputOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a TextInput>;
+
+/// Resolve a scroll viewport and scrollbar in document coordinates.
+pub type ScrollOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a ScrollArea>;
 
 /// A resolver from a node to its already-cascaded DSS style. Callers build these
 /// from [`dunit_style::cascade`]; the painter treats the result as read-only.
@@ -43,6 +46,7 @@ pub fn paint(
         surface,
         false,
         &|_| None,
+        &|_| None,
     )
 }
 
@@ -71,10 +75,43 @@ pub fn paint_clipped_with_inputs(
     clip: Rect,
     input_of: InputOf<'_>,
 ) -> PaintResult {
+    paint_clipped_with_widgets(
+        tree,
+        layout,
+        style_of,
+        font,
+        surface,
+        clip,
+        input_of,
+        &|_| None,
+    )
+}
+
+/// Paint retained input and scroll snapshots in document order.
+pub fn paint_clipped_with_widgets(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    clip: Rect,
+    input_of: InputOf<'_>,
+    scroll_of: ScrollOf<'_>,
+) -> PaintResult {
     let mut result = Ok(());
     if !tree.is_empty() {
         surface.with_clip(clip, |s| {
-            result = paint_node(tree, layout, tree.root(), style_of, font, s, true, input_of);
+            result = paint_node(
+                tree,
+                layout,
+                tree.root(),
+                style_of,
+                font,
+                s,
+                true,
+                input_of,
+                scroll_of,
+            );
         });
     }
     result
@@ -89,6 +126,7 @@ fn paint_node(
     surface: &mut Surface,
     contained: bool,
     input_of: InputOf<'_>,
+    scroll_of: ScrollOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     let style = style_of(id);
@@ -104,11 +142,12 @@ fn paint_node(
             s.with_rounded_clip(rect, style.number("radius").unwrap_or(0.), |s| {
                 paint_contents(
                     tree, layout, id, &style, style_of, font, s, contained, true, input_of,
+                    scroll_of,
                 )
             })
         } else {
             paint_contents(
-                tree, layout, id, &style, style_of, font, s, contained, false, input_of,
+                tree, layout, id, &style, style_of, font, s, contained, false, input_of, scroll_of,
             )
         }
     };
@@ -134,6 +173,7 @@ fn paint_contents(
     contained: bool,
     group: bool,
     input_of: InputOf<'_>,
+    scroll_of: ScrollOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     surface.backdrop_blur(
@@ -216,10 +256,22 @@ fn paint_contents(
         );
     }
 
-    for &c in &tree.node(id).children {
-        paint_node(
-            tree, layout, c, style_of, font, surface, contained, input_of,
-        )?;
+    let scroll = (tag == "Scroll").then(|| scroll_of(id)).flatten();
+    let children = |surface: &mut Surface| -> PaintResult {
+        for &c in &tree.node(id).children {
+            paint_node(
+                tree, layout, c, style_of, font, surface, contained, input_of, scroll_of,
+            )?;
+        }
+        Ok(())
+    };
+    if let Some(scroll) = scroll {
+        let mut result = Ok(());
+        surface.with_clip(scroll.viewport, |surface| result = children(surface));
+        result?;
+        crate::scroll::paint(scroll, style, surface);
+    } else {
+        children(surface)?;
     }
     Ok(())
 }

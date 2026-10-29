@@ -171,3 +171,44 @@ fn measurer_sizes_element_leaves() {
     assert_eq!(plain.rect(tree.by_name("t").unwrap()).w, 0.0);
 }
 
+
+#[test]
+fn scroll_measure_matches_vertical_natural_arrangement_with_spacing() {
+    let (tree, lay) = r("Column { Scroll#scroll spacing=7 { Text#a width=20 height=20 Text#b width=30 height=30 } }", 100., 100.);
+    let scroll = lay.rect(tree.by_name("scroll").unwrap());
+    let a = lay.rect(tree.by_name("a").unwrap());
+    let b = lay.rect(tree.by_name("b").unwrap());
+    assert_eq!(scroll.h, 57.);
+    assert_eq!(a.y, 0.);
+    assert_eq!(b.y, 27.);
+    assert_eq!(b.y + b.h, scroll.y + scroll.h);
+}
+
+#[test]
+fn scroll_preserves_intrinsic_and_explicit_overflow_widths() {
+    let (tree, lay) = r("Scroll { Column#natural { Text#wide width=200 height=10 } Text#explicit width=150 height=20 }", 100., 60.);
+    assert_eq!(lay.rect(tree.by_name("natural").unwrap()).w, 200.);
+    assert_eq!(lay.rect(tree.by_name("wide").unwrap()).w, 200.);
+    assert_eq!(lay.rect(tree.by_name("explicit").unwrap()).w, 150.);
+}
+
+#[test]
+fn translate_subtree_moves_descendants_without_touching_siblings_or_sizes() {
+    let (tree, mut lay) = r("Column { Column#group { Text#leaf width=20 height=10 } Text#sibling height=5 }", 100., 60.);
+    let group = tree.by_name("group").unwrap();
+    let leaf = tree.by_name("leaf").unwrap();
+    let sibling = tree.by_name("sibling").unwrap();
+    let before = lay.rect(leaf);
+    let untouched = lay.rect(sibling);
+    assert!(lay.translate_subtree(&tree, group, 3., -12.));
+    assert_eq!(lay.rect(leaf), dunit_ui::Rect { x: before.x + 3., y: before.y - 12., ..before });
+    assert_eq!(lay.rect(sibling), untouched);
+    let saved = lay.rect(leaf);
+    assert!(!lay.translate_subtree(&tree, group, f32::NAN, 0.));
+    assert!(!lay.translate_subtree(&tree, group, 0., f32::INFINITY));
+    assert_eq!(lay.rect(leaf), saved);
+    assert!(lay.translate_subtree(&tree, group, f32::MAX, 0.));
+    let saved = lay.rect(leaf);
+    assert!(!lay.translate_subtree(&tree, group, f32::MAX, 0.));
+    assert_eq!(lay.rect(leaf), saved, "overflow must fail atomically");
+}

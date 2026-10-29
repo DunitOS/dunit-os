@@ -33,6 +33,7 @@ pub struct View<Msg> {
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
     pub(crate) input: Option<crate::input::InputBinding<Msg>>,
+    pub(crate) scroll_label: Option<String>,
 }
 impl<Msg> View<Msg> {
     fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
@@ -48,6 +49,7 @@ impl<Msg> View<Msg> {
             interaction: dunit_widgets::Interaction::default(),
             radio_group: None,
             input: None,
+            scroll_label: None,
         }
     }
     pub fn text(key: impl Into<String>, text: impl Into<String>) -> Self {
@@ -172,6 +174,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.scroll_label.is_some() {
+            return Some("region");
+        }
         if self.input.is_some() {
             return Some("textbox");
         }
@@ -191,10 +196,20 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(label) = &self.scroll_label {
+            return Some(label);
+        }
         if let Some(input) = &self.input {
             return Some(&input.label);
         }
         self.activation.as_ref().and(self.text.as_deref())
+    }
+    /// Focusable vertical viewport with a theme-sized scrollbar gutter.
+    pub fn scroll(key: impl Into<String>, label: impl Into<String>, children: Vec<Self>) -> Self {
+        let mut view = Self::new(key, Kind::Scroll, None, children);
+        view.scroll_label = Some(label.into());
+        view.attrs.height = dunit_ui::Sizing::Grow(1.);
+        view
     }
     pub fn column(key: impl Into<String>, children: Vec<Self>) -> Self {
         Self::new(key, Kind::Column, None, children)

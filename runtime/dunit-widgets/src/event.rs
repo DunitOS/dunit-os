@@ -51,6 +51,20 @@ fn contains(r: Rect, x: f32, y: f32) -> bool {
 /// point is outside the root. Later siblings paint over earlier ones, so they
 /// win ties.
 pub fn hit_test(tree: &Tree, layout: &Layout, x: f32, y: f32) -> Option<NodeId> {
+    hit_test_with_clips(tree, layout, x, y, &|_| None)
+}
+
+/// Hit-test with optional per-node descendant clips. A point outside a node's
+/// clip may hit the node itself, but cannot hit any of its descendants. This
+/// lets callers keep viewport chrome interactive while clipping its content.
+/// Root containment and later-sibling precedence match [`hit_test`].
+pub fn hit_test_with_clips(
+    tree: &Tree,
+    layout: &Layout,
+    x: f32,
+    y: f32,
+    clip_of: &dyn Fn(NodeId) -> Option<Rect>,
+) -> Option<NodeId> {
     if tree.is_empty() {
         return None;
     }
@@ -58,13 +72,23 @@ pub fn hit_test(tree: &Tree, layout: &Layout, x: f32, y: f32) -> Option<NodeId> 
     if !contains(layout.rect(root), x, y) {
         return None;
     }
-    Some(hit_descend(tree, layout, root, x, y))
+    Some(hit_descend(tree, layout, root, x, y, clip_of))
 }
 
-fn hit_descend(tree: &Tree, layout: &Layout, id: NodeId, x: f32, y: f32) -> NodeId {
+fn hit_descend(
+    tree: &Tree,
+    layout: &Layout,
+    id: NodeId,
+    x: f32,
+    y: f32,
+    clip_of: &dyn Fn(NodeId) -> Option<Rect>,
+) -> NodeId {
+    if clip_of(id).is_some_and(|clip| !contains(clip, x, y)) {
+        return id;
+    }
     for &c in tree.node(id).children.iter().rev() {
         if contains(layout.rect(c), x, y) {
-            return hit_descend(tree, layout, c, x, y);
+            return hit_descend(tree, layout, c, x, y, clip_of);
         }
     }
     id

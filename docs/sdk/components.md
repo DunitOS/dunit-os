@@ -31,7 +31,7 @@ assert_eq!(app.view().children()[1].content(), Some("1"));
 ```
 
 Views contain text, [push buttons](buttons.md), [checkable controls](checkable-controls.md),
-[single-line fields](text-input.md), [multiline fields](multiline-input.md) and Row/Column/Stack/Grid
+[single-line fields](text-input.md), [multiline fields](multiline-input.md), [scroll regions](scroll-areas.md) and Row/Column/Stack/Grid
 containers. Text is stored directly;
 quotes, braces and Unicode do not need markup escaping. Every node has a
 nonempty unique key, also used as its DSS ID. The current adapter hosts one root
@@ -121,7 +121,7 @@ builder and repeated parse/layout/paint code are removed; counters change only
 through a refresh message. It now uses `open_themed` and the shared
 [SDK token profiles](themes.md), including live reload, without a private DSS
 file or font loader. The generated GUI starter uses the same component path.
-Buttons and fields reconcile interaction state by stable key and kind. Other
+Buttons, fields and scroll regions retain interaction state by stable key and kind. Other
 widget families and nested component lifecycle remain separate work. See
 [buttons](buttons.md) and [text input](text-input.md).
 

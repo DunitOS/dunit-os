@@ -44,7 +44,7 @@ impl<M> PartialEq for InputBinding<M> {
 }
 impl<M> View<M> {
     pub(crate) fn focusable(&self) -> bool {
-        self.activation.is_some() || self.input.is_some()
+        self.activation.is_some() || self.input.is_some() || self.scroll_label.is_some()
     }
     pub fn text_editor(&self) -> Option<&TextEditor> {
         self.input.as_ref().map(|i| &i.editor)

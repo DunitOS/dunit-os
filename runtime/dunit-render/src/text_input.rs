@@ -4,6 +4,7 @@ use alloc::string::String;
 use dunit_style::Style;
 use dunit_text::Font;
 use dunit_ui::Rect;
+use dunit_widgets::ScrollAxis;
 
 /// A render snapshot; offsets refer to UTF-8 byte boundaries in `value`.
 #[derive(Clone, Debug, PartialEq)]
@@ -38,15 +39,23 @@ fn finite_scroll(value: f32) -> f32 {
         0.
     }
 }
+fn scroll_axis(prior: f32, visible: f32, limit: f32) -> ScrollAxis {
+    let visible = finite_scroll(visible);
+    let limit = finite_scroll(limit);
+    let content = (visible as f64 + limit as f64).min(f32::MAX as f64) as f32;
+    let mut axis = ScrollAxis {
+        offset: prior,
+        ..ScrollAxis::default()
+    };
+    axis.set_extents(visible, content);
+    axis
+}
 fn fit_axis(prior: f32, pos: f32, visible: f32, limit: f32) -> f32 {
-    let mut scroll = finite_scroll(prior);
-    if pos < scroll {
-        scroll = pos;
-    }
-    if pos > scroll + visible {
-        scroll = pos - visible;
-    }
-    scroll.min(limit.max(0.))
+    // The caller reserves the caret dimensions from the usable viewport, so
+    // revealing its leading-edge point keeps the entire caret in view.
+    let mut axis = scroll_axis(prior, visible, limit);
+    axis.reveal(pos, pos);
+    axis.offset
 }
 impl TextInput {
     fn boundary(&self, index: usize) -> usize {
@@ -138,11 +147,16 @@ impl TextInput {
         let height = font
             .line_metrics(style.number("font-size").unwrap_or(0.))
             .line_height();
-        let next = (finite_scroll(self.scroll_y) + lines * height)
-            .max(0.)
-            .min(self.vertical_limit(font, style, rect));
-        let changed = next != self.scroll_y;
-        self.scroll_y = next;
+        let mut axis = scroll_axis(
+            self.scroll_y,
+            input_content_rect(style, rect).h,
+            self.vertical_limit(font, style, rect),
+        );
+        let delta = (lines as f64 * finite_scroll(height) as f64)
+            .clamp(-(f32::MAX as f64), f32::MAX as f64) as f32;
+        axis.move_by(delta);
+        let changed = axis.offset != self.scroll_y;
+        self.scroll_y = axis.offset;
         changed
     }
     /// Nearest scalar boundary on the first logical line (single-line API).

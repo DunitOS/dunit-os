@@ -53,7 +53,9 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
-                        "color"
+                        "scrollbar-track"
+                        | "scrollbar-thumb"
+                        | "color"
                         | "background"
                         | "border-color"
                         | "indicator-background"
@@ -71,6 +73,9 @@ impl Theme {
                         "indicator-border-width" => valid_number(0., 64.),
                         "indicator-position" => valid_number(0., 1.),
                         "caret-width" => valid_number(0., 64.),
+                        "scrollbar-width" | "scrollbar-min-thumb" | "scrollbar-radius" => {
+                            valid_number(0., 1024.)
+                        }
                         "scroll-step" => valid_number(0., 1024.),
                         "caret-blink" => value
                             .as_duration()

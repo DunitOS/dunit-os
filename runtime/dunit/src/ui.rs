@@ -170,6 +170,15 @@ impl<C: Component> ComponentWindow<C> {
     pub fn last_uploaded_pixels(&self) -> u64 {
         self.uploaded_pixels
     }
+    pub fn scroll_offset(&self, key: &str) -> Option<f32> {
+        self.renderer.scroll_offset(key)
+    }
+    pub fn scroll_thumb(&self, key: &str) -> Option<Rect> {
+        self.renderer.scroll_thumb(key)
+    }
+    pub fn scroll_viewport(&self, key: &str) -> Option<Rect> {
+        self.renderer.scroll_viewport(key)
+    }
     pub fn input_scroll_y(&self, key: &str) -> Option<f32> {
         self.renderer.input_scroll_y(key)
     }
@@ -352,6 +361,16 @@ impl<C: Component> ComponentWindow<C> {
                     IN_LEAVE => PointerEvent::Leave,
                     _ => PointerEvent::Move,
                 };
+                if let Some(key) =
+                    self.renderer
+                        .scroll_pointer(pointer, input.x as f32, input.y as f32)
+                {
+                    self.application
+                        .pointer(pointer, Some(&key))
+                        .map_err(native)?;
+                    self.redraw()?;
+                    return Ok(event);
+                }
                 let target = self
                     .renderer
                     .hit_key(input.x as f32, input.y as f32)
@@ -384,13 +403,11 @@ impl<C: Component> ComponentWindow<C> {
                     .map(alloc::string::String::from);
                 let target = hovered.or_else(|| {
                     self.application
-                        .focused_input_key()
+                        .focused_key()
                         .map(alloc::string::String::from)
                 });
-                if let Some(key) = target {
-                    if self.renderer.scroll_input_wheel(&key, input.x) {
-                        self.redraw()?;
-                    }
+                if self.renderer.scroll_wheel(target.as_deref(), input.x) {
+                    self.redraw()?;
                 }
             }
             Some(WindowEvent::Input(input)) if input.kind == IN_KEY => {
@@ -433,6 +450,23 @@ impl<C: Component> ComponentWindow<C> {
                 };
                 if let Some(direction) = navigation {
                     if self.application.navigate(direction).map_err(native)? {
+                        self.redraw()?;
+                        return Ok(event);
+                    }
+                }
+                if input.value == 0 && input.y == 0 {
+                    let command = match input.x {
+                        0x48 => Some(ScrollCommand::LineUp),
+                        0x50 => Some(ScrollCommand::LineDown),
+                        0x49 => Some(ScrollCommand::PageUp),
+                        0x51 => Some(ScrollCommand::PageDown),
+                        0x47 => Some(ScrollCommand::Home),
+                        0x4f => Some(ScrollCommand::End),
+                        _ => None,
+                    };
+                    if command
+                        .is_some_and(|cmd| self.renderer.scroll_key(self.application.view(), cmd))
+                    {
                         self.redraw()?;
                         return Ok(event);
                     }

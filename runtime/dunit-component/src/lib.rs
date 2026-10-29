@@ -14,6 +14,7 @@ pub use dunit_style::value::Color;
 pub use dunit_style::{self as style, Cascade};
 pub use dunit_text::Font;
 pub use dunit_ui::{Align, Attrs, Edges, Rect, Sizing};
+pub use dunit_widgets::ScrollCommand;
 pub use focus::Navigation;
 pub use input::{EditCommand, InputOptions, TextEditor};
 pub use interaction::PointerEvent;

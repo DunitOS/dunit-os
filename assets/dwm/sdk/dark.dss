@@ -39,3 +39,8 @@ $caret-width: 1;
 $caret-blink: 500ms;
 
 $input-scroll-step: 3;
+
+$scrollbar-width: 12;
+$scrollbar-min-thumb: 24;
+$scrollbar-radius: 4;
+$scroll-step: 32;

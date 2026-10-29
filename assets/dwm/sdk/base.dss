@@ -29,3 +29,9 @@ Input, Textarea { background: $surface; color: $text; font-size: $font-size; pad
 Input:hover, Input:focus, Textarea:hover, Textarea:focus { border-color: $accent; }
 Input:read-only, Textarea:read-only { background: $window-bg; }
 Input:disabled, Textarea:disabled { color: $muted; caret-color: $indicator-off; border-color: $line; }
+
+// Viewport behavior is SDK-owned; gutter and scrollbar appearance are themed.
+Scroll { background: $surface; padding: $space-small; border-width: $border; border-color: $line; radius: $radius; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; scroll-step: $scroll-step; }
+Scroll:focus { border-color: $accent; }
+Scroll:hover { scrollbar-thumb: $accent; }
+Scroll:disabled { scrollbar-thumb: $line; }

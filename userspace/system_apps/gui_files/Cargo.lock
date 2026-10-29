@@ -69,6 +69,7 @@ dependencies = [
  "dunit_style",
  "dunit_text",
  "dunit_ui",
+ "dunit_widgets",
 ]
 
 [[package]]

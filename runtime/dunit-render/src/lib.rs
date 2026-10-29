@@ -18,6 +18,7 @@
 extern crate alloc;
 
 mod paint;
+mod scroll;
 mod text_input;
 mod indicator;
 mod surface;
@@ -26,7 +27,8 @@ mod clip;
 pub mod blur;
 pub mod raster;
 
-pub use paint::{paint, paint_clipped, paint_clipped_with_inputs, InputOf, StyleOf};
+pub use paint::{paint, paint_clipped, paint_clipped_with_inputs, paint_clipped_with_widgets, InputOf, ScrollOf, StyleOf};
+pub use scroll::ScrollArea;
 pub use text_input::{TextInput, input_content_rect};
 pub use effects::visual_bounds;
 pub use surface::{pack_argb, Surface};

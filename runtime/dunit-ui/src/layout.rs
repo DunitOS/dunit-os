@@ -34,6 +34,25 @@ impl Layout {
     pub fn rect(&self, id: NodeId) -> Rect {
         self.boxes[id.0 as usize]
     }
+
+    /// Translate a node and its descendants atomically. Invalid offsets or
+    /// coordinate overflow leave the entire layout unchanged.
+    pub fn translate_subtree(&mut self, tree: &Tree, id: NodeId, dx: f32, dy: f32) -> bool {
+        fn valid(layout: &Layout, tree: &Tree, id: NodeId, dx: f32, dy: f32) -> bool {
+            let rect = layout.rect(id);
+            (rect.x + dx).is_finite() && (rect.y + dy).is_finite()
+                && tree.node(id).children.iter().all(|&child| valid(layout, tree, child, dx, dy))
+        }
+        fn apply(layout: &mut Layout, tree: &Tree, id: NodeId, dx: f32, dy: f32) {
+            let rect = &mut layout.boxes[id.0 as usize];
+            rect.x += dx;
+            rect.y += dy;
+            for &child in &tree.node(id).children { apply(layout, tree, child, dx, dy); }
+        }
+        if !dx.is_finite() || !dy.is_finite() || !valid(self, tree, id, dx, dy) { return false; }
+        apply(self, tree, id, dx, dy);
+        true
+    }
 }
 
 /// A content measurer: given a node, return the intrinsic `(width, height)` of
@@ -83,7 +102,8 @@ fn measure(
     let (content_w, content_h) = match &node.kind {
         Kind::Row => measure_line(tree, node.children.as_slice(), a, inner_w, inner_h, true, desired, mfn),
         Kind::Column => measure_line(tree, node.children.as_slice(), a, inner_w, inner_h, false, desired, mfn),
-        Kind::Stack | Kind::Scroll => {
+        Kind::Scroll => measure_line(tree, node.children.as_slice(), a, inner_w, inner_h, false, desired, mfn),
+        Kind::Stack => {
             let mut w = 0.0f32;
             let mut h = 0.0f32;
             for &c in &node.children {
@@ -101,7 +121,14 @@ fn measure(
     let outer_w = content_w + a.padding.horizontal();
     let outer_h = content_h + a.padding.vertical();
     let w = clamp_opt(resolve(a.width, avail_w, outer_w), a.min_w, a.max_w);
-    let h = clamp_opt(resolve(a.height, avail_h, outer_h), a.min_h, a.max_h);
+    let measured_h = if node.kind == Kind::Scroll {
+        match a.height {
+            Sizing::Grow(_) => a.padding.vertical(),
+            Sizing::Auto => outer_h.min(avail_h),
+            _ => outer_h,
+        }
+    } else { outer_h };
+    let h = clamp_opt(resolve(a.height, avail_h, measured_h), a.min_h, a.max_h);
     desired[id.0 as usize] = (w, h);
     (w, h)
 }
@@ -196,13 +223,17 @@ fn arrange(tree: &Tree, id: NodeId, rect: Rect, desired: &[(f32, f32)], boxes: &
             }
         }
         Kind::Scroll => {
-            // Stack content vertically at natural height; content may exceed the
-            // viewport (scroll offset is modelled in a later slice).
+            // Stack natural content; viewport clipping/offset belong to the
+            // retained scroll controller, not to layout measurement.
             let mut y = inner.y;
             for &c in &node.children {
                 let ca = &tree.node(c).attrs;
-                let dh = desired[c.0 as usize].1;
-                let w = clamp_opt(resolve_fill(ca.width, inner.w), ca.min_w, ca.max_w);
+                let (dw, dh) = desired[c.0 as usize];
+                let width = match ca.width {
+                    Sizing::Auto | Sizing::Grow(_) => fmax(inner.w, dw),
+                    _ => resolve_fill(ca.width, inner.w),
+                };
+                let w = clamp_opt(width, ca.min_w, ca.max_w);
                 let child = Rect { x: inner.x, y, w, h: dh };
                 arrange(tree, c, child, desired, boxes);
                 y += dh + a.spacing;
@@ -240,7 +271,11 @@ fn arrange_line(
         let bmain = if horizontal { dw } else { dh };
         base.push(bmain);
         total_base += bmain;
-        let g = tree.node(c).attrs.grow;
+        let attrs = &tree.node(c).attrs;
+        let main_sizing = if horizontal { attrs.width } else { attrs.height };
+        let g = if attrs.grow > 0. { attrs.grow } else {
+            match main_sizing { Sizing::Grow(weight) => weight, _ => 0. }
+        };
         grow.push(g);
         total_grow += g;
     }

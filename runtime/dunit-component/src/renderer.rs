@@ -1,6 +1,8 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use dunit_render::{paint_clipped_with_inputs, Surface, TextInput};
+use dunit_render::{paint_clipped_with_widgets, ScrollArea, Surface, TextInput};
+#[path = "scroll.rs"]
+mod scroll;
 use dunit_style::{cascade::NodeStyle, Cascade, Style};
 use dunit_text::Font;
 use dunit_ui::{layout_measured, tree::TreeBuilder, Edges, Layout, Rect, Tree};
@@ -41,6 +43,8 @@ struct Snapshot {
     targets: Vec<Style>,
     inputs: Vec<Option<TextInput>>,
     input_activity: Vec<u64>,
+    areas: Vec<Option<ScrollArea>>,
+    focused_key: Option<String>,
 }
 
 /// Retains a private CPU canvas; no published shared buffer is ever mutated.
@@ -54,6 +58,10 @@ pub struct Renderer {
     motion: crate::motion::Motion,
     motion_enabled: bool,
     scroll_requests: BTreeMap<String, f32>,
+    scroll_axes: BTreeMap<String, dunit_widgets::ScrollAxis>,
+    scroll_capture: Option<(String, f32)>,
+    scroll_focus: Option<String>,
+    scroll_sizes: BTreeMap<String, (f32, f32)>,
 }
 impl Renderer {
     pub fn new(font: Font, cascade: Cascade, background: Color) -> Self {
@@ -67,16 +75,20 @@ impl Renderer {
             motion: crate::motion::Motion::default(),
             motion_enabled: true,
             scroll_requests: BTreeMap::new(),
+            scroll_axes: BTreeMap::new(),
+            scroll_capture: None,
+            scroll_focus: None,
+            scroll_sizes: BTreeMap::new(),
         }
     }
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
     }
     /// Stable key of the topmost node under the pointer in the last painted
-    /// layout. Ancestor clipping is shared with the existing widget hit tester.
+    /// layout. Ancestor viewport clipping uses the shared widget hit tester.
     pub fn hit_key(&self, x: f32, y: f32) -> Option<&str> {
         let snapshot = self.previous.as_ref()?;
-        let id = dunit_widgets::hit_test(&snapshot.tree, &snapshot.layout, x, y)?;
+        let id = scroll::hit(snapshot, x, y)?;
         snapshot.tree.node(id).name.as_deref()
     }
     /// UTF-8 scalar boundary under a pointer, using the last painted viewport.
@@ -138,7 +150,23 @@ impl Renderer {
                 .by_name(key)
                 .map(|id| p.styles[id.0 as usize].number("scroll-step").unwrap_or(0.))
         });
-        step.is_some_and(|step| self.scroll_input(key, notches as f32 * step))
+        let Some(step) = step else {
+            return false;
+        };
+        let p = self.previous.as_ref().unwrap();
+        let id = p.tree.by_name(key).unwrap();
+        let Some(mut input) = p.inputs[id.0 as usize].clone().filter(|i| i.multiline) else {
+            return false;
+        };
+        if !input.scroll_lines(
+            &self.font,
+            &p.styles[id.0 as usize],
+            p.layout.rect(id),
+            notches as f32 * step,
+        ) {
+            return false;
+        }
+        self.scroll_input(key, notches as f32 * step)
     }
     pub fn input_scroll_x(&self, key: &str) -> Option<f32> {
         let p = self.previous.as_ref()?;
@@ -250,7 +278,7 @@ impl Renderer {
             .styles(&tree, &targets, old, now, self.motion_enabled);
         let tree = container_padding(&tree, &styles)?;
         let fm = FontMeasure { font: &self.font };
-        let layout = layout_measured(&tree, width as f32, height as f32, &|id| {
+        let mut layout = layout_measured(&tree, width as f32, height as f32, &|id| {
             let n = tree.node(id);
             Widget::from_tag(n.kind.tag())
                 .map(|w| {
@@ -273,6 +301,7 @@ impl Renderer {
         }) {
             return Err(UiError::InvalidLayout);
         }
+        let areas = self.prepare_scroll(&tree, &mut layout, &styles, &views)?;
         let inputs = tree
             .iter()
             .map(|n| {
@@ -347,6 +376,11 @@ impl Renderer {
             .map(|v| v.input.as_ref().map_or(0, |i| i.caret_revision))
             .collect();
         let next = Snapshot {
+            focused_key: views
+                .iter()
+                .find(|v| v.interaction.focused && !v.interaction.disabled)
+                .map(|v| v.key.clone()),
+            areas,
             input_activity,
             inputs,
             tree,
@@ -393,7 +427,7 @@ impl Renderer {
             let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            let painted = paint_clipped_with_inputs(
+            let painted = paint_clipped_with_widgets(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
@@ -401,6 +435,7 @@ impl Renderer {
                 &mut surface,
                 rect,
                 &|id| next.inputs[id.0 as usize].as_ref(),
+                &|id| next.areas[id.0 as usize].as_ref(),
             );
             if painted.is_err() {
                 // A scratch failure may leave a partially painted private canvas.
@@ -410,6 +445,7 @@ impl Renderer {
                 return Err(UiError::Allocation);
             }
         }
+        self.scroll_focus = next.focused_key.clone();
         self.previous = Some(next);
         self.scroll_requests.clear();
         Ok(RenderStats {
@@ -463,6 +499,14 @@ fn container_padding(tree: &Tree, styles: &[Style]) -> Result<Tree> {
                 };
             }
         }
+        if n.kind == dunit_ui::Kind::Scroll {
+            let style = &styles[n.id.0 as usize];
+            let border = style.number("border-width").unwrap_or(0.);
+            attrs.padding.top += border;
+            attrs.padding.bottom += border;
+            attrs.padding.left += border;
+            attrs.padding.right += border + style.number("scrollbar-width").unwrap_or(0.);
+        }
         let id = builder.push(
             n.name.clone(),
             n.kind.clone(),
@@ -501,6 +545,7 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
             && ra == rb
             && old.styles[a.id.0 as usize] == new.styles[b.id.0 as usize]
             && old.inputs[a.id.0 as usize] == new.inputs[b.id.0 as usize]
+            && old.areas[a.id.0 as usize] == new.areas[b.id.0 as usize]
         {
             continue;
         }

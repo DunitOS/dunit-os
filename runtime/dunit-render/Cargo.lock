@@ -9,6 +9,7 @@ dependencies = [
  "dunit_style",
  "dunit_text",
  "dunit_ui",
+ "dunit_widgets",
 ]
 
 [[package]]
@@ -22,3 +23,12 @@ version = "0.1.0"
 [[package]]
 name = "dunit_ui"
 version = "0.1.0"
+
+[[package]]
+name = "dunit_widgets"
+version = "0.1.0"
+dependencies = [
+ "dunit_style",
+ "dunit_text",
+ "dunit_ui",
+]
