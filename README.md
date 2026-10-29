@@ -1,4 +1,4 @@
-Dunit OS
+# Dunit OS
 
 ![Dunit OS](assets/images/banner.png)
 
@@ -10,7 +10,7 @@ system and make the desktop your own.
 The kernel is written in Rust, with C and assembly handling the hardware layer.
 The desktop and apps run as separate processes in userspace.
 
-The desktop is yours
+## The desktop is yours
 
 DWM is Dunit's desktop environment. You can change its layout and behavior
 without rebuilding the OS: keep a single bottom bar, add a second panel, move
@@ -28,7 +28,7 @@ the configuration source directly.
 Changes reload while the desktop is running. If a new configuration or its Lua
 reload check fails, DWM keeps the previous working desktop.
 
-A little Lua goes a long way
+## A little Lua goes a long way
 
 Dunit includes Lua 5.5.1. You can use it to arrange windows, respond to desktop
 events, update widgets and choose animations.
@@ -81,7 +81,7 @@ utility panel with an analog clock. Both use the bundled
 For your own setup, see the [configuration guide](docs/architecture/dwm-shell.md)
 and [Lua SDK reference](docs/DWM_LUA_SDK.md).
 
-What else is here?
+## What else is here?
 
 The desktop comes with a terminal, file manager, calculator, Settings and a
 system monitor. In the shell you'll find command history, tab completion,
@@ -98,7 +98,7 @@ initrd. Persistent files live on /persist. A user desktop profile at
 /persist/config/dwm.toml overrides /system/share/dwm/default.toml; keeping it
 across reboots requires a persistent /persist mount.
 
-Choose an image
+## Choose an image
 
 New releases come in two editions:
 
@@ -111,7 +111,7 @@ dufetch, calc and fsck_dunit, without DWM, desktop assets or the toolchain.
 Both use the same kernel and native application ABI. The Minimal image keeps
 an installer payload so it can still be installed from the live terminal.
 
-Build and try it
+## Build and try it
 
 You'll need 64-bit Linux, git, gcc, nasm, lld, xorriso, python3,
 qemu-system-x86_64, and nightly Rust with rust-src.
@@ -139,7 +139,7 @@ python3 tools/qemu_test.py --build --config limine_test_gui.conf \
   --ready-marker 'gui_server: desktop ready' --timeout 300 --linger 25
 ```
 
-A look around
+## A look around
 
 The boot menu:
 
@@ -153,7 +153,7 @@ The desktop:
 
 ![DWM desktop](assets/images/dwm.gif)
 
-Still a work in progress
+## Still a work in progress
 
 Dunit isn't ready to replace your everyday OS. It currently runs on one CPU
 core. Networking, audio, dynamic linking, signals and a secure entropy service
@@ -168,7 +168,7 @@ The [roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) tracks the next steps. More detaile
 verification results are in the [desktop report](docs/DWM_ENGINE_V2_REPORT.md)
 and [M6 report](docs/m6-readiness.md).
 
-Writing apps
+## Writing apps
 
 Work on the native Rust SDK has started. It uses no_std + alloc over
 libdunit, with an event loop that can wait for messages, files, timers and
@@ -195,12 +195,12 @@ and honor the desktop animation setting.
 Widgets and CLI/TUI desktop launching are still being built.
 See the [SDK progress and contract](docs/sdk/m7-start.md).
 
-Get involved
+## Get involved
 
 If you'd like to help build Dunit, take a look at the
 [contributor guide](.github/CONTRIBUTING.md). Bug reports, reproducible test cases
 and documentation improvements are welcome too.
 
-License
+## License
 
 MIT.
