@@ -47,6 +47,8 @@ fn area() -> ScrollArea {
             w: 40.,
             h: 30.,
         },
+        horizontal_track: None,
+        horizontal_thumb: None,
         track: None,
         thumb: None,
     }
@@ -167,5 +169,120 @@ fn damage_clip_contains_background_children_and_scrollbar() {
                 }
             );
         }
+    }
+}
+
+#[test]
+fn axis_factory_builds_independent_right_and_bottom_tracks_and_proportional_thumbs() {
+    use dunit_widgets::ScrollAxis;
+    let mut cascade = Cascade::new();
+    cascade.push(parse("Scroll { scrollbar-width: 6; scrollbar-min-thumb: 4; }").unwrap());
+    let style = cascade.resolve(&NodeStyle::element("Scroll"));
+    let viewport = area().viewport;
+    let x = ScrollAxis {
+        viewport: 40.,
+        content: 160.,
+        offset: 60.,
+    };
+    let y = ScrollAxis {
+        viewport: 30.,
+        content: 90.,
+        offset: 30.,
+    };
+    let a = ScrollArea::from_axes(viewport, &style, Some(&x), Some(&y));
+    assert_eq!(
+        a.track,
+        Some(Rect {
+            x: 45.,
+            y: 4.,
+            w: 6.,
+            h: 30.
+        })
+    );
+    assert_eq!(
+        a.thumb,
+        Some(Rect {
+            x: 45.,
+            y: 14.,
+            w: 6.,
+            h: 10.
+        })
+    );
+    assert_eq!(
+        a.horizontal_track,
+        Some(Rect {
+            x: 5.,
+            y: 34.,
+            w: 40.,
+            h: 6.
+        })
+    );
+    assert_eq!(
+        a.horizontal_thumb,
+        Some(Rect {
+            x: 20.,
+            y: 34.,
+            w: 10.,
+            h: 6.
+        })
+    );
+    let no_x = ScrollAxis::new(40., 40.);
+    let hidden = ScrollArea::from_axes(viewport, &style, Some(&no_x), None);
+    assert!(hidden.track.is_none() && hidden.thumb.is_none());
+    assert!(hidden.horizontal_track.is_none() && hidden.horizontal_thumb.is_none());
+    let without_style = ScrollArea::from_axes(
+        viewport,
+        &Cascade::new().resolve(&NodeStyle::element("Scroll")),
+        Some(&x),
+        Some(&y),
+    );
+    assert!(without_style.track.is_none() && without_style.horizontal_track.is_none());
+}
+
+#[test]
+fn horizontal_bar_is_above_children_and_below_later_siblings() {
+    let mut a = area();
+    a.horizontal_track = Some(Rect {
+        x: 5.,
+        y: 28.,
+        w: 40.,
+        h: 8.,
+    });
+    a.horizontal_thumb = Some(Rect {
+        x: 10.,
+        y: 28.,
+        w: 10.,
+        h: 8.,
+    });
+    let p = render(
+        "Stack { Scroll width=60 height=40 { Text width=90 height=90 } }",
+        a,
+        full(),
+    );
+    assert_eq!(p[30 * 100 + 7], 0xff445566);
+    assert_eq!(p[30 * 100 + 12], 0xff778899);
+    assert_eq!(p[25 * 100 + 12], 0xffee0000);
+    let p = render("Stack { Scroll width=60 height=40 { Text width=90 height=90 } Text#overlay width=25 height=40 }", a, full());
+    assert_eq!(p[30 * 100 + 12], 0xff0000ee);
+    assert_eq!(p[30 * 100 + 30], 0xff445566);
+}
+
+#[test]
+fn factory_hides_both_bars_for_either_collapsed_viewport_dimension() {
+    use dunit_widgets::ScrollAxis;
+    let mut c = Cascade::new();
+    c.push(parse("Scroll { scrollbar-width: 8; scrollbar-min-thumb: 6; }").unwrap());
+    let style = c.resolve(&NodeStyle::element("Scroll"));
+    for (w, h) in [(0., 50.), (50., 0.)] {
+        let viewport = Rect { x: 4., y: 4., w, h };
+        let a = ScrollArea::from_axes(
+            viewport,
+            &style,
+            Some(&ScrollAxis::new(w, 200.)),
+            Some(&ScrollAxis::new(h, 200.)),
+        );
+        assert_eq!(a.viewport, viewport);
+        assert!(a.track.is_none() && a.thumb.is_none());
+        assert!(a.horizontal_track.is_none() && a.horizontal_thumb.is_none());
     }
 }

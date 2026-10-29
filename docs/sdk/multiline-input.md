@@ -28,13 +28,14 @@ the preferred column. This is scalar navigation; proportional font widths and
 grapheme clusters do not define the preferred column.
 
 Rendering uses explicit LF lines without soft wrapping. The caret is revealed
-on editing, navigation, focus, resize and font geometry changes. Pointer hits
+on editing, navigation, ordinary text focus, resize and font geometry changes. Pointer hits
 use both axes and the current scroll offsets. Drag selection crosses lines;
 selection and glyphs are clipped to the content box. Visible glyph work is
 bounded using font-wide ink bounds, including overhang from adjacent logical
 rows. Pixel-reference tests cover negative bearings, positive overhang, tall
-accents and deep descenders. Timed drag autoscroll and
-scrollbars are not implemented.
+accents and deep descenders. Timed drag edge autoscroll remains open. Both
+scrollbars are supplied by the shared
+[scroll controller](scroll-areas.md).
 
 The native adapter routes wheel input to the hovered node, falling back to the
 focused field when there is no hovered target. Negative native wheel deltas
@@ -74,9 +75,12 @@ both paths. GUI terminal wheel consumption follows the same documented native
 sign convention, with regression coverage for backlog direction and clamping.
 
 Soft wrapping, grapheme/IME, double/triple click, native pointer modifiers,
-clipboard (M7.7), bars inside Textarea and application migration
+clipboard (M7.7) and application migration
 remain open roadmap work. Generic vertical [scroll regions](scroll-areas.md) are
-available for child controls and content.
+available for child controls and content, and their shared two-axis scrollbar
+geometry also controls Textarea. Textarea reserves both themed gutters; bar
+gestures preserve selection/history and a manual viewport, including when the
+field receives focus. Ordinary text focus/navigation still reveals the caret.
 
 Validation on 29 October 2026: 55 component, 28 widget, 43 renderer, 10 text,
 13 native SDK, 18 style, 75 protocol and 19 Python tooling checks passed.

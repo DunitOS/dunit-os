@@ -152,6 +152,19 @@ impl<C: Component> Application<C> {
             .find(|v| v.input.as_ref().is_some_and(|i| i.dragging) && !v.interaction.disabled)
             .map(|v| v.key.as_str())
     }
+    /// A scrollbar changes viewport/focus without initiating text selection.
+    pub fn scrollbar_pointer(&mut self, event: PointerEvent, key: &str) -> Result<bool>
+    where
+        C::Message: Clone,
+    {
+        let changed = self.pointer(event, Some(key))?;
+        self.view.visit_mut(&mut |v| {
+            if let Some(input) = &mut v.input {
+                input.dragging = false;
+            }
+        });
+        Ok(changed)
+    }
     /// `position` comes from Renderer::input_index, including captured dragging.
     pub fn pointer_at(
         &mut self,

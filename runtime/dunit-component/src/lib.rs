@@ -22,6 +22,28 @@ pub use renderer::{Damage, RenderStats, Renderer};
 pub use theme::Theme;
 pub use view::{Key, View};
 
+/// Content axes enabled by a scroll container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollAxes {
+    #[default]
+    Vertical,
+    Horizontal,
+    Both,
+}
+impl ScrollAxes {
+    pub fn horizontal(self) -> bool {
+        matches!(self, Self::Horizontal | Self::Both)
+    }
+    pub fn vertical(self) -> bool {
+        matches!(self, Self::Vertical | Self::Both)
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollDirection {
+    Horizontal,
+    Vertical,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiError {
     DuplicateKey,

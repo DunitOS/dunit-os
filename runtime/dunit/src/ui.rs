@@ -170,6 +170,12 @@ impl<C: Component> ComponentWindow<C> {
     pub fn last_uploaded_pixels(&self) -> u64 {
         self.uploaded_pixels
     }
+    pub fn scroll_offset_x(&self, key: &str) -> Option<f32> {
+        self.renderer.scroll_offset_x(key)
+    }
+    pub fn scroll_thumb_x(&self, key: &str) -> Option<Rect> {
+        self.renderer.scroll_thumb_x(key)
+    }
     pub fn scroll_offset(&self, key: &str) -> Option<f32> {
         self.renderer.scroll_offset(key)
     }
@@ -366,7 +372,7 @@ impl<C: Component> ComponentWindow<C> {
                         .scroll_pointer(pointer, input.x as f32, input.y as f32)
                 {
                     self.application
-                        .pointer(pointer, Some(&key))
+                        .scrollbar_pointer(pointer, &key)
                         .map_err(native)?;
                     self.redraw()?;
                     return Ok(event);
@@ -455,6 +461,20 @@ impl<C: Component> ComponentWindow<C> {
                     }
                 }
                 if input.value == 0 && input.y == 0 {
+                    if let Some(command) = match input.x {
+                        0x4b => Some(ScrollCommand::LineUp),
+                        0x4d => Some(ScrollCommand::LineDown),
+                        _ => None,
+                    } {
+                        if self.renderer.scroll_key_axis(
+                            self.application.view(),
+                            command,
+                            ScrollDirection::Horizontal,
+                        ) {
+                            self.redraw()?;
+                            return Ok(event);
+                        }
+                    }
                     let command = match input.x {
                         0x48 => Some(ScrollCommand::LineUp),
                         0x50 => Some(ScrollCommand::LineDown),

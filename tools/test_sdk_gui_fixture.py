@@ -16,14 +16,14 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
     fixture = fixture or args.fixture
     source_name = "sdk_window_resize" if fixture == "resize" else f"sdk_{fixture}"
     app_id = f'sdk_{fixture}_fixture'
-    config_name = f'sdk-{fixture}.toml'
+    config_name = f'sdk-{fixture.replace("_", "-")}.toml'
 
     os.environ['RUSTUP_TOOLCHAIN'] = 'nightly'
     os.environ['PATH'] = str(Path(cargo()).parent) + os.pathsep + os.environ['PATH']

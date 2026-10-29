@@ -1,5 +1,5 @@
 //! Input geometry and painting. Editing remains in the widget layer.
-use crate::Surface;
+use crate::{ScrollArea, Surface};
 use alloc::string::String;
 use dunit_style::Style;
 use dunit_text::Font;
@@ -58,6 +58,66 @@ fn fit_axis(prior: f32, pos: f32, visible: f32, limit: f32) -> f32 {
     axis.offset
 }
 impl TextInput {
+    /// Text viewport; multiline fields reserve both scrollbar gutters even
+    /// when overflow auto-hides the bars, keeping text layout stable.
+    pub fn content_rect(&self, style: &Style, rect: Rect) -> Rect {
+        let mut content = input_content_rect(style, rect);
+        if self.multiline {
+            let gutter = style
+                .number("scrollbar-width")
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.)
+                .max(0.);
+            content.w = (content.w - gutter).max(0.);
+            content.h = (content.h - gutter).max(0.);
+        }
+        content
+    }
+    /// Actual text extents (excluding placeholder), including insertion caret
+    /// width so dragging the horizontal bar can reveal the full final caret.
+    pub fn scroll_axes(&self, font: &Font, style: &Style, rect: Rect) -> (ScrollAxis, ScrollAxis) {
+        let content = self.content_rect(style, rect);
+        let px = style.number("font-size").unwrap_or(0.);
+        let text_width = if self.multiline {
+            self.value
+                .split('\n')
+                .map(|line| self.width(font, px, line))
+                .fold(0., f32::max)
+        } else {
+            self.width(font, px, &self.value)
+        };
+        let mut x = ScrollAxis {
+            offset: self.scroll_x,
+            ..ScrollAxis::default()
+        };
+        x.set_extents(
+            content.w,
+            text_width + style.number("caret-width").unwrap_or(0.).max(0.),
+        );
+        let mut y = ScrollAxis {
+            offset: self.scroll_y,
+            ..ScrollAxis::default()
+        };
+        y.set_extents(
+            content.h,
+            if self.multiline {
+                self.rows() as f32 * font.line_metrics(px).line_height()
+            } else {
+                0.
+            },
+        );
+        (x, y)
+    }
+    pub fn scroll_area(&self, font: &Font, style: &Style, rect: Rect) -> ScrollArea {
+        let (x, y) = self.scroll_axes(font, style, rect);
+        ScrollArea::from_axes(
+            self.content_rect(style, rect),
+            style,
+            self.multiline.then_some(&x),
+            self.multiline.then_some(&y),
+        )
+    }
+
     fn boundary(&self, index: usize) -> usize {
         let mut i = index.min(self.value.len());
         while !self.value.is_char_boundary(i) {
@@ -109,12 +169,12 @@ impl TextInput {
             * font
                 .line_metrics(style.number("font-size").unwrap_or(0.))
                 .line_height()
-            - input_content_rect(style, rect).h)
+            - self.content_rect(style, rect).h)
             .max(0.)
     }
     /// Preserve the prior viewport while keeping the insertion caret visible.
     pub fn fit_scroll(&mut self, font: &Font, style: &Style, rect: Rect) {
-        let content = input_content_rect(style, rect);
+        let content = self.content_rect(style, rect);
         let px = style.number("font-size").unwrap_or(0.);
         let width = (content.w - style.number("caret-width").unwrap_or(0.).max(0.)).max(0.);
         let total = if self.multiline {
@@ -149,7 +209,7 @@ impl TextInput {
             .line_height();
         let mut axis = scroll_axis(
             self.scroll_y,
-            input_content_rect(style, rect).h,
+            self.content_rect(style, rect).h,
             self.vertical_limit(font, style, rect),
         );
         let delta = (lines as f64 * finite_scroll(height) as f64)
@@ -166,13 +226,13 @@ impl TextInput {
             style,
             rect,
             x,
-            input_content_rect(style, rect).y - self.scroll_y,
+            self.content_rect(style, rect).y - self.scroll_y,
         )
     }
     /// Map both pointer axes through the current logical-line viewport.
     pub fn hit_index_at(&self, font: &Font, style: &Style, rect: Rect, x: f32, y: f32) -> usize {
         let px = style.number("font-size").unwrap_or(0.);
-        let content = input_content_rect(style, rect);
+        let content = self.content_rect(style, rect);
         let height = font.line_metrics(px).line_height();
         let row = if self.multiline && height > 0. {
             ((y - content.y + self.scroll_y).max(0.) / height) as usize
@@ -205,7 +265,7 @@ impl TextInput {
         start + line.len()
     }
     pub(crate) fn paint(&self, font: &Font, style: &Style, rect: Rect, surface: &mut Surface) {
-        let content = input_content_rect(style, rect);
+        let content = self.content_rect(style, rect);
         let px = style.number("font-size").unwrap_or(0.);
         let metrics = font.line_metrics(px);
         let height = metrics.line_height();

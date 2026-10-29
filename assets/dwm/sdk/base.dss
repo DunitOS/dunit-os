@@ -35,3 +35,8 @@ Scroll { background: $surface; padding: $space-small; border-width: $border; bor
 Scroll:focus { border-color: $accent; }
 Scroll:hover { scrollbar-thumb: $accent; }
 Scroll:disabled { scrollbar-thumb: $line; }
+
+// Textarea uses the same themed bars and fixed gutters on both axes.
+Textarea { scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; }
+Textarea:hover, Textarea:focus { scrollbar-thumb: $accent; }
+Textarea:disabled { scrollbar-thumb: $line; }

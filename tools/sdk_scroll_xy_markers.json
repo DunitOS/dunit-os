@@ -1,0 +1,941 @@
+{
+  "description": "Native two-axis Scroll and Textarea: keyboard, both thumb axes, track paging, unchanged selection, caret blink viewport retention, caret reveal, edit/undo, shrink and resize.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /sdk-scroll-xy.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] ready",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] focus OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] right OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] end OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] home OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 15,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 95,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] horizontal track OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 15,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 122,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "relative_motion": {
+            "x": -60,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] horizontal released OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] horizontal drag OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 30,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 122,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": 40,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] vertical released OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] vertical drag OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 96,
+            "y": 56,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor click released OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor focus OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor home OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "shift"
+              },
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] selected OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 41,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 122,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": 40,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor vertical released OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor vertical drag OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 39,
+            "y": 48,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "relative_motion": {
+            "x": 60,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor horizontal released OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] editor horizontal drag OK",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SCROLLXY] blink retained OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] caret revealed OK",
+          "timeout": 60
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-scroll-xy.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] edited after bars OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] undo LF OK",
+          "timeout": 60
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 30,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 96,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 0,
+            "y": 84,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "s"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] shrink clamped OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] resize OK",
+          "timeout": 60
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "x"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[SCROLLXY] ok",
+          "timeout": 60
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "setup: full desktop applied",
+    "[SCROLLXY] ready",
+    "[SCROLLXY] focus OK",
+    "[SCROLLXY] right OK",
+    "[SCROLLXY] end OK",
+    "[SCROLLXY] home OK",
+    "[SCROLLXY] horizontal track OK",
+    "[SCROLLXY] horizontal drag OK",
+    "[SCROLLXY] vertical drag OK",
+    "[SCROLLXY] editor focus OK",
+    "[SCROLLXY] editor home OK",
+    "[SCROLLXY] selected OK",
+    "[SCROLLXY] editor vertical drag OK",
+    "[SCROLLXY] editor horizontal drag OK",
+    "[SCROLLXY] blink retained OK",
+    "[SCROLLXY] caret revealed OK",
+    "[SCROLLXY] edited after bars OK",
+    "[SCROLLXY] undo LF OK",
+    "[SCROLLXY] shrink clamped OK",
+    "[SCROLLXY] resize OK",
+    "[SCROLLXY] ok",
+    "[GUI-EXIT] app=sdk_scroll_xy_fixture kind=0 code=0",
+    "[SCROLLXY] horizontal released OK",
+    "[SCROLLXY] vertical released OK",
+    "[SCROLLXY] editor click released OK",
+    "[SCROLLXY] editor vertical released OK",
+    "[SCROLLXY] editor horizontal released OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop",
+      "why": "Intentional boot fault tests precede the terminal; native GUI faults remain forbidden."
+    },
+    "application failed:",
+    "gui_server: FAIL",
+    "gui_server: PANIC",
+    "setup: error:"
+  ]
+}

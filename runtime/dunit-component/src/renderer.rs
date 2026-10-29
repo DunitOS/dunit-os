@@ -43,6 +43,7 @@ struct Snapshot {
     targets: Vec<Style>,
     inputs: Vec<Option<TextInput>>,
     input_activity: Vec<u64>,
+    input_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
     areas: Vec<Option<ScrollArea>>,
     focused_key: Option<String>,
 }
@@ -57,9 +58,10 @@ pub struct Renderer {
     previous: Option<Snapshot>,
     motion: crate::motion::Motion,
     motion_enabled: bool,
-    scroll_requests: BTreeMap<String, f32>,
     scroll_axes: BTreeMap<String, dunit_widgets::ScrollAxis>,
-    scroll_capture: Option<(String, f32)>,
+    scroll_capture: Option<(String, crate::ScrollDirection, f32)>,
+    scroll_axes_x: BTreeMap<String, dunit_widgets::ScrollAxis>,
+    input_offsets: BTreeMap<String, (f32, f32)>,
     scroll_focus: Option<String>,
     scroll_sizes: BTreeMap<String, (f32, f32)>,
 }
@@ -74,9 +76,10 @@ impl Renderer {
             previous: None,
             motion: crate::motion::Motion::default(),
             motion_enabled: true,
-            scroll_requests: BTreeMap::new(),
             scroll_axes: BTreeMap::new(),
             scroll_capture: None,
+            scroll_axes_x: BTreeMap::new(),
+            input_offsets: BTreeMap::new(),
             scroll_focus: None,
             scroll_sizes: BTreeMap::new(),
         }
@@ -126,46 +129,33 @@ impl Renderer {
         if !lines.is_finite() || lines == 0. {
             return false;
         }
-        let Some(p) = &self.previous else {
+        let Some(p) = self.previous.as_ref() else {
             return false;
         };
         let Some(id) = p.tree.by_name(key) else {
             return false;
         };
-        if !p.inputs[id.0 as usize]
-            .as_ref()
-            .is_some_and(|i| i.multiline)
-        {
+        if p.input_axes[id.0 as usize].is_none() {
             return false;
         }
-        let delta = self.scroll_requests.entry(String::from(key)).or_insert(0.);
-        let bound = crate::input::MAX_INPUT_BYTES as f32 + 1.;
-        *delta = (*delta + lines).clamp(-bound, bound);
-        true
+        let height = self
+            .font
+            .line_metrics(p.styles[id.0 as usize].number("font-size").unwrap_or(0.))
+            .line_height();
+        let pixels =
+            (lines as f64 * height as f64).clamp(-(f32::MAX as f64), f32::MAX as f64) as f32;
+        // Line, wheel and bar requests compose in one retained controller.
+        self.scroll_by(key, pixels)
     }
     /// Native wheel convention: negative upward, positive downward.
     pub fn scroll_input_wheel(&mut self, key: &str, notches: i32) -> bool {
-        let step = self.previous.as_ref().and_then(|p| {
+        let Some(step) = self.previous.as_ref().and_then(|p| {
             p.tree
                 .by_name(key)
                 .map(|id| p.styles[id.0 as usize].number("scroll-step").unwrap_or(0.))
-        });
-        let Some(step) = step else {
+        }) else {
             return false;
         };
-        let p = self.previous.as_ref().unwrap();
-        let id = p.tree.by_name(key).unwrap();
-        let Some(mut input) = p.inputs[id.0 as usize].clone().filter(|i| i.multiline) else {
-            return false;
-        };
-        if !input.scroll_lines(
-            &self.font,
-            &p.styles[id.0 as usize],
-            p.layout.rect(id),
-            notches as f32 * step,
-        ) {
-            return false;
-        }
         self.scroll_input(key, notches as f32 * step)
     }
     pub fn input_scroll_x(&self, key: &str) -> Option<f32> {
@@ -276,7 +266,7 @@ impl Renderer {
         let styles = self
             .motion
             .styles(&tree, &targets, old, now, self.motion_enabled);
-        let tree = container_padding(&tree, &styles)?;
+        let tree = container_padding(&tree, &styles, &views)?;
         let fm = FontMeasure { font: &self.font };
         let mut layout = layout_measured(&tree, width as f32, height as f32, &|id| {
             let n = tree.node(id);
@@ -301,8 +291,8 @@ impl Renderer {
         }) {
             return Err(UiError::InvalidLayout);
         }
-        let areas = self.prepare_scroll(&tree, &mut layout, &styles, &views)?;
-        let inputs = tree
+        let mut areas = self.prepare_scroll(&tree, &mut layout, &styles, &views)?;
+        let inputs: Vec<Option<TextInput>> = tree
             .iter()
             .map(|n| {
                 let view = views[n.id.0 as usize];
@@ -335,12 +325,18 @@ impl Renderer {
                         .and_then(|p| {
                             p.tree.by_name(&view.key).map(|id| {
                                 p.layout.rect(id) != rect
-                                    || ["font-size", "padding", "border-width", "caret-width"]
-                                        .iter()
-                                        .any(|property| {
-                                            p.styles[id.0 as usize].get(property)
-                                                != styles[n.id.0 as usize].get(property)
-                                        })
+                                    || [
+                                        "font-size",
+                                        "padding",
+                                        "border-width",
+                                        "caret-width",
+                                        "scrollbar-width",
+                                    ]
+                                    .iter()
+                                    .any(|property| {
+                                        p.styles[id.0 as usize].get(property)
+                                            != styles[n.id.0 as usize].get(property)
+                                    })
                             })
                         })
                         .unwrap_or(true);
@@ -364,13 +360,46 @@ impl Renderer {
                     if geometry_changed || caret_changed || activity_changed || !paint.multiline {
                         paint.fit_scroll(&self.font, &styles[n.id.0 as usize], rect);
                     }
-                    if let Some(lines) = self.scroll_requests.get(&view.key) {
-                        paint.scroll_lines(&self.font, &styles[n.id.0 as usize], rect, *lines);
+                    if paint.multiline && !view.interaction.disabled {
+                        if let Some(&(x, y)) = self.input_offsets.get(&view.key) {
+                            let (mut ax, mut ay) =
+                                paint.scroll_axes(&self.font, &styles[n.id.0 as usize], rect);
+                            ax.move_by(x - ax.offset);
+                            ay.move_by(y - ay.offset);
+                            paint.scroll_x = ax.offset;
+                            paint.scroll_y = ay.offset;
+                        }
                     }
                     paint
                 })
             })
             .collect();
+        let input_axes = tree
+            .iter()
+            .map(|n| {
+                let index = n.id.0 as usize;
+                inputs[index]
+                    .as_ref()
+                    .filter(|i| i.multiline)
+                    .and_then(|input| {
+                        let area = input.scroll_area(&self.font, &styles[index], layout.rect(n.id));
+                        if views[index].interaction.disabled {
+                            areas[index] = Some(ScrollArea {
+                                track: None,
+                                thumb: None,
+                                horizontal_track: None,
+                                horizontal_thumb: None,
+                                ..area
+                            });
+                            None
+                        } else {
+                            areas[index] = Some(area);
+                            Some(input.scroll_axes(&self.font, &styles[index], layout.rect(n.id)))
+                        }
+                    })
+            })
+            .collect();
+        self.validate_scroll_capture(&tree, &areas);
         let input_activity = views
             .iter()
             .map(|v| v.input.as_ref().map_or(0, |i| i.caret_revision))
@@ -381,6 +410,7 @@ impl Renderer {
                 .find(|v| v.interaction.focused && !v.interaction.disabled)
                 .map(|v| v.key.clone()),
             areas,
+            input_axes,
             input_activity,
             inputs,
             tree,
@@ -447,7 +477,7 @@ impl Renderer {
         }
         self.scroll_focus = next.focused_key.clone();
         self.previous = Some(next);
-        self.scroll_requests.clear();
+        self.input_offsets.clear();
         Ok(RenderStats {
             damaged_pixels: damage.map_or(0, |d| d.width as u64 * d.height as u64),
             damage,
@@ -479,7 +509,7 @@ fn touches_backdrop(snapshot: &Snapshot, dirty: Damage) -> bool {
     })
 }
 
-fn container_padding(tree: &Tree, styles: &[Style]) -> Result<Tree> {
+fn container_padding<M>(tree: &Tree, styles: &[Style], views: &[&View<M>]) -> Result<Tree> {
     let mut builder = TreeBuilder::new();
     for n in tree.iter() {
         let mut attrs = n.attrs.clone();
@@ -505,7 +535,10 @@ fn container_padding(tree: &Tree, styles: &[Style]) -> Result<Tree> {
             attrs.padding.top += border;
             attrs.padding.bottom += border;
             attrs.padding.left += border;
-            attrs.padding.right += border + style.number("scrollbar-width").unwrap_or(0.);
+            let axes = views[n.id.0 as usize].scroll_axes;
+            let width = style.number("scrollbar-width").unwrap_or(0.);
+            attrs.padding.right += border + if axes.vertical() { width } else { 0. };
+            attrs.padding.bottom += if axes.horizontal() { width } else { 0. };
         }
         let id = builder.push(
             n.name.clone(),

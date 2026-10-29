@@ -34,6 +34,7 @@ pub struct View<Msg> {
     pub(crate) radio_group: Option<String>,
     pub(crate) input: Option<crate::input::InputBinding<Msg>>,
     pub(crate) scroll_label: Option<String>,
+    pub(crate) scroll_axes: crate::ScrollAxes,
 }
 impl<Msg> View<Msg> {
     fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
@@ -50,6 +51,7 @@ impl<Msg> View<Msg> {
             radio_group: None,
             input: None,
             scroll_label: None,
+            scroll_axes: crate::ScrollAxes::Vertical,
         }
     }
     pub fn text(key: impl Into<String>, text: impl Into<String>) -> Self {
@@ -210,6 +212,11 @@ impl<Msg> View<Msg> {
         view.scroll_label = Some(label.into());
         view.attrs.height = dunit_ui::Sizing::Grow(1.);
         view
+    }
+    /// Choose axes explicitly; the default remains vertical.
+    pub fn scroll_axes(mut self, axes: crate::ScrollAxes) -> Self {
+        self.scroll_axes = axes;
+        self
     }
     pub fn column(key: impl Into<String>, children: Vec<Self>) -> Self {
         Self::new(key, Kind::Column, None, children)

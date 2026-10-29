@@ -257,7 +257,30 @@ fn sdk_profiles_supply_input_style_and_state_tokens() {
         }
         assert!(base.get("caret-blink").is_some());
         let area = c.resolve(&NodeStyle::element("Textarea"));
-        assert_eq!(base, area);
+        // Shared editing appearance remains identical; Textarea adds its bars.
+        for name in [
+            "background",
+            "border-color",
+            "border-width",
+            "caret-blink",
+            "caret-color",
+            "caret-width",
+            "color",
+            "font-size",
+            "padding",
+            "placeholder-color",
+            "radius",
+            "scroll-step",
+            "selection-color",
+        ] {
+            assert_eq!(base.get(name), area.get(name), "shared {name}");
+        }
+        assert!(base.get("scrollbar-width").is_none());
+        for name in ["scrollbar-width", "scrollbar-min-thumb", "scrollbar-radius"] {
+            assert!(area.number(name).unwrap() > 0., "{name}");
+        }
+        assert!(area.color("scrollbar-track").is_some());
+        assert!(area.color("scrollbar-thumb").is_some());
         assert_ne!(
             base.color("border-color"),
             resolve(&["focus"]).color("border-color")
@@ -566,5 +589,205 @@ fn vertical_ink_overhang_matches_full_raster_clipped_reference() {
             actual, expected,
             "row culling loses vertical overhang for {text:?}"
         );
+    }
+}
+
+fn scrollbar_style() -> Style {
+    let mut c = Cascade::new();
+    c.push(parse("Textarea { font-size: 16; padding: 3; border-width: 1; caret-width: 2; scrollbar-width: 8; scrollbar-min-thumb: 6; scrollbar-track: #334455; scrollbar-thumb: #778899; scrollbar-radius: 0; color: #ffffff; }").unwrap());
+    c.resolve(&NodeStyle::element("Textarea"))
+}
+
+#[test]
+fn multiline_content_reserves_both_gutters_and_axes_exclude_placeholder() {
+    let f = font();
+    let s = scrollbar_style();
+    let r = Rect {
+        x: 0.,
+        y: 0.,
+        w: 80.,
+        h: 60.,
+    };
+    let mut i = input("");
+    i.multiline = true;
+    i.placeholder = "a very very long placeholder\nwith\nmany\nextra\nlines".into();
+    assert_eq!(
+        i.content_rect(&s, r),
+        Rect {
+            x: 4.,
+            y: 4.,
+            w: 64.,
+            h: 44.
+        }
+    );
+    let (x, y) = i.scroll_axes(&f, &s, r);
+    assert_eq!((x.viewport, y.viewport), (64., 44.));
+    assert_eq!(x.content, 2.); // only insertion caret, not the placeholder
+    assert_eq!(y.content, f.line_metrics(16.).line_height());
+    let a = i.scroll_area(&f, &s, r);
+    assert!(a.track.is_none() && a.horizontal_track.is_none());
+    i.multiline = false;
+    assert_eq!(i.content_rect(&s, r), input_content_rect(&s, r));
+    i.value = "long long long text".into();
+    assert!(
+        i.scroll_area(&f, &s, r).horizontal_track.is_none(),
+        "single-line input has no bars"
+    );
+}
+
+#[test]
+fn text_scroll_axes_clamp_offsets_and_match_fit_and_hit_geometry() {
+    let f = font();
+    let s = scrollbar_style();
+    let r = Rect {
+        x: 0.,
+        y: 0.,
+        w: 80.,
+        h: 60.,
+    };
+    let mut i = input("long long long final line\n\nlong long long final line");
+    i.multiline = true;
+    i.cursor = i.value.len();
+    i.scroll_x = 10000.;
+    i.scroll_y = 10000.;
+    let (x, y) = i.scroll_axes(&f, &s, r);
+    assert_eq!(x.offset, x.max_offset());
+    assert_eq!(y.offset, y.max_offset());
+    i.fit_scroll(&f, &s, r);
+    let (x, y) = i.scroll_axes(&f, &s, r);
+    assert!((i.scroll_x - x.offset).abs() < 0.001);
+    assert!((i.scroll_y - y.offset).abs() < 0.001);
+    let c = i.content_rect(&s, r);
+    assert_eq!(
+        i.hit_index_at(&f, &s, r, c.x + c.w - 1., c.y + c.h - 1.),
+        i.value.len()
+    );
+    let a = i.scroll_area(&f, &s, r);
+    assert_eq!(a.track.unwrap().x, 68.);
+    assert_eq!(a.horizontal_track.unwrap().y, 48.);
+}
+
+#[test]
+fn textarea_widget_callback_paints_both_bars_outside_clipped_text() {
+    use dunit_render::paint_clipped_with_widgets;
+    let f = font();
+    let style = scrollbar_style();
+    let tree = dui("Column { Textarea width=80 height=60 }").unwrap();
+    let layout = layout(&tree, 80., 60.);
+    let mut i = input(&"long long long text\n".repeat(12));
+    i.multiline = true;
+    let area = i.scroll_area(
+        &f,
+        &style,
+        Rect {
+            x: 0.,
+            y: 0.,
+            w: 80.,
+            h: 60.,
+        },
+    );
+    let mut actual = vec![0; 80 * 60];
+    let mut text_only = vec![0; 80 * 60];
+    let style_of = |id| {
+        if tree.node(id).kind.tag() == "Textarea" {
+            style.clone()
+        } else {
+            Cascade::new().resolve(&NodeStyle::element("Column"))
+        }
+    };
+    let inputs = |id| (tree.node(id).kind.tag() == "Textarea").then_some(&i);
+    let clip = Rect {
+        x: 0.,
+        y: 0.,
+        w: 80.,
+        h: 60.,
+    };
+    paint_clipped_with_inputs(
+        &tree,
+        &layout,
+        &style_of,
+        &f,
+        &mut Surface::new(&mut text_only, 80, 60),
+        clip,
+        &inputs,
+    )
+    .unwrap();
+    paint_clipped_with_widgets(
+        &tree,
+        &layout,
+        &style_of,
+        &f,
+        &mut Surface::new(&mut actual, 80, 60),
+        clip,
+        &inputs,
+        &|id| (tree.node(id).kind.tag() == "Textarea").then_some(&area),
+    )
+    .unwrap();
+    for y in 4..48 {
+        for x in 4..68 {
+            assert_eq!(actual[y * 80 + x], text_only[y * 80 + x]);
+        }
+    }
+    assert_eq!(actual[43 * 80 + 70], 0xff334455, "vertical track");
+    assert_eq!(actual[6 * 80 + 70], 0xff778899, "vertical thumb");
+    assert_eq!(actual[50 * 80 + 65], 0xff334455, "horizontal track");
+    assert_eq!(actual[50 * 80 + 5], 0xff778899, "horizontal thumb");
+    assert_eq!(
+        actual[50 * 80 + 70],
+        0,
+        "gutter intersection never covers content or adds a fake thumb"
+    );
+}
+
+#[test]
+fn collapsed_textarea_content_suppresses_bars_and_preserves_padding_and_border() {
+    use dunit_render::paint_clipped_with_widgets;
+    let f = font();
+    let mut cascade = Cascade::new();
+    cascade.push(parse("Textarea { font-size: 16; padding: 3; border-width: 1; border-color: #00ff00; background: #112233; color: #ffffff; caret-width: 2; scrollbar-width: 8; scrollbar-min-thumb: 6; scrollbar-track: #ff0000; scrollbar-thumb: #ffffff; scrollbar-radius: 0; }").unwrap());
+    let style = cascade.resolve(&NodeStyle::element("Textarea"));
+    let mut i = input(&"very long overflow line\n".repeat(20));
+    i.multiline = true;
+    i.focused = true;
+    i.caret_visible = true;
+    for (w, h) in [(12usize, 60usize), (60usize, 12usize)] {
+        let rect = Rect {
+            x: 0.,
+            y: 0.,
+            w: w as f32,
+            h: h as f32,
+        };
+        let area = i.scroll_area(&f, &style, rect);
+        assert!(area.viewport.w == 0. || area.viewport.h == 0.);
+        assert!(area.track.is_none() && area.thumb.is_none());
+        assert!(area.horizontal_track.is_none() && area.horizontal_thumb.is_none());
+        let tree = dui("Textarea").unwrap();
+        let layout = layout(&tree, w as f32, h as f32);
+        let mut pixels = vec![0; w * h];
+        paint_clipped_with_widgets(
+            &tree,
+            &layout,
+            &|_| style.clone(),
+            &f,
+            &mut Surface::new(&mut pixels, w, h),
+            rect,
+            &|_| Some(&i),
+            &|_| Some(&area),
+        )
+        .unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let expected = if x == 0 || y == 0 || x + 1 == w || y + 1 == h {
+                    0xff00ff00
+                } else {
+                    0xff112233
+                };
+                assert_eq!(
+                    pixels[y * w + x],
+                    expected,
+                    "collapsed {w}x{h} pixel{x},{y}"
+                );
+            }
+        }
     }
 }
