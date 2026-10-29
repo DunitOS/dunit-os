@@ -73,8 +73,10 @@ hides automatically when its axis has no overflow. This is not timed
 fade/autohide. Each enabled axis reserves its own gutter. Both Textarea axes
 use the shared theme by default; zero scrollbar-width hides the bars and removes
 the gutters. With a collapsed content viewport the bars are suppressed to avoid
-painting over the field border. Timed auto-hide, virtualized rows and timed drag
-edge autoscroll remain separate roadmap work. This container lays out its complete bounded View tree;
+painting over the field border. Timed
+[selection edge autoscroll](selection-autoscroll.md) is available for Input and
+Textarea. Timed auto-hide and virtualized rows remain separate
+roadmap work. This container lays out its complete bounded View tree;
 it does not claim the 10,000-row virtualization criterion.
 
 `Renderer::scroll_offset`, `scroll_viewport`, `scroll_track`, `scroll_thumb`,

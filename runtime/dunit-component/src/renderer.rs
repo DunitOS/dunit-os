@@ -1,6 +1,8 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use dunit_render::{paint_clipped_with_widgets, ScrollArea, Surface, TextInput};
+#[path = "input_scroll.rs"]
+mod input_scroll;
 #[path = "scroll.rs"]
 mod scroll;
 use dunit_style::{cascade::NodeStyle, Cascade, Style};
@@ -44,6 +46,7 @@ struct Snapshot {
     inputs: Vec<Option<TextInput>>,
     input_activity: Vec<u64>,
     input_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
+    input_scroll_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
     areas: Vec<Option<ScrollArea>>,
     focused_key: Option<String>,
 }
@@ -360,7 +363,7 @@ impl Renderer {
                     if geometry_changed || caret_changed || activity_changed || !paint.multiline {
                         paint.fit_scroll(&self.font, &styles[n.id.0 as usize], rect);
                     }
-                    if paint.multiline && !view.interaction.disabled {
+                    if !view.interaction.disabled {
                         if let Some(&(x, y)) = self.input_offsets.get(&view.key) {
                             let (mut ax, mut ay) =
                                 paint.scroll_axes(&self.font, &styles[n.id.0 as usize], rect);
@@ -374,28 +377,33 @@ impl Renderer {
                 })
             })
             .collect();
+        // Measure final painted input extents once; bars and selection timers
+        // share these values. input_axes retains enabled-Textarea semantics.
+        let input_scroll_axes: Vec<_> = tree
+            .iter()
+            .map(|n| {
+                inputs[n.id.0 as usize].as_ref().map(|input| {
+                    input.scroll_axes(&self.font, &styles[n.id.0 as usize], layout.rect(n.id))
+                })
+            })
+            .collect();
         let input_axes = tree
             .iter()
             .map(|n| {
                 let index = n.id.0 as usize;
                 inputs[index]
                     .as_ref()
-                    .filter(|i| i.multiline)
+                    .filter(|input| input.multiline)
                     .and_then(|input| {
-                        let area = input.scroll_area(&self.font, &styles[index], layout.rect(n.id));
-                        if views[index].interaction.disabled {
-                            areas[index] = Some(ScrollArea {
-                                track: None,
-                                thumb: None,
-                                horizontal_track: None,
-                                horizontal_thumb: None,
-                                ..area
-                            });
-                            None
-                        } else {
-                            areas[index] = Some(area);
-                            Some(input.scroll_axes(&self.font, &styles[index], layout.rect(n.id)))
-                        }
+                        let (x, y) = input_scroll_axes[index]?;
+                        let enabled = !views[index].interaction.disabled;
+                        areas[index] = Some(ScrollArea::from_axes(
+                            input.content_rect(&styles[index], layout.rect(n.id)),
+                            &styles[index],
+                            enabled.then_some(&x),
+                            enabled.then_some(&y),
+                        ));
+                        enabled.then_some((x, y))
                     })
             })
             .collect();
@@ -411,6 +419,7 @@ impl Renderer {
                 .map(|v| v.key.clone()),
             areas,
             input_axes,
+            input_scroll_axes,
             input_activity,
             inputs,
             tree,

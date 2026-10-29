@@ -301,9 +301,15 @@ fn cursor_scroll_blink_and_incremental_input_pixels_match_full_render() {
         "Input {caret-blink:wrong;}",
         "Input {caret-width:-1;}",
         "Input {selection-color:12;}",
+        "Input {selection-scroll-interval:32;}",
+        "Input {selection-scroll-interval:-1ms;}",
+        "Input {selection-scroll-interval:60001ms;}",
+        "Input {selection-scroll-step:-1;}",
+        "Input {selection-scroll-step:1025;}",
     ] {
         assert!(Theme::parse(&profile, &base, style).is_err());
     }
+    assert!(Theme::parse(&profile, &base, "Input {selection-scroll-interval:0ms; selection-scroll-step:0;}").is_ok());
 }
 
 #[test]

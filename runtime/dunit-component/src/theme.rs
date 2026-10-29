@@ -76,8 +76,8 @@ impl Theme {
                         "scrollbar-width" | "scrollbar-min-thumb" | "scrollbar-radius" => {
                             valid_number(0., 1024.)
                         }
-                        "scroll-step" => valid_number(0., 1024.),
-                        "caret-blink" => value
+                        "scroll-step" | "selection-scroll-step" => valid_number(0., 1024.),
+                        "caret-blink" | "selection-scroll-interval" => value
                             .as_duration()
                             .is_some_and(|v| v.is_finite() && (0. ..=60_000.).contains(&v)),
                         "background-gradient" => {

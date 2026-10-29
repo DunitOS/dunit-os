@@ -52,6 +52,7 @@ pub struct ComponentWindow<C: Component> {
     motion_frame: Option<crate::time::Instant>,
     motion_requested: bool,
     caret_frame: Option<crate::time::Instant>,
+    selection_frame: Option<crate::time::Instant>,
     pointer_position: Option<(i32, i32)>,
 }
 impl<C: Component> ComponentWindow<C> {
@@ -72,6 +73,7 @@ impl<C: Component> ComponentWindow<C> {
             motion_frame: None,
             motion_requested: true,
             caret_frame: None,
+            selection_frame: None,
             pointer_position: None,
         };
         ui.redraw()?;
@@ -260,6 +262,12 @@ impl<C: Component> ComponentWindow<C> {
     {
         let start = crate::time::Instant::now()?;
         let event = loop {
+            let selection = self.selection_autoscroll();
+            if selection.is_none() {
+                self.selection_frame = None;
+            } else if self.selection_frame.is_none() {
+                self.selection_frame = Some(crate::time::Instant::now()?);
+            }
             let remaining = timeout.saturating_sub(start.elapsed()?);
             let since_check = self
                 .theme_checked
@@ -292,7 +300,18 @@ impl<C: Component> ComponentWindow<C> {
             } else {
                 slice
             };
+            let slice = if let Some((_, _, _, ms)) = &selection {
+                let elapsed = self.selection_frame.unwrap().elapsed()?;
+                slice.min(Duration::from_millis(*ms).saturating_sub(elapsed))
+            } else {
+                slice
+            };
             let event = self.window.next_event(slice)?;
+            // Deliver input first: a pending Up/Leave/Close must cancel capture
+            // before a due selection timer can move the viewport again.
+            if event.is_none() {
+                self.sample_selection_autoscroll()?;
+            }
             if let Some(ms) = self.renderer.caret_blink_ms() {
                 if self
                     .caret_frame
@@ -361,6 +380,9 @@ impl<C: Component> ComponentWindow<C> {
                 } else {
                     Some((input.x, input.y))
                 };
+                if input.kind != IN_MOVE {
+                    self.selection_frame = Some(crate::time::Instant::now()?);
+                }
                 let pointer = match input.kind {
                     IN_DOWN => PointerEvent::Down,
                     IN_UP => PointerEvent::Up,
@@ -389,8 +411,13 @@ impl<C: Component> ComponentWindow<C> {
                         .map(alloc::string::String::from)
                 };
                 let index = capture.as_deref().and_then(|key| {
-                    self.renderer
-                        .input_index_at(key, input.x as f32, input.y as f32)
+                    if pointer == PointerEvent::Down {
+                        self.renderer
+                            .input_index_at(key, input.x as f32, input.y as f32)
+                    } else {
+                        self.renderer
+                            .input_drag_index_at(key, input.x as f32, input.y as f32)
+                    }
                 });
                 let position = capture.as_deref().zip(index);
                 if self
@@ -509,7 +536,33 @@ impl<C: Component> ComponentWindow<C> {
             }
             _ => {}
         }
+        if matches!(&event, Some(WindowEvent::Input(i)) if i.kind == IN_MOVE) {
+            self.sample_selection_autoscroll()?;
+        }
         Ok(event)
+    }
+    fn sample_selection_autoscroll(&mut self) -> NativeResult<()> {
+        let Some((key, x, y, ms)) = self.selection_autoscroll() else {
+            self.selection_frame = None;
+            return Ok(());
+        };
+        let elapsed = self.selection_frame.map(|t| t.elapsed()).transpose()?;
+        if elapsed.is_some_and(|d| d >= Duration::from_millis(ms)) {
+            if let Some(index) = self.renderer.input_autoscroll_step(&key, x, y) {
+                self.application.drag_selection(&key, index);
+                self.caret_frame = Some(crate::time::Instant::now()?);
+                self.redraw()?;
+            }
+            self.selection_frame = Some(crate::time::Instant::now()?);
+        }
+        Ok(())
+    }
+    fn selection_autoscroll(&self) -> Option<(alloc::string::String, f32, f32, u64)> {
+        let key = self.application.dragging_input_key()?;
+        let (x, y) = self.pointer_position?;
+        let (x, y) = (x as f32, y as f32);
+        let ms = self.renderer.input_autoscroll_ms(key, x, y)?;
+        Some((key.into(), x, y, ms))
     }
     pub fn close(self) -> NativeResult<()> {
         self.window.close()

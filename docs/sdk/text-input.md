@@ -32,7 +32,9 @@ owns the accepted text; the SDK does not keep an independent authoritative value
 - Primary click places the cursor; dragging selects within the client, including
   across another node in the same window. Pointer Leave cancels capture. The
   current native channel does not report pointer modifiers, so native Shift+click
-  is not implemented. Double/triple click and timed edge autoscroll remain open.
+  is not implemented. Double/triple click remains open. Timed
+  [selection edge autoscroll](selection-autoscroll.md) supports horizontal drag
+  selection with a stationary captured pointer.
 - Enter is not inserted into a single-line field; root application shortcuts may
   handle it. Text and editing shortcuts consumed by a field do not also activate
   root shortcuts. Tab/Shift+Tab traverse fields, buttons and radio groups.

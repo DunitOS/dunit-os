@@ -33,9 +33,10 @@ use both axes and the current scroll offsets. Drag selection crosses lines;
 selection and glyphs are clipped to the content box. Visible glyph work is
 bounded using font-wide ink bounds, including overhang from adjacent logical
 rows. Pixel-reference tests cover negative bearings, positive overhang, tall
-accents and deep descenders. Timed drag edge autoscroll remains open. Both
-scrollbars are supplied by the shared
-[scroll controller](scroll-areas.md).
+accents and deep descenders. Timed
+[selection edge autoscroll](selection-autoscroll.md) supports stationary captured
+pointers on both axes. The shared [scroll controller](scroll-areas.md) supplies
+both scrollbars.
 
 The native adapter routes wheel input to the hovered node, falling back to the
 focused field when there is no hovered target. Negative native wheel deltas

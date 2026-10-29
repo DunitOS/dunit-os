@@ -194,6 +194,25 @@ impl<C: Component> Application<C> {
         }
         Ok(changed)
     }
+    /// Extend an existing text capture without synthesizing pointer routing.
+    pub fn drag_selection(&mut self, key: &str, index: usize) -> bool {
+        let mut changed = false;
+        self.view.visit_mut(&mut |v| {
+            if v.key != key || !v.interaction.focused || v.interaction.disabled {
+                return;
+            }
+            if let Some(input) = &mut v.input {
+                if input.dragging {
+                    input.editor.place(index, true);
+                    input.caret_revision = input.caret_revision.wrapping_add(1);
+                    input.caret_visible = true;
+                    changed = true;
+                }
+            }
+        });
+        changed
+    }
+
     pub fn blink_caret(&mut self) -> bool {
         let mut changed = false;
         self.view.visit_mut(&mut |v| {
