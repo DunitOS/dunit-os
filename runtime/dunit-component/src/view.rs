@@ -32,12 +32,13 @@ pub struct View<Msg> {
     pub(crate) activation: Option<Msg>,
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
+    pub(crate) slider: Option<crate::slider::SliderBinding<Msg>>,
     pub(crate) input: Option<crate::input::InputBinding<Msg>>,
     pub(crate) scroll_label: Option<String>,
     pub(crate) scroll_axes: crate::ScrollAxes,
 }
 impl<Msg> View<Msg> {
-    fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
+    pub(crate) fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
         Self {
             key: key.into(),
             kind,
@@ -50,6 +51,7 @@ impl<Msg> View<Msg> {
             interaction: dunit_widgets::Interaction::default(),
             radio_group: None,
             input: None,
+            slider: None,
             scroll_label: None,
             scroll_axes: crate::ScrollAxes::Vertical,
         }
@@ -176,6 +178,7 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.slider.is_some() { return Some("slider"); }
         if self.scroll_label.is_some() {
             return Some("region");
         }
@@ -198,6 +201,7 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(slider)=&self.slider {return Some(&slider.label);}
         if let Some(label) = &self.scroll_label {
             return Some(label);
         }
@@ -289,6 +293,7 @@ impl<Msg> View<Msg> {
         if !names.insert(&self.key) {
             return Err(UiError::DuplicateKey);
         }
+        if self.slider.as_ref().is_some_and(|s| !s.options.valid(s.value)) {return Err(UiError::InvalidSlider);}
         if let Some(input) = &self.input {
             let value = self.text.as_deref().unwrap_or("");
             let valid = if input.editor.is_multiline() {

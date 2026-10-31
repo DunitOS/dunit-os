@@ -47,3 +47,7 @@ $scroll-step: 32;
 
 $selection-scroll-interval: 32ms;
 $selection-scroll-step: 12;
+
+$slider-thumb-size: 18;
+$slider-track-height: 4;
+$slider-min-track: 120;

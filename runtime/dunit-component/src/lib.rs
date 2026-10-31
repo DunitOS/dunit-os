@@ -4,6 +4,8 @@
 extern crate alloc;
 
 mod focus;
+mod slider;
+pub use slider::{SliderOptions,SliderCommand,SliderGeometry,SliderRange};
 mod input;
 mod interaction;
 mod motion;
@@ -54,6 +56,7 @@ pub enum UiError {
     InvalidClass,
     InvalidRadioGroup,
     InvalidInput,
+    InvalidSlider,
     InvalidLayout,
     InvalidSize,
     Allocation,

@@ -34,6 +34,10 @@ impl<M> View<M> {
                     self.interaction.hovered = old.interaction.hovered;
                     self.interaction.focused = old.interaction.focused;
                     self.interaction.pressed = old.interaction.pressed;
+                    if let (Some(slider),Some(previous))=(&mut self.slider,&old.slider) {
+                        if slider.options==previous.options {slider.grab=previous.grab;}
+                        else {self.interaction.pressed=false;}
+                    }
                     if let (Some(input), Some(previous)) = (&mut self.input, &old.input) {
                         input.editor = previous.editor.clone();
                         input.editor.sync(self.text.as_deref().unwrap_or(""));

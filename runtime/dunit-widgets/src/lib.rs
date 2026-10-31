@@ -30,6 +30,7 @@ pub mod event;
 pub mod kind;
 pub mod measure;
 pub mod scroll;
+pub mod slider;
 pub mod state;
 pub mod text_input;
 

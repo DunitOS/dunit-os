@@ -89,6 +89,10 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        if self.slider_command(match direction {
+            Navigation::Left|Navigation::Down=>crate::SliderCommand::Decrease,
+            Navigation::Right|Navigation::Up=>crate::SliderCommand::Increase,
+        })? {return Ok(true);}
         let mut nodes = Vec::new();
         self.view.flatten(&mut nodes);
         let Some(focused) = nodes

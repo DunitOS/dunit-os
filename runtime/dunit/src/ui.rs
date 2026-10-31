@@ -18,6 +18,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidSlider
         | UiError::InvalidRadioGroup
         | UiError::InvalidClass
         | UiError::DuplicateKey
@@ -403,6 +404,11 @@ impl<C: Component> ComponentWindow<C> {
                     .renderer
                     .hit_key(input.x as f32, input.y as f32)
                     .map(alloc::string::String::from);
+                let slider_key=self.application.dragging_slider_key().map(alloc::string::String::from).or_else(||target.clone());
+                let slider_position=slider_key.as_deref().and_then(|key|self.renderer.slider_geometry(key).map(|g|(key,input.x as f32,g)));
+                if self.application.slider_pointer(pointer,target.as_deref(),slider_position).map_err(native)? {
+                    self.redraw()?;return Ok(event);
+                }
                 let capture = if pointer == PointerEvent::Down {
                     target.clone()
                 } else {
@@ -466,6 +472,15 @@ impl<C: Component> ComponentWindow<C> {
                             self.redraw()?;
                             return Ok(event);
                         }
+                    }
+                }
+                if input.value==0 && input.y==0 {
+                    let command=match input.x {
+                        0x47=>Some(SliderCommand::Home),0x4f=>Some(SliderCommand::End),
+                        0x49=>Some(SliderCommand::PageUp),0x51=>Some(SliderCommand::PageDown),_=>None,
+                    };
+                    if let Some(command)=command {
+                        if self.application.slider_command(command).map_err(native)? {self.redraw()?;return Ok(event);}
                     }
                 }
                 // Existing IN_KEY carries PS/2 set-1 scancode and modifiers;

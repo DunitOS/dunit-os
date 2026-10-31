@@ -53,6 +53,7 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
+                        "slider-track-color" | "slider-fill-color" | "slider-thumb-color" |
                         "scrollbar-track"
                         | "scrollbar-thumb"
                         | "color"
@@ -64,6 +65,7 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
+                        "slider-thumb-size" | "slider-track-height" | "slider-min-track" |
                         "indicator-width"
                         | "indicator-height"
                         | "indicator-gap"

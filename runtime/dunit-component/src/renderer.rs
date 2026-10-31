@@ -1,6 +1,6 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use dunit_render::{paint_clipped_with_widgets, ScrollArea, Surface, TextInput};
+use dunit_render::{paint_clipped_with_sliders, ScrollArea, Surface, TextInput};
 #[path = "input_scroll.rs"]
 mod input_scroll;
 #[path = "scroll.rs"]
@@ -44,6 +44,7 @@ struct Snapshot {
     styles: Vec<Style>,
     targets: Vec<Style>,
     inputs: Vec<Option<TextInput>>,
+    sliders: Vec<Option<f32>>,
     input_activity: Vec<u64>,
     input_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
     input_scroll_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
@@ -86,6 +87,10 @@ impl Renderer {
             scroll_focus: None,
             scroll_sizes: BTreeMap::new(),
         }
+    }
+    pub fn slider_geometry(&self,key:&str)->Option<crate::SliderGeometry> {
+        let p=self.previous.as_ref()?;let id=p.tree.by_name(key)?;
+        Some(crate::SliderGeometry::new(p.layout.rect(id),&p.styles[id.0 as usize],p.sliders[id.0 as usize]?))
     }
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
@@ -412,7 +417,9 @@ impl Renderer {
             .iter()
             .map(|v| v.input.as_ref().map_or(0, |i| i.caret_revision))
             .collect();
+        let sliders=views.iter().map(|v|v.slider.as_ref().map(|s|s.options.fraction(s.value))).collect();
         let next = Snapshot {
+            sliders,
             focused_key: views
                 .iter()
                 .find(|v| v.interaction.focused && !v.interaction.disabled)
@@ -466,7 +473,7 @@ impl Renderer {
             let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            let painted = paint_clipped_with_widgets(
+            let painted = paint_clipped_with_sliders(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
@@ -475,6 +482,7 @@ impl Renderer {
                 rect,
                 &|id| next.inputs[id.0 as usize].as_ref(),
                 &|id| next.areas[id.0 as usize].as_ref(),
+                &|id| next.sliders[id.0 as usize],
             );
             if painted.is_err() {
                 // A scratch failure may leave a partially painted private canvas.
@@ -587,6 +595,7 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
             && ra == rb
             && old.styles[a.id.0 as usize] == new.styles[b.id.0 as usize]
             && old.inputs[a.id.0 as usize] == new.inputs[b.id.0 as usize]
+            && old.sliders[a.id.0 as usize] == new.sliders[b.id.0 as usize]
             && old.areas[a.id.0 as usize] == new.areas[b.id.0 as usize]
         {
             continue;
