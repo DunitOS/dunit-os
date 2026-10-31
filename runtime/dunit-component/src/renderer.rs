@@ -3,6 +3,8 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use dunit_render::{paint_clipped_with_progress, ScrollArea, Surface, TextInput};
 #[path = "input_scroll.rs"]
 mod input_scroll;
+#[path = "overlays.rs"]
+mod overlays;
 #[path = "progress_render.rs"]
 mod progress_render;
 #[path = "scroll.rs"]
@@ -43,6 +45,7 @@ pub struct RenderStats {
     pub animation_time_ms: Option<u64>,
 }
 struct Snapshot {
+    overlays: overlays::Scene,
     tree: Tree,
     layout: Layout,
     styles: Vec<Style>,
@@ -244,7 +247,7 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<RenderStats> {
-        self.render_inner(view, width, height, None)
+        self.render_inner(view, width, height, None, None)
     }
     /// Render using an explicit monotonic clock. Immediate `render` remains
     /// deterministic and settles all properties to their targets.
@@ -255,7 +258,25 @@ impl Renderer {
         height: u32,
         now_ms: u64,
     ) -> Result<RenderStats> {
-        self.render_inner(view, width, height, Some(now_ms))
+        self.render_inner(view, width, height, Some(now_ms), None)
+    }
+    /// Render the application including active menus and delayed tooltips.
+    pub fn render_application<C: crate::Component>(
+        &mut self,
+        app: &crate::Application<C>,
+        width: u32,
+        height: u32,
+    ) -> Result<RenderStats> {
+        self.render_inner(app.view(), width, height, None, Some(&app.overlays))
+    }
+    pub fn render_application_at<C: crate::Component>(
+        &mut self,
+        app: &crate::Application<C>,
+        width: u32,
+        height: u32,
+        now: u64,
+    ) -> Result<RenderStats> {
+        self.render_inner(app.view(), width, height, Some(now), Some(&app.overlays))
     }
     fn render_inner<Msg>(
         &mut self,
@@ -263,6 +284,7 @@ impl Renderer {
         width: u32,
         height: u32,
         now: Option<u64>,
+        overlays: Option<&crate::popup::OverlayState>,
     ) -> Result<RenderStats> {
         if width == 0 || height == 0 {
             return Err(UiError::InvalidSize);
@@ -276,6 +298,12 @@ impl Renderer {
             .map(|(n, v)| {
                 let classes: Vec<_> = v.classes.iter().map(|c| c.as_str()).collect();
                 let mut states = v.interaction.state_names();
+                if overlays
+                    .and_then(|s| s.open.as_ref())
+                    .is_some_and(|p| p.owner == v.key)
+                {
+                    states.push("expanded");
+                }
                 if v.input.as_ref().is_some_and(|i| i.options.read_only) {
                     states.push("read-only");
                 }
@@ -469,7 +497,9 @@ impl Renderer {
             .collect();
         let (progress, busy_interval_ms, active_busy_indicators) =
             self.prepare_progress(&views, &tree, &layout, &styles, &areas, now, width, height);
+        let overlay_scene = self.overlays(view, &tree, &layout, overlays, &areas, width, height);
         let next = Snapshot {
+            overlays: overlay_scene,
             progress,
             busy_interval_ms,
             sliders,
@@ -501,7 +531,12 @@ impl Renderer {
             // A retained final canvas is not a valid pre-filter backdrop.
             // Rebuild when damage touches any filter output or sampled halo.
             // Disjoint edits cannot affect a filter and need no blur scratch.
-            if touches_backdrop(&next, dirty)
+            if next.overlays.requires_backdrop_rebuild()
+                || self
+                    .previous
+                    .as_ref()
+                    .is_some_and(|p| p.overlays.requires_backdrop_rebuild())
+                || touches_backdrop(&next, dirty)
                 || self
                     .previous
                     .as_ref()
@@ -538,6 +573,8 @@ impl Renderer {
                 &|id| next.sliders[id.0 as usize],
                 &|id| next.progress[id.0 as usize],
             );
+            let painted =
+                painted.and_then(|()| next.overlays.paint(&self.font, &mut surface, rect));
             if painted.is_err() {
                 // A scratch failure may leave a partially painted private canvas.
                 // Never diff against it or publish it as a completed frame.
@@ -616,7 +653,11 @@ fn container_padding<M>(tree: &Tree, styles: &[Style], views: &[&View<M>]) -> Re
             n.name.clone(),
             n.kind.clone(),
             attrs,
-            n.text.clone(),
+            if let Some(suffix) = styles[n.id.0 as usize].keyword("control-suffix") {
+                n.text.as_ref().map(|t| alloc::format!("{} {}", t, suffix))
+            } else {
+                n.text.clone()
+            },
             n.parent,
         );
         if let Some(parent) = n.parent {
@@ -642,6 +683,11 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
         return Some(full);
     }
     let mut bounds: Option<(u32, u32, u32, u32)> = None;
+    let mut rectangles = Vec::new();
+    if old.overlays != new.overlays {
+        rectangles.extend(old.overlays.bounds());
+        rectangles.extend(new.overlays.bounds());
+    }
     for (a, b) in old.tree.iter().zip(new.tree.iter()) {
         let ra = old.layout.rect(a.id);
         let rb = new.layout.rect(b.id);
@@ -656,23 +702,24 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
         {
             continue;
         }
-        for r in [
+        rectangles.extend([
             dunit_render::visual_bounds(ra, &old.styles[a.id.0 as usize]),
             dunit_render::visual_bounds(rb, &new.styles[b.id.0 as usize]),
-        ] {
-            // Outward rounding also contains the painter's nearest-pixel bounds.
-            let x0 = r.x.max(0.0).min(width as f32) as u32;
-            let y0 = r.y.max(0.0).min(height as f32) as u32;
-            let x1 = ceil_clamped(r.x + r.w, width);
-            let y1 = ceil_clamped(r.y + r.h, height);
-            if x0 >= x1 || y0 >= y1 {
-                continue;
-            }
-            bounds = Some(match bounds {
-                Some((x, y, xx, yy)) => (x.min(x0), y.min(y0), xx.max(x1), yy.max(y1)),
-                None => (x0, y0, x1, y1),
-            });
+        ]);
+    }
+    for r in rectangles {
+        // Outward rounding also contains the painter's nearest-pixel bounds.
+        let x0 = r.x.max(0.0).min(width as f32) as u32;
+        let y0 = r.y.max(0.0).min(height as f32) as u32;
+        let x1 = ceil_clamped(r.x + r.w, width);
+        let y1 = ceil_clamped(r.y + r.h, height);
+        if x0 >= x1 || y0 >= y1 {
+            continue;
         }
+        bounds = Some(match bounds {
+            Some((x, y, xx, yy)) => (x.min(x0), y.min(y0), xx.max(x1), yy.max(y1)),
+            None => (x0, y0, x1, y1),
+        });
     }
     bounds.map(|(x, y, xx, yy)| Damage {
         x,

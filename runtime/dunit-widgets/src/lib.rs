@@ -29,6 +29,7 @@ extern crate alloc;
 pub mod event;
 pub mod kind;
 pub mod measure;
+pub mod overlay;
 pub mod progress;
 pub mod scroll;
 pub mod slider;

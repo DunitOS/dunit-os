@@ -42,6 +42,7 @@ impl Widget {
         Some(match tag {
             "Text" | "Label" => Widget::Text,
             "Icon" => Widget::Icon,
+            "Select" | "MenuButton" | "MenuItem" => Widget::Button,
             "Button" => Widget::Button,
             "ToggleButton" => Widget::ToggleButton,
             "Checkbox" => Widget::Checkbox,

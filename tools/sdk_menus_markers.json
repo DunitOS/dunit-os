@@ -1,0 +1,805 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /sdk-menus.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[MENUS] ready",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] bar tab focus OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] bar one tab stop OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] select open OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] disabled skip pending OK",
+          "timeout": 45
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-menus-select.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "esc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] select escape OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 25,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 49,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 100
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MENUS] pointer option OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": -27,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 33,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 100
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MENUS] outside no click through OK",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 100
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MENUS] ordinary button OK",
+          "timeout": 45
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -32,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": -33,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "wait_marker": "[MENUS] tooltip armed OK",
+          "timeout": 45
+        },
+        {
+          "wait_marker": "[MENUS] tooltip deadline OK",
+          "timeout": 45
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-menus-tooltip.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "f10"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] f10 dismisses tooltip OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] menu open OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] menu disabled separator skip OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] submenu open OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] submenu disabled skip OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] submenu action restore OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "alt"
+              },
+              {
+                "type": "qcode",
+                "data": "e"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] alt mnemonic OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "left"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] bar switch OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "o"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] item mnemonic OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "shift"
+              },
+              {
+                "type": "qcode",
+                "data": "f10"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] keyboard context OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] context submenu restore OK",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "right",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MENUS] right click context OK",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "right",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-menus-context.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 70,
+            "y": 19,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 100
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[MENUS] context pointer action OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "alt"
+              },
+              {
+                "type": "qcode",
+                "data": "f"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] resize menu ready",
+          "timeout": 45
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-menus-submenu.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] resize popup focus OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "esc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] escape one level OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "esc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] escape restores bar OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "q"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[MENUS] ok",
+          "timeout": 45
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[MENUS] ready",
+    "[MENUS] bar tab focus OK",
+    "[MENUS] bar one tab stop OK",
+    "[MENUS] select open OK",
+    "[MENUS] disabled skip pending OK",
+    "[MENUS] select escape OK",
+    "[MENUS] pointer option OK",
+    "[MENUS] outside no click through OK",
+    "[MENUS] ordinary button OK",
+    "[MENUS] tooltip armed OK",
+    "[MENUS] tooltip deadline OK",
+    "[MENUS] f10 dismisses tooltip OK",
+    "[MENUS] menu open OK",
+    "[MENUS] menu disabled separator skip OK",
+    "[MENUS] submenu open OK",
+    "[MENUS] submenu disabled skip OK",
+    "[MENUS] submenu action restore OK",
+    "[MENUS] alt mnemonic OK",
+    "[MENUS] bar switch OK",
+    "[MENUS] item mnemonic OK",
+    "[MENUS] keyboard context OK",
+    "[MENUS] context submenu restore OK",
+    "[MENUS] right click context OK",
+    "[MENUS] context pointer action OK",
+    "[MENUS] resize menu ready",
+    "[MENUS] resize popup focus OK",
+    "[MENUS] escape one level OK",
+    "[MENUS] escape restores bar OK",
+    "[MENUS] ok",
+    "[GUI-EXIT] app=sdk_menus_fixture kind=0 code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "application failed:",
+    "gui_server: FAIL",
+    "gui_server: PANIC"
+  ]
+}

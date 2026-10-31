@@ -7,6 +7,8 @@ use crate::{
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
+#[path = "ui_overlays.rs"]
+mod overlays;
 
 /// Load the selected SDK profile and configured font for a custom renderer.
 pub fn load_theme(overlay: &str) -> NativeResult<(Theme, Font)> {
@@ -18,6 +20,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidPopup
         | UiError::InvalidProgress
         | UiError::InvalidSpinbox
         | UiError::InvalidSlider
@@ -224,7 +227,7 @@ impl<C: Component> ComponentWindow<C> {
         let clock = self.motion_clock;
         let mut sampled = None;
         let renderer = &mut self.renderer;
-        let view = self.application.view();
+        let application = &self.application;
         let last = &mut self.last_render;
         let uploaded = &mut self.uploaded_pixels;
         let result = self.window.try_draw_damage(|frame| {
@@ -232,7 +235,9 @@ impl<C: Component> ComponentWindow<C> {
             sampled = Some(crate::time::Instant::now()?);
             let now =
                 u64::try_from(clock.elapsed()?.as_millis()).map_err(|_| Error(libdunit::EINVAL))?;
-            *last = renderer.render_at(view, w, h, now).map_err(native)?;
+            *last = renderer
+                .render_application_at(application, w, h, now)
+                .map_err(native)?;
             if last.damage.is_none() && !frame.requires_full_frame() {
                 *uploaded = 0;
                 return Ok(None);
@@ -318,11 +323,17 @@ impl<C: Component> ComponentWindow<C> {
             } else {
                 slice
             };
+            let slice = if let Some(tooltip) = self.tooltip_wait()? {
+                slice.min(tooltip)
+            } else {
+                slice
+            };
             let event = self.window.next_event(slice)?;
             // Deliver input first: a pending Up/Leave/Close must cancel capture
             // before a due selection timer can move the viewport again.
             if event.is_none() {
                 self.sample_selection_autoscroll()?;
+                self.tick_tooltip()?;
             }
             if let Some(ms) = self.renderer.caret_blink_ms() {
                 if self
@@ -380,6 +391,9 @@ impl<C: Component> ComponentWindow<C> {
                 break event;
             }
         };
+        if self.overlay_event(&event)? {
+            return Ok(event);
+        }
         match &event {
             Some(WindowEvent::Resized { .. }) => self.redraw()?,
             Some(WindowEvent::Input(input))

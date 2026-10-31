@@ -50,3 +50,20 @@ Spinbox { spinbox-button-width: $spinbox-button-width; spinbox-mark-size: $spinb
 
 Progress, Busy { padding: $space-small; progress-thickness: $progress-thickness; progress-min-track: $progress-min-track; progress-radius: $radius; progress-track-color: $line; progress-fill-color: $accent; busy-segment: $busy-segment; busy-duration: $busy-duration; busy-interval: $busy-interval; }
 Progress:disabled, Busy:disabled { progress-fill-color: $muted; }
+
+Row.menu-bar { padding: 0; }
+MenuButton, Select { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; tooltip-delay: $tooltip-delay; }
+MenuButton:hover, MenuButton:focus, MenuButton:expanded, Select:hover, Select:focus, Select:expanded { border-color: $accent; }
+MenuButton:active, MenuButton:expanded { background: $line; }
+MenuButton:disabled, Select:disabled { color: $muted; }
+Select { control-suffix: $select-mark; }
+Popup { background: $surface; border-width: $border; border-color: $line; radius: $radius; padding: $space-small; clip: rounded; menu-min-width: $menu-min-width; menu-gap: $menu-gap; }
+MenuItem { color: $text; font-size: $font-size; padding: $space-small; menu-row-height: $menu-row-height; menu-submenu-mark: $menu-submenu-mark; }
+MenuItem:checked { background: $line; }
+MenuItem:focus, MenuItem:active { background: $accent; color: $window-bg; }
+MenuItem:disabled { color: $muted; }
+MenuSeparator { background: $line; menu-separator-height: $border; }
+Tooltip { background: $surface; border-width: $border; border-color: $accent; padding: $space-small; radius: $radius; tooltip-gap: $tooltip-gap; tooltip-max-width: $tooltip-max-width; }
+TooltipText { color: $text; font-size: $font-size; }
+// Tooltip delay applies to every SDK element that declares a tooltip.
+Text, Row, Column, Stack, Grid, Button, ToggleButton, Checkbox, Radio, Switch, Input, Textarea, Spinbox, Slider, VerticalSlider, Progress, Busy, Scroll { tooltip-delay: $tooltip-delay; }

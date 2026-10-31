@@ -72,7 +72,13 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
-                        "progress-thickness"
+                        "menu-min-width"
+                        | "menu-row-height"
+                        | "menu-separator-height"
+                        | "menu-gap"
+                        | "tooltip-gap"
+                        | "tooltip-max-width"
+                        | "progress-thickness"
                         | "progress-min-track"
                         | "progress-radius"
                         | "spinbox-button-width"
@@ -93,8 +99,12 @@ impl Theme {
                             valid_number(0., 1024.)
                         }
                         "scroll-step" | "selection-scroll-step" => valid_number(0., 1024.),
+                        "menu-submenu-mark" | "control-suffix" => value
+                            .as_keyword()
+                            .is_some_and(|s| !s.chars().any(char::is_control)),
                         "busy-segment" => valid_number(0., 1.),
-                        "busy-duration"
+                        "tooltip-delay"
+                        | "busy-duration"
                         | "busy-interval"
                         | "caret-blink"
                         | "selection-scroll-interval" => value

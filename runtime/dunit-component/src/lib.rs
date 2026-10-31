@@ -4,6 +4,10 @@
 extern crate alloc;
 
 mod focus;
+mod popup;
+mod popup_events;
+mod tooltip;
+pub use popup::{MenuEntry, MenuItem, OpenPopup, PopupCommand, PopupHit, PopupItem, SelectOption};
 mod progress;
 pub use progress::{ProgressOptions, ProgressState};
 mod spinbox;
@@ -63,6 +67,7 @@ pub enum UiError {
     InvalidSlider,
     InvalidSpinbox,
     InvalidProgress,
+    InvalidPopup,
     InvalidLayout,
     InvalidSize,
     Allocation,
@@ -82,12 +87,17 @@ pub trait Component {
 pub struct Application<C: Component> {
     component: C,
     view: View<C::Message>,
+    pub(crate) overlays: popup::OverlayState,
 }
 impl<C: Component> Application<C> {
     pub fn new(component: C) -> Result<Self> {
         let view = component.view();
         view.validate()?;
-        Ok(Self { component, view })
+        Ok(Self {
+            component,
+            view,
+            overlays: popup::OverlayState::default(),
+        })
     }
     pub fn component(&self) -> &C {
         &self.component
@@ -99,6 +109,7 @@ impl<C: Component> Application<C> {
         self.component.update(message);
         let mut view = self.component.view();
         view.validate()?;
+        self.reconcile_overlays(&view);
         view.reconcile(&self.view);
         self.view = view;
         Ok(())
@@ -108,7 +119,12 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
-        if self.spinbox_key(key)? || self.text_key(key)? || self.widget_key(key)? {
+        self.dismiss_tooltip();
+        if self.popup_key(key)?
+            || self.spinbox_key(key)?
+            || self.text_key(key)?
+            || self.widget_key(key)?
+        {
             return Ok(true);
         }
         let message = self

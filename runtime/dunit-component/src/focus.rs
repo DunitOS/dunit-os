@@ -45,12 +45,38 @@ impl<C: Component> Application<C> {
                 }
             }
         }
+        let mut bar_stops = BTreeMap::new();
+        for bar in nodes.iter().filter(|v| v.menu_bar) {
+            let enabled: Vec<_> = bar
+                .children
+                .iter()
+                .filter(|v| !v.interaction.disabled)
+                .collect();
+            let chosen = enabled
+                .iter()
+                .find(|v| v.interaction.focused)
+                .or_else(|| {
+                    self.overlays
+                        .bar_focus
+                        .get(&bar.key)
+                        .and_then(|last| enabled.iter().find(|v| &v.key == last))
+                })
+                .or(enabled.first());
+            if let Some(chosen) = chosen {
+                for child in &enabled {
+                    bar_stops.insert(child.key.as_str(), chosen.key.as_str());
+                }
+            }
+        }
         let order: Vec<_> = nodes
             .iter()
             .enumerate()
             .filter(|(index, v)| {
                 v.focusable()
                     && !v.interaction.disabled
+                    && bar_stops
+                        .get(v.key.as_str())
+                        .is_none_or(|chosen| *chosen == v.key)
                     && v.radio_group
                         .as_deref()
                         .map_or(true, |g| groups[g].0 == *index)
@@ -73,7 +99,12 @@ impl<C: Component> Application<C> {
         self.set_focus(&target);
         true
     }
-    fn set_focus(&mut self, target: &str) {
+    pub(crate) fn set_focus(&mut self, target: &str) {
+        if let Some(bar) = self.view.ancestor_with(target, &|v| v.menu_bar) {
+            self.overlays
+                .bar_focus
+                .insert(bar.key.clone(), target.into());
+        }
         self.view.visit_mut(&mut |v| {
             v.interaction.focused = v.focusable() && !v.interaction.disabled && v.key == target;
             v.interaction.pressed = false;
@@ -89,6 +120,9 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        if self.popup_navigation(direction)? {
+            return Ok(true);
+        }
         if matches!(direction, Navigation::Up | Navigation::Down)
             && self.spinbox_step(match direction {
                 Navigation::Up => crate::SliderCommand::Increase,

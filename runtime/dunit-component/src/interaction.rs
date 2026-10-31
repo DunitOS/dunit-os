@@ -83,6 +83,13 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        if event != PointerEvent::Move {
+            self.dismiss_tooltip();
+        }
+        if self.popup_pointer(event, None, target)? {
+            return Ok(true);
+        }
+        let mut open = None;
         let mut changed = false;
         if event == PointerEvent::Down && self.focused_input_key() != target {
             changed |= self.commit_spinbox()?;
@@ -98,7 +105,7 @@ impl<C: Component> Application<C> {
             match event {
                 PointerEvent::Down => {
                     v.interaction.focused = hit;
-                    v.interaction.pressed = hit && v.activation.is_some();
+                    v.interaction.pressed = hit && (v.activation.is_some() || v.popup.is_some());
                     if let Some(input) = &mut v.input {
                         input.dragging = hit;
                         changed |= hit && !input.caret_visible;
@@ -107,7 +114,11 @@ impl<C: Component> Application<C> {
                 }
                 PointerEvent::Up => {
                     if hit && v.interaction.pressed {
-                        message = v.activation_message();
+                        if v.popup.is_some() {
+                            open = Some(v.key.clone());
+                        } else {
+                            message = v.activation_message();
+                        }
                     }
                     v.interaction.pressed = false;
                     if let Some(input) = &mut v.input {
@@ -127,6 +138,9 @@ impl<C: Component> Application<C> {
             }
             changed |= old != v.interaction;
         });
+        if let Some(key) = open {
+            changed |= self.trigger_popup(&key);
+        }
         if let Some(message) = message {
             self.update(message)?;
             changed = true;

@@ -60,3 +60,12 @@ $progress-min-track: 120;
 $busy-segment: 0.25;
 $busy-duration: 1200ms;
 $busy-interval: 40ms;
+
+$menu-min-width: 160;
+$menu-row-height: 28;
+$menu-gap: 0;
+$menu-submenu-mark: >;
+$select-mark: v;
+$tooltip-delay: 600ms;
+$tooltip-gap: 6;
+$tooltip-max-width: 320;

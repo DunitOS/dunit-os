@@ -42,6 +42,10 @@ pub struct View<Msg> {
     pub(crate) children: Vec<View<Msg>>,
     pub(crate) classes: Vec<String>,
     pub(crate) bindings: Vec<(Key, Msg)>,
+    pub(crate) popup: Option<crate::popup::PopupBinding<Msg>>,
+    pub(crate) context_menu: Option<Vec<crate::MenuItem<Msg>>>,
+    pub(crate) menu_bar: bool,
+    pub(crate) tooltip: Option<String>,
     pub(crate) activation: Option<Msg>,
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
@@ -68,6 +72,10 @@ impl<Msg> View<Msg> {
             classes: Vec::new(),
             bindings: Vec::new(),
             activation: None,
+            popup: None,
+            context_menu: None,
+            menu_bar: false,
+            tooltip: None,
             interaction: dunit_widgets::Interaction::default(),
             radio_group: None,
             input: None,
@@ -200,6 +208,18 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.menu_bar {
+            return Some("menubar");
+        }
+        if let Some(p) = &self.popup {
+            return Some(
+                if matches!(p.trigger, crate::popup::Trigger::Select { .. }) {
+                    "combobox"
+                } else {
+                    "button"
+                },
+            );
+        }
         if self.progress.is_some() {
             return Some("progressbar");
         }
@@ -231,6 +251,9 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(p) = &self.popup {
+            return Some(&p.label);
+        }
         if let Some(progress) = &self.progress {
             return Some(&progress.label);
         }
@@ -304,7 +327,18 @@ impl<Msg> View<Msg> {
     }
     pub fn validate(&self) -> Result<()> {
         let mut names = BTreeSet::new();
-        self.check(0, &mut names, &mut BTreeSet::new())
+        self.check(0, &mut names, &mut BTreeSet::new())?;
+        let mut nodes = Vec::new();
+        self.flatten(&mut nodes);
+        let mut mnemonics = BTreeSet::new();
+        for node in nodes {
+            if let Some(ch) = node.popup.as_ref().and_then(|p| p.mnemonic) {
+                if !mnemonics.insert(ch) {
+                    return Err(UiError::InvalidPopup);
+                }
+            }
+        }
+        Ok(())
     }
     fn check<'a>(
         &'a self,
@@ -312,6 +346,7 @@ impl<Msg> View<Msg> {
         names: &mut BTreeSet<&'a str>,
         checked_groups: &mut BTreeSet<&'a str>,
     ) -> Result<()> {
+        self.check_popups()?;
         if depth >= 64 || names.len() >= 4096 {
             return Err(UiError::TreeLimit);
         }
