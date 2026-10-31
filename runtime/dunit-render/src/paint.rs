@@ -15,6 +15,8 @@ pub type InputOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a TextInput>;
 /// Resolve a scroll viewport and scrollbar in document coordinates.
 pub type SliderOf<'a> = &'a dyn Fn(NodeId) -> Option<f32>;
 
+pub type ProgressOf<'a> = &'a dyn Fn(NodeId) -> Option<dunit_widgets::progress::ProgressPaint>;
+
 pub type ScrollOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a ScrollArea>;
 
 /// A resolver from a node to its already-cascaded DSS style. Callers build these
@@ -47,6 +49,7 @@ pub fn paint(
         font,
         surface,
         false,
+        &|_| None,
         &|_| None,
         &|_| None,
         &|_| None,
@@ -125,6 +128,32 @@ pub fn paint_clipped_with_sliders(
     scroll_of: ScrollOf<'_>,
     slider_of: SliderOf<'_>,
 ) -> PaintResult {
+    paint_clipped_with_progress(
+        tree,
+        layout,
+        style_of,
+        font,
+        surface,
+        clip,
+        input_of,
+        scroll_of,
+        slider_of,
+        &|_| None,
+    )
+}
+
+pub fn paint_clipped_with_progress(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    clip: Rect,
+    input_of: InputOf<'_>,
+    scroll_of: ScrollOf<'_>,
+    slider_of: SliderOf<'_>,
+    progress_of: ProgressOf<'_>,
+) -> PaintResult {
     let mut result = Ok(());
     if !tree.is_empty() {
         surface.with_clip(clip, |s| {
@@ -139,6 +168,7 @@ pub fn paint_clipped_with_sliders(
                 input_of,
                 scroll_of,
                 slider_of,
+                progress_of,
             );
         });
     }
@@ -156,6 +186,7 @@ fn paint_node(
     input_of: InputOf<'_>,
     scroll_of: ScrollOf<'_>,
     slider_of: SliderOf<'_>,
+    progress_of: ProgressOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     let style = style_of(id);
@@ -170,14 +201,36 @@ fn paint_node(
         if rounded {
             s.with_rounded_clip(rect, style.number("radius").unwrap_or(0.), |s| {
                 paint_contents(
-                    tree, layout, id, &style, style_of, font, s, contained, true, input_of,
-                    scroll_of, slider_of,
+                    tree,
+                    layout,
+                    id,
+                    &style,
+                    style_of,
+                    font,
+                    s,
+                    contained,
+                    true,
+                    input_of,
+                    scroll_of,
+                    slider_of,
+                    progress_of,
                 )
             })
         } else {
             paint_contents(
-                tree, layout, id, &style, style_of, font, s, contained, false, input_of, scroll_of,
+                tree,
+                layout,
+                id,
+                &style,
+                style_of,
+                font,
+                s,
+                contained,
+                false,
+                input_of,
+                scroll_of,
                 slider_of,
+                progress_of,
             )
         }
     };
@@ -205,6 +258,7 @@ fn paint_contents(
     input_of: InputOf<'_>,
     scroll_of: ScrollOf<'_>,
     slider_of: SliderOf<'_>,
+    progress_of: ProgressOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     surface.backdrop_blur(
@@ -249,7 +303,12 @@ fn paint_contents(
     }
 
     let tag = tree.node(id).kind.tag();
-    if let Some(fraction) = matches!(tag, "Slider" | "VerticalSlider")
+    if let Some(progress) = matches!(tag, "Progress" | "Busy")
+        .then(|| progress_of(id))
+        .flatten()
+    {
+        crate::progress::paint(rect, style, progress, surface);
+    } else if let Some(fraction) = matches!(tag, "Slider" | "VerticalSlider")
         .then(|| slider_of(id))
         .flatten()
     {
@@ -304,7 +363,17 @@ fn paint_contents(
     let children = |surface: &mut Surface| -> PaintResult {
         for &c in &tree.node(id).children {
             paint_node(
-                tree, layout, c, style_of, font, surface, contained, input_of, scroll_of, slider_of,
+                tree,
+                layout,
+                c,
+                style_of,
+                font,
+                surface,
+                contained,
+                input_of,
+                scroll_of,
+                slider_of,
+                progress_of,
             )?;
         }
         Ok(())

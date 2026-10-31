@@ -52,7 +52,7 @@ impl Widget {
             "Menu" => Widget::Menu,
             "Slider" => Widget::Slider,
             "VerticalSlider" => Widget::VerticalSlider,
-            "Progress" => Widget::Progress,
+            "Busy" | "Progress" => Widget::Progress,
             "Notification" | "Toast" => Widget::Notification,
             _ => return None,
         })

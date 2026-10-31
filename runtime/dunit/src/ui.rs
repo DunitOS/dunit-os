@@ -18,6 +18,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidProgress
         | UiError::InvalidSpinbox
         | UiError::InvalidSlider
         | UiError::InvalidRadioGroup
@@ -140,7 +141,16 @@ impl<C: Component> ComponentWindow<C> {
         Ok(true)
     }
     pub fn is_animating(&self) -> bool {
-        self.renderer.is_animating()
+        self.animation_interval().is_some()
+    }
+    fn animation_interval(&self) -> Option<Duration> {
+        let transition = self.renderer.is_animating().then_some(MOTION_FRAME);
+        let busy = self.renderer.busy_interval_ms().map(Duration::from_millis);
+        match (transition, busy) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            (None, None) => None,
+        }
     }
     /// Applications may reduce motion. Themed windows also honor the desktop's
     /// [effects] anim setting; changing the mode settles the next frame.
@@ -281,13 +291,13 @@ impl<C: Component> ComponentWindow<C> {
             } else {
                 remaining
             };
-            let slice = if self.renderer.is_animating() {
+            let slice = if let Some(interval) = self.animation_interval() {
                 let elapsed = self
                     .motion_frame
                     .map(|t| t.elapsed())
                     .transpose()?
                     .unwrap_or_default();
-                slice.min(MOTION_FRAME.saturating_sub(elapsed))
+                slice.min(interval.saturating_sub(elapsed))
             } else {
                 slice
             };
@@ -356,14 +366,15 @@ impl<C: Component> ComponentWindow<C> {
                 }
                 self.theme_checked = Some(crate::time::Instant::now()?);
             }
-            if self.renderer.is_animating()
-                && self
+            if let Some(interval) = self.animation_interval() {
+                if self
                     .motion_frame
                     .map(|t| t.elapsed())
                     .transpose()?
-                    .map_or(true, |elapsed| elapsed >= MOTION_FRAME)
-            {
-                self.redraw()?;
+                    .map_or(true, |elapsed| elapsed >= interval)
+                {
+                    self.redraw()?;
+                }
             }
             if event.is_some() || start.elapsed()? >= timeout {
                 break event;

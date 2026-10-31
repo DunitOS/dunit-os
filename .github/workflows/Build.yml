@@ -112,6 +112,7 @@ jobs:
           python3 tools/test_sdk_gui_fixture.py slider --accel tcg
           python3 tools/test_sdk_gui_fixture.py vertical_slider --accel tcg
           python3 tools/test_sdk_gui_fixture.py spinbox --accel tcg
+          python3 tools/test_sdk_gui_fixture.py progress --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |

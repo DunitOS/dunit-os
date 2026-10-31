@@ -46,6 +46,7 @@ pub struct View<Msg> {
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
     pub(crate) spinbox: Option<crate::spinbox::SpinboxBinding<Msg>>,
+    pub(crate) progress: Option<crate::progress::ProgressBinding>,
     pub(crate) slider: Option<crate::slider::SliderBinding<Msg>>,
     pub(crate) input: Option<crate::input::InputBinding<Msg>>,
     pub(crate) scroll_label: Option<String>,
@@ -71,6 +72,7 @@ impl<Msg> View<Msg> {
             radio_group: None,
             input: None,
             slider: None,
+            progress: None,
             spinbox: None,
             scroll_label: None,
             scroll_axes: crate::ScrollAxes::Vertical,
@@ -198,6 +200,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.progress.is_some() {
+            return Some("progressbar");
+        }
         if self.spinbox.is_some() {
             return Some("spinbutton");
         }
@@ -226,6 +231,9 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(progress) = &self.progress {
+            return Some(&progress.label);
+        }
         if let Some(slider) = &self.slider {
             return Some(&slider.label);
         }
@@ -333,6 +341,11 @@ impl<Msg> View<Msg> {
             .is_some_and(|s| !s.options.range.valid(s.value))
         {
             return Err(UiError::InvalidSpinbox);
+        }
+        if let Some(crate::ProgressState::Determinate { value, options }) = self.progress_state() {
+            if !options.valid(value) {
+                return Err(UiError::InvalidProgress);
+            }
         }
         if let Some(input) = &self.input {
             let value = self.text.as_deref().unwrap_or("");

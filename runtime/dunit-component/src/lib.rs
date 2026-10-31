@@ -4,6 +4,8 @@
 extern crate alloc;
 
 mod focus;
+mod progress;
+pub use progress::{ProgressOptions, ProgressState};
 mod spinbox;
 pub use spinbox::{SpinButton, SpinboxOptions, SpinboxRange};
 mod slider;
@@ -60,6 +62,7 @@ pub enum UiError {
     InvalidInput,
     InvalidSlider,
     InvalidSpinbox,
+    InvalidProgress,
     InvalidLayout,
     InvalidSize,
     Allocation,

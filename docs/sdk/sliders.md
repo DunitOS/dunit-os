@@ -82,7 +82,7 @@ python3 tools/test_sdk_gui_fixture.py slider --accel tcg
 
 The marker contract is tools/sdk_slider_markers.json. No existing marker is
 removed or weakened. Integer spinboxes have their own [contract](spinboxes.md);
-progress and busy indicator remain separate M7.6 work.
+[progress and busy indicators](progress.md) have a separate passive API.
 
 Six additional host scenarios cover vertical direction, asymmetric padding,
 primary-axis thumb offset, rejected proposals, cancellation (including orientation

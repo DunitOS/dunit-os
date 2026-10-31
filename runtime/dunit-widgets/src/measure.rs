@@ -91,7 +91,13 @@ pub fn intrinsic_size(
                 (length, breadth)
             }
         }
-        Widget::Progress => (MIN_TRACK, style.number("thickness").unwrap_or(6.0)),
+        Widget::Progress => (
+            style.number("progress-min-track").unwrap_or(MIN_TRACK),
+            style
+                .number("progress-thickness")
+                .or_else(|| style.number("thickness"))
+                .unwrap_or(6.0),
+        ),
         Widget::List | Widget::Menu => {
             // Rows are supplied as children by the caller; on their own these
             // reserve one line at the minimum track width.

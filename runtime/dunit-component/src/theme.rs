@@ -53,7 +53,9 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
-                        "spinbox-button-color"
+                        "progress-track-color"
+                        | "progress-fill-color"
+                        | "spinbox-button-color"
                         | "spinbox-pressed-color"
                         | "spinbox-disabled-color"
                         | "slider-track-color"
@@ -70,7 +72,10 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
-                        "spinbox-button-width"
+                        "progress-thickness"
+                        | "progress-min-track"
+                        | "progress-radius"
+                        | "spinbox-button-width"
                         | "spinbox-mark-size"
                         | "slider-thumb-size"
                         | "slider-track-height"
@@ -88,7 +93,11 @@ impl Theme {
                             valid_number(0., 1024.)
                         }
                         "scroll-step" | "selection-scroll-step" => valid_number(0., 1024.),
-                        "caret-blink" | "selection-scroll-interval" => value
+                        "busy-segment" => valid_number(0., 1.),
+                        "busy-duration"
+                        | "busy-interval"
+                        | "caret-blink"
+                        | "selection-scroll-interval" => value
                             .as_duration()
                             .is_some_and(|v| v.is_finite() && (0. ..=60_000.).contains(&v)),
                         "background-gradient" => {

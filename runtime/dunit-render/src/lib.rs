@@ -22,6 +22,7 @@ mod clip;
 mod effects;
 mod indicator;
 mod paint;
+mod progress;
 pub mod raster;
 mod scroll;
 mod slider;
@@ -30,8 +31,9 @@ mod text_input;
 
 pub use effects::visual_bounds;
 pub use paint::{
-    paint, paint_clipped, paint_clipped_with_inputs, paint_clipped_with_sliders,
-    paint_clipped_with_widgets, InputOf, ScrollOf, SliderOf, StyleOf,
+    paint, paint_clipped, paint_clipped_with_inputs, paint_clipped_with_progress,
+    paint_clipped_with_sliders, paint_clipped_with_widgets, InputOf, ProgressOf, ScrollOf,
+    SliderOf, StyleOf,
 };
 pub use scroll::ScrollArea;
 pub use surface::{pack_argb, Surface};

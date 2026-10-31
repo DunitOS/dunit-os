@@ -47,3 +47,6 @@ Slider:focus, VerticalSlider:focus { border-color: $accent; }
 Slider:disabled, VerticalSlider:disabled { slider-fill-color: $muted; slider-thumb-color: $muted; }
 
 Spinbox { spinbox-button-width: $spinbox-button-width; spinbox-mark-size: $spinbox-mark-size; spinbox-mark-width: $border; spinbox-button-color: $line; spinbox-pressed-color: $accent; spinbox-disabled-color: $muted; }
+
+Progress, Busy { padding: $space-small; progress-thickness: $progress-thickness; progress-min-track: $progress-min-track; progress-radius: $radius; progress-track-color: $line; progress-fill-color: $accent; busy-segment: $busy-segment; busy-duration: $busy-duration; busy-interval: $busy-interval; }
+Progress:disabled, Busy:disabled { progress-fill-color: $muted; }

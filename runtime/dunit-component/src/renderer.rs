@@ -1,8 +1,10 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use dunit_render::{paint_clipped_with_sliders, ScrollArea, Surface, TextInput};
+use dunit_render::{paint_clipped_with_progress, ScrollArea, Surface, TextInput};
 #[path = "input_scroll.rs"]
 mod input_scroll;
+#[path = "progress_render.rs"]
+mod progress_render;
 #[path = "scroll.rs"]
 mod scroll;
 use dunit_style::{cascade::NodeStyle, Cascade, Style};
@@ -35,6 +37,8 @@ pub struct RenderStats {
     pub damaged_pixels: u64,
     /// Number of paint-property transitions still in progress after this sample.
     pub active_transitions: usize,
+    /// Visible moving busy indicators that currently need timed sampling.
+    pub active_busy_indicators: usize,
     /// Caller-supplied monotonic milliseconds; None for immediate rendering.
     pub animation_time_ms: Option<u64>,
 }
@@ -45,6 +49,8 @@ struct Snapshot {
     targets: Vec<Style>,
     inputs: Vec<Option<TextInput>>,
     sliders: Vec<Option<f32>>,
+    progress: Vec<Option<dunit_widgets::progress::ProgressPaint>>,
+    busy_interval_ms: Option<u64>,
     input_activity: Vec<u64>,
     input_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
     input_scroll_axes: Vec<Option<(dunit_widgets::ScrollAxis, dunit_widgets::ScrollAxis)>>,
@@ -217,6 +223,9 @@ impl Renderer {
     /// Stop sampling. The next render settles to the current target values.
     pub fn cancel_motion(&mut self) {
         self.motion.clear();
+        if let Some(p) = &mut self.previous {
+            p.busy_interval_ms = None;
+        }
     }
     pub fn is_animating(&self) -> bool {
         self.motion.active() > 0
@@ -458,7 +467,11 @@ impl Renderer {
             .iter()
             .map(|v| v.slider.as_ref().map(|s| s.options.fraction(s.value)))
             .collect();
+        let (progress, busy_interval_ms, active_busy_indicators) =
+            self.prepare_progress(&views, &tree, &layout, &styles, &areas, now, width, height);
         let next = Snapshot {
+            progress,
+            busy_interval_ms,
             sliders,
             focused_key: views
                 .iter()
@@ -513,7 +526,7 @@ impl Renderer {
             let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            let painted = paint_clipped_with_sliders(
+            let painted = paint_clipped_with_progress(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
@@ -523,6 +536,7 @@ impl Renderer {
                 &|id| next.inputs[id.0 as usize].as_ref(),
                 &|id| next.areas[id.0 as usize].as_ref(),
                 &|id| next.sliders[id.0 as usize],
+                &|id| next.progress[id.0 as usize],
             );
             if painted.is_err() {
                 // A scratch failure may leave a partially painted private canvas.
@@ -539,6 +553,7 @@ impl Renderer {
             damaged_pixels: damage.map_or(0, |d| d.width as u64 * d.height as u64),
             damage,
             active_transitions: self.motion.active(),
+            active_busy_indicators,
             animation_time_ms: now,
         })
     }
@@ -636,6 +651,7 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
             && old.styles[a.id.0 as usize] == new.styles[b.id.0 as usize]
             && old.inputs[a.id.0 as usize] == new.inputs[b.id.0 as usize]
             && old.sliders[a.id.0 as usize] == new.sliders[b.id.0 as usize]
+            && old.progress[a.id.0 as usize] == new.progress[b.id.0 as usize]
             && old.areas[a.id.0 as usize] == new.areas[b.id.0 as usize]
         {
             continue;

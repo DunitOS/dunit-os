@@ -54,3 +54,9 @@ $slider-min-track: 120;
 
 $spinbox-button-width: 24;
 $spinbox-mark-size: 8;
+
+$progress-thickness: 8;
+$progress-min-track: 120;
+$busy-segment: 0.25;
+$busy-duration: 1200ms;
+$busy-interval: 40ms;
