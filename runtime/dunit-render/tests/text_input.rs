@@ -17,6 +17,7 @@ fn font() -> Font {
 }
 fn input(value: &str) -> TextInput {
     TextInput {
+        spinbox: None,
         value: value.into(),
         placeholder: "Hint".into(),
         password: false,

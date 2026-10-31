@@ -51,3 +51,6 @@ $selection-scroll-step: 12;
 $slider-thumb-size: 18;
 $slider-track-height: 4;
 $slider-min-track: 120;
+
+$spinbox-button-width: 24;
+$spinbox-mark-size: 8;

@@ -101,7 +101,17 @@ pub fn paint_clipped_with_widgets(
     input_of: InputOf<'_>,
     scroll_of: ScrollOf<'_>,
 ) -> PaintResult {
-    paint_clipped_with_sliders(tree,layout,style_of,font,surface,clip,input_of,scroll_of,&|_|None)
+    paint_clipped_with_sliders(
+        tree,
+        layout,
+        style_of,
+        font,
+        surface,
+        clip,
+        input_of,
+        scroll_of,
+        &|_| None,
+    )
 }
 
 pub fn paint_clipped_with_sliders(
@@ -166,7 +176,8 @@ fn paint_node(
             })
         } else {
             paint_contents(
-                tree, layout, id, &style, style_of, font, s, contained, false, input_of, scroll_of, slider_of,
+                tree, layout, id, &style, style_of, font, s, contained, false, input_of, scroll_of,
+                slider_of,
             )
         }
     };
@@ -238,9 +249,9 @@ fn paint_contents(
     }
 
     let tag = tree.node(id).kind.tag();
-    if let Some(fraction)=(tag=="Slider").then(||slider_of(id)).flatten() {
-        crate::slider::paint(rect,style,fraction,surface);
-    } else if let Some(input) = matches!(tag, "Input" | "Textarea")
+    if let Some(fraction) = (tag == "Slider").then(|| slider_of(id)).flatten() {
+        crate::slider::paint(rect, style, fraction, surface);
+    } else if let Some(input) = matches!(tag, "Input" | "Textarea" | "Spinbox")
         .then(|| input_of(id))
         .flatten()
     {

@@ -34,13 +34,30 @@ impl<M> View<M> {
                     self.interaction.hovered = old.interaction.hovered;
                     self.interaction.focused = old.interaction.focused;
                     self.interaction.pressed = old.interaction.pressed;
-                    if let (Some(slider),Some(previous))=(&mut self.slider,&old.slider) {
-                        if slider.options==previous.options {slider.grab=previous.grab;}
-                        else {self.interaction.pressed=false;}
+                    if let (Some(slider), Some(previous)) = (&mut self.slider, &old.slider) {
+                        if slider.options == previous.options {
+                            slider.grab = previous.grab;
+                        } else {
+                            self.interaction.pressed = false;
+                        }
+                    }
+                    if let (Some(spin), Some(previous)) = (&mut self.spinbox, &old.spinbox) {
+                        if spin.value == previous.value && spin.options == previous.options {
+                            spin.pressed = previous.pressed;
+                        } else {
+                            self.interaction.pressed = false;
+                        }
                     }
                     if let (Some(input), Some(previous)) = (&mut self.input, &old.input) {
                         input.editor = previous.editor.clone();
-                        input.editor.sync(self.text.as_deref().unwrap_or(""));
+                        let preserve_draft = self
+                            .spinbox
+                            .as_ref()
+                            .zip(old.spinbox.as_ref())
+                            .is_some_and(|(a, b)| a.value == b.value && a.options == b.options);
+                        if !preserve_draft {
+                            input.editor.sync(self.text.as_deref().unwrap_or(""));
+                        }
                         input.dragging = previous.dragging;
                         input.caret_revision = previous.caret_revision;
                     }
@@ -66,8 +83,11 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
-        let mut message = None;
         let mut changed = false;
+        if event == PointerEvent::Down && self.focused_input_key() != target {
+            changed |= self.commit_spinbox()?;
+        }
+        let mut message = None;
         self.view.visit_mut(&mut |v| {
             if !v.focusable() || v.interaction.disabled {
                 return;

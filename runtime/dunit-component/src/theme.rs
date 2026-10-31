@@ -53,8 +53,13 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
-                        "slider-track-color" | "slider-fill-color" | "slider-thumb-color" |
-                        "scrollbar-track"
+                        "spinbox-button-color"
+                        | "spinbox-pressed-color"
+                        | "spinbox-disabled-color"
+                        | "slider-track-color"
+                        | "slider-fill-color"
+                        | "slider-thumb-color"
+                        | "scrollbar-track"
                         | "scrollbar-thumb"
                         | "color"
                         | "background"
@@ -65,14 +70,18 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
-                        "slider-thumb-size" | "slider-track-height" | "slider-min-track" |
-                        "indicator-width"
+                        "spinbox-button-width"
+                        | "spinbox-mark-size"
+                        | "slider-thumb-size"
+                        | "slider-track-height"
+                        | "slider-min-track"
+                        | "indicator-width"
                         | "indicator-height"
                         | "indicator-gap"
                         | "indicator-radius"
                         | "indicator-mark-size"
                         | "indicator-inset" => valid_number(0., 1024.),
-                        "indicator-border-width" => valid_number(0., 64.),
+                        "indicator-border-width" | "spinbox-mark-width" => valid_number(0., 64.),
                         "indicator-position" => valid_number(0., 1.),
                         "caret-width" => valid_number(0., 64.),
                         "scrollbar-width" | "scrollbar-min-thumb" | "scrollbar-radius" => {

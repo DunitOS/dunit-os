@@ -4,8 +4,10 @@
 extern crate alloc;
 
 mod focus;
+mod spinbox;
+pub use spinbox::{SpinButton, SpinboxOptions, SpinboxRange};
 mod slider;
-pub use slider::{SliderOptions,SliderCommand,SliderGeometry,SliderRange};
+pub use slider::{SliderCommand, SliderGeometry, SliderOptions, SliderRange};
 mod input;
 mod interaction;
 mod motion;
@@ -57,6 +59,7 @@ pub enum UiError {
     InvalidRadioGroup,
     InvalidInput,
     InvalidSlider,
+    InvalidSpinbox,
     InvalidLayout,
     InvalidSize,
     Allocation,
@@ -102,7 +105,7 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
-        if self.text_key(key)? || self.widget_key(key)? {
+        if self.spinbox_key(key)? || self.text_key(key)? || self.widget_key(key)? {
             return Ok(true);
         }
         let message = self

@@ -9,6 +9,7 @@ use dunit_widgets::ScrollAxis;
 /// A render snapshot; offsets refer to UTF-8 byte boundaries in `value`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextInput {
+    pub spinbox: Option<SpinboxPaint>,
     pub value: String,
     pub placeholder: String,
     pub password: bool,
@@ -19,6 +20,13 @@ pub struct TextInput {
     pub caret_visible: bool,
     pub scroll_x: f32,
     pub scroll_y: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpinboxPaint {
+    pub increase: bool,
+    pub decrease: bool,
+    pub pressed: Option<dunit_widgets::spinbox::SpinButton>,
 }
 
 /// Content box shared by painting, cursor fitting and pointer hit testing.
@@ -62,6 +70,9 @@ impl TextInput {
     /// when overflow auto-hides the bars, keeping text layout stable.
     pub fn content_rect(&self, style: &Style, rect: Rect) -> Rect {
         let mut content = input_content_rect(style, rect);
+        if self.spinbox.is_some() {
+            content.w = (content.w - self.spinbox_rects(style, rect)[0].w).max(0.);
+        }
         if self.multiline {
             let gutter = style
                 .number("scrollbar-width")
@@ -72,6 +83,110 @@ impl TextInput {
             content.h = (content.h - gutter).max(0.);
         }
         content
+    }
+    /// Shared button boxes for painting and pointer hit testing.
+    pub fn spinbox_rects(&self, style: &Style, rect: Rect) -> [Rect; 2] {
+        let area = input_content_rect(style, rect);
+        let w = style
+            .number("spinbox-button-width")
+            .unwrap_or(0.)
+            .max(0.)
+            .min(area.w);
+        let up = Rect {
+            x: area.x + area.w - w,
+            y: area.y,
+            w,
+            h: area.h / 2.,
+        };
+        [
+            up,
+            Rect {
+                y: up.y + up.h,
+                ..up
+            },
+        ]
+    }
+    pub fn spinbox_button_at(
+        &self,
+        style: &Style,
+        rect: Rect,
+        x: f32,
+        y: f32,
+    ) -> Option<dunit_widgets::spinbox::SpinButton> {
+        self.spinbox.as_ref()?;
+        let boxes = self.spinbox_rects(style, rect);
+        for (r, button) in boxes.into_iter().zip([
+            dunit_widgets::spinbox::SpinButton::Increase,
+            dunit_widgets::spinbox::SpinButton::Decrease,
+        ]) {
+            if x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h {
+                return Some(button);
+            }
+        }
+        None
+    }
+    fn paint_spinbox(&self, style: &Style, rect: Rect, surface: &mut Surface) {
+        let Some(spin) = &self.spinbox else {
+            return;
+        };
+        use dunit_widgets::spinbox::SpinButton;
+        for (r, button, enabled) in [
+            (
+                self.spinbox_rects(style, rect)[0],
+                SpinButton::Increase,
+                spin.increase,
+            ),
+            (
+                self.spinbox_rects(style, rect)[1],
+                SpinButton::Decrease,
+                spin.decrease,
+            ),
+        ] {
+            surface.with_clip(r, |surface| {
+                let bg = style.color(if spin.pressed == Some(button) {
+                    "spinbox-pressed-color"
+                } else {
+                    "spinbox-button-color"
+                });
+                if let Some(bg) = bg {
+                    surface.fill_rect(r.x, r.y, r.w, r.h, bg);
+                }
+                let color = style.color(if enabled {
+                    "color"
+                } else {
+                    "spinbox-disabled-color"
+                });
+                let size = style
+                    .number("spinbox-mark-size")
+                    .unwrap_or(0.)
+                    .max(0.)
+                    .min(r.w)
+                    .min(r.h);
+                let stroke = style
+                    .number("spinbox-mark-width")
+                    .unwrap_or(0.)
+                    .max(0.)
+                    .min(size);
+                if let Some(color) = color {
+                    surface.fill_rect(
+                        r.x + (r.w - size) / 2.,
+                        r.y + (r.h - stroke) / 2.,
+                        size,
+                        stroke,
+                        color,
+                    );
+                    if button == SpinButton::Increase {
+                        surface.fill_rect(
+                            r.x + (r.w - stroke) / 2.,
+                            r.y + (r.h - size) / 2.,
+                            stroke,
+                            size,
+                            color,
+                        );
+                    }
+                }
+            });
+        }
     }
     /// Actual text extents (excluding placeholder), including insertion caret
     /// width so dragging the horizontal bar can reveal the full final caret.
@@ -265,6 +380,7 @@ impl TextInput {
         start + line.len()
     }
     pub(crate) fn paint(&self, font: &Font, style: &Style, rect: Rect, surface: &mut Surface) {
+        self.paint_spinbox(style, rect, surface);
         let content = self.content_rect(style, rect);
         let px = style.number("font-size").unwrap_or(0.);
         let metrics = font.line_metrics(px);

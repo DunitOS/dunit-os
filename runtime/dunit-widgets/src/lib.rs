@@ -31,6 +31,7 @@ pub mod kind;
 pub mod measure;
 pub mod scroll;
 pub mod slider;
+pub mod spinbox;
 pub mod state;
 pub mod text_input;
 

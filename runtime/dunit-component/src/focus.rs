@@ -89,10 +89,20 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        if matches!(direction, Navigation::Up | Navigation::Down)
+            && self.spinbox_step(match direction {
+                Navigation::Up => crate::SliderCommand::Increase,
+                _ => crate::SliderCommand::Decrease,
+            })?
+        {
+            return Ok(true);
+        }
         if self.slider_command(match direction {
-            Navigation::Left|Navigation::Down=>crate::SliderCommand::Decrease,
-            Navigation::Right|Navigation::Up=>crate::SliderCommand::Increase,
-        })? {return Ok(true);}
+            Navigation::Left | Navigation::Down => crate::SliderCommand::Decrease,
+            Navigation::Right | Navigation::Up => crate::SliderCommand::Increase,
+        })? {
+            return Ok(true);
+        }
         let mut nodes = Vec::new();
         self.view.flatten(&mut nodes);
         let Some(focused) = nodes

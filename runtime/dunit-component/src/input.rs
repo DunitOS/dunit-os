@@ -26,7 +26,8 @@ pub(crate) struct InputBinding<M> {
     pub label: String,
     pub options: InputOptions,
     pub editor: TextEditor,
-    pub on_change: fn(String) -> M,
+    /// None for a spinbox: numeric drafts commit through its integer callback.
+    pub on_change: Option<fn(String) -> M>,
     pub dragging: bool,
     pub caret_visible: bool,
     pub caret_revision: u64,
@@ -36,7 +37,11 @@ impl<M> PartialEq for InputBinding<M> {
         self.label == other.label
             && self.options == other.options
             && self.editor == other.editor
-            && core::ptr::fn_addr_eq(self.on_change, other.on_change)
+            && match (self.on_change, other.on_change) {
+                (Some(a), Some(b)) => core::ptr::fn_addr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
             && self.dragging == other.dragging
             && self.caret_visible == other.caret_visible
             && self.caret_revision == other.caret_revision
@@ -44,7 +49,10 @@ impl<M> PartialEq for InputBinding<M> {
 }
 impl<M> View<M> {
     pub(crate) fn focusable(&self) -> bool {
-        self.activation.is_some() || self.slider.is_some() || self.input.is_some() || self.scroll_label.is_some()
+        self.activation.is_some()
+            || self.slider.is_some()
+            || self.input.is_some()
+            || self.scroll_label.is_some()
     }
     pub fn text_editor(&self) -> Option<&TextEditor> {
         self.input.as_ref().map(|i| &i.editor)
@@ -54,6 +62,19 @@ impl<C: Component> Application<C> {
     /// Dispatch a command to the focused field. Returns consumed, even for a
     /// rejected edit, so text never falls through to application shortcuts.
     pub fn edit(&mut self, command: EditCommand) -> Result<bool> {
+        match command {
+            EditCommand::Up { extend: false } => {
+                if self.spinbox_step(crate::SliderCommand::Increase)? {
+                    return Ok(true);
+                }
+            }
+            EditCommand::Down { extend: false } => {
+                if self.spinbox_step(crate::SliderCommand::Decrease)? {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
         let mut message = None;
         let mut previous = None;
         let mut consumed = false;
@@ -72,8 +93,12 @@ impl<C: Component> Application<C> {
                 .apply(command, input.options.max_chars, input.options.read_only);
             input.caret_visible = true;
             if old.text() != input.editor.text() {
-                message = Some((input.on_change)(input.editor.text().into()));
-                previous = Some((v.key.clone(), old));
+                if let Some(on_change) = input.on_change {
+                    message = Some(on_change(input.editor.text().into()));
+                    previous = Some((v.key.clone(), old));
+                } else if !crate::spinbox::valid_draft(input.editor.text()) {
+                    input.editor = old;
+                }
             }
         });
         if let Some(message) = message {

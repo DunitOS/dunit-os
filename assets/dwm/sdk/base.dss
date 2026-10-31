@@ -25,10 +25,10 @@ Switch:disabled:checked { indicator-background: $accent; }
 Checkbox:disabled:checked, Radio:disabled:checked, Switch:disabled { indicator-mark-color: $muted; }
 
 // Input editing is retained by the SDK; every visual metric is theme supplied.
-Input, Textarea { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; placeholder-color: $muted; selection-color: $input-selection; caret-color: $text; caret-width: $caret-width; caret-blink: $caret-blink; scroll-step: $input-scroll-step; selection-scroll-interval: $selection-scroll-interval; selection-scroll-step: $selection-scroll-step; }
-Input:hover, Input:focus, Textarea:hover, Textarea:focus { border-color: $accent; }
-Input:read-only, Textarea:read-only { background: $window-bg; }
-Input:disabled, Textarea:disabled { color: $muted; caret-color: $indicator-off; border-color: $line; }
+Input, Textarea, Spinbox { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; placeholder-color: $muted; selection-color: $input-selection; caret-color: $text; caret-width: $caret-width; caret-blink: $caret-blink; scroll-step: $input-scroll-step; selection-scroll-interval: $selection-scroll-interval; selection-scroll-step: $selection-scroll-step; }
+Input:hover, Input:focus, Textarea:hover, Textarea:focus, Spinbox:hover, Spinbox:focus { border-color: $accent; }
+Input:read-only, Textarea:read-only, Spinbox:read-only { background: $window-bg; }
+Input:disabled, Textarea:disabled, Spinbox:disabled { color: $muted; caret-color: $indicator-off; border-color: $line; }
 
 // Viewport behavior is SDK-owned; gutter and scrollbar appearance are themed.
 Scroll { background: $surface; padding: $space-small; border-width: $border; border-color: $line; radius: $radius; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; scroll-step: $scroll-step; }
@@ -45,3 +45,5 @@ Slider { padding: $space-small; border-width: $border; border-color: $indicator-
 Slider:hover, Slider:active { slider-thumb-color: $accent; }
 Slider:focus { border-color: $accent; }
 Slider:disabled { slider-fill-color: $muted; slider-thumb-color: $muted; }
+
+Spinbox { spinbox-button-width: $spinbox-button-width; spinbox-mark-size: $spinbox-mark-size; spinbox-mark-width: $border; spinbox-button-color: $line; spinbox-pressed-color: $accent; spinbox-disabled-color: $muted; }

@@ -88,9 +88,24 @@ impl Renderer {
             scroll_sizes: BTreeMap::new(),
         }
     }
-    pub fn slider_geometry(&self,key:&str)->Option<crate::SliderGeometry> {
-        let p=self.previous.as_ref()?;let id=p.tree.by_name(key)?;
-        Some(crate::SliderGeometry::new(p.layout.rect(id),&p.styles[id.0 as usize],p.sliders[id.0 as usize]?))
+    pub fn slider_geometry(&self, key: &str) -> Option<crate::SliderGeometry> {
+        let p = self.previous.as_ref()?;
+        let id = p.tree.by_name(key)?;
+        Some(crate::SliderGeometry::new(
+            p.layout.rect(id),
+            &p.styles[id.0 as usize],
+            p.sliders[id.0 as usize]?,
+        ))
+    }
+    pub fn spinbox_button_at(&self, key: &str, x: f32, y: f32) -> Option<crate::SpinButton> {
+        let p = self.previous.as_ref()?;
+        let id = p.tree.by_name(key)?;
+        p.inputs[id.0 as usize].as_ref()?.spinbox_button_at(
+            &p.styles[id.0 as usize],
+            p.layout.rect(id),
+            x,
+            y,
+        )
     }
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
@@ -311,6 +326,27 @@ impl Renderer {
                             .and_then(|id| p.inputs[id.0 as usize].as_ref())
                     });
                     let mut paint = TextInput {
+                        spinbox: view.spinbox.as_ref().map(|s| {
+                            let base = s.draft_value(input.editor.text());
+                            let enabled = !s.options.read_only && !view.interaction.disabled;
+                            dunit_render::SpinboxPaint {
+                                increase: enabled
+                                    && s.options
+                                        .range
+                                        .command(base, crate::SliderCommand::Increase)
+                                        != base,
+                                decrease: enabled
+                                    && s.options
+                                        .range
+                                        .command(base, crate::SliderCommand::Decrease)
+                                        != base,
+                                pressed: if view.interaction.pressed {
+                                    s.pressed
+                                } else {
+                                    None
+                                },
+                            }
+                        }),
                         value: input.editor.text().into(),
                         placeholder: input.options.placeholder.clone(),
                         password: input.options.password,
@@ -417,7 +453,10 @@ impl Renderer {
             .iter()
             .map(|v| v.input.as_ref().map_or(0, |i| i.caret_revision))
             .collect();
-        let sliders=views.iter().map(|v|v.slider.as_ref().map(|s|s.options.fraction(s.value))).collect();
+        let sliders = views
+            .iter()
+            .map(|v| v.slider.as_ref().map(|s| s.options.fraction(s.value)))
+            .collect();
         let next = Snapshot {
             sliders,
             focused_key: views

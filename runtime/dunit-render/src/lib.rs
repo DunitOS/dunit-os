@@ -17,22 +17,25 @@
 
 extern crate alloc;
 
+pub mod blur;
+mod clip;
+mod effects;
+mod indicator;
 mod paint;
+pub mod raster;
 mod scroll;
 mod slider;
-mod text_input;
-mod indicator;
 mod surface;
-mod effects;
-mod clip;
-pub mod blur;
-pub mod raster;
+mod text_input;
 
-pub use paint::{paint, paint_clipped, paint_clipped_with_inputs, paint_clipped_with_widgets, paint_clipped_with_sliders, InputOf, ScrollOf, SliderOf, StyleOf};
-pub use scroll::ScrollArea;
-pub use text_input::{TextInput, input_content_rect};
 pub use effects::visual_bounds;
+pub use paint::{
+    paint, paint_clipped, paint_clipped_with_inputs, paint_clipped_with_sliders,
+    paint_clipped_with_widgets, InputOf, ScrollOf, SliderOf, StyleOf,
+};
+pub use scroll::ScrollArea;
 pub use surface::{pack_argb, Surface};
+pub use text_input::{input_content_rect, SpinboxPaint, TextInput};
 
 /// Effect scratch allocation failure. A caller must discard a partially painted frame.
 pub type PaintResult = core::result::Result<(), alloc::collections::TryReserveError>;

@@ -70,13 +70,22 @@ pub fn intrinsic_size(
         Widget::Input => {
             // Fit the placeholder/content but never below the minimum track.
             let (tw, th) = text_size(text, font, measure);
-            (fmax(tw, MIN_TRACK), th)
+            (
+                fmax(tw, MIN_TRACK) + style.number("spinbox-button-width").unwrap_or(0.).max(0.),
+                th,
+            )
         }
         // Preserve generic DUI's unthemed intrinsic defaults. SDK profiles
         // supply their own geometry; no label is painted inside a typed slider.
-        Widget::Slider => (style.number("slider-min-track").unwrap_or(MIN_TRACK),
-            fmax(style.number("slider-thumb-size").unwrap_or(fmax(font,16.0)),
-                 style.number("slider-track-height").unwrap_or(0.))),
+        Widget::Slider => (
+            style.number("slider-min-track").unwrap_or(MIN_TRACK),
+            fmax(
+                style
+                    .number("slider-thumb-size")
+                    .unwrap_or(fmax(font, 16.0)),
+                style.number("slider-track-height").unwrap_or(0.),
+            ),
+        ),
         Widget::Progress => (MIN_TRACK, style.number("thickness").unwrap_or(6.0)),
         Widget::List | Widget::Menu => {
             // Rows are supplied as children by the caller; on their own these

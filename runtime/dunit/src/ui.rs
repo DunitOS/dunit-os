@@ -18,6 +18,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidSpinbox
         | UiError::InvalidSlider
         | UiError::InvalidRadioGroup
         | UiError::InvalidClass
@@ -404,10 +405,43 @@ impl<C: Component> ComponentWindow<C> {
                     .renderer
                     .hit_key(input.x as f32, input.y as f32)
                     .map(alloc::string::String::from);
-                let slider_key=self.application.dragging_slider_key().map(alloc::string::String::from).or_else(||target.clone());
-                let slider_position=slider_key.as_deref().and_then(|key|self.renderer.slider_geometry(key).map(|g|(key,input.x as f32,g)));
-                if self.application.slider_pointer(pointer,target.as_deref(),slider_position).map_err(native)? {
-                    self.redraw()?;return Ok(event);
+                let spin_key = if pointer == PointerEvent::Down {
+                    target.clone()
+                } else {
+                    self.application
+                        .pressed_spinbox_key()
+                        .map(alloc::string::String::from)
+                        .or_else(|| target.clone())
+                };
+                let spin_button = spin_key.as_deref().and_then(|key| {
+                    self.renderer
+                        .spinbox_button_at(key, input.x as f32, input.y as f32)
+                });
+                if self
+                    .application
+                    .spinbox_pointer(pointer, target.as_deref(), spin_button)
+                    .map_err(native)?
+                {
+                    self.redraw()?;
+                    return Ok(event);
+                }
+                let slider_key = self
+                    .application
+                    .dragging_slider_key()
+                    .map(alloc::string::String::from)
+                    .or_else(|| target.clone());
+                let slider_position = slider_key.as_deref().and_then(|key| {
+                    self.renderer
+                        .slider_geometry(key)
+                        .map(|g| (key, input.x as f32, g))
+                });
+                if self
+                    .application
+                    .slider_pointer(pointer, target.as_deref(), slider_position)
+                    .map_err(native)?
+                {
+                    self.redraw()?;
+                    return Ok(event);
                 }
                 let capture = if pointer == PointerEvent::Down {
                     target.clone()
@@ -474,13 +508,25 @@ impl<C: Component> ComponentWindow<C> {
                         }
                     }
                 }
-                if input.value==0 && input.y==0 {
-                    let command=match input.x {
-                        0x47=>Some(SliderCommand::Home),0x4f=>Some(SliderCommand::End),
-                        0x49=>Some(SliderCommand::PageUp),0x51=>Some(SliderCommand::PageDown),_=>None,
+                if input.value == 0 && input.y == 0 {
+                    let command = match input.x {
+                        0x47 => Some(SliderCommand::Home),
+                        0x4f => Some(SliderCommand::End),
+                        0x49 => Some(SliderCommand::PageUp),
+                        0x51 => Some(SliderCommand::PageDown),
+                        _ => None,
                     };
-                    if let Some(command)=command {
-                        if self.application.slider_command(command).map_err(native)? {self.redraw()?;return Ok(event);}
+                    if let Some(command) = command {
+                        if matches!(command, SliderCommand::PageUp | SliderCommand::PageDown)
+                            && self.application.spinbox_step(command).map_err(native)?
+                        {
+                            self.redraw()?;
+                            return Ok(event);
+                        }
+                        if self.application.slider_command(command).map_err(native)? {
+                            self.redraw()?;
+                            return Ok(event);
+                        }
                     }
                 }
                 // Existing IN_KEY carries PS/2 set-1 scancode and modifiers;
@@ -533,17 +579,11 @@ impl<C: Component> ComponentWindow<C> {
                         return Ok(event);
                     }
                 }
-                if let (Some(character), Ok(modifiers)) =
-                    (char::from_u32(input.value), u8::try_from(input.y))
+                if let Some(key) = u8::try_from(input.y)
+                    .ok()
+                    .and_then(|modifiers| Key::from_native(input.x, input.value, modifiers))
                 {
-                    if self
-                        .application
-                        .key(Key {
-                            character,
-                            modifiers,
-                        })
-                        .map_err(native)?
-                    {
+                    if self.application.key(key).map_err(native)? {
                         self.caret_frame = Some(crate::time::Instant::now()?);
                         self.redraw()?;
                     }

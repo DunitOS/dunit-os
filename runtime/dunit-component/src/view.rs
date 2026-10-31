@@ -9,6 +9,19 @@ pub struct Key {
     pub modifiers: u8,
 }
 impl Key {
+    /// gui-v1 carries the PS/2 scancode as well as cooked text. Escape has no
+    /// cooked ASCII byte in the current seat, but remains a control key.
+    pub fn from_native(scancode: i32, character: u32, modifiers: u8) -> Option<Self> {
+        let character = if scancode == 0x01 && character == 0 {
+            '\u{1b}'
+        } else {
+            char::from_u32(character)?
+        };
+        Some(Self {
+            character,
+            modifiers,
+        })
+    }
     pub const fn plain(character: char) -> Self {
         Self {
             character,
@@ -32,13 +45,19 @@ pub struct View<Msg> {
     pub(crate) activation: Option<Msg>,
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
+    pub(crate) spinbox: Option<crate::spinbox::SpinboxBinding<Msg>>,
     pub(crate) slider: Option<crate::slider::SliderBinding<Msg>>,
     pub(crate) input: Option<crate::input::InputBinding<Msg>>,
     pub(crate) scroll_label: Option<String>,
     pub(crate) scroll_axes: crate::ScrollAxes,
 }
 impl<Msg> View<Msg> {
-    pub(crate) fn new(key: impl Into<String>, kind: Kind, text: Option<String>, children: Vec<Self>) -> Self {
+    pub(crate) fn new(
+        key: impl Into<String>,
+        kind: Kind,
+        text: Option<String>,
+        children: Vec<Self>,
+    ) -> Self {
         Self {
             key: key.into(),
             kind,
@@ -52,6 +71,7 @@ impl<Msg> View<Msg> {
             radio_group: None,
             input: None,
             slider: None,
+            spinbox: None,
             scroll_label: None,
             scroll_axes: crate::ScrollAxes::Vertical,
         }
@@ -145,7 +165,7 @@ impl<Msg> View<Msg> {
             label: label.into(),
             options,
             editor: crate::TextEditor::new(value),
-            on_change,
+            on_change: Some(on_change),
             dragging: false,
             caret_visible: true,
             caret_revision: 0,
@@ -178,7 +198,12 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
-        if self.slider.is_some() { return Some("slider"); }
+        if self.spinbox.is_some() {
+            return Some("spinbutton");
+        }
+        if self.slider.is_some() {
+            return Some("slider");
+        }
         if self.scroll_label.is_some() {
             return Some("region");
         }
@@ -201,7 +226,9 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
-        if let Some(slider)=&self.slider {return Some(&slider.label);}
+        if let Some(slider) = &self.slider {
+            return Some(&slider.label);
+        }
         if let Some(label) = &self.scroll_label {
             return Some(label);
         }
@@ -293,7 +320,20 @@ impl<Msg> View<Msg> {
         if !names.insert(&self.key) {
             return Err(UiError::DuplicateKey);
         }
-        if self.slider.as_ref().is_some_and(|s| !s.options.valid(s.value)) {return Err(UiError::InvalidSlider);}
+        if self
+            .slider
+            .as_ref()
+            .is_some_and(|s| !s.options.valid(s.value))
+        {
+            return Err(UiError::InvalidSlider);
+        }
+        if self
+            .spinbox
+            .as_ref()
+            .is_some_and(|s| !s.options.range.valid(s.value))
+        {
+            return Err(UiError::InvalidSpinbox);
+        }
         if let Some(input) = &self.input {
             let value = self.text.as_deref().unwrap_or("");
             let valid = if input.editor.is_multiline() {
