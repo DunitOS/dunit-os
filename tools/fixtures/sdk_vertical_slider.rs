@@ -58,7 +58,7 @@ impl Component for Demo {
                             format!("Level {} | updates {}", self.value, self.calls),
                         ),
                         View::button("apply", "Apply", Msg::Apply),
-                        View::text("help", "Up: increase\nDown: decrease"),
+                        View::text("help", "Up/Down: step"),
                     ],
                 ),
             ],
