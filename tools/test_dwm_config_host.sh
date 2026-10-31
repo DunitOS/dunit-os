@@ -16,13 +16,21 @@ from pathlib import Path
 records = [json.loads(line) for line in open(sys.argv[1])]
 libraries = [r for r in records if r.get('reason') == 'compiler-artifact']
 for name in ('libdunit', 'dunit_app_manifest'):
-    print(next(p for r in libraries if r['target']['name'] == name
-               for p in r['filenames'] if p.endswith('.rlib')))
+    filenames = [p for r in libraries if r['target']['name'] == name
+                 for p in r['filenames']]
+    # Pass both code and metadata when Cargo reports split artifacts. Older
+    # Cargo versions embed metadata in .rlib and need only that path.
+    print(next(p for p in filenames if p.endswith('.rlib')))
+    print(next((p for p in filenames if p.endswith('.rmeta')), ''))
 print('\n'.join(sorted({str(Path(p).parent) for r in libraries for p in r['filenames']})))
 PY
 )
 links=()
-for directory in "${artifacts[@]:2}"; do links+=(-L "dependency=$directory"); done
+for directory in "${artifacts[@]:4}"; do links+=(-L "dependency=$directory"); done
+native=(--extern "native=${artifacts[0]}")
+manifest=(--extern "dunit_app_manifest=${artifacts[2]}")
+if [ -n "${artifacts[1]}" ]; then native+=(--extern "native=${artifacts[1]}"); fi
+if [ -n "${artifacts[3]}" ]; then manifest+=(--extern "dunit_app_manifest=${artifacts[3]}"); fi
 cat > "$test_dir/libdunit.rs" <<'RS'
 pub use native::{DirEntry, FileStat, FILE_TYPE_FILE, FILE_TYPE_DIRECTORY,
     ENOENT, EFBIG, EINVAL, OPEN_READ,
@@ -40,21 +48,21 @@ pub fn readdir(path: &str,_:&mut[DirEntry])->isize {
 pub fn stat(_: &str,_:&mut FileStat)->isize {panic!("unexpected I/O")}
 RS
 rustc --edition=2021 --crate-type rlib --crate-name libdunit "$test_dir/libdunit.rs" \
-    --extern native="${artifacts[0]}" "${links[@]}" -o "$test_dir/liblibdunit.rlib"
+    "${native[@]}" "${links[@]}" -o "$test_dir/liblibdunit.rlib"
 rustc --edition=2021 --crate-type rlib --crate-name term_theme runtime/term_theme/src/lib.rs -o "$test_dir/libterm_theme.rlib"
 rustc --edition=2021 --crate-type rlib --crate-name dwm_settings userspace/dwm_settings/src/lib.rs \
     --extern libdunit="$test_dir/liblibdunit.rlib" --extern term_theme="$test_dir/libterm_theme.rlib" \
-    --extern dunit_app_manifest="${artifacts[1]}" \
+    "${manifest[@]}" \
     -L dependency="$test_dir" "${links[@]}" -o "$test_dir/libdwm_settings.rlib"
 DUNIT_ROOT="$PWD" rustc --edition=2021 --test --crate-name dwm_settings userspace/dwm_settings/src/lib.rs \
     --extern libdunit="$test_dir/liblibdunit.rlib" --extern term_theme="$test_dir/libterm_theme.rlib" \
-    --extern dunit_app_manifest="${artifacts[1]}" -L dependency="$test_dir" \
+    "${manifest[@]}" -L dependency="$test_dir" \
     "${links[@]}" -o "$test_dir/unit-tests"
 "$test_dir/unit-tests"
 for source in userspace/dwm_settings/tests/*.rs; do
     DUNIT_ROOT="$PWD" rustc --edition=2021 --test "$source" \
         --extern dwm_settings="$test_dir/libdwm_settings.rlib" \
-        --extern dunit_app_manifest="${artifacts[1]}" -L dependency="$test_dir" \
+        "${manifest[@]}" -L dependency="$test_dir" \
         "${links[@]}" -o "$test_dir/integration-tests"
     "$test_dir/integration-tests"
 done
