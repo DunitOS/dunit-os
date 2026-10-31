@@ -61,7 +61,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-minimize.ppm"
+            "filename": "build/engine-v2-minimize.ppm"
           }
         },
         {
@@ -140,7 +140,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-group.ppm"
+            "filename": "build/engine-v2-group.ppm"
           }
         },
         {
@@ -239,7 +239,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-restored.ppm"
+            "filename": "build/engine-v2-restored.ppm"
           }
         },
         {
@@ -291,7 +291,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-settings.ppm"
+            "filename": "build/engine-v2-settings.ppm"
           }
         },
         {
@@ -359,7 +359,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-profiles.ppm"
+            "filename": "build/engine-v2-profiles.ppm"
           }
         },
         {
@@ -515,7 +515,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-selected.ppm"
+            "filename": "build/engine-v2-selected.ppm"
           }
         },
         {
@@ -598,7 +598,7 @@
         {
           "execute": "screendump",
           "arguments": {
-            "filename": "/home/tuxpc/dunit-os/build/engine-v2-multi-panel.ppm"
+            "filename": "build/engine-v2-multi-panel.ppm"
           }
         },
         {
