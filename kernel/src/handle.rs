@@ -236,15 +236,22 @@ static INPUT_MASTER_OWNER: AtomicU64 = AtomicU64::new(0);
 /// Пытается захватить источник ввода за процессом `pid`. Идемпотентно для
 /// текущего владельца. Возвращает `false`, если вводом владеет другой процесс.
 pub fn try_acquire_input(pid: ProcessId) -> bool {
+    let _irq = crate::sync::InterruptGuard::new();
     match INPUT_MASTER_OWNER.compare_exchange(0, pid.0, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => true,
+        Ok(_) => {
+            crate::input::reset_pointer_queue();
+            true
+        },
         Err(current) => current == pid.0,
     }
 }
 
 /// Освобождает источник ввода, если им владеет `pid` (иначе no-op).
 pub fn release_input(pid: ProcessId) {
-    let _ = INPUT_MASTER_OWNER.compare_exchange(pid.0, 0, Ordering::AcqRel, Ordering::Acquire);
+    let _irq = crate::sync::InterruptGuard::new();
+    if INPUT_MASTER_OWNER.compare_exchange(pid.0, 0, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        crate::input::clear_pointer_queue();
+    }
 }
 
 pub fn input_owner() -> u64 {

@@ -1,0 +1,6 @@
+[package]
+name = "pointer_queue_denied"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+libdunit = { path = "../../libdunit" }

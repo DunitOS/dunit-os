@@ -1280,6 +1280,17 @@ impl Process {
             .insert(HandleObject::Display, RIGHT_DISPLAY_MASTER))
     }
 
+    /// Validate both the caller's handle and the exclusive seat owner.
+    pub fn require_input_master(&self, handle: Handle) -> Result<(), HandleError> {
+        let entry = self.handle_table.require(handle, RIGHT_INPUT_MASTER)?;
+        if !matches!(entry.object, HandleObject::Input)
+            || crate::handle::input_owner() != self.pid.0
+        {
+            return Err(HandleError::AccessDenied);
+        }
+        Ok(())
+    }
+
     /// Захватывает мастер-право на источник ввода (эксклюзивно). Возвращает хэндл
     /// с правом INPUT_MASTER (без TRANSFER) либо `DisplayBusy` (ресурс занят).
     pub fn handle_input_acquire(&mut self) -> Result<Handle, HandleError> {

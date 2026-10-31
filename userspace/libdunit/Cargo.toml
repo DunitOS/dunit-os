@@ -8,4 +8,5 @@ name = "libdunit"
 crate-type = ["rlib"]
 
 [dependencies]
+dunit_pointer_abi = { path = "../../abi/pointer-input" }
 dunit_wait_abi = { path = "../../abi/wait-set" }

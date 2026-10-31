@@ -91,3 +91,4 @@ pub const SYSCALL_FCNTL: usize = 86;
 pub const SYSCALL_POLL: usize = 87;
 pub const SYSCALL_IOCTL: usize = 88;
 pub const SYSCALL_WAIT_SET_WAIT: usize = 89;
+pub const SYSCALL_READ_POINTER_EVENT: usize = 90;

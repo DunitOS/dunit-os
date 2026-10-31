@@ -18,6 +18,13 @@ and `pointer(event, target_key)`; `Renderer::hit_key` resolves pointer coordinat
 using the most recent layout and the existing rectangular ancestor clips.
 Only the primary pointer button is dispatched by the native adapter.
 
+The compositor receives ordered device records through
+[`ReadPointerEvent`](pointer-events-proposal.md), so a complete short click
+between two rendered frames remains a Down followed by Up. Stream loss or seat
+handover cancels capture through Leave before resynchronising; it never creates
+an activation from an already-held button. Client control-channel bytes and the
+SDK widget state machine are unchanged.
+
 ## State and identity
 
 - Move supplies `:hover`; Down focuses and supplies `:active`.

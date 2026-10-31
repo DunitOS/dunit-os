@@ -6,6 +6,7 @@ mod allocator;
 pub mod shared_buffer;
 pub mod process;
 pub mod wait_set;
+pub mod pointer;
 mod exec_path;
 
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};

@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
+rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o "$test_dir/libdunit_pointer_abi.rlib"
 for source in kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     userspace/system_apps/gui_server/src/lua_policy.rs \
     userspace/system_apps/gui_server/src/shell_geometry.rs \
@@ -15,7 +16,11 @@ for source in kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     userspace/system_apps/gui_server/src/animation.rs
 do
     echo "Testing $source"
-    rustc --edition=2021 --test "$source" -o "$test_dir/regression"
+    pointer_deps=()
+    if [ "$source" = kernel/tests/input_geometry.rs ]; then
+        pointer_deps=(--extern "dunit_pointer_abi=$test_dir/libdunit_pointer_abi.rlib")
+    fi
+    rustc --edition=2021 --test "$source" "${pointer_deps[@]}" -o "$test_dir/regression"
     "$test_dir/regression"
 done
 

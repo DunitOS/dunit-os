@@ -97,3 +97,4 @@
 87	Poll
 88	Ioctl
 89	WaitSetWait
+90	ReadPointerEvent

@@ -57,7 +57,7 @@ TCC_DIR = toolchains/dunit-tcc
 TCC_BIN = $(TCC_DIR)/tcc
 TCC_CTESTS = tcc_hello
 
-USERSPACE_APPS = pty_args_test pty_terminal_test \
+USERSPACE_APPS = pointer_queue_test pointer_queue_denied pty_args_test pty_terminal_test \
 	elf_demo fs_test exit_test args_test cwd_test path_test image_demo bmp_viewer color_test \
 	scheduler_test spawn_ready_test yield_child yield_test resumable_child resumable_test \
 	ipc_child ipc_parent runtime_stress input_test pointer_test file_api_test env_test calc \

@@ -1,7 +1,4 @@
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
-
-const MOUSE_EVENT_QUEUE_LEN: usize = 64;
+use core::sync::atomic::{AtomicI32, AtomicU8, Ordering};
 
 static MOUSE_X: AtomicI32 = AtomicI32::new(0);
 static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
@@ -10,40 +7,33 @@ static MOUSE_MAX_X: AtomicI32 = AtomicI32::new(0);
 static MOUSE_MAX_Y: AtomicI32 = AtomicI32::new(0);
 static MOUSE_BUTTONS: AtomicU8 = AtomicU8::new(0);
 static MOUSE_WHEEL_DELTA: AtomicI32 = AtomicI32::new(0);
-static MOUSE_EVENT_READ: AtomicUsize = AtomicUsize::new(0);
-static MOUSE_EVENT_WRITE: AtomicUsize = AtomicUsize::new(0);
-static MOUSE_EVENT_LOCK: AtomicBool = AtomicBool::new(false);
+mod pointer_queue;
+use pointer_queue::PointerQueue;
+static POINTER_QUEUE: crate::sync::IrqSafeSpinLock<PointerQueue> =
+    crate::sync::IrqSafeSpinLock::new(PointerQueue::new());
 
-/// Кольцо событий мыши. Раньше `static mut` массив; теперь `UnsafeCell`-newtype,
-/// доступ к которому всегда под `MOUSE_EVENT_LOCK` (индексы — отдельные атомики).
-struct MouseEventsCell(UnsafeCell<[MouseEvent; MOUSE_EVENT_QUEUE_LEN]>);
-unsafe impl Sync for MouseEventsCell {}
-static MOUSE_EVENTS: MouseEventsCell =
-    MouseEventsCell(UnsafeCell::new([MouseEvent::empty(); MOUSE_EVENT_QUEUE_LEN]));
-
-#[derive(Clone, Copy)]
-pub struct MouseEvent {
-    pub x: i32,
-    pub y: i32,
-    pub dx: i32,
-    pub dy: i32,
-    pub buttons: u8,
-    pub wheel: i32,
-    pub absolute: bool,
+pub fn reset_pointer_queue() {
+    let _irq = crate::sync::InterruptGuard::new();
+    let (x, y) = mouse_position();
+    POINTER_QUEUE
+        .lock()
+        .reset(x as u32, y as u32, mouse_buttons() as u32);
+}
+pub fn clear_pointer_queue() {
+    POINTER_QUEUE.lock().clear();
 }
 
-impl MouseEvent {
-    const fn empty() -> Self {
-        Self {
-            x: 0,
-            y: 0,
-            dx: 0,
-            dy: 0,
-            buttons: 0,
-            wheel: 0,
-            absolute: false,
-        }
-    }
+/// Keep the front record until the user copy succeeds, including EFAULT paths.
+pub fn read_pointer_event(
+    copy: impl FnOnce(&[u8; dunit_pointer_abi::RECORD_LEN]) -> Result<(), i64>,
+) -> Result<bool, i64> {
+    let mut queue = POINTER_QUEUE.lock();
+    let Some(event) = queue.peek() else {
+        return Ok(false);
+    };
+    copy(&event.encode())?;
+    queue.pop();
+    Ok(true)
 }
 
 pub fn set_mouse_bounds(width: usize, height: usize) {
@@ -91,20 +81,12 @@ pub fn push_mouse_relative(dx: i32, dy: i32, buttons: u8, wheel: i32) {
         MOUSE_WHEEL_DELTA.fetch_add(wheel, Ordering::Relaxed);
     }
 
-    push_mouse_event(MouseEvent {
-        x,
-        y,
-        dx,
-        dy,
-        buttons,
-        wheel,
-        absolute: false,
-    });
+    POINTER_QUEUE
+        .lock()
+        .push(x as u32, y as u32, buttons as u32, wheel);
 }
 
 pub fn push_mouse_absolute(x: i32, y: i32, buttons: u8, wheel: i32) {
-    let old_x = MOUSE_X.load(Ordering::Relaxed);
-    let old_y = MOUSE_Y.load(Ordering::Relaxed);
     let (x, y) = clamp_mouse_xy(x, y);
 
     MOUSE_X.store(x, Ordering::Relaxed);
@@ -114,58 +96,9 @@ pub fn push_mouse_absolute(x: i32, y: i32, buttons: u8, wheel: i32) {
         MOUSE_WHEEL_DELTA.fetch_add(wheel, Ordering::Relaxed);
     }
 
-    push_mouse_event(MouseEvent {
-        x,
-        y,
-        dx: x.saturating_sub(old_x),
-        dy: y.saturating_sub(old_y),
-        buttons,
-        wheel,
-        absolute: true,
-    });
-}
-
-pub fn pop_mouse_event() -> Option<MouseEvent> {
-    lock_mouse_events();
-
-    let read = MOUSE_EVENT_READ.load(Ordering::Relaxed);
-    let write = MOUSE_EVENT_WRITE.load(Ordering::Relaxed);
-    if read == write {
-        MOUSE_EVENT_LOCK.store(false, Ordering::Release);
-        return None;
-    }
-
-    let event = unsafe { (*MOUSE_EVENTS.0.get())[read] };
-    MOUSE_EVENT_READ.store((read + 1) % MOUSE_EVENT_QUEUE_LEN, Ordering::Relaxed);
-    MOUSE_EVENT_LOCK.store(false, Ordering::Release);
-    Some(event)
-}
-
-fn push_mouse_event(event: MouseEvent) {
-    lock_mouse_events();
-
-    let write = MOUSE_EVENT_WRITE.load(Ordering::Relaxed);
-    let next = (write + 1) % MOUSE_EVENT_QUEUE_LEN;
-    if next == MOUSE_EVENT_READ.load(Ordering::Relaxed) {
-        MOUSE_EVENT_READ.store(
-            (MOUSE_EVENT_READ.load(Ordering::Relaxed) + 1) % MOUSE_EVENT_QUEUE_LEN,
-            Ordering::Relaxed,
-        );
-    }
-    unsafe {
-        (*MOUSE_EVENTS.0.get())[write] = event;
-    }
-    MOUSE_EVENT_WRITE.store(next, Ordering::Relaxed);
-    MOUSE_EVENT_LOCK.store(false, Ordering::Release);
-}
-
-fn lock_mouse_events() {
-    while MOUSE_EVENT_LOCK
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
-    }
+    POINTER_QUEUE
+        .lock()
+        .push(x as u32, y as u32, buttons as u32, wheel);
 }
 
 fn clamp_mouse_position() {

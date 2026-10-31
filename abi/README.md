@@ -132,3 +132,13 @@ timers and child termination in one blocking call. It is non-consuming and
 level-triggered. `abi/wait-set` defines the shared Rust record layout;
 `libdunit::wait_set::wait` is the safe slice-based binding. The exact contract,
 limits and remaining M7 work are in [SDK foundation](../docs/sdk/m7-start.md).
+
+## Queued pointer input (M7, approved 31 October 2026)
+
+`ReadPointerEvent` (90) reads one 32-byte little-endian event using an owned
+`INPUT_MASTER` handle. EAGAIN means no queued event; invalid output does not
+consume an event. `abi/pointer-input` shares the codec between kernel and
+`libdunit::pointer::read`. Button transitions survive render stalls; pure motion
+may coalesce. Overflow and ownership handover explicitly reset the consumer's
+press/capture baseline. `GetMouseState` (60), including its wheel accumulator,
+remains compatible. See the [complete contract](../docs/sdk/pointer-events-proposal.md).

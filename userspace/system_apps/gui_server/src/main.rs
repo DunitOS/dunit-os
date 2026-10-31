@@ -231,7 +231,7 @@ pub extern "C" fn _start() -> ! {
     //    framebuffer at separate slots. Neither client holds display/input.
     // serve_two_clients() emits "served two untrusted clients OK" itself (right
     // before it holds the composited frame on screen); only report failure here.
-    if !serve_two_clients() {
+    if !serve_two_clients(input as u32) {
         libdunit::println("gui_server: FAIL serving clients");
     }
 
@@ -1131,6 +1131,8 @@ fn apply_display_mode(d: &settings::Display) {
 /// Pointer edges and client capture survive framebuffer/session recreation.
 #[derive(Default)]
 struct PointerSession {
+    input: u32,
+    state: libdunit::MouseState,
     left: bool,
     right: bool,
     captured_pid: Option<u32>,
@@ -2318,7 +2320,39 @@ fn run_desktop_session(
         }
         shell.advance(animation_now);
         ins=shell.insets;
-        let m = libdunit::get_mouse_state();
+        // Read queued device transitions, not frame-to-frame button snapshots.
+        // Pure motion is coalesced in the kernel; deferring remaining records to
+        // the next iteration keeps rendering/IPC fair without dropping edges.
+        let mut m = pointer.state;
+        m.wheel = 0;
+        match libdunit::pointer::read(pointer.input) {
+            Ok(Some(event)) => {
+                m = libdunit::MouseState { x: event.x, y: event.y,
+                    buttons: event.buttons, wheel: event.wheel };
+                if event.flags & libdunit::pointer::LOST_BEFORE != 0 {
+                    // A new owner or an overrun has no trustworthy press history.
+                    // Leave cancels client presses/selection without activation.
+                    for wi in [pressed_win, input_focus.filter(|wi| Some(*wi) != pressed_win)].into_iter().flatten() {
+                        if wins[wi].alive { send_input(clients,wins[wi].pid,IN_LEAVE,0,0,0); }
+                    }
+                    drag = None;
+                    pressed_win = None;
+                    input_focus = None;
+                    last_lx = i32::MIN;
+                    prev_left = m.left();
+                    prev_right = m.right();
+                }
+            }
+            Ok(None) => {},
+            Err(error) => {
+                libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));
+                libdunit::exit(1);
+            }
+        }
+        // A live modeset can shrink bounds while old events remain queued.
+        m.x = m.x.min(bw.saturating_sub(1) as u32);
+        m.y = m.y.min(bh.saturating_sub(1) as u32);
+        pointer.state = m;
         let mx = m.x as i32;
         let my = m.y as i32;
         let workspace_input=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);

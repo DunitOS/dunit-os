@@ -63,6 +63,10 @@ jobs:
           rustc --edition=2021 --test userspace/system_apps/gui_server/src/damage_plan.rs -o /tmp/dunit-damage-plan-test
           /tmp/dunit-damage-plan-test
           cargo test --manifest-path abi/wait-set/Cargo.toml
+          cargo test --manifest-path abi/pointer-input/Cargo.toml
+          rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o /tmp/libdunit_pointer_abi.rlib
+          rustc --edition=2021 --test kernel/tests/input_geometry.rs --extern dunit_pointer_abi=/tmp/libdunit_pointer_abi.rlib -o /tmp/dunit-input-geometry-test
+          /tmp/dunit-input-geometry-test
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
           cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
           bash tools/test_dwm_config_host.sh
@@ -99,6 +103,12 @@ jobs:
 
       - name: Native SDK timed DSS transitions and reduced motion
         run: python3 tools/test_sdk_gui_fixture.py motion --accel tcg
+
+      - name: Native pointer queue and short button clicks
+        run: |
+          python3 tools/qemu_test.py --build --markers-file tools/pointer_queue_markers.json \
+            --accel tcg --boot-timeout 180 --cmd-timeout 90 --timeout 300
+          python3 tools/test_sdk_gui_fixture.py buttons --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |

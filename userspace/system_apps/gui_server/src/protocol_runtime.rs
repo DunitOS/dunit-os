@@ -682,7 +682,7 @@ pub(super) fn try_launch(
 /// launches at boot is data (`settings::Applications::startup`), so changing the
 /// startup set needs no gui_server edit. Returns true iff the isolation smoke saw
 /// two clients present at once (the baseline config autostarts three).
-pub(super) fn serve_two_clients() -> bool {
+pub(super) fn serve_two_clients(input: u32) -> bool {
     let cfg = settings::load_config();
     // The display mode as configured at boot, captured BEFORE any client is spawned
     // — so a settings client that rewrites `[display]` during bring-up cannot move
@@ -729,7 +729,7 @@ pub(super) fn serve_two_clients() -> bool {
         // a session has actually processed them, including across mode changes.
         let mut pn = pending_notifies;
         let mut baseline = Some(boot_display);
-        let mut pointer = PointerSession::default();
+        let mut pointer = PointerSession { input, ..PointerSession::default() };
         while run_desktop_session(
             &mut server,
             &mut clients,
@@ -837,7 +837,7 @@ pub(super) fn serve_two_clients() -> bool {
     // bring-up (serve_two_clients / resize_one_client); re-entries pass None/false
     // because the config file is authoritative by then.
     let mut baseline = Some(boot_display);
-    let mut pointer = PointerSession::default();
+    let mut pointer = PointerSession { input, ..PointerSession::default() };
     while run_desktop_session(
         &mut server,
         &mut clients,

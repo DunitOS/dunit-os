@@ -1,4 +1,22 @@
 //! Exercises the actual hardware-independent input module on the host.
+// Host threads use a mutex; CLI/STI and interrupt safety are checked in QEMU.
+mod sync {
+    pub struct InterruptGuard;
+    impl InterruptGuard {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+    pub struct IrqSafeSpinLock<T>(std::sync::Mutex<T>);
+    impl<T> IrqSafeSpinLock<T> {
+        pub const fn new(value: T) -> Self {
+            Self(std::sync::Mutex::new(value))
+        }
+        pub fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+            self.0.lock().unwrap()
+        }
+    }
+}
 #[path = "../src/input/mod.rs"]
 #[allow(dead_code)]
 mod input;
@@ -28,12 +46,24 @@ fn pointer_tracks_display_geometry() {
     input::push_mouse_absolute(-1, 2000, 0, 0);
     assert_eq!(input::mouse_position(), (0, 1439));
 
-    while input::pop_mouse_event().is_some() {}
+    input::clear_pointer_queue();
     input::push_mouse_absolute(2000, 1000, 2, -1);
-    let event = input::pop_mouse_event().unwrap();
+    assert_eq!(input::read_pointer_event(|_| Err(-14)), Err(-14));
+    let mut event = None;
+    assert_eq!(
+        input::read_pointer_event(|record| {
+            event = dunit_pointer_abi::PointerEvent::decode(record);
+            Ok(())
+        }),
+        Ok(true)
+    );
+    let event = event.unwrap();
     assert_eq!((event.x, event.y), (2000, 1000));
-    assert!(event.absolute);
     assert_eq!((event.buttons, event.wheel), (2, -1));
+    assert_eq!(
+        input::read_pointer_event(|_| panic!("empty queue copied")),
+        Ok(false)
+    );
 
     input::set_mouse_bounds(0, 0);
     assert_eq!(input::mouse_position(), (0, 0));

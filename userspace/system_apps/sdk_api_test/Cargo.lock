@@ -20,6 +20,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunit_pointer_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_wait_abi"
 version = "0.1.0"
 
@@ -27,6 +31,7 @@ version = "0.1.0"
 name = "libdunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_pointer_abi",
  "dunit_wait_abi",
 ]
 
