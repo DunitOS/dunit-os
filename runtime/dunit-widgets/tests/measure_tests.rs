@@ -67,6 +67,10 @@ fn tracks_use_minimum_width() {
         intrinsic_size(Widget::Progress, None, &style, &Mono),
         (120.0, 6.0)
     );
+    assert_eq!(
+        intrinsic_size(Widget::VerticalSlider, None, &style, &Mono),
+        (16.0, 120.0)
+    );
     // Input fits content but never below the track minimum.
     assert_eq!(
         intrinsic_size(Widget::Input, Some("x"), &style, &Mono).0,

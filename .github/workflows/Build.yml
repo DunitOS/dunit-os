@@ -110,6 +110,7 @@ jobs:
             --accel tcg --boot-timeout 180 --cmd-timeout 90 --timeout 300
           python3 tools/test_sdk_gui_fixture.py buttons --accel tcg
           python3 tools/test_sdk_gui_fixture.py slider --accel tcg
+          python3 tools/test_sdk_gui_fixture.py vertical_slider --accel tcg
           python3 tools/test_sdk_gui_fixture.py spinbox --accel tcg
 
       - name: Optional desktop catalog compatibility

@@ -249,8 +249,17 @@ fn paint_contents(
     }
 
     let tag = tree.node(id).kind.tag();
-    if let Some(fraction) = (tag == "Slider").then(|| slider_of(id)).flatten() {
-        crate::slider::paint(rect, style, fraction, surface);
+    if let Some(fraction) = matches!(tag, "Slider" | "VerticalSlider")
+        .then(|| slider_of(id))
+        .flatten()
+    {
+        crate::slider::paint(
+            rect,
+            style,
+            fraction,
+            dunit_widgets::slider::SliderOrientation::from_tag(tag),
+            surface,
+        );
     } else if let Some(input) = matches!(tag, "Input" | "Textarea" | "Spinbox")
         .then(|| input_of(id))
         .flatten()

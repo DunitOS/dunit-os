@@ -7,7 +7,7 @@ mod focus;
 mod spinbox;
 pub use spinbox::{SpinButton, SpinboxOptions, SpinboxRange};
 mod slider;
-pub use slider::{SliderCommand, SliderGeometry, SliderOptions, SliderRange};
+pub use slider::{SliderCommand, SliderGeometry, SliderOptions, SliderOrientation, SliderRange};
 mod input;
 mod interaction;
 mod motion;

@@ -91,10 +91,11 @@ impl Renderer {
     pub fn slider_geometry(&self, key: &str) -> Option<crate::SliderGeometry> {
         let p = self.previous.as_ref()?;
         let id = p.tree.by_name(key)?;
-        Some(crate::SliderGeometry::new(
+        Some(crate::SliderGeometry::oriented(
             p.layout.rect(id),
             &p.styles[id.0 as usize],
             p.sliders[id.0 as usize]?,
+            crate::SliderOrientation::from_tag(p.tree.node(id).kind.tag()),
         ))
     }
     pub fn spinbox_button_at(&self, key: &str, x: f32, y: f32) -> Option<crate::SpinButton> {

@@ -41,9 +41,9 @@ Textarea { scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-mi
 Textarea:hover, Textarea:focus { scrollbar-thumb: $accent; }
 Textarea:disabled { scrollbar-thumb: $line; }
 
-Slider { padding: $space-small; border-width: $border; border-color: $indicator-off; radius: $radius; slider-thumb-size: $slider-thumb-size; slider-track-height: $slider-track-height; slider-min-track: $slider-min-track; slider-track-color: $line; slider-fill-color: $accent; slider-thumb-color: $text; }
-Slider:hover, Slider:active { slider-thumb-color: $accent; }
-Slider:focus { border-color: $accent; }
-Slider:disabled { slider-fill-color: $muted; slider-thumb-color: $muted; }
+Slider, VerticalSlider { padding: $space-small; border-width: $border; border-color: $indicator-off; radius: $radius; slider-thumb-size: $slider-thumb-size; slider-track-height: $slider-track-height; slider-min-track: $slider-min-track; slider-track-color: $line; slider-fill-color: $accent; slider-thumb-color: $text; }
+Slider:hover, VerticalSlider:hover, Slider:active, VerticalSlider:active { slider-thumb-color: $accent; }
+Slider:focus, VerticalSlider:focus { border-color: $accent; }
+Slider:disabled, VerticalSlider:disabled { slider-fill-color: $muted; slider-thumb-color: $muted; }
 
 Spinbox { spinbox-button-width: $spinbox-button-width; spinbox-mark-size: $spinbox-mark-size; spinbox-mark-width: $border; spinbox-button-color: $line; spinbox-pressed-color: $accent; spinbox-disabled-color: $muted; }

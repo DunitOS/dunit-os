@@ -27,6 +27,8 @@ pub enum Widget {
     Menu,
     /// A draggable value slider.
     Slider,
+    /// A vertical value slider; maximum is at the top.
+    VerticalSlider,
     /// A progress indicator.
     Progress,
     /// A transient notification banner.
@@ -49,6 +51,7 @@ impl Widget {
             "List" => Widget::List,
             "Menu" => Widget::Menu,
             "Slider" => Widget::Slider,
+            "VerticalSlider" => Widget::VerticalSlider,
             "Progress" => Widget::Progress,
             "Notification" | "Toast" => Widget::Notification,
             _ => return None,
@@ -69,6 +72,7 @@ impl Widget {
             Widget::List => "List",
             Widget::Menu => "Menu",
             Widget::Slider => "Slider",
+            Widget::VerticalSlider => "VerticalSlider",
             Widget::Progress => "Progress",
             Widget::Notification => "Notification",
         }
@@ -87,6 +91,7 @@ impl Widget {
                 | Widget::List
                 | Widget::Menu
                 | Widget::Slider
+                | Widget::VerticalSlider
         )
     }
 
@@ -105,6 +110,7 @@ impl Widget {
                 | Widget::Switch
                 | Widget::Input
                 | Widget::Slider
+                | Widget::VerticalSlider
                 | Widget::Progress
                 | Widget::List
                 | Widget::Menu

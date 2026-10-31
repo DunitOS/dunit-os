@@ -92,13 +92,36 @@ pub enum SliderCommand {
     PageUp,
     PageDown,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SliderOrientation {
+    Horizontal,
+    Vertical,
+}
+impl SliderOrientation {
+    pub fn from_tag(tag: &str) -> Self {
+        if tag == "VerticalSlider" {
+            Self::Vertical
+        } else {
+            Self::Horizontal
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SliderGeometry {
+    pub orientation: SliderOrientation,
     pub track: Rect,
     pub thumb: Rect,
 }
 impl SliderGeometry {
     pub fn new(rect: Rect, style: &Style, fraction: f32) -> Self {
+        Self::oriented(rect, style, fraction, SliderOrientation::Horizontal)
+    }
+    pub fn oriented(
+        rect: Rect,
+        style: &Style,
+        fraction: f32,
+        orientation: SliderOrientation,
+    ) -> Self {
         let border = style.number("border-width").unwrap_or(0.).max(0.);
         let [t, r, b, l] = style.padding().unwrap_or([0.; 4]);
         let area = Rect {
@@ -113,36 +136,93 @@ impl SliderGeometry {
             .max(0.)
             .min(area.w)
             .min(area.h);
-        let thickness = style
-            .number("slider-track-height")
-            .unwrap_or(0.)
-            .max(0.)
-            .min(area.h);
-        let track = Rect {
-            x: area.x + diameter / 2.,
-            y: area.y + (area.h - thickness) / 2.,
-            w: (area.w - diameter).max(0.),
-            h: thickness,
+        let thickness = style.number("slider-track-height").unwrap_or(0.).max(0.);
+        let vertical = orientation == SliderOrientation::Vertical;
+        let thickness = thickness.min(if vertical { area.w } else { area.h });
+        let track = if vertical {
+            Rect {
+                x: area.x + (area.w - thickness) / 2.,
+                y: area.y + diameter / 2.,
+                w: thickness,
+                h: (area.h - diameter).max(0.),
+            }
+        } else {
+            Rect {
+                x: area.x + diameter / 2.,
+                y: area.y + (area.h - thickness) / 2.,
+                w: (area.w - diameter).max(0.),
+                h: thickness,
+            }
         };
-        let thumb = Rect {
-            x: track.x + track.w * fraction.clamp(0., 1.) - diameter / 2.,
-            y: area.y + (area.h - diameter) / 2.,
-            w: diameter,
-            h: diameter,
+        let fraction = fraction.clamp(0., 1.);
+        let thumb = if vertical {
+            Rect {
+                x: area.x + (area.w - diameter) / 2.,
+                y: track.y + track.h * (1. - fraction) - diameter / 2.,
+                w: diameter,
+                h: diameter,
+            }
+        } else {
+            Rect {
+                x: track.x + track.w * fraction - diameter / 2.,
+                y: area.y + (area.h - diameter) / 2.,
+                w: diameter,
+                h: diameter,
+            }
         };
-        Self { track, thumb }
+        Self {
+            orientation,
+            track,
+            thumb,
+        }
     }
-    pub fn fraction(self, x: f32, grab: f32) -> Option<f32> {
-        if !x.is_finite() || !grab.is_finite() || self.track.w <= 0. {
+    /// Primary-axis coordinate in the same space as this painted geometry.
+    pub fn coordinate(self, x: f32, y: f32) -> f32 {
+        match self.orientation {
+            SliderOrientation::Horizontal => x,
+            SliderOrientation::Vertical => y,
+        }
+    }
+    pub fn fraction(self, coordinate: f32, grab: f32) -> Option<f32> {
+        let (start, length) = match self.orientation {
+            SliderOrientation::Horizontal => (self.track.x, self.track.w),
+            SliderOrientation::Vertical => (self.track.y, self.track.h),
+        };
+        if !coordinate.is_finite() || !grab.is_finite() || length <= 0. {
             return None;
         }
-        Some(((x - grab - self.track.x) / self.track.w).clamp(0., 1.))
+        let fraction = (coordinate - grab - start) / length;
+        Some(
+            match self.orientation {
+                SliderOrientation::Horizontal => fraction,
+                SliderOrientation::Vertical => 1. - fraction,
+            }
+            .clamp(0., 1.),
+        )
     }
-    pub fn grab(self, x: f32) -> f32 {
-        if x >= self.thumb.x && x <= self.thumb.x + self.thumb.w {
-            x - self.thumb.x - self.thumb.w / 2.
+    pub fn grab(self, coordinate: f32) -> f32 {
+        let (start, length) = match self.orientation {
+            SliderOrientation::Horizontal => (self.thumb.x, self.thumb.w),
+            SliderOrientation::Vertical => (self.thumb.y, self.thumb.h),
+        };
+        if coordinate >= start && coordinate <= start + length {
+            coordinate - start - length / 2.
         } else {
             0.
+        }
+    }
+    pub fn fill(self, fraction: f32) -> Rect {
+        let fraction = fraction.clamp(0., 1.);
+        match self.orientation {
+            SliderOrientation::Horizontal => Rect {
+                w: self.track.w * fraction,
+                ..self.track
+            },
+            SliderOrientation::Vertical => Rect {
+                y: self.track.y + self.track.h * (1. - fraction),
+                h: self.track.h * fraction,
+                ..self.track
+            },
         }
     }
 }

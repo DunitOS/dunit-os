@@ -1,7 +1,7 @@
 //! Controlled slider messages; range/value stay in the component model.
 use crate::{Application, Component, PointerEvent, Result, View};
 use alloc::string::String;
-pub use dunit_widgets::slider::{SliderCommand, SliderGeometry, SliderOptions};
+pub use dunit_widgets::slider::{SliderCommand, SliderGeometry, SliderOptions, SliderOrientation};
 #[derive(Debug, Clone)]
 pub(crate) struct SliderBinding<M> {
     pub label: String,
@@ -21,6 +21,7 @@ impl<M> PartialEq for SliderBinding<M> {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SliderRange {
+    pub orientation: SliderOrientation,
     pub min: i64,
     pub max: i64,
     pub step: i64,
@@ -49,8 +50,21 @@ impl<M> View<M> {
         });
         view
     }
+    /// Vertical value slider: minimum at the bottom, maximum at the top.
+    pub fn vertical_slider(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        value: i64,
+        options: SliderOptions,
+        on_change: fn(i64) -> M,
+    ) -> Self {
+        let mut view = Self::slider(key, label, value, options, on_change);
+        view.kind = dunit_ui::Kind::Element("VerticalSlider".into());
+        view
+    }
     pub fn slider_range(&self) -> Option<SliderRange> {
         self.slider.as_ref().map(|s| SliderRange {
+            orientation: SliderOrientation::from_tag(self.kind.tag()),
             min: s.options.min,
             max: s.options.max,
             step: s.options.step,
@@ -87,7 +101,9 @@ impl<C: Component> Application<C> {
         }
         Ok(consumed)
     }
-    /// Geometry is from the last painted layout. Capture continues outside the
+    /// Position carries the primary-axis coordinate (x horizontal, y vertical),
+    /// as returned by SliderGeometry::coordinate. Geometry is from the last
+    /// painted layout. Capture continues outside the
     /// control, until Up/Leave/Escape/focus change/removal/disable/range change.
     pub fn slider_pointer(
         &mut self,
@@ -129,15 +145,15 @@ impl<C: Component> Application<C> {
             let sample = position.filter(|(sample, _, _)| *sample == key);
             if event == PointerEvent::Down {
                 v.interaction.pressed = true;
-                if let Some((_, x, geometry)) = sample {
-                    s.grab = geometry.grab(x);
+                if let Some((_, coordinate, geometry)) = sample {
+                    s.grab = geometry.grab(coordinate);
                 }
             } else if event == PointerEvent::Move && capture.is_some() {
                 v.interaction.pressed = true;
             }
             if event != PointerEvent::Leave && (event == PointerEvent::Down || capture.is_some()) {
-                if let Some((_, x, geometry)) = sample {
-                    if let Some(fraction) = geometry.fraction(x, s.grab) {
+                if let Some((_, coordinate, geometry)) = sample {
+                    if let Some(fraction) = geometry.fraction(coordinate, s.grab) {
                         let value = s.options.at_fraction(fraction);
                         if value != s.value {
                             message = Some((s.on_change)(value));

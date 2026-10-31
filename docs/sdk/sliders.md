@@ -1,4 +1,4 @@
-# Controlled horizontal slider (M7.6)
+# Controlled sliders (M7.6)
 
 ```rust
 View::slider("volume", "Volume", model.volume,
@@ -6,7 +6,8 @@ View::slider("volume", "Volume", model.volume,
 ```
 
 The label supplies the accessibility name; put a separate Text node beside the
-control for a visible label/value. `slider_range()` exposes min/max/step/value,
+control for a visible label/value. `slider_range()` exposes min/max/step/value
+and `SliderOrientation` (Horizontal or Vertical),
 and `accessibility_role()` is `slider`. The model owns the value; the callback
 receives a proposed integer and rebuilding the view accepts or rejects it.
 No speculative value is retained when the model rejects a change.
@@ -35,8 +36,16 @@ by the track's pixel/floating-point geometry, then snapped to the integer grid.
 - Existing text selection and scrollbar captures take precedence. The native
   adapter routes events; application code does not perform slider hit testing.
 
-This first slider is horizontal. Vertical orientation, wheel-based value
-changes, tick marks, tooltips and keyboard key-up visuals are not included.
+`View::vertical_slider` takes the same arguments as `View::slider`. The minimum
+is at the bottom, the maximum at the top; the filled part grows upwards. The
+canonical element tag is `VerticalSlider`, with the same theme tokens and states.
+Its intrinsic minimum track length is vertical. Up/Right increase and Down/Left
+decrease, with the same bounds and page commands in either orientation.
+Changing a stable key between the two element kinds resets transient focus and
+capture; rebuilding or resizing the same kind preserves focus.
+
+Wheel-based value changes, tick marks, tooltips and keyboard key-up visuals are
+not included.
 It adds no kernel syscall or GUI wire format.
 
 ## Shared appearance and drawing
@@ -48,7 +57,9 @@ focus and disabled rules. The generic DUI measurer retains its existing
 unthemed minimum-size defaults for compatibility.
 
 Paint and pointer mapping share SliderGeometry, including border, padding and
-thumb travel. Typed model fractions are immutable paint data, separate from
+thumb travel. `SliderGeometry::coordinate(x, y)` chooses the primary axis for
+`Application::slider_pointer`; it returns x for horizontal and y for vertical.
+`fraction`, `grab` and `fill` use this same oriented geometry. Typed model fractions are immutable paint data, separate from
 DSS policy. Value changes participate in retained damage; old thumb/fill pixels
 are cleared, ancestor clips and scroll translation remain effective. Existing
 low-level painter entry points remain compatible.
@@ -70,5 +81,21 @@ python3 tools/test_sdk_gui_fixture.py slider --accel tcg
 ```
 
 The marker contract is tools/sdk_slider_markers.json. No existing marker is
-removed or weakened. This completes the horizontal slider slice; spinbox,
+removed or weakened. Integer spinboxes have their own [contract](spinboxes.md);
 progress and busy indicator remain separate M7.6 work.
+
+Six additional host scenarios cover vertical direction, asymmetric padding,
+primary-axis thumb offset, rejected proposals, cancellation (including orientation
+changes), dark/light rendering and damage, resize and scroll clipping. Generic
+widget measurement checks preserve the unthemed horizontal defaults and transpose
+them for vertical sliders.
+
+```sh
+python3 tools/test_sdk_gui_fixture.py vertical_slider --accel tcg
+```
+
+This single native scenario checks Up, Home/End and pages, track click, upward
+captured drag/clamp, thumb grab without a jump, raw Escape cancellation while the
+mouse is held, cancelled movement/release, disabled Tab skip, ordinary button
+activation and resize/focus. Its contract is
+`tools/sdk_vertical_slider_markers.json`.

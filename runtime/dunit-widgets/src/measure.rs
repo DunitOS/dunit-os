@@ -77,15 +77,20 @@ pub fn intrinsic_size(
         }
         // Preserve generic DUI's unthemed intrinsic defaults. SDK profiles
         // supply their own geometry; no label is painted inside a typed slider.
-        Widget::Slider => (
-            style.number("slider-min-track").unwrap_or(MIN_TRACK),
-            fmax(
+        Widget::Slider | Widget::VerticalSlider => {
+            let length = style.number("slider-min-track").unwrap_or(MIN_TRACK);
+            let breadth = fmax(
                 style
                     .number("slider-thumb-size")
                     .unwrap_or(fmax(font, 16.0)),
                 style.number("slider-track-height").unwrap_or(0.),
-            ),
-        ),
+            );
+            if widget == Widget::VerticalSlider {
+                (breadth, length)
+            } else {
+                (length, breadth)
+            }
+        }
         Widget::Progress => (MIN_TRACK, style.number("thickness").unwrap_or(6.0)),
         Widget::List | Widget::Menu => {
             // Rows are supplied as children by the caller; on their own these

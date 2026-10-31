@@ -425,15 +425,18 @@ impl<C: Component> ComponentWindow<C> {
                     self.redraw()?;
                     return Ok(event);
                 }
-                let slider_key = self
-                    .application
-                    .dragging_slider_key()
-                    .map(alloc::string::String::from)
-                    .or_else(|| target.clone());
+                let slider_key = if pointer == PointerEvent::Down {
+                    target.clone()
+                } else {
+                    self.application
+                        .dragging_slider_key()
+                        .map(alloc::string::String::from)
+                        .or_else(|| target.clone())
+                };
                 let slider_position = slider_key.as_deref().and_then(|key| {
                     self.renderer
                         .slider_geometry(key)
-                        .map(|g| (key, input.x as f32, g))
+                        .map(|g| (key, g.coordinate(input.x as f32, input.y as f32), g))
                 });
                 if self
                     .application
