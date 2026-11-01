@@ -49,7 +49,8 @@ impl<M> PartialEq for InputBinding<M> {
 }
 impl<M> View<M> {
     pub(crate) fn focusable(&self) -> bool {
-        self.split.is_some()
+        self.list.is_some()
+            || self.split.is_some()
             || self.popup.is_some()
             || self.activation.is_some()
             || self.slider.is_some()

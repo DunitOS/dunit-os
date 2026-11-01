@@ -41,3 +41,7 @@ pub use text_input::{input_content_rect, SpinboxPaint, TextInput};
 
 /// Effect scratch allocation failure. A caller must discard a partially painted frame.
 pub type PaintResult = core::result::Result<(), alloc::collections::TryReserveError>;
+
+mod list;
+pub use list::{ListPaint,ListRowPaint};
+pub use paint::paint_clipped_with_lists;

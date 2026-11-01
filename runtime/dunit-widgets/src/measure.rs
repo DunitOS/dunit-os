@@ -99,8 +99,8 @@ pub fn intrinsic_size(
                 .unwrap_or(6.0),
         ),
         Widget::List | Widget::Menu => {
-            // Rows are supplied as children by the caller; on their own these
-            // reserve one line at the minimum track width.
+            // Generic DUI collections may supply children. Without explicit
+            // sizing, collection leaves reserve one line at minimum width.
             let line = measure.measure("W", font).1;
             (MIN_TRACK, line)
         }

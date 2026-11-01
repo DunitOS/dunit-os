@@ -7,6 +7,8 @@ use crate::{
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
+#[path = "ui_list.rs"]
+mod list;
 #[path = "ui_overlays.rs"]
 mod overlays;
 #[path = "ui_workspace.rs"]
@@ -22,6 +24,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidList
         | UiError::InvalidWorkspace
         | UiError::InvalidPopup
         | UiError::InvalidProgress
@@ -397,6 +400,9 @@ impl<C: Component> ComponentWindow<C> {
         if self.overlay_event(&event)? {
             return Ok(event);
         }
+        if self.list_event(&event)? {
+            return Ok(event);
+        }
         if self.workspace_event(&event)? {
             return Ok(event);
         }
@@ -436,6 +442,20 @@ impl<C: Component> ComponentWindow<C> {
                     .renderer
                     .hit_key(input.x as f32, input.y as f32)
                     .map(alloc::string::String::from);
+                if pointer == PointerEvent::Down {
+                    let row = target
+                        .as_deref()
+                        .and_then(|k| self.renderer.list_geometry(k))
+                        .and_then(|g| g.row_at(input.x as f32, input.y as f32));
+                    if self
+                        .application
+                        .list_pointer(pointer, target.as_deref(), row, 0)
+                        .map_err(native)?
+                    {
+                        self.redraw()?;
+                        return Ok(event);
+                    }
+                }
                 let spin_key = if pointer == PointerEvent::Down {
                     target.clone()
                 } else {

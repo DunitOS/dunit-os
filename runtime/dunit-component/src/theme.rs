@@ -53,7 +53,11 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
-                        "progress-track-color"
+                        "list-selection-background"
+                        | "list-selection-color"
+                        | "list-disabled-color"
+                        | "list-current-color"
+                        | "progress-track-color"
                         | "progress-fill-color"
                         | "spinbox-button-color"
                         | "spinbox-pressed-color"
@@ -72,6 +76,7 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
+                        "list-row-height" => valid_number(1., 1024.),
                         "splitter-thickness"
                         | "separator-thickness"
                         | "dialog-width"

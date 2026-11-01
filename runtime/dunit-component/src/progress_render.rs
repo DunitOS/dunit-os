@@ -22,22 +22,7 @@ fn visible(
     width: u32,
     height: u32,
 ) -> bool {
-    let mut left = track.x.max(0.);
-    let mut top = track.y.max(0.);
-    let mut right = (track.x + track.w).min(width as f32);
-    let mut bottom = (track.y + track.h).min(height as f32);
-    let mut parent = tree.node(id).parent;
-    while let Some(id) = parent {
-        let clip = areas[id.0 as usize]
-            .as_ref()
-            .map_or(layout.rect(id), |a| a.viewport);
-        left = left.max(clip.x);
-        top = top.max(clip.y);
-        right = right.min(clip.x + clip.w);
-        bottom = bottom.min(clip.y + clip.h);
-        parent = tree.node(id).parent;
-    }
-    left < right && top < bottom
+    super::visible_rect(tree, layout, areas, id, track, width, height).is_some()
 }
 impl Renderer {
     /// No busy timer is needed for paused, disabled, reduced-motion or clipped

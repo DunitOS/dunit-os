@@ -141,6 +141,19 @@ impl<C: Component> Application<C> {
         if self.popup_navigation(direction)? {
             return Ok(true);
         }
+        if matches!(direction, Navigation::Up | Navigation::Down)
+            && self.list_command(
+                if direction == Navigation::Up {
+                    crate::ListCommand::Previous
+                } else {
+                    crate::ListCommand::Next
+                },
+                0,
+                1,
+            )?
+        {
+            return Ok(true);
+        }
         if self.workspace_navigation(direction)? {
             return Ok(true);
         }

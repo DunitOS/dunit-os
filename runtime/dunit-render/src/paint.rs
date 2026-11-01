@@ -9,7 +9,10 @@ use dunit_ui::Rect;
 
 use crate::{surface::Surface, PaintResult, ScrollArea, TextInput};
 
-/// Resolve retained input snapshots at their place in document paint order.
+/// Resolve visible collection rows at their place in document paint order.
+pub type ListOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a crate::ListPaint>;
+
+/// Resolve retained input snapshots in document order.
 pub type InputOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a TextInput>;
 
 /// Resolve a scroll viewport and scrollbar in document coordinates.
@@ -49,6 +52,7 @@ pub fn paint(
         font,
         surface,
         false,
+        &|_| None,
         &|_| None,
         &|_| None,
         &|_| None,
@@ -154,6 +158,33 @@ pub fn paint_clipped_with_progress(
     slider_of: SliderOf<'_>,
     progress_of: ProgressOf<'_>,
 ) -> PaintResult {
+    paint_clipped_with_lists(
+        tree,
+        layout,
+        style_of,
+        font,
+        surface,
+        clip,
+        input_of,
+        scroll_of,
+        slider_of,
+        progress_of,
+        &|_| None,
+    )
+}
+pub fn paint_clipped_with_lists(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    clip: Rect,
+    input_of: InputOf<'_>,
+    scroll_of: ScrollOf<'_>,
+    slider_of: SliderOf<'_>,
+    progress_of: ProgressOf<'_>,
+    list_of: ListOf<'_>,
+) -> PaintResult {
     let mut result = Ok(());
     if !tree.is_empty() {
         surface.with_clip(clip, |s| {
@@ -169,6 +200,7 @@ pub fn paint_clipped_with_progress(
                 scroll_of,
                 slider_of,
                 progress_of,
+                list_of,
             );
         });
     }
@@ -187,6 +219,7 @@ fn paint_node(
     scroll_of: ScrollOf<'_>,
     slider_of: SliderOf<'_>,
     progress_of: ProgressOf<'_>,
+    list_of: ListOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     let style = style_of(id);
@@ -214,6 +247,7 @@ fn paint_node(
                     scroll_of,
                     slider_of,
                     progress_of,
+                    list_of,
                 )
             })
         } else {
@@ -231,6 +265,7 @@ fn paint_node(
                 scroll_of,
                 slider_of,
                 progress_of,
+                list_of,
             )
         }
     };
@@ -259,6 +294,7 @@ fn paint_contents(
     scroll_of: ScrollOf<'_>,
     slider_of: SliderOf<'_>,
     progress_of: ProgressOf<'_>,
+    list_of: ListOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     surface.backdrop_blur(
@@ -303,7 +339,9 @@ fn paint_contents(
     }
 
     let tag = tree.node(id).kind.tag();
-    if let Some(progress) = matches!(tag, "Progress" | "Busy")
+    if let Some(list) = list_of(id) {
+        list.paint(style, font, surface);
+    } else if let Some(progress) = matches!(tag, "Progress" | "Busy")
         .then(|| progress_of(id))
         .flatten()
     {
@@ -357,7 +395,7 @@ fn paint_contents(
         );
     }
 
-    let scroll = matches!(tag, "Scroll" | "Textarea")
+    let scroll = matches!(tag, "Scroll" | "Textarea" | "List")
         .then(|| scroll_of(id))
         .flatten();
     let children = |surface: &mut Surface| -> PaintResult {
@@ -374,6 +412,7 @@ fn paint_contents(
                 scroll_of,
                 slider_of,
                 progress_of,
+                list_of,
             )?;
         }
         Ok(())
@@ -399,7 +438,7 @@ fn node_text(tree: &Tree, id: NodeId) -> Option<&str> {
 
 /// Draw a single line of text inside `rect`'s content box (inset by border and
 /// padding), on the font baseline.
-fn paint_text(
+pub(crate) fn paint_text(
     style: &Style,
     rect: Rect,
     border: f32,

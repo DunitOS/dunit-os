@@ -3,6 +3,8 @@
 #![forbid(unsafe_code)]
 extern crate alloc;
 
+mod list;
+pub use list::{ListCommand,ListGeometry,ListItem,ListSelection,SelectionMode};
 mod focus;
 mod splitter;
 mod workspace;
@@ -74,6 +76,7 @@ pub enum UiError {
     InvalidProgress,
     InvalidPopup,
     InvalidWorkspace,
+    InvalidList,
     InvalidLayout,
     InvalidSize,
     Allocation,
@@ -133,6 +136,7 @@ impl<C: Component> Application<C> {
     {
         self.dismiss_tooltip();
         if self.popup_key(key)?
+            || self.list_key(key)?
             || self.workspace_key(key)?
             || self.spinbox_key(key)?
             || self.text_key(key)?

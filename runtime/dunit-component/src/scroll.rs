@@ -161,7 +161,7 @@ impl Renderer {
             .map(|n| NodeId(n as u32));
         let ids: Vec<_> = tree
             .iter()
-            .filter(|n| n.kind == Kind::Scroll)
+            .filter(|n| n.kind == Kind::Scroll || views[n.id.0 as usize].list.is_some())
             .map(|n| n.id)
             .collect();
         // Reveal inner viewports before calculating outer descendant coordinates.
@@ -181,6 +181,16 @@ impl Renderer {
                 width = width.max(right);
                 height = height.max(bottom);
             }
+            if let Some(list) = &view.list {
+                let row = styles[id.0 as usize]
+                    .number("list-row-height")
+                    .filter(|h| h.is_finite() && *h > 0.)
+                    .ok_or(UiError::InvalidLayout)?;
+                height = list.items.len() as f32 * row;
+                if !height.is_finite() {
+                    return Err(UiError::InvalidLayout);
+                }
+            }
             let mut x = self.scroll_axes_x.get(key).copied().unwrap_or_default();
             let mut y = self.scroll_axes.get(key).copied().unwrap_or_default();
             x.set_extents(viewport.w, width);
@@ -192,6 +202,28 @@ impl Renderer {
             }
             if !enabled_y {
                 y.offset = 0.;
+            }
+            if let Some(list) = view.list.as_ref().filter(|_| enabled_y) {
+                let current = list.selection.current.as_deref().and_then(|key| {
+                    list.items
+                        .iter()
+                        .position(|i| i.key == key)
+                        .map(|index| (key, index))
+                });
+                let previous = self.previous.as_ref().and_then(|p| p.list_current(key));
+                let changed = self
+                    .scroll_sizes
+                    .get(key)
+                    .is_none_or(|&s| s != (viewport.w, viewport.h));
+                if current != previous
+                    || changed
+                    || (view.interaction.focused && self.scroll_focus.as_deref() != Some(key))
+                {
+                    if let Some(index) = current.map(|(_, i)| i) {
+                        let row = styles[id.0 as usize].number("list-row-height").unwrap();
+                        y.reveal(index as f32 * row, (index + 1) as f32 * row);
+                    }
+                }
             }
             if let Some(focus) = focused.filter(|&f| within(tree, f, id)) {
                 let changed = self

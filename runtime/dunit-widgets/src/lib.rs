@@ -46,3 +46,4 @@ pub use measure::{intrinsic_size, FontMeasure, TextMeasure};
 pub use scroll::{ScrollAxis, ScrollCommand, Thumb};
 pub use state::{Interaction, WidgetValue};
 pub use text_input::{EditCommand, TextEditor, MAX_INPUT_BYTES};
+pub mod selection;

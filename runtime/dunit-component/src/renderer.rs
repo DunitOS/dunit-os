@@ -1,8 +1,10 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use dunit_render::{paint_clipped_with_progress, ScrollArea, Surface, TextInput};
+use dunit_render::{paint_clipped_with_lists, ScrollArea, Surface, TextInput};
 #[path = "input_scroll.rs"]
 mod input_scroll;
+#[path = "list_render.rs"]
+mod list_render;
 #[path = "overlays.rs"]
 mod overlays;
 #[path = "progress_render.rs"]
@@ -47,6 +49,8 @@ pub struct RenderStats {
     pub animation_time_ms: Option<u64>,
 }
 struct Snapshot {
+    lists: Vec<Option<dunit_render::ListPaint>>,
+    list_current: Vec<Option<(String, usize)>>,
     overlays: overlays::Scene,
     modal_owner: Option<String>,
     popup_owner: Option<String>,
@@ -527,7 +531,23 @@ impl Renderer {
             .iter()
             .map(|v| v.split.as_ref().map(|s| (s.value, s.options.axis)))
             .collect();
+        let lists = self.prepare_lists(&tree, &layout, &styles, &views, &areas, width, height);
+        let list_current = views
+            .iter()
+            .map(|v| {
+                v.list.as_ref().and_then(|l| {
+                    l.selection.current.as_ref().and_then(|key| {
+                        l.items
+                            .iter()
+                            .position(|i| &i.key == key)
+                            .map(|index| (key.clone(), index))
+                    })
+                })
+            })
+            .collect();
         let next = Snapshot {
+            lists,
+            list_current,
             modal_owner,
             popup_owner,
             splitters,
@@ -593,7 +613,7 @@ impl Renderer {
             let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            let painted = paint_clipped_with_progress(
+            let painted = paint_clipped_with_lists(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
@@ -604,6 +624,7 @@ impl Renderer {
                 &|id| next.areas[id.0 as usize].as_ref(),
                 &|id| next.sliders[id.0 as usize],
                 &|id| next.progress[id.0 as usize],
+                &|id| next.lists[id.0 as usize].as_ref(),
             );
             let painted =
                 painted.and_then(|()| next.overlays.paint(&self.font, &mut surface, rect));
@@ -693,6 +714,16 @@ fn container_padding<M>(tree: &Tree, styles: &[Style], views: &[&View<M>]) -> Re
                 };
             }
         }
+        if views[n.id.0 as usize].list.is_some() {
+            let style = &styles[n.id.0 as usize];
+            let border = style.number("border-width").unwrap_or(0.);
+            attrs.padding = Edges {
+                top: border,
+                bottom: border,
+                left: border,
+                right: border + style.number("scrollbar-width").unwrap_or(0.),
+            };
+        }
         if n.kind == dunit_ui::Kind::Scroll {
             let style = &styles[n.id.0 as usize];
             let border = style.number("border-width").unwrap_or(0.);
@@ -750,6 +781,7 @@ fn diff(old: &Snapshot, new: &Snapshot, width: u32, height: u32) -> Option<Damag
             && a.attrs == b.attrs
             && ra == rb
             && old.styles[a.id.0 as usize] == new.styles[b.id.0 as usize]
+            && old.lists[a.id.0 as usize] == new.lists[b.id.0 as usize]
             && old.inputs[a.id.0 as usize] == new.inputs[b.id.0 as usize]
             && old.sliders[a.id.0 as usize] == new.sliders[b.id.0 as usize]
             && old.progress[a.id.0 as usize] == new.progress[b.id.0 as usize]
@@ -791,4 +823,38 @@ fn ceil_clamped(value: f32, max: u32) -> u32 {
     } else {
         n
     }
+}
+
+/// Effective rectangular clip shared by timed and virtualized content.
+fn visible_rect(
+    tree: &Tree,
+    layout: &Layout,
+    areas: &[Option<ScrollArea>],
+    id: dunit_ui::NodeId,
+    rect: Rect,
+    width: u32,
+    height: u32,
+) -> Option<Rect> {
+    let root = layout.rect(tree.root());
+    let mut left = rect.x.max(root.x).max(0.);
+    let mut top = rect.y.max(root.y).max(0.);
+    let mut right = (rect.x + rect.w).min(root.x + root.w).min(width as f32);
+    let mut bottom = (rect.y + rect.h).min(root.y + root.h).min(height as f32);
+    let mut parent = tree.node(id).parent;
+    while let Some(id) = parent {
+        let clip = areas[id.0 as usize]
+            .as_ref()
+            .map_or(layout.rect(id), |a| a.viewport);
+        left = left.max(clip.x);
+        top = top.max(clip.y);
+        right = right.min(clip.x + clip.w);
+        bottom = bottom.min(clip.y + clip.h);
+        parent = tree.node(id).parent;
+    }
+    (left < right && top < bottom).then_some(Rect {
+        x: left,
+        y: top,
+        w: (right - left).max(0.),
+        h: (bottom - top).max(0.),
+    })
 }

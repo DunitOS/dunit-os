@@ -35,6 +35,7 @@ impl Key {
 /// owns button interaction; this description owns identity, configuration and messages.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View<Msg> {
+    pub(crate) list: Option<crate::list::ListBinding<Msg>>,
     pub(crate) workspace: Option<crate::workspace::WorkspaceRole>,
     pub(crate) dialog: Option<crate::workspace::DialogBinding<Msg>>,
     pub(crate) split: Option<crate::workspace::SplitBinding<Msg>>,
@@ -67,6 +68,7 @@ impl<Msg> View<Msg> {
         children: Vec<Self>,
     ) -> Self {
         Self {
+            list: None,
             workspace: None,
             dialog: None,
             split: None,
@@ -218,6 +220,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.list.is_some() {
+            return Some("listbox");
+        }
         if let Some(role) = self.workspace_role() {
             return Some(role);
         }
@@ -264,6 +269,9 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(l) = &self.list {
+            return Some(&l.label);
+        }
         if let Some(label) = self.workspace_label() {
             return Some(label);
         }
@@ -375,6 +383,7 @@ impl<Msg> View<Msg> {
         names: &mut BTreeSet<&'a str>,
         checked_groups: &mut BTreeSet<&'a str>,
     ) -> Result<()> {
+        self.check_list()?;
         self.check_popups()?;
         self.check_workspace()?;
         if depth > 0
