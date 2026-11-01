@@ -73,7 +73,7 @@ impl<C: Component> Application<C> {
                     .filter(|s| Some(s) != v.tree_state().as_ref())
                 {
                     if let crate::list::SelectionHandler::Tree(f) = &list.on_change {
-                        message = Some(f(state));
+                        message = Some(f.call(state));
                     }
                 }
             }
@@ -106,8 +106,11 @@ impl<C: Component> Application<C> {
         let row_key = v.list.as_ref().unwrap().items[row].key.clone();
         let key = String::from(key);
         self.pointer(PointerEvent::Down, Some(&key))?;
+        if !self.in_scope(&key) || self.popup_state().is_some() {
+            return Ok(true);
+        }
         let mut message = None;
-        if let Some(v) = self.view.find(&key) {
+        if let Some(v) = self.view.find(&key).filter(|v| !v.interaction.disabled) {
             let list = v.list.as_ref();
             if list.is_some_and(|l| l.items.get(row).is_some_and(|i| i.key == row_key)) {
                 if let Some(state) = v
@@ -115,7 +118,7 @@ impl<C: Component> Application<C> {
                     .filter(|s| Some(s) != v.tree_state().as_ref())
                 {
                     if let crate::list::SelectionHandler::Tree(f) = &list.unwrap().on_change {
-                        message = Some(f(state));
+                        message = Some(f.call(state));
                     }
                 }
             }

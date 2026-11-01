@@ -46,5 +46,7 @@ pub use measure::{intrinsic_size, FontMeasure, TextMeasure};
 pub use scroll::{ScrollAxis, ScrollCommand, Thumb};
 pub use state::{Interaction, WidgetValue};
 pub use text_input::{EditCommand, TextEditor, MAX_INPUT_BYTES};
+pub mod file_browser;
 pub mod selection;
+pub mod table;
 pub mod tree;

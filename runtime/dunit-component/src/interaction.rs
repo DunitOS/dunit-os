@@ -65,6 +65,12 @@ impl<M> View<M> {
                         if !preserve_draft {
                             input.editor.sync(self.text.as_deref().unwrap_or(""));
                         }
+                        if input.editor.text() == previous.editor.text()
+                            && input.options.soft_wrap == previous.options.soft_wrap
+                        {
+                            input.affinity = previous.affinity;
+                            input.visual_goal = previous.visual_goal;
+                        }
                         input.dragging = previous.dragging;
                         input.caret_revision = previous.caret_revision;
                     }
@@ -90,6 +96,21 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        self.dispatch_input(
+            target,
+            crate::UiEventKind::Pointer {
+                event,
+                position: None,
+                button: 0,
+                modifiers: 0,
+            },
+            |app| app.pointer_default(event, target),
+        )
+    }
+    fn pointer_default(&mut self, event: PointerEvent, target: Option<&str>) -> Result<bool>
+    where
+        C::Message: Clone,
+    {
         if event != PointerEvent::Move {
             self.dismiss_tooltip();
         }
@@ -103,6 +124,9 @@ impl<C: Component> Application<C> {
         let mut changed = false;
         if event == PointerEvent::Down && self.focused_input_key() != target {
             changed |= self.commit_spinbox()?;
+            if self.blocked_pointer(target) || self.popup_state().is_some() {
+                return Ok(true);
+            }
         }
         let mut message = None;
         self.view.visit_mut(&mut |v| {

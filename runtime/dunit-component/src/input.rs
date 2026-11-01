@@ -7,6 +7,8 @@ pub use dunit_widgets::text_input::{EditCommand, TextEditor, MAX_INPUT_BYTES};
 pub struct InputOptions {
     pub placeholder: String,
     pub password: bool,
+    /// Wrap multiline visual rows without changing the controlled text.
+    pub soft_wrap: bool,
     pub read_only: bool,
     /// Unicode scalar count, additionally bounded by MAX_INPUT_BYTES.
     pub max_chars: usize,
@@ -16,6 +18,7 @@ impl Default for InputOptions {
         Self {
             placeholder: String::new(),
             password: false,
+            soft_wrap: false,
             read_only: false,
             max_chars: MAX_INPUT_BYTES,
         }
@@ -23,25 +26,27 @@ impl Default for InputOptions {
 }
 #[derive(Clone, Debug)]
 pub(crate) struct InputBinding<M> {
+    pub affinity: dunit_render::CaretAffinity,
+    pub visual_goal: Option<f32>,
+    pub owner: Option<String>,
     pub label: String,
     pub options: InputOptions,
     pub editor: TextEditor,
     /// None for a spinbox: numeric drafts commit through its integer callback.
-    pub on_change: Option<fn(String) -> M>,
+    pub on_change: Option<crate::callback::Callback<String, M>>,
     pub dragging: bool,
     pub caret_visible: bool,
     pub caret_revision: u64,
 }
 impl<M> PartialEq for InputBinding<M> {
     fn eq(&self, other: &Self) -> bool {
-        self.label == other.label
+        self.affinity == other.affinity
+            && self.visual_goal == other.visual_goal
+            && self.owner == other.owner
+            && self.label == other.label
             && self.options == other.options
             && self.editor == other.editor
-            && match (self.on_change, other.on_change) {
-                (Some(a), Some(b)) => core::ptr::fn_addr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
+            && self.on_change == other.on_change
             && self.dragging == other.dragging
             && self.caret_visible == other.caret_visible
             && self.caret_revision == other.caret_revision
@@ -80,6 +85,7 @@ impl<C: Component> Application<C> {
         }
         let mut message = None;
         let mut previous = None;
+        let mut rename_change = None;
         let mut consumed = false;
         self.view.visit_mut(&mut |v| {
             if !v.interaction.focused || v.interaction.disabled {
@@ -91,22 +97,31 @@ impl<C: Component> Application<C> {
             consumed = true;
             input.caret_revision = input.caret_revision.wrapping_add(1);
             let old = input.editor.clone();
+            let old_visual = (input.affinity, input.visual_goal);
+            input.affinity = dunit_render::CaretAffinity::Downstream;
+            input.visual_goal = None;
             input
                 .editor
                 .apply(command, input.options.max_chars, input.options.read_only);
             input.caret_visible = true;
             if old.text() != input.editor.text() {
-                if let Some(on_change) = input.on_change {
-                    message = Some(on_change(input.editor.text().into()));
-                    previous = Some((v.key.clone(), old));
+                if let Some(owner) = &input.owner {
+                    rename_change = Some((owner.clone(), String::from(input.editor.text())));
+                    previous = Some((v.key.clone(), old, old_visual));
+                } else if let Some(on_change) = &input.on_change {
+                    message = Some(on_change.call(input.editor.text().into()));
+                    previous = Some((v.key.clone(), old, old_visual));
                 } else if !crate::spinbox::valid_draft(input.editor.text()) {
                     input.editor = old;
                 }
             }
         });
+        if let Some((owner, value)) = rename_change {
+            message = Some(self.rename_change(&owner, value)?);
+        }
         if let Some(message) = message {
             let result = self.update(message);
-            if let Some((key, old)) = previous {
+            if let Some((key, old, old_visual)) = previous {
                 self.view.visit_mut(&mut |v| {
                     if v.key == key
                         && !v.interaction.disabled
@@ -115,6 +130,8 @@ impl<C: Component> Application<C> {
                         if let Some(input) = &mut v.input {
                             if input.editor.is_multiline() == old.is_multiline() {
                                 input.editor = old.clone();
+                                input.affinity = old_visual.0;
+                                input.visual_goal = old_visual.1;
                             }
                         }
                     }
@@ -185,6 +202,21 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        self.dispatch_input(
+            Some(key),
+            crate::UiEventKind::Pointer {
+                event,
+                position: None,
+                button: 0,
+                modifiers: 0,
+            },
+            |app| app.scrollbar_pointer_default(event, key),
+        )
+    }
+    fn scrollbar_pointer_default(&mut self, event: PointerEvent, key: &str) -> Result<bool>
+    where
+        C::Message: Clone,
+    {
         let changed = self.pointer(event, Some(key))?;
         self.view.visit_mut(&mut |v| {
             if let Some(input) = &mut v.input {
@@ -203,6 +235,26 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        self.dispatch_input(
+            target,
+            crate::UiEventKind::Pointer {
+                event,
+                position: None,
+                button: 0,
+                modifiers: 0,
+            },
+            |app| app.pointer_at_default(event, target, position),
+        )
+    }
+    fn pointer_at_default(
+        &mut self,
+        event: PointerEvent,
+        target: Option<&str>,
+        position: Option<(&str, usize)>,
+    ) -> Result<bool>
+    where
+        C::Message: Clone,
+    {
         let mut changed = self.pointer(event, target)?;
         if let Some((key, index)) = position {
             if event != PointerEvent::Leave {
@@ -212,6 +264,8 @@ impl<C: Component> Application<C> {
                     }
                     if let Some(input) = &mut v.input {
                         input.caret_revision = input.caret_revision.wrapping_add(1);
+                        input.affinity = dunit_render::CaretAffinity::Downstream;
+                        input.visual_goal = None;
                         input.editor.place(index, event != PointerEvent::Down);
                         // Revision-only activity must schedule a render to reveal the caret.
                         changed = true;
@@ -231,6 +285,8 @@ impl<C: Component> Application<C> {
             }
             if let Some(input) = &mut v.input {
                 if input.dragging {
+                    input.affinity = dunit_render::CaretAffinity::Downstream;
+                    input.visual_goal = None;
                     input.editor.place(index, true);
                     input.caret_revision = input.caret_revision.wrapping_add(1);
                     input.caret_visible = true;
@@ -248,6 +304,78 @@ impl<C: Component> Application<C> {
                 if let Some(input) = &mut v.input {
                     input.caret_visible = !input.caret_visible;
                     changed = true;
+                }
+            }
+        });
+        changed
+    }
+}
+
+impl<C: Component> Application<C>
+where
+    C::Message: Clone,
+{
+    pub(crate) fn submit_key(&mut self, key: Key) -> Result<bool> {
+        if key.modifiers != 0 || !matches!(key.character, '\r' | '\n') {
+            return Ok(false);
+        }
+        let message = self
+            .focused_key()
+            .and_then(|k| self.view.find(k))
+            .and_then(|v| v.submit.clone());
+        if let Some(m) = message {
+            self.update(m)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+}
+
+impl<C: Component> Application<C> {
+    /// Visual navigation changes selection/caret only, preserving model/history.
+    pub fn place_visual_input(
+        &mut self,
+        key: &str,
+        target: dunit_render::TextPosition,
+        extend: bool,
+        goal: Option<f32>,
+    ) -> bool {
+        let mut changed = false;
+        self.view.visit_mut(&mut |v| {
+            if v.key != key || !v.interaction.focused || v.interaction.disabled {
+                return;
+            }
+            if let Some(input) = &mut v.input {
+                input.editor.place(target.index, extend);
+                input.affinity = if input.editor.cursor() == target.index {
+                    target.affinity
+                } else {
+                    dunit_render::CaretAffinity::Downstream
+                };
+                input.visual_goal = goal.filter(|x| x.is_finite() && *x >= 0.);
+                input.caret_revision = input.caret_revision.wrapping_add(1);
+                input.caret_visible = true;
+                changed = true;
+            }
+        });
+        changed
+    }
+    /// Resolve the visual side of a wrap boundary after a pointer gesture.
+    pub fn set_input_affinity(&mut self, key: &str, position: dunit_render::TextPosition) -> bool {
+        let mut changed = false;
+        self.view.visit_mut(&mut |v| {
+            if v.key != key || !v.interaction.focused || v.interaction.disabled {
+                return;
+            }
+            if let Some(input) = &mut v.input {
+                if input.editor.cursor() == position.index {
+                    changed = input.affinity != position.affinity || input.visual_goal.is_some();
+                    input.affinity = position.affinity;
+                    input.visual_goal = None;
+                    if changed {
+                        input.caret_revision = input.caret_revision.wrapping_add(1);
+                        input.caret_visible = true;
+                    }
                 }
             }
         });

@@ -206,3 +206,47 @@ pub fn current_dir() -> Result<String> {
 pub fn set_current_dir(path: &str) -> Result<()> {
     checked(libdunit::chdir(path)).map(|_| ())
 }
+
+/// Complete bounded directory snapshot. A full native buffer is reported as
+/// overflow rather than silently claiming a potentially truncated listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub file_type: FileType,
+}
+pub fn read_dir(path: &str) -> Result<Vec<DirectoryEntry>> {
+    let mut capacity = 64;
+    loop {
+        let mut raw = alloc::vec![libdunit::DirEntry::empty();capacity];
+        let count = checked(libdunit::readdir(path, &mut raw))?;
+        if count >= capacity {
+            if capacity == 1024 {
+                return Err(Error(libdunit::ENOBUFS));
+            }
+            capacity = (capacity * 2).min(1024);
+            continue;
+        }
+        let mut entries = Vec::with_capacity(count);
+        for entry in raw.iter().take(count) {
+            if entry.name_len > entry.name.len() {
+                return Err(Error(libdunit::EINVAL));
+            }
+            let name = core::str::from_utf8(&entry.name[..entry.name_len])
+                .map_err(|_| Error(libdunit::EINVAL))?;
+            if name.is_empty() || name.contains('/') || name.contains('\0') {
+                return Err(Error(libdunit::EINVAL));
+            }
+            let file_type = match entry.file_type {
+                libdunit::FILE_TYPE_FILE => FileType::File,
+                libdunit::FILE_TYPE_DIRECTORY => FileType::Directory,
+                libdunit::FILE_TYPE_DEVICE => FileType::Device,
+                _ => return Err(Error(libdunit::EINVAL)),
+            };
+            entries.push(DirectoryEntry {
+                name: name.into(),
+                file_type,
+            });
+        }
+        return Ok(entries);
+    }
+}

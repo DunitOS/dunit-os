@@ -17,6 +17,33 @@ where
         if input.kind != IN_KEY || input.value != 0 || input.y & !3 != 0 {
             return Ok(false);
         }
+        if input.y == 0
+            && input.x == 0x3e
+            && self
+                .application
+                .table_command(TableCommand::ToggleSort)
+                .map_err(native)?
+        {
+            self.redraw()?;
+            return Ok(true);
+        }
+        if input.y == 0 && input.x == 0x3c && self.application.begin_rename().map_err(native)? {
+            self.redraw()?;
+            return Ok(true);
+        }
+        if input.y == 0 {
+            let command = match input.x {
+                0x4b => Some(TableCommand::PreviousColumn),
+                0x4d => Some(TableCommand::NextColumn),
+                _ => None,
+            };
+            if let Some(command) = command {
+                if self.application.table_command(command).map_err(native)? {
+                    self.redraw()?;
+                    return Ok(true);
+                }
+            }
+        }
         if input.y == 0 {
             let tree = match input.x {
                 0x4b => Some(TreeCommand::Collapse),

@@ -53,7 +53,8 @@ impl Theme {
                             .is_some_and(|v| v.is_finite() && v >= min && v <= max)
                     };
                     let valid = match declaration.property.as_str() {
-                        "list-selection-background"
+                        "table-header-background"
+                        | "list-selection-background"
                         | "list-selection-color"
                         | "list-disabled-color"
                         | "list-current-color"
@@ -76,7 +77,10 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
-                        "tree-indent" | "tree-toggle-width" => valid_number(1., 1024.),
+                        "table-column-width"
+                        | "table-header-height"
+                        | "tree-indent"
+                        | "tree-toggle-width" => valid_number(1., 1024.),
                         "list-row-height" => valid_number(1., 1024.),
                         "splitter-thickness"
                         | "separator-thickness"
@@ -108,13 +112,21 @@ impl Theme {
                         "scrollbar-width" | "scrollbar-min-thumb" | "scrollbar-radius" => {
                             valid_number(0., 1024.)
                         }
-                        "scroll-step" | "selection-scroll-step" => valid_number(0., 1024.),
-                        "tree-open-mark" | "tree-closed-mark" | "menu-submenu-mark"
+                        "scroll-step" | "selection-scroll-step" | "input-multiclick-distance" => {
+                            valid_number(0., 1024.)
+                        }
+                        "table-sort-asc-mark"
+                        | "table-sort-desc-mark"
+                        | "tree-open-mark"
+                        | "tree-closed-mark"
+                        | "menu-submenu-mark"
                         | "control-suffix" => value
                             .as_keyword()
                             .is_some_and(|s| !s.chars().any(char::is_control)),
                         "busy-segment" => valid_number(0., 1.),
-                        "tooltip-delay"
+                        "scrollbar-hide-delay"
+                        | "input-multiclick-interval"
+                        | "tooltip-delay"
                         | "busy-duration"
                         | "busy-interval"
                         | "caret-blink"
@@ -129,6 +141,25 @@ impl Theme {
                             value.as_keyword() == Some("none")
                                 || style::effects::Shadow::parse(value).is_some()
                         }
+                        "width" | "height" => crate::layout_style::sizing(value).is_some(),
+                        "min-width" | "min-height" | "max-width" | "max-height" => {
+                            value.as_keyword() == Some("none") || valid_number(0., 65536.)
+                        }
+                        "flex-grow" | "gap" => valid_number(0., 65536.),
+                        "grid-columns" => value.as_number().is_some_and(|n| {
+                            n.is_finite() && (1. ..=4096.).contains(&n) && n as u32 as f32 == n
+                        }),
+                        "align-items" | "justify-content" => matches!(
+                            value.as_keyword(),
+                            Some(
+                                "start"
+                                    | "end"
+                                    | "center"
+                                    | "stretch"
+                                    | "space-between"
+                                    | "space-around"
+                            )
+                        ),
                         "backdrop-blur" => valid_number(0., 64.),
                         "transition" => crate::motion::declarations(value).is_some(),
                         "clip" => matches!(value.as_keyword(), Some("rect" | "rounded")),
@@ -159,6 +190,16 @@ impl Theme {
                         });
                     }
                 }
+                let mut layout = style::Style::default();
+                for declaration in &rule.declarations {
+                    layout.set(&declaration.property, declaration.value.clone());
+                }
+                crate::layout_style::apply(&mut dunit_ui::Attrs::default(), &layout).map_err(
+                    |_| style::StyleError::Unexpected {
+                        line: 1,
+                        what: alloc::string::String::from("contradictory SDK layout constraints"),
+                    },
+                )?;
             }
         }
         let tokens = profile.tokens.clone();

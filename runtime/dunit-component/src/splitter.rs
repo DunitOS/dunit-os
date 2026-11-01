@@ -24,7 +24,7 @@ impl<C: Component> Application<C> {
                     consumed = true;
                     let value = s.options.range.command(s.value, command);
                     if value != s.value {
-                        message = Some((s.on_change)(value));
+                        message = Some(s.on_change.call(value));
                     }
                 }
             }
@@ -87,7 +87,7 @@ impl<C: Component> Application<C> {
                     if let Some(value) = g.value(coordinate, s.grab) {
                         let value = s.options.range.snap(value as i128);
                         if value != s.value {
-                            message = Some((s.on_change)(value));
+                            message = Some(s.on_change.call(value));
                         }
                     }
                 }

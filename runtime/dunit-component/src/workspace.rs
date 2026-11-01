@@ -98,7 +98,7 @@ pub(crate) struct SplitBinding<M> {
     pub label: String,
     pub value: i64,
     pub options: SplitterOptions,
-    pub on_change: fn(i64) -> M,
+    pub on_change: crate::callback::Callback<i64, M>,
     pub grab: f32,
 }
 impl<M> PartialEq for SplitBinding<M> {
@@ -107,7 +107,7 @@ impl<M> PartialEq for SplitBinding<M> {
             && self.value == b.value
             && self.options == b.options
             && self.grab == b.grab
-            && core::ptr::fn_addr_eq(self.on_change, b.on_change)
+            && self.on_change == b.on_change
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,7 +297,7 @@ impl<M> View<M> {
             label,
             value,
             options,
-            on_change,
+            on_change: crate::callback::Callback::new(on_change),
             grab: 0.,
         });
         let children = vec![first, handle, second];

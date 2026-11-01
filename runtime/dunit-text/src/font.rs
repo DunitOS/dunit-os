@@ -50,6 +50,7 @@ pub struct LaidGlyph {
 }
 
 /// A decoded character-map subtable, reduced to the lookups we need.
+#[derive(Clone)]
 enum Cmap {
     /// Segment-mapped format 4 (BMP). Parallel arrays per segment.
     Format4 {
@@ -68,6 +69,7 @@ enum Cmap {
 }
 
 /// A parsed TrueType font that owns its backing bytes.
+#[derive(Clone)]
 pub struct Font {
     data: Vec<u8>,
     units_per_em: u16,

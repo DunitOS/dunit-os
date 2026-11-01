@@ -352,7 +352,7 @@ where
                     if selected.as_deref() == Some(&item.key) {
                         None
                     } else {
-                        Some(on_change(item.key.clone()))
+                        Some(on_change.call(item.key.clone()))
                     }
                 }
                 _ => owner.menu_entry(false, &p.path).and_then(|i| {

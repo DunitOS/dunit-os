@@ -4,14 +4,16 @@ use alloc::{string::String, vec::Vec};
 pub use dunit_widgets::selection::{ListGeometry, ListItem, ListSelection, SelectionMode};
 #[derive(Debug, Clone)]
 pub(crate) enum SelectionHandler<M> {
-    List(fn(ListSelection) -> M),
-    Tree(fn(crate::TreeState) -> M),
+    List(crate::callback::Callback<ListSelection, M>),
+    Tree(crate::callback::Callback<crate::TreeState, M>),
+    Table(crate::callback::Callback<crate::TableState, M>),
 }
 impl<M> PartialEq for SelectionHandler<M> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::List(a), Self::List(b)) => core::ptr::fn_addr_eq(*a, *b),
-            (Self::Tree(a), Self::Tree(b)) => core::ptr::fn_addr_eq(*a, *b),
+            (Self::List(a), Self::List(b)) => a == b,
+            (Self::Tree(a), Self::Tree(b)) => a == b,
+            (Self::Table(a), Self::Table(b)) => a == b,
             _ => false,
         }
     }
@@ -48,8 +50,16 @@ impl<M> View<M> {
     pub(crate) fn collection_message(&self, selection: ListSelection) -> crate::Result<M> {
         let l = self.list.as_ref().ok_or(UiError::InvalidList)?;
         Ok(match &l.on_change {
-            crate::list::SelectionHandler::List(f) => f(selection),
-            crate::list::SelectionHandler::Tree(f) => f(crate::TreeState {
+            crate::list::SelectionHandler::List(f) => f.call(selection),
+            crate::list::SelectionHandler::Table(f) => {
+                let t = self.table.as_ref().ok_or(UiError::InvalidTable)?;
+                f.call(crate::TableState {
+                    selection,
+                    sort: t.sort.clone(),
+                    column: t.column.clone(),
+                })
+            }
+            crate::list::SelectionHandler::Tree(f) => f.call(crate::TreeState {
                 selection,
                 expanded: self
                     .tree
@@ -80,7 +90,7 @@ impl<M> View<M> {
             items,
             selection,
             mode,
-            on_change: SelectionHandler::List(on_change),
+            on_change: SelectionHandler::List(crate::callback::Callback::new(on_change)),
         });
         v
     }

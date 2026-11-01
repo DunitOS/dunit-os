@@ -14,6 +14,7 @@ name = "dunit_render"
 path = "src/lib.rs"
 
 [dependencies]
+unicode-segmentation = { version = "=1.12.0", default-features = false }
 dunit_ui = { path = "../dunit-ui" }
 dunit_style = { path = "../dunit-style" }
 dunit_text = { path = "../dunit-text" }

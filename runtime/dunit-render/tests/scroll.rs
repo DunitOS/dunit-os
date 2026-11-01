@@ -41,6 +41,7 @@ fn render(source: &str, area: ScrollArea, damage: Rect) -> Vec<u32> {
 }
 fn area() -> ScrollArea {
     ScrollArea {
+        bars_visible: true,
         viewport: Rect {
             x: 5.,
             y: 4.,

@@ -7,10 +7,19 @@ use crate::{
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
+#[path = "ui_files.rs"]
+mod files;
+pub use files::{choose_file, NativeDirectorySource};
 #[path = "ui_list.rs"]
 mod list;
 #[path = "ui_overlays.rs"]
 mod overlays;
+#[path = "ui_routing.rs"]
+mod routing;
+#[path = "ui_scroll.rs"]
+mod scroll;
+#[path = "ui_text.rs"]
+mod text;
 #[path = "ui_workspace.rs"]
 mod workspace;
 
@@ -24,6 +33,8 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidRename
+        | UiError::InvalidTable
         | UiError::InvalidTree
         | UiError::InvalidList
         | UiError::InvalidWorkspace
@@ -67,6 +78,7 @@ pub struct ComponentWindow<C: Component> {
     caret_frame: Option<crate::time::Instant>,
     selection_frame: Option<crate::time::Instant>,
     pointer_position: Option<(i32, i32)>,
+    text_clicks: TextClickState,
 }
 impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
@@ -88,6 +100,7 @@ impl<C: Component> ComponentWindow<C> {
             caret_frame: None,
             selection_frame: None,
             pointer_position: None,
+            text_clicks: TextClickState::default(),
         };
         ui.redraw()?;
         Ok(ui)
@@ -141,6 +154,20 @@ impl<C: Component> ComponentWindow<C> {
             self.theme_error_detail = None;
             return Ok(false);
         };
+        let (width, height) = self.window.size();
+        if let Err(error) = self.renderer.validate_theme_application(
+            &self.application,
+            &theme,
+            font.as_ref(),
+            width,
+            height,
+        ) {
+            let error = native(error);
+            self.theme_error = Some(error);
+            self.theme_error_detail =
+                Some(alloc::format!("theme layout rejected: {}", error.name()));
+            return Err(error);
+        }
         self.renderer.set_theme(theme, font);
         self.renderer
             .set_motion_enabled(self.motion_requested && watcher.animations_enabled());
@@ -330,6 +357,11 @@ impl<C: Component> ComponentWindow<C> {
             } else {
                 slice
             };
+            let slice = if let Some(wait) = self.scrollbar_wait()? {
+                slice.min(wait)
+            } else {
+                slice
+            };
             let slice = if let Some(tooltip) = self.tooltip_wait()? {
                 slice.min(tooltip)
             } else {
@@ -341,6 +373,7 @@ impl<C: Component> ComponentWindow<C> {
             if event.is_none() {
                 self.sample_selection_autoscroll()?;
                 self.tick_tooltip()?;
+                self.tick_scrollbars()?;
             }
             if let Some(ms) = self.renderer.caret_blink_ms() {
                 if self
@@ -398,7 +431,27 @@ impl<C: Component> ComponentWindow<C> {
                 break event;
             }
         };
+        self.dispatch_event(event)
+    }
+    fn dispatch_event_default(
+        &mut self,
+        event: Option<WindowEvent>,
+    ) -> NativeResult<Option<WindowEvent>>
+    where
+        C::Message: Clone,
+    {
+        if matches!(
+            &event,
+            Some(WindowEvent::Resized { .. }) | Some(WindowEvent::CloseRequested)
+        ) || matches!(&event, Some(WindowEvent::Input(i)) if i.kind == IN_KEY || i.kind == IN_SCROLL)
+        {
+            self.text_clicks.cancel();
+        }
         if self.overlay_event(&event)? {
+            if matches!(&event,Some(WindowEvent::Input(i)) if i.kind == IN_DOWN || i.kind == IN_LEAVE)
+            {
+                self.text_clicks.cancel();
+            }
             return Ok(event);
         }
         if self.list_event(&event)? {
@@ -436,6 +489,7 @@ impl<C: Component> ComponentWindow<C> {
                     self.application
                         .scrollbar_pointer(pointer, &key)
                         .map_err(native)?;
+                    self.text_clicks.cancel();
                     self.redraw()?;
                     return Ok(event);
                 }
@@ -444,12 +498,39 @@ impl<C: Component> ComponentWindow<C> {
                     .hit_key(input.x as f32, input.y as f32)
                     .map(alloc::string::String::from);
                 if pointer == PointerEvent::Down {
+                    if let Some((key, column)) = target.as_deref().and_then(|k| {
+                        self.renderer
+                            .table_header_at(k, input.x as f32, input.y as f32)
+                            .map(|c| (k, c))
+                    }) {
+                        if self.application.table_header(key, column).map_err(native)? {
+                            self.text_clicks.cancel();
+                            self.redraw()?;
+                            return Ok(event);
+                        }
+                    }
+                    if let Some((key, row, column)) = target.as_deref().and_then(|k| {
+                        self.renderer
+                            .table_cell_at(k, input.x as f32, input.y as f32)
+                            .map(|(r, c)| (k, r, c))
+                    }) {
+                        if self
+                            .application
+                            .table_pointer(key, row, column, 0)
+                            .map_err(native)?
+                        {
+                            self.text_clicks.cancel();
+                            self.redraw()?;
+                            return Ok(event);
+                        }
+                    }
                     if let Some((key, row)) = target.as_deref().and_then(|k| {
                         self.renderer
                             .tree_toggle_at(k, input.x as f32, input.y as f32)
                             .map(|row| (k, row))
                     }) {
                         if self.application.tree_toggle_row(key, row).map_err(native)? {
+                            self.text_clicks.cancel();
                             self.redraw()?;
                             return Ok(event);
                         }
@@ -463,6 +544,7 @@ impl<C: Component> ComponentWindow<C> {
                         .list_pointer(pointer, target.as_deref(), row, 0)
                         .map_err(native)?
                     {
+                        self.text_clicks.cancel();
                         self.redraw()?;
                         return Ok(event);
                     }
@@ -484,6 +566,7 @@ impl<C: Component> ComponentWindow<C> {
                     .spinbox_pointer(pointer, target.as_deref(), spin_button)
                     .map_err(native)?
                 {
+                    self.text_clicks.cancel();
                     self.redraw()?;
                     return Ok(event);
                 }
@@ -505,6 +588,7 @@ impl<C: Component> ComponentWindow<C> {
                     .slider_pointer(pointer, target.as_deref(), slider_position)
                     .map_err(native)?
                 {
+                    self.text_clicks.cancel();
                     self.redraw()?;
                     return Ok(event);
                 }
@@ -515,21 +599,26 @@ impl<C: Component> ComponentWindow<C> {
                         .dragging_input_key()
                         .map(alloc::string::String::from)
                 };
-                let index = capture.as_deref().and_then(|key| {
+                let text_position = capture.as_deref().and_then(|key| {
                     if pointer == PointerEvent::Down {
                         self.renderer
-                            .input_index_at(key, input.x as f32, input.y as f32)
+                            .input_position_at(key, input.x as f32, input.y as f32)
                     } else {
                         self.renderer
-                            .input_drag_index_at(key, input.x as f32, input.y as f32)
+                            .input_drag_position_at(key, input.x as f32, input.y as f32)
                     }
                 });
-                let position = capture.as_deref().zip(index);
-                if self
-                    .application
-                    .pointer_at(pointer, target.as_deref(), position)
-                    .map_err(native)?
-                {
+                let position = capture.as_deref().zip(text_position.map(|p| p.index));
+                if self.text_pointer(
+                    pointer,
+                    target.as_deref(),
+                    position,
+                    input.x as f32,
+                    input.y as f32,
+                )? {
+                    if let Some((key, position)) = capture.as_deref().zip(text_position) {
+                        self.application.set_input_affinity(key, position);
+                    }
                     self.caret_frame = Some(crate::time::Instant::now()?);
                     self.redraw()?;
                 }
@@ -566,7 +655,11 @@ impl<C: Component> ComponentWindow<C> {
                         _ => None,
                     };
                     if let Some(command) = command {
-                        if self.application.edit(command).map_err(native)? {
+                        if self
+                            .renderer
+                            .edit_input(&mut self.application, command)
+                            .map_err(native)?
+                        {
                             self.caret_frame = Some(crate::time::Instant::now()?);
                             self.redraw()?;
                             return Ok(event);
@@ -668,8 +761,10 @@ impl<C: Component> ComponentWindow<C> {
         };
         let elapsed = self.selection_frame.map(|t| t.elapsed()).transpose()?;
         if elapsed.is_some_and(|d| d >= Duration::from_millis(ms)) {
-            if let Some(index) = self.renderer.input_autoscroll_step(&key, x, y) {
-                self.application.drag_selection(&key, index);
+            if let Some(position) = self.renderer.input_autoscroll_position_step(&key, x, y) {
+                self.application
+                    .drag_text_selection(&key, position.index, &mut self.text_clicks);
+                self.application.set_input_affinity(&key, position);
                 self.caret_frame = Some(crate::time::Instant::now()?);
                 self.redraw()?;
             }

@@ -31,7 +31,7 @@ impl<C: Component> Application<C> {
         // or first enabled member. Arrow keys move inside the group.
         let mut groups = BTreeMap::new();
         for (index, node) in nodes.iter().enumerate() {
-            if node.interaction.disabled {
+            if node.interaction.disabled || node.tab_index < 0 {
                 continue;
             }
             if let Some(group) = node.radio_group.as_deref() {
@@ -59,7 +59,7 @@ impl<C: Component> Application<C> {
             let enabled: Vec<_> = bar
                 .children
                 .iter()
-                .filter(|v| v.focusable() && !v.interaction.disabled)
+                .filter(|v| v.focusable() && !v.interaction.disabled && v.tab_index >= 0)
                 .collect();
             let chosen = enabled
                 .iter()
@@ -77,12 +77,14 @@ impl<C: Component> Application<C> {
                 }
             }
         }
-        let order: Vec<_> = nodes
+        let mut order: Vec<_> = nodes
             .iter()
             .enumerate()
             .filter(|(index, v)| {
                 self.in_scope(&v.key)
                     && v.focusable()
+                    && v.tab_index >= 0
+                    && !v.rename.as_ref().is_some_and(|r| r.state.is_some())
                     && !v.interaction.disabled
                     && bar_stops
                         .get(v.key.as_str())
@@ -93,6 +95,14 @@ impl<C: Component> Application<C> {
             })
             .map(|(i, _)| NodeId(i as u32))
             .collect();
+        order.sort_by_key(|id| {
+            let index = nodes[id.0 as usize].tab_index;
+            if index > 0 {
+                (0, index)
+            } else {
+                (1, 0)
+            }
+        });
         let current = order
             .iter()
             .copied()
@@ -108,6 +118,47 @@ impl<C: Component> Application<C> {
         let target = nodes[next.0 as usize].key.clone();
         self.set_focus(&target);
         true
+    }
+    pub(crate) fn mnemonic_key(&mut self, key: crate::Key) -> Result<bool>
+    where
+        C::Message: Clone,
+    {
+        if key.modifiers != 4 || self.popup_state().is_some() {
+            return Ok(false);
+        }
+        let mut nodes = Vec::new();
+        self.view.flatten(&mut nodes);
+        let target = nodes
+            .iter()
+            .find(|v| {
+                self.in_scope(&v.key)
+                    && !v.interaction.disabled
+                    && v.mnemonic == Some(key.character.to_ascii_lowercase())
+            })
+            .map(|v| v.key.clone());
+        let Some(target) = target else {
+            return Ok(false);
+        };
+        self.commit_spinbox()?;
+        if !self.in_scope(&target) || self.popup_state().is_some() {
+            return Ok(true);
+        }
+        let Some(v) = self
+            .view
+            .find(&target)
+            .filter(|v| !v.interaction.disabled && v.focusable())
+        else {
+            return Ok(true);
+        };
+        let message = v.activation_message();
+        let popup = v.popup.is_some();
+        self.set_focus(&target);
+        if popup {
+            self.trigger_popup(&target);
+        } else if let Some(m) = message {
+            self.update(m)?;
+        }
+        Ok(true)
     }
     pub(crate) fn set_focus(&mut self, target: &str) {
         if let Some(bar) = self.view.ancestor_with(target, &|v| {
@@ -139,6 +190,15 @@ impl<C: Component> Application<C> {
         C::Message: Clone,
     {
         if self.popup_navigation(direction)? {
+            return Ok(true);
+        }
+        if matches!(direction, Navigation::Left | Navigation::Right)
+            && self.table_command(if direction == Navigation::Left {
+                crate::TableCommand::PreviousColumn
+            } else {
+                crate::TableCommand::NextColumn
+            })?
+        {
             return Ok(true);
         }
         if matches!(direction, Navigation::Left | Navigation::Right)

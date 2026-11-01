@@ -5,6 +5,22 @@ use dunit_render::{ListPaint, ListRowPaint, ScrollArea};
 use dunit_style::Style;
 use dunit_ui::{Layout, Tree};
 impl Renderer {
+    pub fn table_header_at(&self, key: &str, x: f32, y: f32) -> Option<usize> {
+        let p = self.previous.as_ref()?;
+        p.lists[p.tree.by_name(key)?.0 as usize]
+            .as_ref()?
+            .table
+            .as_ref()?
+            .header_at(x, y)
+    }
+    pub fn table_cell_at(&self, key: &str, x: f32, y: f32) -> Option<(usize, usize)> {
+        let p = self.previous.as_ref()?;
+        let l = p.lists[p.tree.by_name(key)?.0 as usize].as_ref()?;
+        Some((
+            l.geometry.row_at(x, y)?,
+            l.table.as_ref()?.cell_at(l.geometry.viewport, x, y)?,
+        ))
+    }
     pub fn tree_toggle_at(&self, key: &str, x: f32, y: f32) -> Option<usize> {
         let p = self.previous.as_ref()?;
         let id = p.tree.by_name(key)?;
@@ -69,13 +85,50 @@ impl Renderer {
                             .visible()
                         })
                         .unwrap_or(0..0);
+                let table = v.table.as_ref().and_then(|t| {
+                    let widths = t
+                        .model
+                        .widths(styles[n.id.0 as usize].number("table-column-width")?)?;
+                    let outer = layout.rect(n.id);
+                    let border = styles[n.id.0 as usize].number("border-width").unwrap_or(0.);
+                    let height = styles[n.id.0 as usize].number("table-header-height")?;
+                    Some(dunit_render::TablePaint {
+                        header: dunit_ui::Rect {
+                            x: g.viewport.x,
+                            y: g.viewport.y - height,
+                            w: g.viewport.w,
+                            h: height.min((outer.h - border * 2.).max(0.)),
+                        },
+                        columns: t.model.columns().iter().map(|c| c.label.clone()).collect(),
+                        widths,
+                        offset: self.scroll_offset_x(&v.key).unwrap_or(0.),
+                        current_column: t
+                            .column
+                            .as_deref()
+                            .and_then(|c| t.model.column(c))
+                            .unwrap_or(0),
+                        sort: t.sort.as_ref().and_then(|s| {
+                            t.model
+                                .column(&s.column)
+                                .map(|i| (i, s.order == crate::SortOrder::Ascending))
+                        }),
+                    })
+                });
                 Some(ListPaint {
+                    table,
                     geometry: g,
                     focused: v.interaction.focused && !v.interaction.disabled,
                     rows: range
                         .map(|index| {
                             let i = &l.items[index];
                             ListRowPaint {
+                                cells: v.table.as_ref().map(|t| {
+                                    t.model.rows()[t.order[index]]
+                                        .cells
+                                        .iter()
+                                        .map(|c| c.text())
+                                        .collect()
+                                }),
                                 tree: v.tree.as_ref().and_then(|t| t.rows.get(index)).map(|r| {
                                     dunit_render::TreeRowPaint {
                                         depth: r.depth,

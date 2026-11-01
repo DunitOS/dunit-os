@@ -380,12 +380,7 @@ impl Files {
 
     /// Absolute path of a child `name` in the current directory.
     fn child_path(&self, name: &str) -> String {
-        let mut p = self.path.clone();
-        if p != "/" {
-            p.push('/');
-        }
-        p.push_str(name);
-        p
+        dunit_widgets::file_browser::child_path(&self.path, name)
     }
 
     /// Absolute path of the selected entry, if any.

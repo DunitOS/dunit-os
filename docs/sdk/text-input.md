@@ -19,12 +19,11 @@ owns the accepted text; the SDK does not keep an independent authoritative value
 ## Editing and state
 
 - Printable characters replace the current selection; all indices stay on
-  UTF-8 scalar boundaries. Native hardware input currently supplies cooked ASCII;
-  Unicode values and edits are supported by the pure API. IME and grapheme-aware
-  editing are not implemented.
+  UTF-8 extended grapheme boundaries. Native hardware input currently supplies cooked ASCII;
+  Unicode values and edits are supported by the pure API. A system IME remains future work.
 - Left/Right, Home/End and Shift variants move or extend selection. Ctrl+Left/Right
   and Ctrl+Backspace/Delete use whitespace-delimited runs. Ctrl+A selects all.
-  Backspace/Delete remove the selection or adjacent scalar/run.
+  Backspace/Delete remove the selection or adjacent grapheme/run.
 - Ctrl+Z undoes; Ctrl+Y or Ctrl+Shift+Z redoes. Each successful text mutation is
   one action; history is bounded to 64 snapshots. A new edit clears redo.
   Replacing selected text with itself collapses selection without creating a
@@ -101,8 +100,9 @@ password/limit/read-only, resize, pointer selection/replacement, `[INPUT] ok`
 and guest exit 0. All guest launches use `tools/qemu_test.py`.
 
 [Multiline fields](multiline-input.md) extend the same editor with LF lines and
-a vertical viewport. Double/triple click, native pointer modifiers, grapheme/IME,
-clipboard and integration into migrated applications remain open. There is no
+a vertical viewport. [Double/triple click](click-selection.md) and extended grapheme editing
+are supported. Native pointer modifiers, system IME, clipboard and integration
+into migrated applications remain open. There is no
 local imitation of the system clipboard; Ctrl+C/V depend on M7.7.
 
 Validation on 28 October 2026: 47 component, 22 widget, 36 renderer, 13 native
@@ -111,3 +111,19 @@ input runs passed 20/20 markers in KVM and TCG; checkable regression 18/18,
 theme regression 7/7 plus exact dark/light/restored framebuffer comparisons,
 and GUI smoke 33/33. Forbidden markers were absent. ABI remains in sync at
 89 syscalls, 25 errno and 7 rights. The real input screenshot was inspected.
+
+## Extended grapheme editing
+
+Cursor placement, Left/Right, selection endpoints, Backspace/Delete and logical
+vertical columns now follow Unicode extended grapheme boundaries using the
+`no_std` `unicode-segmentation` 1.12.0 implementation. Combining sequences, emoji
+skin tones, ZWJ families and regional-indicator flags cannot be split by these
+operations. Arbitrary pointer byte offsets snap to the beginning of their cluster.
+Insertion/deletion that merges neighboring clusters moves the caret to a valid
+boundary after the resulting cluster. Undo/redo retain complete text/selection
+snapshots. Word commands still use whitespace runs (not linguistic words), now
+on whole clusters. `max_chars` remains the existing scalar-count limit.
+
+This is an editing boundary contract, not a new shaping engine or system IME.
+Host `dunit-widgets/tests/graphemes.rs` checks composition, deletion, navigation,
+vertical columns, selection, history and merging neighboring emoji clusters.

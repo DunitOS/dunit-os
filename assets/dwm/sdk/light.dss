@@ -37,9 +37,12 @@ $indicator-end: 1;
 $input-selection: #b9dcf5;
 $caret-width: 1;
 $caret-blink: 500ms;
+$input-multiclick-interval: 400ms;
+$input-multiclick-distance: 5;
 
 $input-scroll-step: 3;
 
+$scrollbar-hide-delay: 1200ms;
 $scrollbar-width: 12;
 $scrollbar-min-thumb: 24;
 $scrollbar-radius: 4;
@@ -78,3 +81,11 @@ $list-row-height: 28;
 
 $tree-indent: 20;
 $tree-toggle-width: 20;
+
+$table-header-height: 32;
+$table-column-width: 140;
+
+$file-picker-width: 600;
+$file-picker-height: 360;
+$file-picker-window-width: 640;
+$file-picker-window-height: 500;

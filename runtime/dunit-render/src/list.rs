@@ -12,6 +12,7 @@ pub struct TreeRowPaint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListRowPaint {
     pub tree: Option<TreeRowPaint>,
+    pub cells: Option<Vec<String>>,
     pub index: usize,
     pub text: String,
     pub selected: bool,
@@ -20,12 +21,16 @@ pub struct ListRowPaint {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListPaint {
+    pub table: Option<crate::TablePaint>,
     pub geometry: ListGeometry,
     pub focused: bool,
     pub rows: Vec<ListRowPaint>,
 }
 impl ListPaint {
     pub(crate) fn paint(&self, style: &Style, font: &Font, surface: &mut Surface) {
+        if let Some(table) = &self.table {
+            table.header(style, font, surface);
+        }
         surface.with_clip(self.geometry.viewport, |s| {
             for row in &self.rows {
                 let r = dunit_ui::Rect {
@@ -62,6 +67,10 @@ impl ListPaint {
                 };
                 if let Some(ink) = ink {
                     text_style.set("color", ink.clone());
+                }
+                if let (Some(table), Some(cells)) = (&self.table, &row.cells) {
+                    table.row(r, cells, &text_style, font, s, self.focused && row.current);
+                    continue;
                 }
                 let mut label = r;
                 if let Some(tree) = &row.tree {

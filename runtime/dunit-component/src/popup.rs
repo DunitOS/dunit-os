@@ -87,7 +87,7 @@ pub(crate) enum Trigger<M> {
     Select {
         options: Vec<SelectOption>,
         selected: Option<String>,
-        on_change: fn(String) -> M,
+        on_change: crate::callback::Callback<String, M>,
     },
 }
 impl<M: PartialEq> PartialEq for Trigger<M> {
@@ -105,7 +105,7 @@ impl<M: PartialEq> PartialEq for Trigger<M> {
                     selected: bv,
                     on_change: bf,
                 },
-            ) => a == b && av == bv && core::ptr::fn_addr_eq(*af, *bf),
+            ) => a == b && av == bv && af == bf,
             _ => false,
         }
     }
@@ -207,7 +207,7 @@ impl<M> View<M> {
             trigger: Trigger::Select {
                 options,
                 selected: selected.map(String::from),
-                on_change,
+                on_change: crate::callback::Callback::new(on_change),
             },
         });
         v

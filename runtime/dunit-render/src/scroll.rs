@@ -7,6 +7,8 @@ use dunit_widgets::ScrollAxis;
 /// Absolute document geometry, after ancestor scrolling has been applied.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollArea {
+    /// Paint-only idle state; hit testing and reserved gutter geometry remain.
+    pub bars_visible: bool,
     pub viewport: Rect,
     pub track: Option<Rect>,
     pub thumb: Option<Rect>,
@@ -44,6 +46,7 @@ impl ScrollArea {
             .filter(|_| usable && width > 0.)
             .and_then(|axis| axis.thumb(viewport.x, viewport.w, min));
         Self {
+            bars_visible: true,
             viewport,
             track: vertical.map(|_| Rect {
                 x: viewport.x + viewport.w,
@@ -74,6 +77,9 @@ impl ScrollArea {
 }
 
 pub(crate) fn paint(area: &ScrollArea, style: &Style, surface: &mut Surface) {
+    if !area.bars_visible {
+        return;
+    }
     for (rect, color) in [
         (area.track, style.color("scrollbar-track")),
         (area.horizontal_track, style.color("scrollbar-track")),

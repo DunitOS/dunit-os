@@ -25,19 +25,19 @@ Switch:disabled:checked { indicator-background: $accent; }
 Checkbox:disabled:checked, Radio:disabled:checked, Switch:disabled { indicator-mark-color: $muted; }
 
 // Input editing is retained by the SDK; every visual metric is theme supplied.
-Input, Textarea, Spinbox { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; placeholder-color: $muted; selection-color: $input-selection; caret-color: $text; caret-width: $caret-width; caret-blink: $caret-blink; scroll-step: $input-scroll-step; selection-scroll-interval: $selection-scroll-interval; selection-scroll-step: $selection-scroll-step; }
+Input, Textarea, Spinbox { background: $surface; color: $text; font-size: $font-size; padding: $space-small; radius: $radius; border-width: $border; border-color: $line; placeholder-color: $muted; selection-color: $input-selection; caret-color: $text; caret-width: $caret-width; caret-blink: $caret-blink; input-multiclick-interval: $input-multiclick-interval; input-multiclick-distance: $input-multiclick-distance; scroll-step: $input-scroll-step; selection-scroll-interval: $selection-scroll-interval; selection-scroll-step: $selection-scroll-step; }
 Input:hover, Input:focus, Textarea:hover, Textarea:focus, Spinbox:hover, Spinbox:focus { border-color: $accent; }
 Input:read-only, Textarea:read-only, Spinbox:read-only { background: $window-bg; }
 Input:disabled, Textarea:disabled, Spinbox:disabled { color: $muted; caret-color: $indicator-off; border-color: $line; }
 
 // Viewport behavior is SDK-owned; gutter and scrollbar appearance are themed.
-Scroll { background: $surface; padding: $space-small; border-width: $border; border-color: $line; radius: $radius; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; scroll-step: $scroll-step; }
+Scroll { background: $surface; padding: $space-small; border-width: $border; border-color: $line; radius: $radius; scrollbar-hide-delay: $scrollbar-hide-delay; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; scroll-step: $scroll-step; }
 Scroll:focus { border-color: $accent; }
 Scroll:hover { scrollbar-thumb: $accent; }
 Scroll:disabled { scrollbar-thumb: $line; }
 
 // Textarea uses the same themed bars and fixed gutters on both axes.
-Textarea { scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; }
+Textarea { scrollbar-hide-delay: $scrollbar-hide-delay; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-radius: $scrollbar-radius; scrollbar-track: $window-bg; scrollbar-thumb: $muted; }
 Textarea:hover, Textarea:focus { scrollbar-thumb: $accent; }
 Textarea:disabled { scrollbar-thumb: $line; }
 
@@ -85,8 +85,15 @@ Text.dialog-title { color: $accent; font-size: $font-title; }
 Row.dialog-actions { padding: 0; }
 Scroll.message-body { message-body-height: $message-body-height; }
 
-List, Tree { font-size: $font-size; color: $text; background: $surface; border-width: $border; border-color: $line; padding: $space-small; list-row-height: $list-row-height; list-selection-background: $accent; list-selection-color: $window-bg; list-disabled-color: $muted; list-current-color: $text; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-track: $line; scrollbar-thumb: $accent; scrollbar-radius: $radius; scroll-step: $scroll-step; tooltip-delay: $tooltip-delay; }
-List:focus, Tree:focus { border-color: $accent; }
-List:disabled, Tree:disabled { color: $muted; border-color: $line; }
+List, Tree, Table { font-size: $font-size; color: $text; background: $surface; border-width: $border; border-color: $line; padding: $space-small; list-row-height: $list-row-height; list-selection-background: $accent; list-selection-color: $window-bg; list-disabled-color: $muted; list-current-color: $text; scrollbar-hide-delay: $scrollbar-hide-delay; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-track: $line; scrollbar-thumb: $accent; scrollbar-radius: $radius; scroll-step: $scroll-step; tooltip-delay: $tooltip-delay; }
+List:focus, Tree:focus, Table:focus { border-color: $accent; }
+List:disabled, Tree:disabled, Table:disabled { color: $muted; border-color: $line; }
 
 Tree { tree-indent: $tree-indent; tree-toggle-width: $tree-toggle-width; tree-open-mark: "-"; tree-closed-mark: "+"; }
+
+Table { table-header-height: $table-header-height; table-column-width: $table-column-width; table-header-background: $line; table-sort-asc-mark: "+"; table-sort-desc-mark: "-"; }
+
+Column.file-picker-dialog { width: $file-picker-width; }
+Column.file-picker-body { height: $file-picker-height; clip: rect; }
+Input.file-picker-location, Input.file-picker-name { width: grow; }
+Table.file-picker-files { width: grow; height: grow; }

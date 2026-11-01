@@ -66,6 +66,7 @@ impl Renderer {
         })
     }
     fn set_scroll_axis(&mut self, key: &str, direction: ScrollDirection, axis: ScrollAxis) -> bool {
+        self.scroll_activity(key);
         let generic = match direction {
             ScrollDirection::Horizontal => self.scroll_axes_x.get_mut(key),
             ScrollDirection::Vertical => self.scroll_axes.get_mut(key),
@@ -187,6 +188,18 @@ impl Renderer {
                     .filter(|h| h.is_finite() && *h > 0.)
                     .ok_or(UiError::InvalidLayout)?;
                 height = list.items.len() as f32 * row;
+                if let Some(t) = &view.table {
+                    width = t
+                        .model
+                        .widths(
+                            styles[id.0 as usize]
+                                .number("table-column-width")
+                                .ok_or(UiError::InvalidLayout)?,
+                        )
+                        .ok_or(UiError::InvalidLayout)?
+                        .iter()
+                        .sum();
+                }
                 if !height.is_finite() {
                     return Err(UiError::InvalidLayout);
                 }
@@ -204,7 +217,13 @@ impl Renderer {
                 y.offset = 0.;
             }
             if let Some(list) = view.list.as_ref().filter(|_| enabled_y) {
-                let current = list.selection.current.as_deref().and_then(|key| {
+                let active = view
+                    .rename
+                    .as_ref()
+                    .and_then(|r| r.state.as_ref())
+                    .map(|s| s.row.as_str())
+                    .or(list.selection.current.as_deref());
+                let current = active.and_then(|key| {
                     list.items
                         .iter()
                         .position(|i| i.key == key)
@@ -217,6 +236,7 @@ impl Renderer {
                     .is_none_or(|&s| s != (viewport.w, viewport.h));
                 if current != previous
                     || changed
+                    || view.rename.as_ref().is_some_and(|r| r.state.is_some())
                     || (view.interaction.focused && self.scroll_focus.as_deref() != Some(key))
                 {
                     if let Some(index) = current.map(|(_, i)| i) {
@@ -225,7 +245,34 @@ impl Renderer {
                     }
                 }
             }
-            if let Some(focus) = focused.filter(|&f| within(tree, f, id)) {
+            if let Some(t) = view.table.as_ref().filter(|_| enabled_x) {
+                let column = view
+                    .rename
+                    .as_ref()
+                    .and_then(|r| r.state.as_ref())
+                    .and_then(|s| s.column.as_deref())
+                    .or(t.column.as_deref())
+                    .and_then(|c| t.model.column(c))
+                    .unwrap_or(0);
+                let old = self.previous.as_ref().and_then(|p| {
+                    p.tree.by_name(key).and_then(|id| {
+                        p.lists[id.0 as usize]
+                            .as_ref()?
+                            .table
+                            .as_ref()
+                            .map(|t| t.current_column)
+                    })
+                });
+                if old != Some(column) || self.scroll_focus.as_deref() != Some(key) {
+                    let widths = t
+                        .model
+                        .widths(styles[id.0 as usize].number("table-column-width").unwrap())
+                        .ok_or(UiError::InvalidLayout)?;
+                    let left = widths[..column].iter().sum::<f32>();
+                    x.reveal(left, left + widths[column]);
+                }
+            }
+            if let Some(focus) = focused.filter(|&f| view.list.is_none() && within(tree, f, id)) {
                 let changed = self
                     .scroll_sizes
                     .get(key)
@@ -391,6 +438,7 @@ impl Renderer {
         }
         if let Some((key, direction, grab)) = self.scroll_capture.clone() {
             if event == PointerEvent::Up {
+                self.scroll_activity(&key);
                 self.scroll_capture = None;
                 return Some(key);
             }
@@ -416,6 +464,7 @@ impl Renderer {
             return None;
         }
         let key: String = self.hit_key(x, y)?.into();
+        self.scroll_activity(&key);
         let input_gutter = self.previous.as_ref().is_some_and(|p| {
             let Some(id) = p.tree.by_name(&key) else {
                 return false;

@@ -1,8 +1,14 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 use dunit_render::{paint_clipped_with_lists, ScrollArea, Surface, TextInput};
+#[path = "collection_layout.rs"]
+mod collection_layout;
+#[path = "input_click_style.rs"]
+mod input_click_style;
 #[path = "input_scroll.rs"]
 mod input_scroll;
+#[path = "input_visual.rs"]
+mod input_visual;
 #[path = "list_render.rs"]
 mod list_render;
 #[path = "overlays.rs"]
@@ -11,6 +17,8 @@ mod overlays;
 mod progress_render;
 #[path = "scroll.rs"]
 mod scroll;
+#[path = "scroll_visibility.rs"]
+mod scroll_visibility;
 #[path = "workspace_layout.rs"]
 mod workspace_layout;
 use dunit_style::{cascade::NodeStyle, Cascade, Style};
@@ -86,6 +94,8 @@ pub struct Renderer {
     input_offsets: BTreeMap<String, (f32, f32)>,
     scroll_focus: Option<String>,
     scroll_sizes: BTreeMap<String, (f32, f32)>,
+    scroll_clock: Option<u64>,
+    scroll_visibility: BTreeMap<String, scroll_visibility::Visibility>,
 }
 impl Renderer {
     pub fn new(font: Font, cascade: Cascade, background: Color) -> Self {
@@ -104,6 +114,8 @@ impl Renderer {
             input_offsets: BTreeMap::new(),
             scroll_focus: None,
             scroll_sizes: BTreeMap::new(),
+            scroll_clock: None,
+            scroll_visibility: BTreeMap::new(),
         }
     }
     pub fn slider_geometry(&self, key: &str) -> Option<crate::SliderGeometry> {
@@ -125,6 +137,9 @@ impl Renderer {
             x,
             y,
         )
+    }
+    pub fn scroll_capture_key(&self) -> Option<&str> {
+        self.scroll_capture.as_ref().map(|c| c.0.as_str())
     }
     pub fn cancel_scroll_capture(&mut self) -> bool {
         self.scroll_capture.take().is_some()
@@ -222,6 +237,25 @@ impl Renderer {
     }
     /// Apply a fully validated candidate. A font-path change also invalidates
     /// measurement; application state and stable view keys remain untouched.
+    /// Preflight a candidate against the actual view without changing the
+    /// published canvas, hit geometry, scroll state or active transitions.
+    /// Reload is rare; a temporary renderer also validates final clipped geometry.
+    pub fn validate_theme_application<C: crate::Component>(
+        &self,
+        app: &crate::Application<C>,
+        theme: &crate::Theme,
+        font: Option<&Font>,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
+        let mut candidate = Self::new(
+            font.unwrap_or(&self.font).clone(),
+            theme.cascade.clone(),
+            theme.background,
+        );
+        candidate.set_motion_enabled(false);
+        candidate.render_application(app, width, height).map(|_| ())
+    }
     pub fn set_theme(&mut self, theme: crate::Theme, font: Option<Font>) {
         if let Some(font) = font {
             self.font = font;
@@ -355,24 +389,7 @@ impl Renderer {
             .motion
             .styles(&tree, &targets, old, now, self.motion_enabled);
         let tree = container_padding(&tree, &styles, &views)?;
-        let fm = FontMeasure { font: &self.font };
-        let measure = |id: dunit_ui::NodeId| {
-            let n = tree.node(id);
-            Widget::from_tag(n.kind.tag())
-                .map(|w| {
-                    intrinsic_size(
-                        w,
-                        if views[id.0 as usize].input.is_some() {
-                            None
-                        } else {
-                            n.text.as_deref()
-                        },
-                        &styles[id.0 as usize],
-                        &fm,
-                    )
-                })
-                .unwrap_or((0.0, 0.0))
-        };
+        let measure = |id| measure_widget(&self.font, &tree, &styles, &views, id);
         let mut layout = layout_measured(&tree, width as f32, height as f32, &measure);
         self.layout_splitters(&tree, &mut layout, &styles, &views, &measure)?;
         if tree.iter().any(|n| {
@@ -382,6 +399,15 @@ impl Renderer {
             return Err(UiError::InvalidLayout);
         }
         let mut areas = self.prepare_scroll(&tree, &mut layout, &styles, &views)?;
+        let measure_after = |id| measure_widget(&self.font, &tree, &styles, &views, id);
+        self.layout_collection_editors(
+            &tree,
+            &mut layout,
+            &styles,
+            &views,
+            &areas,
+            &measure_after,
+        )?;
         let inputs: Vec<Option<TextInput>> = tree
             .iter()
             .map(|n| {
@@ -417,6 +443,8 @@ impl Renderer {
                         value: input.editor.text().into(),
                         placeholder: input.options.placeholder.clone(),
                         password: input.options.password,
+                        soft_wrap: input.options.soft_wrap,
+                        affinity: input.affinity,
                         cursor: input.editor.cursor(),
                         anchor: input.editor.anchor(),
                         focused: view.interaction.focused && !view.interaction.disabled,
@@ -465,6 +493,8 @@ impl Renderer {
                             || p.cursor != paint.cursor
                             || p.anchor != paint.anchor
                             || p.multiline != paint.multiline
+                            || p.soft_wrap != paint.soft_wrap
+                            || p.affinity != paint.affinity
                             || p.password != paint.password
                             || (!p.focused && paint.focused)
                     });
@@ -516,6 +546,7 @@ impl Renderer {
             })
             .collect();
         self.validate_scroll_capture(&tree, &areas);
+        self.prepare_scroll_visibility(&tree, &styles, &mut areas, &views, now);
         let input_activity = views
             .iter()
             .map(|v| v.input.as_ref().map_or(0, |i| i.caret_revision))
@@ -675,6 +706,7 @@ fn container_padding<M>(tree: &Tree, styles: &[Style], views: &[&View<M>]) -> Re
     let mut builder = TreeBuilder::new();
     for n in tree.iter() {
         let mut attrs = n.attrs.clone();
+        crate::layout_style::apply(&mut attrs, &styles[n.id.0 as usize])?;
         if n.kind.tag() == "ToolbarSeparator" {
             attrs.width = dunit_ui::Sizing::Px(
                 styles[n.id.0 as usize]
@@ -719,10 +751,20 @@ fn container_padding<M>(tree: &Tree, styles: &[Style], views: &[&View<M>]) -> Re
             let border = style.number("border-width").unwrap_or(0.);
             attrs.padding = Edges {
                 top: border,
-                bottom: border,
+                bottom: border
+                    + if views[n.id.0 as usize].scroll_axes.horizontal() {
+                        style.number("scrollbar-width").unwrap_or(0.)
+                    } else {
+                        0.
+                    },
                 left: border,
                 right: border + style.number("scrollbar-width").unwrap_or(0.),
             };
+        }
+        if views[n.id.0 as usize].table.is_some() {
+            attrs.padding.top += styles[n.id.0 as usize]
+                .number("table-header-height")
+                .ok_or(UiError::InvalidLayout)?;
         }
         if n.kind == dunit_ui::Kind::Scroll {
             let style = &styles[n.id.0 as usize];
@@ -857,4 +899,28 @@ fn visible_rect(
         w: (right - left).max(0.),
         h: (bottom - top).max(0.),
     })
+}
+
+fn measure_widget<M>(
+    font: &Font,
+    tree: &Tree,
+    styles: &[Style],
+    views: &[&View<M>],
+    id: dunit_ui::NodeId,
+) -> (f32, f32) {
+    let n = tree.node(id);
+    Widget::from_tag(n.kind.tag())
+        .map(|w| {
+            intrinsic_size(
+                w,
+                if views[id.0 as usize].input.is_some() {
+                    None
+                } else {
+                    n.text.as_deref()
+                },
+                &styles[id.0 as usize],
+                &FontMeasure { font },
+            )
+        })
+        .unwrap_or((0., 0.))
 }

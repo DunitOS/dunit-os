@@ -1,0 +1,920 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /sdk-collections.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[COLLECTIONS] ready",
+          "timeout": 45
+        },
+        {
+          "wait_marker": "[COLLECTIONS] idle bars hidden",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] focus",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] selection",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "f4"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] sort",
+          "timeout": 45
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 60,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 76,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] pointer header descending",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] pointer header ascending",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "f2"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] rename begin",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] rename edit",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-collections-rename.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] rename commit",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] virtual end",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-collections-table.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] resize",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "o"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] picker",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-collections-picker.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] overwrite",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-collections-overwrite.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "esc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] decline",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] overwrite again",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ret"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] accepted",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "c"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] cancel picker",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "esc"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] cancelled",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "t"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] gestures ready",
+          "timeout": 45
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 38,
+            "y": 88,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] single click",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] double word",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] triple line",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-collections-selection.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] selection replaced",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "z"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] selection undo",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "w"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap ready",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "home"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap home",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap visual end",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap visual down",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "shift"
+              },
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap visual selection",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap document end",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] wrap resize",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-collections-wrap.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "q"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[COLLECTIONS] ok",
+          "timeout": 45
+        },
+        {
+          "wait_marker": "[WIDGETS] ok",
+          "timeout": 45
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[DF-TEST] syscall+irq flags preserved",
+    "[GUI-EXIT] app=sdk_collections_fixture kind=0 code=0",
+    {
+      "marker": "[COLLECTIONS] ready",
+      "claim": "ready",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] focus",
+      "claim": "focus",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] selection",
+      "claim": "selection",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] sort",
+      "claim": "sort",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] rename begin",
+      "claim": "rename begin",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] rename edit",
+      "claim": "rename edit",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] rename commit",
+      "claim": "rename commit",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] virtual end",
+      "claim": "virtual end",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] resize",
+      "claim": "resize",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] picker",
+      "claim": "picker",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] overwrite",
+      "claim": "overwrite",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] decline",
+      "claim": "decline",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] overwrite again",
+      "claim": "overwrite again",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] accepted",
+      "claim": "accepted",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] cancel picker",
+      "claim": "cancel picker",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] cancelled",
+      "claim": "cancelled",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] ok",
+      "claim": "ok",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] idle bars hidden",
+      "claim": "Native wait-set hides idle scrollbars without changing viewport geometry",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] gestures ready",
+      "claim": "Native text gesture: gestures ready",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] single click",
+      "claim": "Native text gesture: single click",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] double word",
+      "claim": "Native text gesture: double word",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] triple line",
+      "claim": "Native text gesture: triple line",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] selection replaced",
+      "claim": "Native text gesture: selection replaced",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] selection undo",
+      "claim": "Native text gesture: selection undo",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap ready",
+      "claim": "Shared soft-wrap behavior: wrap ready",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap home",
+      "claim": "Shared soft-wrap behavior: wrap home",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap visual end",
+      "claim": "Shared soft-wrap behavior: wrap visual end",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap visual down",
+      "claim": "Shared soft-wrap behavior: wrap visual down",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap visual selection",
+      "claim": "Shared soft-wrap behavior: wrap visual selection",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap document end",
+      "claim": "Shared soft-wrap behavior: wrap document end",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] wrap resize",
+      "claim": "Shared soft-wrap behavior: wrap resize",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    "[WIDGETS] ok",
+    {
+      "marker": "[COLLECTIONS] pointer header descending",
+      "claim": "Real table header pointer sort toggle: pointer header descending",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[COLLECTIONS] pointer header ascending",
+      "claim": "Real table header pointer sort toggle: pointer header ascending",
+      "source": "tools/fixtures/sdk_collections.rs"
+    },
+    {
+      "marker": "[THREAD-TEST] OK",
+      "claim": "Intentional isolated boot fault regressions complete successfully before native GUI execution",
+      "source": "kernel/src/command.rs; userspace/system_apps/thread_test/src/main.rs; userspace/system_apps/vm_test/src/main.rs"
+    },
+    {
+      "marker": "[VM-TEST] OK",
+      "claim": "Intentional isolated boot fault regressions complete successfully before native GUI execution",
+      "source": "kernel/src/command.rs; userspace/system_apps/thread_test/src/main.rs; userspace/system_apps/vm_test/src/main.rs"
+    },
+    {
+      "marker": "[USER-FAULT-IRQ] OK kernel interrupt preserved fault return",
+      "claim": "Intentional isolated boot fault regressions complete successfully before native GUI execution",
+      "source": "kernel/src/command.rs; userspace/system_apps/thread_test/src/main.rs; userspace/system_apps/vm_test/src/main.rs"
+    }
+  ],
+  "forbidden": [
+    "[PANIC]",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop",
+      "why": "Boot thread/VM negative tests intentionally fault isolated children before terminal readiness; every user fault during native widget execution remains forbidden. Matches sdk_scroll/sdk_scroll_xy/sdk_autoscroll contract scope."
+    },
+    "panicked at",
+    "[SDK] PANIC",
+    "application failed:",
+    "gui_server: FAIL",
+    "gui_server: PANIC"
+  ]
+}

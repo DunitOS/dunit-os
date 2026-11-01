@@ -17,6 +17,8 @@ fn font() -> Font {
 }
 fn input(value: &str) -> TextInput {
     TextInput {
+        soft_wrap: false,
+        affinity: dunit_render::CaretAffinity::Downstream,
         spinbox: None,
         value: value.into(),
         placeholder: "Hint".into(),
@@ -791,4 +793,42 @@ fn collapsed_textarea_content_suppresses_bars_and_preserves_padding_and_border()
             }
         }
     }
+}
+
+#[test]
+fn wrapped_paint_and_both_caret_affinities_match_explicit_line_reference() {
+    let f = font();
+    let s = style();
+    let mut wrapped = input("abcd efgh ijkl mnop qrst");
+    wrapped.multiline = true;
+    wrapped.soft_wrap = true;
+    let lines = wrapped.visual_lines(&f, &s, rect());
+    assert!(lines.lines.len() > 2);
+    let reference_text = lines
+        .lines
+        .iter()
+        .map(|line| &wrapped.value[line.start..line.end])
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut reference = input(&reference_text);
+    reference.multiline = true;
+    assert_eq!(draw(&wrapped), draw(&reference));
+    let boundary = lines.lines[0].end;
+    for affinity in [
+        dunit_render::CaretAffinity::Upstream,
+        dunit_render::CaretAffinity::Downstream,
+    ] {
+        wrapped.focused = true;
+        wrapped.caret_visible = true;
+        wrapped.cursor = boundary;
+        wrapped.anchor = boundary;
+        wrapped.affinity = affinity;
+        reference.focused = true;
+        reference.caret_visible = true;
+        reference.cursor =
+            boundary + usize::from(affinity == dunit_render::CaretAffinity::Downstream);
+        reference.anchor = reference.cursor;
+        assert_eq!(draw(&wrapped), draw(&reference));
+    }
+    assert_eq!(wrapped.value, "abcd efgh ijkl mnop qrst");
 }

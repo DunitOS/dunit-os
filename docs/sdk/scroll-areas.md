@@ -61,7 +61,9 @@ the insertion point. Blink/no-op updates retain manual viewport offsets.
 
 Shared dark/light DSS defines `scroll-step` (content pixels for Scroll),
 `scrollbar-width`, `scrollbar-min-thumb`, `scrollbar-radius`, `scrollbar-track`
-and `scrollbar-thumb`. Dimensions/steps must be finite and within 0..1024;
+and `scrollbar-thumb`. `scrollbar-hide-delay` is a duration from 0 to 60000ms;
+zero keeps overflowing bars visible. Dark/light profiles use 1200ms.
+Dimensions/steps must be finite and within 0..1024;
 colors must be valid colors. A zero step disables line/wheel scrolling; zero
 width hides the bar. Keyboard paging remains available. The existing textarea
 vertical `scroll-step` is in logical lines; its horizontal API step is
@@ -69,14 +71,22 @@ vertical `scroll-step` is in logical lines; its horizontal API step is
 
 A fixed themed gutter is reserved inside the scroll border and padding even
 when content fits, avoiding reflow feedback as the scrollbar appears. Each bar
-hides automatically when its axis has no overflow. This is not timed
-fade/autohide. Each enabled axis reserves its own gutter. Both Textarea axes
+hides automatically when its axis has no overflow. With a monotonic render
+clock, both bars also hide after the configured idle delay. Wheel, keyboard,
+caret reveal, pointer activity through the viewport and scrollbar gestures
+restart the deadline; a held thumb remains visible. Pointer activity on a child
+wakes its scrollable ancestors. Hiding changes painting only: gutter size,
+viewport, offsets, clipping and track/thumb hit geometry stay unchanged. A
+hidden gutter can therefore reveal and grab its thumb in the same gesture.
+There is no fade or repeated animation sampling: the native wait set schedules
+a single deadline and redraws once when it expires. Immediate `Renderer::render`
+without a clock remains deterministic and keeps overflowing bars visible.
+Each enabled axis reserves its own gutter. Both Textarea axes
 use the shared theme by default; zero scrollbar-width hides the bars and removes
 the gutters. With a collapsed content viewport the bars are suppressed to avoid
 painting over the field border. Timed
 [selection edge autoscroll](selection-autoscroll.md) is available for Input and
-Textarea. Timed auto-hide and virtualized rows remain separate
-roadmap work. This container lays out its complete bounded View tree;
+Textarea. This container lays out its complete bounded View tree;
 it does not claim the 10,000-row virtualization criterion.
 
 `Renderer::scroll_offset`, `scroll_viewport`, `scroll_track`, `scroll_thumb`,
@@ -85,7 +95,11 @@ path. The `*_x` diagnostics and `scroll_by_x` address the horizontal axis;
 `scroll_wheel_axis` and `scroll_key_axis` take `ScrollDirection`. Textarea uses
 the same controller API and bar geometry. Text editing keys keep priority over
 viewport navigation. `ComponentWindow` exposes offset/viewport/thumb diagnostics and routes
-native events automatically.
+native events automatically. Pure callers use `scroll_activity_at(target, now)`
+to announce pointer/keyboard activity and `scroll_hide_deadline_ms()` to schedule
+the next render on their own monotonic wait set. `scrollbars_visible(key)`
+reports the last painted visibility; geometry diagnostics remain available while
+paint is hidden.
 
 ## Verification
 
@@ -94,6 +108,7 @@ cargo test --manifest-path runtime/dunit-ui/Cargo.toml
 cargo test --manifest-path runtime/dunit-widgets/Cargo.toml
 cargo test --manifest-path runtime/dunit-render/Cargo.toml
 cargo test --manifest-path runtime/dunit-component/Cargo.toml
+cargo test --manifest-path runtime/dunit-component/Cargo.toml --test scroll_visibility
 python3 tools/test_sdk_gui_fixture.py scroll --accel kvm
 python3 tools/test_sdk_gui_fixture.py scroll --reuse-image --accel tcg
 ```

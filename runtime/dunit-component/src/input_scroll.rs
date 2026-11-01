@@ -95,6 +95,15 @@ impl Renderer {
     /// caret fitting on a short line cannot reset the other drag axis.
     /// Unlike the timer methods this also supports the initial unfocused press.
     pub fn input_drag_index_at(&mut self, key: &str, x: f32, y: f32) -> Option<usize> {
+        self.input_drag_position_at(key, x, y)
+            .map(|position| position.index)
+    }
+    pub fn input_drag_position_at(
+        &mut self,
+        key: &str,
+        x: f32,
+        y: f32,
+    ) -> Option<dunit_render::TextPosition> {
         let DragInput {
             id,
             input,
@@ -111,7 +120,7 @@ impl Renderer {
                 input
             });
         let input = adjusted.as_ref().unwrap_or(input);
-        let index = input.hit_index_at(
+        let index = input.hit_position_at(
             &self.font,
             &p.styles[id.0 as usize],
             p.layout.rect(id),
@@ -153,6 +162,15 @@ impl Renderer {
     /// viewport. The application extends its selection separately; text,
     /// history, painted pixels and painted hit geometry are never changed here.
     pub fn input_autoscroll_step(&mut self, key: &str, x: f32, y: f32) -> Option<usize> {
+        self.input_autoscroll_position_step(key, x, y)
+            .map(|position| position.index)
+    }
+    pub fn input_autoscroll_position_step(
+        &mut self,
+        key: &str,
+        x: f32,
+        y: f32,
+    ) -> Option<dunit_render::TextPosition> {
         self.input_autoscroll_ms(key, x, y)?;
         let DragInput {
             id,
@@ -172,7 +190,7 @@ impl Renderer {
         input.scroll_x = axis_x.offset;
         input.scroll_y = axis_y.offset;
         let (x, y) = clamped_point(viewport, x, y);
-        let index = input.hit_index_at(&self.font, style, rect, x, y);
+        let index = input.hit_position_at(&self.font, style, rect, x, y);
         self.input_offsets
             .insert(String::from(key), (input.scroll_x, input.scroll_y));
         Some(index)

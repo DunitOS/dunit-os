@@ -45,3 +45,8 @@ pub type PaintResult = core::result::Result<(), alloc::collections::TryReserveEr
 mod list;
 pub use list::{ListPaint, ListRowPaint, TreeRowPaint};
 pub use paint::paint_clipped_with_lists;
+mod table;
+pub use table::TablePaint;
+
+mod visual_lines;
+pub use visual_lines::{CaretAffinity, TextPosition, VisualLine, VisualLines};

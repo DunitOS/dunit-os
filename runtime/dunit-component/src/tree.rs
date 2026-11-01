@@ -50,7 +50,9 @@ impl<M> View<M> {
             items,
             selection: state.selection,
             mode,
-            on_change: crate::list::SelectionHandler::Tree(on_change),
+            on_change: crate::list::SelectionHandler::Tree(crate::callback::Callback::new(
+                on_change,
+            )),
         });
         view.tree = Some(TreeBinding {
             model,

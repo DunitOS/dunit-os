@@ -31,7 +31,7 @@ pub struct SpinboxRange {
 pub(crate) struct SpinboxBinding<M> {
     pub value: i64,
     pub options: SpinboxOptions,
-    pub on_change: fn(i64) -> M,
+    pub on_change: crate::callback::Callback<i64, M>,
     pub pressed: Option<SpinButton>,
 }
 impl<M> SpinboxBinding<M> {
@@ -46,7 +46,7 @@ impl<M> PartialEq for SpinboxBinding<M> {
         self.value == other.value
             && self.options == other.options
             && self.pressed == other.pressed
-            && core::ptr::fn_addr_eq(self.on_change, other.on_change)
+            && self.on_change == other.on_change
     }
 }
 pub(crate) fn valid_draft(text: &str) -> bool {
@@ -69,6 +69,9 @@ impl<M> View<M> {
             alloc::vec::Vec::new(),
         );
         view.input = Some(crate::input::InputBinding {
+            affinity: dunit_render::CaretAffinity::Downstream,
+            visual_goal: None,
+            owner: None,
             label: label.into(),
             options: InputOptions {
                 max_chars: 20,
@@ -84,7 +87,7 @@ impl<M> View<M> {
         view.spinbox = Some(SpinboxBinding {
             value,
             options,
-            on_change,
+            on_change: crate::callback::Callback::new(on_change),
             pressed: None,
         });
         view
@@ -125,7 +128,7 @@ impl<C: Component> Application<C> {
             let base = s.draft_value(input.editor.text());
             let value = command.map_or(base, |c| s.options.range.command(base, c));
             if value != s.value {
-                message = Some((s.on_change)(value));
+                message = Some(s.on_change.call(value));
             }
         });
         let result = if let Some(message) = message {

@@ -35,6 +35,13 @@ impl Key {
 /// owns button interaction; this description owns identity, configuration and messages.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View<Msg> {
+    pub(crate) capture:
+        Option<crate::callback::Callback<crate::UiEvent, crate::EventResponse<Msg>>>,
+    pub(crate) bubble: Option<crate::callback::Callback<crate::UiEvent, crate::EventResponse<Msg>>>,
+    pub(crate) tab_index: i32,
+    pub(crate) mnemonic: Option<char>,
+    pub(crate) rename: Option<crate::rename::RenameBinding<Msg>>,
+    pub(crate) table: Option<crate::table::TableBinding>,
     pub(crate) tree: Option<crate::tree::TreeBinding>,
     pub(crate) list: Option<crate::list::ListBinding<Msg>>,
     pub(crate) workspace: Option<crate::workspace::WorkspaceRole>,
@@ -52,6 +59,7 @@ pub struct View<Msg> {
     pub(crate) menu_bar: bool,
     pub(crate) tooltip: Option<String>,
     pub(crate) activation: Option<Msg>,
+    pub(crate) submit: Option<Msg>,
     pub(crate) interaction: dunit_widgets::Interaction,
     pub(crate) radio_group: Option<String>,
     pub(crate) spinbox: Option<crate::spinbox::SpinboxBinding<Msg>>,
@@ -69,6 +77,12 @@ impl<Msg> View<Msg> {
         children: Vec<Self>,
     ) -> Self {
         Self {
+            capture: None,
+            bubble: None,
+            tab_index: 0,
+            mnemonic: None,
+            rename: None,
+            table: None,
             tree: None,
             list: None,
             workspace: None,
@@ -82,6 +96,7 @@ impl<Msg> View<Msg> {
             classes: Vec::new(),
             bindings: Vec::new(),
             activation: None,
+            submit: None,
             popup: None,
             context_menu: None,
             menu_bar: false,
@@ -182,10 +197,13 @@ impl<Msg> View<Msg> {
             Vec::new(),
         );
         view.input = Some(crate::input::InputBinding {
+            affinity: dunit_render::CaretAffinity::Downstream,
+            visual_goal: None,
+            owner: None,
             label: label.into(),
             options,
             editor: crate::TextEditor::new(value),
-            on_change: Some(on_change),
+            on_change: Some(crate::callback::Callback::new(on_change)),
             dragging: false,
             caret_visible: true,
             caret_revision: 0,
@@ -194,6 +212,10 @@ impl<Msg> View<Msg> {
     }
     /// LF-delimited, controlled multiline field. It fills available height by
     /// default; explicit layout may choose a fixed viewport instead.
+    pub fn on_submit(mut self, message: Msg) -> Self {
+        self.submit = Some(message);
+        self
+    }
     pub fn text_area(
         key: impl Into<String>,
         label: impl Into<String>,
@@ -215,6 +237,15 @@ impl<Msg> View<Msg> {
             self.children[1].interaction.disabled = disabled;
         }
 
+        for child in &mut self.children {
+            if child
+                .input
+                .as_ref()
+                .is_some_and(|i| i.owner.as_deref() == Some(&self.key))
+            {
+                child.interaction.disabled = disabled;
+            }
+        }
         self.interaction.disabled = disabled;
         self
     }
@@ -222,6 +253,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.table.is_some() {
+            return Some("grid");
+        }
         if self.tree.is_some() {
             return Some("tree");
         }
@@ -345,6 +379,17 @@ impl<Msg> View<Msg> {
         self.bindings.push((key, message));
         self
     }
+    /// Negative values skip Tab traversal; positive values precede default
+    /// document order, with stable document order for ties. Pointer focus is unchanged.
+    pub fn tab_index(mut self, index: i32) -> Self {
+        self.tab_index = index;
+        self
+    }
+    /// Alt+character focuses the control and activates its action when present.
+    pub fn mnemonic(mut self, character: char) -> Self {
+        self.mnemonic = Some(character.to_ascii_lowercase());
+        self
+    }
     pub fn key(&self) -> &str {
         &self.key
     }
@@ -373,9 +418,26 @@ impl<Msg> View<Msg> {
         if nodes.iter().filter(|v| v.dialog.is_some()).count() > 1 {
             return Err(UiError::InvalidWorkspace);
         }
+        if nodes
+            .iter()
+            .filter(|v| v.rename.as_ref().is_some_and(|r| r.state.is_some()))
+            .count()
+            > 1
+        {
+            return Err(UiError::InvalidRename);
+        }
         for node in nodes {
-            if let Some(ch) = node.popup.as_ref().and_then(|p| p.mnemonic) {
-                if !mnemonics.insert(ch) {
+            if let Some(ch) = node
+                .mnemonic
+                .or_else(|| node.popup.as_ref().and_then(|p| p.mnemonic))
+            {
+                if !node.focusable() || !ch.is_ascii_alphanumeric() {
+                    return Err(UiError::InvalidPopup);
+                }
+                let scope = self
+                    .ancestor_with(&node.key, &|v| v.dialog.is_some())
+                    .map_or(self.key.as_str(), |v| v.key.as_str());
+                if !mnemonics.insert((scope, ch)) {
                     return Err(UiError::InvalidPopup);
                 }
             }
@@ -388,6 +450,16 @@ impl<Msg> View<Msg> {
         names: &mut BTreeSet<&'a str>,
         checked_groups: &mut BTreeSet<&'a str>,
     ) -> Result<()> {
+        if self.submit.is_some()
+            && !self
+                .input
+                .as_ref()
+                .is_some_and(|i| !i.editor.is_multiline())
+        {
+            return Err(UiError::InvalidInput);
+        }
+        self.check_rename()?;
+        self.check_table()?;
         self.check_tree()?;
         self.check_list()?;
         self.check_popups()?;
@@ -442,7 +514,8 @@ impl<Msg> View<Msg> {
             } else {
                 crate::TextEditor::valid_text
             };
-            if input.editor.is_multiline() != (self.kind.tag() == "Textarea")
+            if (input.options.soft_wrap && !input.editor.is_multiline())
+                || input.editor.is_multiline() != (self.kind.tag() == "Textarea")
                 || !valid(value)
                 || !valid(&input.options.placeholder)
                 || (input.editor.is_multiline() && input.options.password)

@@ -7,7 +7,7 @@ pub(crate) struct SliderBinding<M> {
     pub label: String,
     pub value: i64,
     pub options: SliderOptions,
-    pub on_change: fn(i64) -> M,
+    pub on_change: crate::callback::Callback<i64, M>,
     pub grab: f32,
 }
 impl<M> PartialEq for SliderBinding<M> {
@@ -15,7 +15,7 @@ impl<M> PartialEq for SliderBinding<M> {
         self.label == other.label
             && self.value == other.value
             && self.options == other.options
-            && core::ptr::fn_addr_eq(self.on_change, other.on_change)
+            && self.on_change == other.on_change
             && self.grab == other.grab
     }
 }
@@ -45,7 +45,7 @@ impl<M> View<M> {
             label: label.into(),
             value,
             options,
-            on_change,
+            on_change: crate::callback::Callback::new(on_change),
             grab: 0.,
         });
         view
@@ -92,7 +92,7 @@ impl<C: Component> Application<C> {
                 consumed = true;
                 let value = s.options.command(s.value, command);
                 if value != s.value {
-                    message = Some((s.on_change)(value));
+                    message = Some(s.on_change.call(value));
                 }
             }
         });
@@ -156,7 +156,7 @@ impl<C: Component> Application<C> {
                     if let Some(fraction) = geometry.fraction(coordinate, s.grab) {
                         let value = s.options.at_fraction(fraction);
                         if value != s.value {
-                            message = Some((s.on_change)(value));
+                            message = Some(s.on_change.call(value));
                         }
                     }
                 }
