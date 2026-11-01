@@ -212,3 +212,19 @@ fn translate_subtree_moves_descendants_without_touching_siblings_or_sizes() {
     assert!(!lay.translate_subtree(&tree, group, f32::MAX, 0.));
     assert_eq!(lay.rect(leaf), saved, "overflow must fail atomically");
 }
+
+#[test]
+fn grid_honors_child_constraints_sizing_and_alignment_within_fixed_cells() {
+    let (tree, lay) = r(
+        r#"Grid columns=2 spacing=10 align=end cross-align=center {
+            Stack #a width=grow max-width=30 height=20
+            Stack #b width=50% height=40
+        }"#,
+        210.0,
+        100.0,
+    );
+    let a = lay.rect(tree.by_name("a").unwrap());
+    let b = lay.rect(tree.by_name("b").unwrap());
+    assert_eq!((a.x, a.y, a.w, a.h), (70., 10., 30., 20.));
+    assert_eq!((b.x, b.y, b.w, b.h), (160., 0., 50., 40.));
+}

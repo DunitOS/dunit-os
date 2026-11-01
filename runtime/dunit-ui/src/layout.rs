@@ -371,8 +371,18 @@ fn arrange_grid(
             if idx >= n {
                 break;
             }
-            let rect = Rect { x, y, w: fmax(col_w, 0.0), h: row_h[r] };
-            arrange(tree, children[idx], rect, desired, boxes);
+            let child = children[idx];
+            let ca = &tree.node(child).attrs;
+            let cell_w = fmax(col_w, 0.0);
+            let w = clamp_opt(resolve_fill(ca.width, cell_w), ca.min_w, ca.max_w);
+            let h = clamp_opt(resolve_fill(ca.height, row_h[r]), ca.min_h, ca.max_h);
+            let rect = Rect {
+                x: x + cross_offset(a.main_align, cell_w, w),
+                y: y + cross_offset(a.cross_align, row_h[r], h),
+                w,
+                h,
+            };
+            arrange(tree, child, rect, desired, boxes);
             x += col_w + a.spacing;
         }
         y += row_h[r] + a.spacing;
