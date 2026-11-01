@@ -636,6 +636,8 @@ pub extern "C" fn syscall_handler(
     arg4: u64,
     arg5: u64,
 ) -> i64 {
+    #[cfg(feature = "boot-smoke-tests")]
+    crate::hal::assert_kernel_direction_flag();
     let syscall = match Syscall::from_u64(syscall_num) {
         Some(s) => s,
         None => {

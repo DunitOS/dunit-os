@@ -33,7 +33,13 @@ extern "C" {
 
 #[no_mangle]
 pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
+    #[cfg(feature = "boot-smoke-tests")]
+    assert_kernel_direction_flag();
     let frame = unsafe { &*frame };
+    #[cfg(feature = "boot-smoke-tests")]
+    if frame.cs & 3 == 3 && frame.rflags & 0x400 != 0 {
+        USER_DF_IRQ.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
 
     use crate::interrupts::*;
 
@@ -80,4 +86,20 @@ pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
     } else {
         0
     }
+}
+
+// The userspace preemption smoke deliberately holds DF across timer ticks.
+#[cfg(feature = "boot-smoke-tests")]
+static USER_DF_IRQ: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+#[cfg(feature = "boot-smoke-tests")]
+pub(crate) fn user_df_irq_observed() -> bool {
+    USER_DF_IRQ.load(core::sync::atomic::Ordering::Relaxed)
+}
+#[cfg(feature = "boot-smoke-tests")]
+pub(crate) fn assert_kernel_direction_flag() {
+    let flags: u64;
+    unsafe {
+        core::arch::asm!("pushfq", "pop {}", out(reg) flags);
+    }
+    assert_eq!(flags & 0x400, 0, "kernel ABI entered with DF set");
 }

@@ -5,6 +5,7 @@
     "cmd": ["exec /app/runtime_stress", "exec /app/ipc_parent"]
   },
   "required": [
+    {"marker": "[DF-TEST] syscall+irq flags preserved", "claim": "DF cleared at kernel entry and preserved in userspace across timer interrupts and syscall return", "source": "userspace/system_apps/preempt_child/src/main.rs; kernel/src/hal.rs; kernel/src/command.rs"},
     { "marker": "[KERNEL] START", "claim": "boot/kernel handoff", "source": "kernel/src/lib.rs" },
     { "marker": "GDT loaded", "claim": "GDT", "source": "hal/src/gdt.c" },
     { "marker": "IDT loaded with 256 entries", "claim": "IDT + exception handlers", "source": "kernel/src/lib.rs" },

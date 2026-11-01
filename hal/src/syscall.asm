@@ -159,9 +159,10 @@ syscall_init:
     shr rdx, 32
     wrmsr
 
-    ; SFMASK: mask IF while inside the syscall handler.
+    ; SFMASK: clear IF and DF for the kernel C/Rust ABI. SYSCALL saves
+    ; the original user flags in R11; IRET restores those unchanged.
     mov ecx, 0xC0000084
-    mov eax, 0x00000200
+    mov eax, 0x00000600
     xor edx, edx
     wrmsr
 

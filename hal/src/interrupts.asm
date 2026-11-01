@@ -60,6 +60,10 @@ extern syscall_escape_user_fault
 extern user_fpu_state
 
 isr_common_stub:
+    ; Interrupts can land inside a backwards userspace/kernel memmove (DF=1).
+    ; The CPU already saved RFLAGS: preserve it for IRET, but enter the C/Rust
+    ; ABI with forward string operations even on the scheduler escape path.
+    cld
     push rax
     push rbx
     push rcx

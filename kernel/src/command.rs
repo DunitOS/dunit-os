@@ -204,11 +204,13 @@ pub fn run_preemption_smoke() -> bool {
         Ok((_, exit)) => {
             let _ = process::autoreap_process(exit.pid, "preempt-smoke");
             matches!(exit.status, process::ProcessExitStatus::Exited(0)) && preempts > 0
+                && crate::hal::user_df_irq_observed()
         }
         Err(_) => false,
     };
 
     if ok {
+        crate::serial_write("[DF-TEST] syscall+irq flags preserved\r\n");
         crate::serial_write("[PREEMPT-TEST] OK preempts=");
         serial_write_u32(preempts as u32);
         crate::serial_write("\r\n");
