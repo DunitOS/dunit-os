@@ -1,8 +1,9 @@
-//! Pure single-line and logical multiline UTF-8 editing. Indices are byte offsets at scalar boundaries;
-//! word operations use whitespace runs, not linguistic or grapheme segmentation.
+//! Pure single-line and logical multiline UTF-8 editing at extended grapheme boundaries.
+//! Word commands use whitespace-separated grapheme runs, not language-specific words.
 
 use alloc::{string::String, vec::Vec};
 use core::ops::Range;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub const MAX_INPUT_BYTES: usize = 64 * 1024;
 const HISTORY_LIMIT: usize = 64;
@@ -123,11 +124,15 @@ impl TextEditor {
     }
 
     fn boundary(&self, index: usize) -> usize {
-        let mut index = index.min(self.text().len());
-        while !self.text().is_char_boundary(index) {
-            index -= 1;
+        let index = index.min(self.text().len());
+        if index == self.text().len() {
+            return index;
         }
-        index
+        self.text()
+            .grapheme_indices(true)
+            .take_while(|(i, _)| *i <= index)
+            .last()
+            .map_or(0, |(i, _)| i)
     }
 
     pub fn place(&mut self, index: usize, extend: bool) -> bool {
@@ -177,11 +182,11 @@ impl TextEditor {
             start = previous;
         }
         let mut end = index;
-        for ch in self.text()[index..].chars() {
-            if ch.is_whitespace() != whitespace {
+        for grapheme in self.text()[index..].graphemes(true) {
+            if grapheme.chars().next().unwrap().is_whitespace() != whitespace {
                 break;
             }
-            end += ch.len_utf8();
+            end += grapheme.len();
         }
         let changed = self.anchor() != start || self.cursor() != end;
         self.value.anchor = start;
@@ -199,7 +204,7 @@ impl TextEditor {
             .map_or(self.text().len(), |i| index + i)
     }
 
-    /// Vertical movement counts Unicode scalars, with no wrapping or grapheme model.
+    /// Logical vertical movement preserves the extended grapheme column.
     fn vertical(&mut self, down: bool, extend: bool) -> bool {
         if !self.multiline {
             return false;
@@ -207,7 +212,7 @@ impl TextEditor {
         let start = self.line_start(self.cursor());
         let column = self
             .preferred_column
-            .unwrap_or_else(|| self.text()[start..self.cursor()].chars().count());
+            .unwrap_or_else(|| self.text()[start..self.cursor()].graphemes(true).count());
         let target_start = if down {
             let end = self.line_end(self.cursor());
             if end == self.text().len() {
@@ -222,7 +227,7 @@ impl TextEditor {
         };
         let target_end = self.line_end(target_start);
         let offset = self.text()[target_start..target_end]
-            .char_indices()
+            .grapheme_indices(true)
             .nth(column)
             .map_or(target_end, |(i, _)| target_start + i);
         let changed = self.place(offset, extend);
@@ -231,22 +236,23 @@ impl TextEditor {
     }
 
     fn previous(&self, index: usize) -> usize {
-        self.text()[..index]
-            .char_indices()
-            .next_back()
+        self.text()
+            .grapheme_indices(true)
+            .take_while(|(i, _)| *i < index)
+            .last()
             .map_or(0, |(i, _)| i)
     }
     fn next(&self, index: usize) -> usize {
-        self.text()[index..]
-            .chars()
-            .next()
-            .map_or(index, |ch| index + ch.len_utf8())
+        self.text()
+            .grapheme_indices(true)
+            .find(|(i, _)| *i > index)
+            .map_or(self.text().len(), |(i, _)| i)
     }
     fn word_left(&self, index: usize) -> usize {
         let mut result = index;
         let mut in_word = false;
-        for (i, ch) in self.text()[..index].char_indices().rev() {
-            if ch.is_whitespace() {
+        for (i, g) in self.text()[..index].grapheme_indices(true).rev() {
+            if g.chars().next().unwrap().is_whitespace() {
                 if in_word {
                     break;
                 }
@@ -260,13 +266,13 @@ impl TextEditor {
     fn word_right(&self, index: usize) -> usize {
         let mut result = index;
         let mut in_space = false;
-        for ch in self.text()[index..].chars() {
-            if ch.is_whitespace() {
+        for g in self.text()[index..].graphemes(true) {
+            if g.chars().next().unwrap().is_whitespace() {
                 in_space = true;
             } else if in_space {
                 break;
             }
-            result += ch.len_utf8();
+            result += g.len();
         }
         result
     }
@@ -295,6 +301,13 @@ impl TextEditor {
         self.redo.clear();
         let cursor = range.start + insert.len();
         self.value.text.replace_range(range, insert);
+        // Insertion can merge with following combining marks or ZWJ sequences.
+        // Keep the caret after the resulting complete cluster.
+        let cursor = self
+            .text()
+            .grapheme_indices(true)
+            .find(|(i, _)| *i >= cursor)
+            .map_or(self.text().len(), |(i, _)| i);
         self.value.cursor = cursor;
         self.value.anchor = cursor;
         true

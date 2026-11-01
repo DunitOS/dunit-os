@@ -3,7 +3,7 @@
 # concrete widgets, resolves their DSS state (hover/focus/press/...), sizes them
 # to their content, and provides the event/focus model (hit-testing, capture/
 # bubble paths, focus navigation, keyboard actions). Pure `no_std + alloc`; the
-# only dependencies are the sibling runtime crates.
+# Unicode boundaries use the no_std Unicode segmentation implementation.
 [package]
 name = "dunit_widgets"
 version = "0.1.0"
@@ -17,6 +17,7 @@ path = "src/lib.rs"
 dunit_ui = { path = "../dunit-ui" }
 dunit_style = { path = "../dunit-style" }
 dunit_text = { path = "../dunit-text" }
+unicode-segmentation = { version = "=1.12.0", default-features = false }
 
 [profile.release]
 panic = "abort"

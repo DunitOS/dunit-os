@@ -1,0 +1,1 @@
+Unicode segmentation used by SDK text editing: unicode-segmentation 1.12.0, MIT OR Apache-2.0. Upstream: https://github.com/unicode-rs/unicode-segmentation . Copyright and license texts are retained alongside this notice.
