@@ -72,7 +72,11 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
-                        "menu-min-width"
+                        "splitter-thickness"
+                        | "separator-thickness"
+                        | "dialog-width"
+                        | "message-body-height"
+                        | "menu-min-width"
                         | "menu-row-height"
                         | "menu-separator-height"
                         | "menu-gap"

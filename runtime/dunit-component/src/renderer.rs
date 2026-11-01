@@ -9,6 +9,8 @@ mod overlays;
 mod progress_render;
 #[path = "scroll.rs"]
 mod scroll;
+#[path = "workspace_layout.rs"]
+mod workspace_layout;
 use dunit_style::{cascade::NodeStyle, Cascade, Style};
 use dunit_text::Font;
 use dunit_ui::{layout_measured, tree::TreeBuilder, Edges, Layout, Rect, Tree};
@@ -46,6 +48,9 @@ pub struct RenderStats {
 }
 struct Snapshot {
     overlays: overlays::Scene,
+    modal_owner: Option<String>,
+    popup_owner: Option<String>,
+    splitters: Vec<Option<(i64, crate::SplitAxis)>>,
     tree: Tree,
     layout: Layout,
     styles: Vec<Style>,
@@ -116,6 +121,9 @@ impl Renderer {
             x,
             y,
         )
+    }
+    pub fn cancel_scroll_capture(&mut self) -> bool {
+        self.scroll_capture.take().is_some()
     }
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
@@ -292,6 +300,21 @@ impl Renderer {
         let tree = view.tree()?;
         let mut views = Vec::new();
         view.flatten(&mut views);
+        let modal_owner = views
+            .iter()
+            .find(|v| v.dialog.is_some())
+            .map(|v| v.key.clone());
+        let popup_owner = overlays
+            .and_then(|s| s.open.as_ref())
+            .map(|p| p.owner.clone());
+        if self
+            .previous
+            .as_ref()
+            .is_some_and(|p| p.modal_owner != modal_owner || p.popup_owner != popup_owner)
+        {
+            self.cancel_scroll_capture();
+        }
+
         let targets: Vec<_> = tree
             .iter()
             .zip(&views)
@@ -329,7 +352,7 @@ impl Renderer {
             .styles(&tree, &targets, old, now, self.motion_enabled);
         let tree = container_padding(&tree, &styles, &views)?;
         let fm = FontMeasure { font: &self.font };
-        let mut layout = layout_measured(&tree, width as f32, height as f32, &|id| {
+        let measure = |id: dunit_ui::NodeId| {
             let n = tree.node(id);
             Widget::from_tag(n.kind.tag())
                 .map(|w| {
@@ -345,7 +368,9 @@ impl Renderer {
                     )
                 })
                 .unwrap_or((0.0, 0.0))
-        });
+        };
+        let mut layout = layout_measured(&tree, width as f32, height as f32, &measure);
+        self.layout_splitters(&tree, &mut layout, &styles, &views, &measure)?;
         if tree.iter().any(|n| {
             let r = layout.rect(n.id);
             [r.x, r.y, r.w, r.h].iter().any(|v| !v.is_finite()) || r.w < 0.0 || r.h < 0.0
@@ -498,7 +523,14 @@ impl Renderer {
         let (progress, busy_interval_ms, active_busy_indicators) =
             self.prepare_progress(&views, &tree, &layout, &styles, &areas, now, width, height);
         let overlay_scene = self.overlays(view, &tree, &layout, overlays, &areas, width, height);
+        let splitters = views
+            .iter()
+            .map(|v| v.split.as_ref().map(|s| (s.value, s.options.axis)))
+            .collect();
         let next = Snapshot {
+            modal_owner,
+            popup_owner,
+            splitters,
             overlays: overlay_scene,
             progress,
             busy_interval_ms,
@@ -622,6 +654,29 @@ fn container_padding<M>(tree: &Tree, styles: &[Style], views: &[&View<M>]) -> Re
     let mut builder = TreeBuilder::new();
     for n in tree.iter() {
         let mut attrs = n.attrs.clone();
+        if n.kind.tag() == "ToolbarSeparator" {
+            attrs.width = dunit_ui::Sizing::Px(
+                styles[n.id.0 as usize]
+                    .number("separator-thickness")
+                    .unwrap_or(0.),
+            );
+            attrs.height = dunit_ui::Sizing::Grow(1.);
+        }
+        if views[n.id.0 as usize]
+            .classes
+            .iter()
+            .any(|c| c == "message-body")
+        {
+            if let Some(height) = styles[n.id.0 as usize].number("message-body-height") {
+                attrs.height = dunit_ui::Sizing::Px(height);
+            }
+        }
+        if views[n.id.0 as usize].dialog.is_some() && attrs.width == dunit_ui::Sizing::Auto {
+            if let Some(width) = styles[n.id.0 as usize].number("dialog-width") {
+                attrs.width = dunit_ui::Sizing::Px(width);
+            }
+        }
+
         if n.kind.is_container() {
             if let Some([top, right, bottom, left]) = styles[n.id.0 as usize].padding() {
                 if [top, right, bottom, left]

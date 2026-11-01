@@ -9,6 +9,8 @@ use crate::{
 pub use dunit_component::*;
 #[path = "ui_overlays.rs"]
 mod overlays;
+#[path = "ui_workspace.rs"]
+mod workspace;
 
 /// Load the selected SDK profile and configured font for a custom renderer.
 pub fn load_theme(overlay: &str) -> NativeResult<(Theme, Font)> {
@@ -20,6 +22,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidWorkspace
         | UiError::InvalidPopup
         | UiError::InvalidProgress
         | UiError::InvalidSpinbox
@@ -392,6 +395,9 @@ impl<C: Component> ComponentWindow<C> {
             }
         };
         if self.overlay_event(&event)? {
+            return Ok(event);
+        }
+        if self.workspace_event(&event)? {
             return Ok(event);
         }
         match &event {

@@ -22,6 +22,9 @@ impl<M: Clone> View<M> {
 }
 impl<C: Component> Application<C> {
     pub(crate) fn tab_focus(&mut self, reverse: bool) -> bool {
+        if let Some(key) = self.focused_key().map(alloc::string::String::from) {
+            self.set_focus(&key);
+        }
         let mut nodes = Vec::new();
         self.view.flatten(&mut nodes);
         // Each group has one Tab stop: focused member, selected enabled member,
@@ -46,11 +49,17 @@ impl<C: Component> Application<C> {
             }
         }
         let mut bar_stops = BTreeMap::new();
-        for bar in nodes.iter().filter(|v| v.menu_bar) {
+        for bar in nodes.iter().filter(|v| {
+            v.menu_bar
+                || matches!(
+                    v.workspace,
+                    Some(crate::workspace::WorkspaceRole::Toolbar(_))
+                )
+        }) {
             let enabled: Vec<_> = bar
                 .children
                 .iter()
-                .filter(|v| !v.interaction.disabled)
+                .filter(|v| v.focusable() && !v.interaction.disabled)
                 .collect();
             let chosen = enabled
                 .iter()
@@ -72,7 +81,8 @@ impl<C: Component> Application<C> {
             .iter()
             .enumerate()
             .filter(|(index, v)| {
-                v.focusable()
+                self.in_scope(&v.key)
+                    && v.focusable()
                     && !v.interaction.disabled
                     && bar_stops
                         .get(v.key.as_str())
@@ -100,13 +110,21 @@ impl<C: Component> Application<C> {
         true
     }
     pub(crate) fn set_focus(&mut self, target: &str) {
-        if let Some(bar) = self.view.ancestor_with(target, &|v| v.menu_bar) {
+        if let Some(bar) = self.view.ancestor_with(target, &|v| {
+            v.menu_bar
+                || matches!(
+                    v.workspace,
+                    Some(crate::workspace::WorkspaceRole::Toolbar(_))
+                )
+        }) {
             self.overlays
                 .bar_focus
                 .insert(bar.key.clone(), target.into());
         }
+        let allowed = self.in_scope(target);
         self.view.visit_mut(&mut |v| {
-            v.interaction.focused = v.focusable() && !v.interaction.disabled && v.key == target;
+            v.interaction.focused =
+                allowed && v.focusable() && !v.interaction.disabled && v.key == target;
             v.interaction.pressed = false;
             if let Some(input) = &mut v.input {
                 input.dragging = false;
@@ -121,6 +139,9 @@ impl<C: Component> Application<C> {
         C::Message: Clone,
     {
         if self.popup_navigation(direction)? {
+            return Ok(true);
+        }
+        if self.workspace_navigation(direction)? {
             return Ok(true);
         }
         if matches!(direction, Navigation::Up | Navigation::Down)
@@ -151,7 +172,11 @@ impl<C: Component> Application<C> {
         let order: Vec<_> = nodes
             .iter()
             .enumerate()
-            .filter(|(_, v)| !v.interaction.disabled && v.radio_group.as_deref() == Some(group))
+            .filter(|(_, v)| {
+                self.in_scope(&v.key)
+                    && !v.interaction.disabled
+                    && v.radio_group.as_deref() == Some(group)
+            })
             .map(|(i, _)| NodeId(i as u32))
             .collect();
         let current = order

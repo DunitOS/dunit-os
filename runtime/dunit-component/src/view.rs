@@ -35,6 +35,9 @@ impl Key {
 /// owns button interaction; this description owns identity, configuration and messages.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View<Msg> {
+    pub(crate) workspace: Option<crate::workspace::WorkspaceRole>,
+    pub(crate) dialog: Option<crate::workspace::DialogBinding<Msg>>,
+    pub(crate) split: Option<crate::workspace::SplitBinding<Msg>>,
     pub(crate) key: String,
     pub(crate) kind: Kind,
     pub(crate) attrs: Attrs,
@@ -64,6 +67,9 @@ impl<Msg> View<Msg> {
         children: Vec<Self>,
     ) -> Self {
         Self {
+            workspace: None,
+            dialog: None,
+            split: None,
             key: key.into(),
             kind,
             attrs: Attrs::default(),
@@ -201,6 +207,10 @@ impl<Msg> View<Msg> {
     }
     /// Disabled buttons cannot receive focus, presses or activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
+        if self.children.get(1).is_some_and(|c| c.split.is_some()) {
+            self.children[1].interaction.disabled = disabled;
+        }
+
         self.interaction.disabled = disabled;
         self
     }
@@ -208,6 +218,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if let Some(role) = self.workspace_role() {
+            return Some(role);
+        }
         if self.menu_bar {
             return Some("menubar");
         }
@@ -251,6 +264,9 @@ impl<Msg> View<Msg> {
         (self.kind.tag() == "ToggleButton").then_some(self.interaction.checked)
     }
     pub fn accessibility_label(&self) -> Option<&str> {
+        if let Some(label) = self.workspace_label() {
+            return Some(label);
+        }
         if let Some(p) = &self.popup {
             return Some(&p.label);
         }
@@ -330,7 +346,20 @@ impl<Msg> View<Msg> {
         self.check(0, &mut names, &mut BTreeSet::new())?;
         let mut nodes = Vec::new();
         self.flatten(&mut nodes);
+        if nodes.iter().any(|v| {
+            v.dialog.is_some()
+                && v.key != self.key
+                && !(matches!(
+                    self.workspace,
+                    Some(crate::workspace::WorkspaceRole::ModalHost)
+                ) && self.children.last().is_some_and(|child| child.key == v.key))
+        }) {
+            return Err(UiError::InvalidWorkspace);
+        }
         let mut mnemonics = BTreeSet::new();
+        if nodes.iter().filter(|v| v.dialog.is_some()).count() > 1 {
+            return Err(UiError::InvalidWorkspace);
+        }
         for node in nodes {
             if let Some(ch) = node.popup.as_ref().and_then(|p| p.mnemonic) {
                 if !mnemonics.insert(ch) {
@@ -347,6 +376,15 @@ impl<Msg> View<Msg> {
         checked_groups: &mut BTreeSet<&'a str>,
     ) -> Result<()> {
         self.check_popups()?;
+        self.check_workspace()?;
+        if depth > 0
+            && matches!(
+                self.workspace,
+                Some(crate::workspace::WorkspaceRole::ModalHost)
+            )
+        {
+            return Err(UiError::InvalidWorkspace);
+        }
         if depth >= 64 || names.len() >= 4096 {
             return Err(UiError::TreeLimit);
         }

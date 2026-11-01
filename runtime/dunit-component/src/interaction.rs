@@ -41,6 +41,13 @@ impl<M> View<M> {
                             self.interaction.pressed = false;
                         }
                     }
+                    if let (Some(split), Some(previous)) = (&mut self.split, &old.split) {
+                        if split.options == previous.options {
+                            split.grab = previous.grab;
+                        } else {
+                            self.interaction.pressed = false;
+                        }
+                    }
                     if let (Some(spin), Some(previous)) = (&mut self.spinbox, &old.spinbox) {
                         if spin.value == previous.value && spin.options == previous.options {
                             spin.pressed = previous.pressed;
@@ -87,6 +94,9 @@ impl<C: Component> Application<C> {
             self.dismiss_tooltip();
         }
         if self.popup_pointer(event, None, target)? {
+            return Ok(true);
+        }
+        if self.blocked_pointer(target) {
             return Ok(true);
         }
         let mut open = None;

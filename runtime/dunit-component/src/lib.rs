@@ -4,6 +4,11 @@
 extern crate alloc;
 
 mod focus;
+mod splitter;
+mod workspace;
+pub use splitter::SplitGeometry;
+mod workspace_events;
+pub use workspace::{DialogAction, SplitAxis, SplitterOptions, Tab, WorkspaceCommand};
 mod popup;
 mod popup_events;
 mod tooltip;
@@ -68,6 +73,7 @@ pub enum UiError {
     InvalidSpinbox,
     InvalidProgress,
     InvalidPopup,
+    InvalidWorkspace,
     InvalidLayout,
     InvalidSize,
     Allocation,
@@ -85,6 +91,7 @@ pub trait Component {
 /// Propagate a view validation error: the model may have consumed the message,
 /// while the previous valid view is retained for diagnostics.
 pub struct Application<C: Component> {
+    pub(crate) dialog_focus: workspace::DialogFocus,
     component: C,
     view: View<C::Message>,
     pub(crate) overlays: popup::OverlayState,
@@ -93,11 +100,14 @@ impl<C: Component> Application<C> {
     pub fn new(component: C) -> Result<Self> {
         let view = component.view();
         view.validate()?;
-        Ok(Self {
+        let mut app = Self {
+            dialog_focus: Default::default(),
             component,
             view,
             overlays: popup::OverlayState::default(),
-        })
+        };
+        app.sync_dialog(None);
+        Ok(app)
     }
     pub fn component(&self) -> &C {
         &self.component
@@ -106,12 +116,14 @@ impl<C: Component> Application<C> {
         &self.view
     }
     pub fn update(&mut self, message: C::Message) -> Result<()> {
+        let focused = self.focused_key().map(alloc::string::String::from);
         self.component.update(message);
         let mut view = self.component.view();
         view.validate()?;
         self.reconcile_overlays(&view);
         view.reconcile(&self.view);
         self.view = view;
+        self.sync_dialog(focused);
         Ok(())
     }
     /// Dispatch focused text editing and control navigation before root shortcuts.
@@ -121,10 +133,15 @@ impl<C: Component> Application<C> {
     {
         self.dismiss_tooltip();
         if self.popup_key(key)?
+            || self.workspace_key(key)?
             || self.spinbox_key(key)?
             || self.text_key(key)?
+            || self.dialog_default(key)?
             || self.widget_key(key)?
         {
+            return Ok(true);
+        }
+        if self.dialog_focus.key.is_some() {
             return Ok(true);
         }
         let message = self

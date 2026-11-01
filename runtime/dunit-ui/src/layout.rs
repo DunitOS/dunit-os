@@ -35,6 +35,15 @@ impl Layout {
         self.boxes[id.0 as usize]
     }
 
+    /// Re-measure and arrange an existing subtree at an explicit rectangle.
+    /// Compound controls use this after assigning pane geometry. Invalid input
+    /// leaves the layout untouched.
+    pub fn relayout_subtree(&mut self,tree:&Tree,id:NodeId,rect:Rect,measure_fn:Measurer)->bool {
+        if self.boxes.len()!=tree.len()||id.0 as usize>=tree.len()||![rect.x,rect.y,rect.w,rect.h].iter().all(|v|v.is_finite())||rect.w<0.||rect.h<0. {return false;}
+        let mut desired=vec![(0.,0.);tree.len()];measure(tree,id,rect.w,rect.h,&mut desired,measure_fn);
+        let mut boxes=self.boxes.clone();arrange(tree,id,rect,&desired,&mut boxes);
+        if boxes.iter().any(|r|![r.x,r.y,r.w,r.h].iter().all(|v|v.is_finite())||r.w<0.||r.h<0.){return false;}self.boxes=boxes;true
+    }
     /// Translate a node and its descendants atomically. Invalid offsets or
     /// coordinate overflow leave the entire layout unchanged.
     pub fn translate_subtree(&mut self, tree: &Tree, id: NodeId, dx: f32, dy: f32) -> bool {
@@ -66,6 +75,13 @@ pub type Measurer<'a> = &'a dyn Fn(NodeId) -> (f32, f32);
 /// content size — use [`layout_measured`] to size them to real content.
 pub fn layout(tree: &Tree, avail_w: f32, avail_h: f32) -> Layout {
     layout_measured(tree, avail_w, avail_h, &|_| (0.0, 0.0))
+}
+
+/// Measure a subtree without arranging its siblings.
+pub fn measure_subtree(tree:&Tree,id:NodeId,avail_w:f32,avail_h:f32,measure_fn:Measurer)->Option<(f32,f32)> {
+    if id.0 as usize>=tree.len()||!avail_w.is_finite()||!avail_h.is_finite()||avail_w<0.||avail_h<0. {return None;}
+    let mut desired=vec![(0.,0.);tree.len()];let (w,h)=measure(tree,id,avail_w,avail_h,&mut desired,measure_fn);
+    (w.is_finite()&&h.is_finite()&&w>=0.&&h>=0.).then_some((w,h))
 }
 
 /// Like [`layout`], but `measure` supplies the intrinsic content size of each

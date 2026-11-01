@@ -69,3 +69,8 @@ $select-mark: v;
 $tooltip-delay: 600ms;
 $tooltip-gap: 6;
 $tooltip-max-width: 320;
+
+$splitter-thickness: 8;
+$dialog-width: 360;
+$message-body-height: 96;
+$dialog-scrim: #00000088;

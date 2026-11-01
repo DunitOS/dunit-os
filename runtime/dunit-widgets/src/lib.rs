@@ -34,6 +34,7 @@ pub mod progress;
 pub mod scroll;
 pub mod slider;
 pub mod spinbox;
+pub mod splitter;
 pub mod state;
 pub mod text_input;
 

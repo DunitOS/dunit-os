@@ -34,7 +34,11 @@ impl<C: Component> Application<C> {
     pub(crate) fn reconcile_overlays(&mut self, new: &View<C::Message>) {
         self.overlays.bar_focus.retain(|bar, key| {
             new.find(bar).is_some_and(|v| {
-                v.menu_bar
+                (v.menu_bar
+                    || matches!(
+                        v.workspace,
+                        Some(crate::workspace::WorkspaceRole::Toolbar(_))
+                    ))
                     && v.children
                         .iter()
                         .any(|c| &c.key == key && !c.interaction.disabled)
@@ -100,6 +104,9 @@ impl<C: Component> Application<C> {
         if point.is_some_and(|(x, y)| !x.is_finite() || !y.is_finite()) {
             return false;
         }
+        if !self.in_scope(target) {
+            return false;
+        }
         let owner = self
             .view
             .ancestor_with(target, &|v| {
@@ -115,6 +122,9 @@ impl<C: Component> Application<C> {
         point: Option<(f32, f32)>,
         last: bool,
     ) -> bool {
+        if !self.in_scope(key) {
+            return false;
+        }
         let Some(owner) = self.view.find(key).filter(|v| !v.interaction.disabled) else {
             return false;
         };
@@ -243,7 +253,7 @@ where
             self.view.flatten(&mut nodes);
             let key = nodes
                 .into_iter()
-                .find(|v| v.menu_bar && !v.interaction.disabled)
+                .find(|v| v.menu_bar && !v.interaction.disabled && self.in_scope(&v.key))
                 .and_then(|b| b.children.iter().find(|v| !v.interaction.disabled))
                 .map(|v| v.key.clone());
             if let Some(key) = key {
@@ -383,7 +393,8 @@ where
             let owner = nodes
                 .into_iter()
                 .find(|v| {
-                    !v.interaction.disabled
+                    self.in_scope(&v.key)
+                        && !v.interaction.disabled
                         && v.popup
                             .as_ref()
                             .is_some_and(|p| p.mnemonic == Some(key.character.to_ascii_lowercase()))

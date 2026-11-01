@@ -26,10 +26,12 @@ impl<C: Component> Application<C> {
     pub fn tooltip_pointer(&mut self, target: Option<&str>, now: u64) -> bool {
         let owner = if self.overlays.open.is_none() && !self.overlays.pointer_down {
             target
+                .filter(|target| self.in_scope(target))
                 .and_then(|target| {
                     self.view
                         .ancestor_with(target, &|v| v.tooltip.is_some() && !v.interaction.disabled)
                 })
+                .filter(|v| self.in_scope(&v.key))
                 .map(|v| v.key.clone())
         } else {
             None

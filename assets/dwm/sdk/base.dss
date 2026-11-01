@@ -67,3 +67,20 @@ Tooltip { background: $surface; border-width: $border; border-color: $accent; pa
 TooltipText { color: $text; font-size: $font-size; }
 // Tooltip delay applies to every SDK element that declares a tooltip.
 Text, Row, Column, Stack, Grid, Button, ToggleButton, Checkbox, Radio, Switch, Input, Textarea, Spinbox, Slider, VerticalSlider, Progress, Busy, Scroll { tooltip-delay: $tooltip-delay; }
+
+Column.tabs, Row.tab-list, Column.tab-panel, Row.splitter, Column.splitter, Stack.modal-layer { padding: 0; }
+Tab { tooltip-delay: $tooltip-delay; background: $surface; color: $text; font-size: $font-size; padding: $space-small; border-width: $border; border-color: $line; radius: $radius; }
+Tab:checked { background: $accent; color: $window-bg; }
+Tab:hover, Tab:focus { border-color: $accent; }
+Tab:disabled { background: $surface; color: $muted; }
+Row.toolbar { padding: $space-small; background: $surface; }
+ToolbarSeparator { tooltip-delay: $tooltip-delay; background: $line; separator-thickness: $border; }
+Text.status-bar { background: $surface; color: $muted; }
+SplitterHandle { background: $line; splitter-thickness: $splitter-thickness; tooltip-delay: $tooltip-delay; }
+SplitterHandle:hover, SplitterHandle:focus, SplitterHandle:active { background: $accent; }
+SplitterHandle:disabled { background: $surface; }
+ModalScrim { background: $dialog-scrim; }
+Column.dialog { background: $surface; border-width: $border; border-color: $accent; radius: $radius; clip: rounded; dialog-width: $dialog-width; }
+Text.dialog-title { color: $accent; font-size: $font-title; }
+Row.dialog-actions { padding: 0; }
+Scroll.message-body { message-body-height: $message-body-height; }
