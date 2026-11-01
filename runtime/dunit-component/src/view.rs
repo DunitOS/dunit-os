@@ -35,6 +35,7 @@ impl Key {
 /// owns button interaction; this description owns identity, configuration and messages.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View<Msg> {
+    pub(crate) tree: Option<crate::tree::TreeBinding>,
     pub(crate) list: Option<crate::list::ListBinding<Msg>>,
     pub(crate) workspace: Option<crate::workspace::WorkspaceRole>,
     pub(crate) dialog: Option<crate::workspace::DialogBinding<Msg>>,
@@ -68,6 +69,7 @@ impl<Msg> View<Msg> {
         children: Vec<Self>,
     ) -> Self {
         Self {
+            tree: None,
             list: None,
             workspace: None,
             dialog: None,
@@ -220,6 +222,9 @@ impl<Msg> View<Msg> {
         self.interaction
     }
     pub fn accessibility_role(&self) -> Option<&'static str> {
+        if self.tree.is_some() {
+            return Some("tree");
+        }
         if self.list.is_some() {
             return Some("listbox");
         }
@@ -383,6 +388,7 @@ impl<Msg> View<Msg> {
         names: &mut BTreeSet<&'a str>,
         checked_groups: &mut BTreeSet<&'a str>,
     ) -> Result<()> {
+        self.check_tree()?;
         self.check_list()?;
         self.check_popups()?;
         self.check_workspace()?;

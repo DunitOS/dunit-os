@@ -395,7 +395,7 @@ fn paint_contents(
         );
     }
 
-    let scroll = matches!(tag, "Scroll" | "Textarea" | "List")
+    let scroll = matches!(tag, "Scroll" | "Textarea" | "List" | "Tree")
         .then(|| scroll_of(id))
         .flatten();
     let children = |surface: &mut Surface| -> PaintResult {

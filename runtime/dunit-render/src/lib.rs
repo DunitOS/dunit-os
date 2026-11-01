@@ -43,5 +43,5 @@ pub use text_input::{input_content_rect, SpinboxPaint, TextInput};
 pub type PaintResult = core::result::Result<(), alloc::collections::TryReserveError>;
 
 mod list;
-pub use list::{ListPaint,ListRowPaint};
+pub use list::{ListPaint, ListRowPaint, TreeRowPaint};
 pub use paint::paint_clipped_with_lists;

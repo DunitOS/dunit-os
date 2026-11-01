@@ -3,12 +3,26 @@ use crate::{Application, Component, Key, PointerEvent, Result, UiError, View};
 use alloc::{string::String, vec::Vec};
 pub use dunit_widgets::selection::{ListGeometry, ListItem, ListSelection, SelectionMode};
 #[derive(Debug, Clone)]
+pub(crate) enum SelectionHandler<M> {
+    List(fn(ListSelection) -> M),
+    Tree(fn(crate::TreeState) -> M),
+}
+impl<M> PartialEq for SelectionHandler<M> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::List(a), Self::List(b)) => core::ptr::fn_addr_eq(*a, *b),
+            (Self::Tree(a), Self::Tree(b)) => core::ptr::fn_addr_eq(*a, *b),
+            _ => false,
+        }
+    }
+}
+#[derive(Debug, Clone)]
 pub(crate) struct ListBinding<M> {
     pub label: String,
     pub items: Vec<ListItem>,
     pub selection: ListSelection,
     pub mode: SelectionMode,
-    pub on_change: fn(ListSelection) -> M,
+    pub on_change: SelectionHandler<M>,
 }
 impl<M> PartialEq for ListBinding<M> {
     fn eq(&self, o: &Self) -> bool {
@@ -16,7 +30,7 @@ impl<M> PartialEq for ListBinding<M> {
             && self.items == o.items
             && self.selection == o.selection
             && self.mode == o.mode
-            && core::ptr::fn_addr_eq(self.on_change, o.on_change)
+            && self.on_change == o.on_change
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +45,22 @@ pub enum ListCommand {
     SelectAll,
 }
 impl<M> View<M> {
+    pub(crate) fn collection_message(&self, selection: ListSelection) -> crate::Result<M> {
+        let l = self.list.as_ref().ok_or(UiError::InvalidList)?;
+        Ok(match &l.on_change {
+            crate::list::SelectionHandler::List(f) => f(selection),
+            crate::list::SelectionHandler::Tree(f) => f(crate::TreeState {
+                selection,
+                expanded: self
+                    .tree
+                    .as_ref()
+                    .ok_or(UiError::InvalidTree)?
+                    .expanded
+                    .clone(),
+            }),
+        })
+    }
+
     pub fn list(
         key: impl Into<String>,
         label: impl Into<String>,
@@ -50,7 +80,7 @@ impl<M> View<M> {
             items,
             selection,
             mode,
-            on_change,
+            on_change: SelectionHandler::List(on_change),
         });
         v
     }
@@ -160,11 +190,11 @@ impl<C: Component> Application<C> {
                 }
             };
             if let Some(next) = next.filter(|s| s != &l.selection) {
-                message = Some((l.on_change)(next));
+                message = Some(v.collection_message(next));
             }
         });
         if let Some(m) = message {
-            self.update(m)?;
+            self.update(m?)?;
         }
         Ok(consumed)
     }
@@ -205,7 +235,8 @@ impl<C: Component> Application<C> {
         if event == PointerEvent::Down {
             self.dismiss_tooltip();
             let mut message = None;
-            if let Some(l) = self.view.find(&key).and_then(|v| v.list.as_ref()) {
+            if let Some(v) = self.view.find(&key) {
+                let l = v.list.as_ref().ok_or(UiError::InvalidList)?;
                 if let Some(i) = row {
                     let next = l.selection.choose(
                         &l.items,
@@ -216,12 +247,12 @@ impl<C: Component> Application<C> {
                         modifiers & 2 != 0,
                     );
                     if next != l.selection {
-                        message = Some((l.on_change)(next));
+                        message = Some(v.collection_message(next));
                     }
                 }
             }
             if let Some(m) = message {
-                self.update(m)?;
+                self.update(m?)?;
             }
         }
         Ok(true)

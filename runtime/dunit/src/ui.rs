@@ -24,6 +24,7 @@ fn native(error: UiError) -> Error {
     Error(match error {
         UiError::Allocation => libdunit::ENOMEM,
         UiError::InvalidInput
+        | UiError::InvalidTree
         | UiError::InvalidList
         | UiError::InvalidWorkspace
         | UiError::InvalidPopup
@@ -443,6 +444,16 @@ impl<C: Component> ComponentWindow<C> {
                     .hit_key(input.x as f32, input.y as f32)
                     .map(alloc::string::String::from);
                 if pointer == PointerEvent::Down {
+                    if let Some((key, row)) = target.as_deref().and_then(|k| {
+                        self.renderer
+                            .tree_toggle_at(k, input.x as f32, input.y as f32)
+                            .map(|row| (k, row))
+                    }) {
+                        if self.application.tree_toggle_row(key, row).map_err(native)? {
+                            self.redraw()?;
+                            return Ok(event);
+                        }
+                    }
                     let row = target
                         .as_deref()
                         .and_then(|k| self.renderer.list_geometry(k))

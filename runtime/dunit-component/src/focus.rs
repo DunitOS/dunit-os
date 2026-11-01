@@ -141,6 +141,15 @@ impl<C: Component> Application<C> {
         if self.popup_navigation(direction)? {
             return Ok(true);
         }
+        if matches!(direction, Navigation::Left | Navigation::Right)
+            && self.tree_command(if direction == Navigation::Left {
+                crate::TreeCommand::Collapse
+            } else {
+                crate::TreeCommand::Expand
+            })?
+        {
+            return Ok(true);
+        }
         if matches!(direction, Navigation::Up | Navigation::Down)
             && self.list_command(
                 if direction == Navigation::Up {

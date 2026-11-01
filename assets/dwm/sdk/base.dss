@@ -85,6 +85,8 @@ Text.dialog-title { color: $accent; font-size: $font-title; }
 Row.dialog-actions { padding: 0; }
 Scroll.message-body { message-body-height: $message-body-height; }
 
-List { font-size: $font-size; color: $text; background: $surface; border-width: $border; border-color: $line; padding: $space-small; list-row-height: $list-row-height; list-selection-background: $accent; list-selection-color: $window-bg; list-disabled-color: $muted; list-current-color: $text; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-track: $line; scrollbar-thumb: $accent; scrollbar-radius: $radius; scroll-step: $scroll-step; tooltip-delay: $tooltip-delay; }
-List:focus { border-color: $accent; }
-List:disabled { color: $muted; border-color: $line; }
+List, Tree { font-size: $font-size; color: $text; background: $surface; border-width: $border; border-color: $line; padding: $space-small; list-row-height: $list-row-height; list-selection-background: $accent; list-selection-color: $window-bg; list-disabled-color: $muted; list-current-color: $text; scrollbar-width: $scrollbar-width; scrollbar-min-thumb: $scrollbar-min-thumb; scrollbar-track: $line; scrollbar-thumb: $accent; scrollbar-radius: $radius; scroll-step: $scroll-step; tooltip-delay: $tooltip-delay; }
+List:focus, Tree:focus { border-color: $accent; }
+List:disabled, Tree:disabled { color: $muted; border-color: $line; }
+
+Tree { tree-indent: $tree-indent; tree-toggle-width: $tree-toggle-width; tree-open-mark: "-"; tree-closed-mark: "+"; }

@@ -5,6 +5,23 @@ use dunit_render::{ListPaint, ListRowPaint, ScrollArea};
 use dunit_style::Style;
 use dunit_ui::{Layout, Tree};
 impl Renderer {
+    pub fn tree_toggle_at(&self, key: &str, x: f32, y: f32) -> Option<usize> {
+        let p = self.previous.as_ref()?;
+        let id = p.tree.by_name(key)?;
+        let list = p.lists[id.0 as usize].as_ref()?;
+        let index = list.geometry.row_at(x, y)?;
+        let tree = list.rows.iter().find(|r| r.index == index)?.tree.as_ref()?;
+        tree.expanded?;
+        let style = &p.styles[id.0 as usize];
+        let rect = dunit_widgets::tree::disclosure(
+            list.geometry,
+            index,
+            tree.depth,
+            style.number("tree-indent")?,
+            style.number("tree-toggle-width")?,
+        )?;
+        (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h).then_some(index)
+    }
     pub fn list_geometry(&self, key: &str) -> Option<ListGeometry> {
         let p = self.previous.as_ref()?;
         Some(p.lists[p.tree.by_name(key)?.0 as usize].as_ref()?.geometry)
@@ -59,6 +76,12 @@ impl Renderer {
                         .map(|index| {
                             let i = &l.items[index];
                             ListRowPaint {
+                                tree: v.tree.as_ref().and_then(|t| t.rows.get(index)).map(|r| {
+                                    dunit_render::TreeRowPaint {
+                                        depth: r.depth,
+                                        expanded: r.expanded,
+                                    }
+                                }),
                                 index,
                                 text: i.label.clone(),
                                 selected: l.selection.selected.contains(&i.key),

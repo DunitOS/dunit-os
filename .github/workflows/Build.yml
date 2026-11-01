@@ -116,6 +116,7 @@ jobs:
           python3 tools/test_sdk_gui_fixture.py menus --accel tcg
           python3 tools/test_sdk_gui_fixture.py workspace --accel tcg
           python3 tools/test_sdk_gui_fixture.py list --accel tcg
+          python3 tools/test_sdk_gui_fixture.py tree --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |

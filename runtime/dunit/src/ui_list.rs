@@ -17,6 +17,19 @@ where
         if input.kind != IN_KEY || input.value != 0 || input.y & !3 != 0 {
             return Ok(false);
         }
+        if input.y == 0 {
+            let tree = match input.x {
+                0x4b => Some(TreeCommand::Collapse),
+                0x4d => Some(TreeCommand::Expand),
+                _ => None,
+            };
+            if let Some(command) = tree {
+                if self.application.tree_command(command).map_err(native)? {
+                    self.redraw()?;
+                    return Ok(true);
+                }
+            }
+        }
         let command = match input.x {
             0x48 => ListCommand::Previous,
             0x50 => ListCommand::Next,

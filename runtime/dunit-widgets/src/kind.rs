@@ -49,7 +49,7 @@ impl Widget {
             "Radio" => Widget::Radio,
             "Switch" => Widget::Switch,
             "Input" | "TextInput" | "Textarea" | "Spinbox" => Widget::Input,
-            "List" => Widget::List,
+            "Tree" | "List" => Widget::List,
             "Menu" => Widget::Menu,
             "Slider" => Widget::Slider,
             "VerticalSlider" => Widget::VerticalSlider,

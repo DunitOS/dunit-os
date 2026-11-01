@@ -5,7 +5,13 @@ use dunit_style::Style;
 use dunit_text::Font;
 use dunit_widgets::selection::ListGeometry;
 #[derive(Debug, Clone, PartialEq)]
+pub struct TreeRowPaint {
+    pub depth: usize,
+    pub expanded: Option<bool>,
+}
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListRowPaint {
+    pub tree: Option<TreeRowPaint>,
     pub index: usize,
     pub text: String,
     pub selected: bool,
@@ -57,7 +63,42 @@ impl ListPaint {
                 if let Some(ink) = ink {
                     text_style.set("color", ink.clone());
                 }
-                super::paint::paint_text(&text_style, r, 0., &row.text, font, s, true);
+                let mut label = r;
+                if let Some(tree) = &row.tree {
+                    let indent = style.number("tree-indent").unwrap_or(0.);
+                    let width = style.number("tree-toggle-width").unwrap_or(0.);
+                    if let Some(toggle) = dunit_widgets::tree::disclosure(
+                        self.geometry,
+                        row.index,
+                        tree.depth,
+                        indent,
+                        width,
+                    ) {
+                        if let Some(expanded) = tree.expanded {
+                            if let Some(mark) = style.keyword(if expanded {
+                                "tree-open-mark"
+                            } else {
+                                "tree-closed-mark"
+                            }) {
+                                super::paint::paint_text(
+                                    &text_style,
+                                    toggle,
+                                    0.,
+                                    mark,
+                                    font,
+                                    s,
+                                    true,
+                                );
+                            }
+                        }
+                    }
+                    let offset = (tree.depth as f32 * indent + width).min(r.w);
+                    label.x += offset;
+                    label.w = (r.w - offset).max(0.);
+                }
+                s.with_clip(label, |s| {
+                    super::paint::paint_text(&text_style, label, 0., &row.text, font, s, true)
+                });
             }
         });
     }

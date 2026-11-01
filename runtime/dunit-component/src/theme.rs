@@ -76,6 +76,7 @@ impl Theme {
                         | "placeholder-color"
                         | "selection-color"
                         | "caret-color" => value.as_color().is_some(),
+                        "tree-indent" | "tree-toggle-width" => valid_number(1., 1024.),
                         "list-row-height" => valid_number(1., 1024.),
                         "splitter-thickness"
                         | "separator-thickness"
@@ -108,7 +109,8 @@ impl Theme {
                             valid_number(0., 1024.)
                         }
                         "scroll-step" | "selection-scroll-step" => valid_number(0., 1024.),
-                        "menu-submenu-mark" | "control-suffix" => value
+                        "tree-open-mark" | "tree-closed-mark" | "menu-submenu-mark"
+                        | "control-suffix" => value
                             .as_keyword()
                             .is_some_and(|s| !s.chars().any(char::is_control)),
                         "busy-segment" => valid_number(0., 1.),

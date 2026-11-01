@@ -75,3 +75,6 @@ $dialog-width: 360;
 $message-body-height: 96;
 $dialog-scrim: #00000088;
 $list-row-height: 28;
+
+$tree-indent: 20;
+$tree-toggle-width: 20;

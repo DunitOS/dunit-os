@@ -1,0 +1,562 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /sdk-tree.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[TREE] ready",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "tab"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] tab focus OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] root selection OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] root expand OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] right enters child OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] nested expand OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] nested child metadata OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "shift"
+              },
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] shift range OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "shift"
+              },
+              {
+                "type": "qcode",
+                "data": "down"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] disabled branch skip OK",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-tree-hierarchy.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "left"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] left parent OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "left"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] left collapse OK",
+          "timeout": 45
+        },
+        {
+          "relative_motion": {
+            "x": -127,
+            "y": -127,
+            "repeat": 24,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 127,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 127,
+            "y": 53,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 66,
+            "y": 0,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[TREE] pointer disclosure OK",
+          "timeout": 45
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[TREE] pointer release OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] end visible branch OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] large branch expand OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "end"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] last file reveal virtualized OK",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-tree-last.ppm"
+          }
+        },
+        {
+          "relative_motion": {
+            "x": 80,
+            "y": 120,
+            "repeat": 1,
+            "interval": 0.02
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "down": true,
+                  "button": "wheel-up"
+                }
+              },
+              {
+                "type": "btn",
+                "data": {
+                  "down": false,
+                  "button": "wheel-up"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[TREE] wheel OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "meta_l"
+              },
+              {
+                "type": "qcode",
+                "data": "m"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] resize OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "c"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] collapse promotes current and clamps OK",
+          "timeout": 45
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-tree-collapsed.ppm"
+          }
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "r"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] reject ready",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "right"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] model rejects expansion OK",
+          "timeout": 45
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "q"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "[TREE] ok",
+          "timeout": 45
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[DF-TEST] syscall+irq flags preserved",
+    "[GUI-EXIT] app=sdk_tree_fixture kind=0 code=0",
+    {
+      "marker": "[TREE] ready",
+      "claim": "Native controlled virtual tree: ready",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] tab focus OK",
+      "claim": "Native controlled virtual tree: tab focus OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] root selection OK",
+      "claim": "Native controlled virtual tree: root selection OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] root expand OK",
+      "claim": "Native controlled virtual tree: root expand OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] right enters child OK",
+      "claim": "Native controlled virtual tree: right enters child OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] nested expand OK",
+      "claim": "Native controlled virtual tree: nested expand OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] nested child metadata OK",
+      "claim": "Native controlled virtual tree: nested child metadata OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] shift range OK",
+      "claim": "Native controlled virtual tree: shift range OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] disabled branch skip OK",
+      "claim": "Native controlled virtual tree: disabled branch skip OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] left parent OK",
+      "claim": "Native controlled virtual tree: left parent OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] left collapse OK",
+      "claim": "Native controlled virtual tree: left collapse OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] pointer disclosure OK",
+      "claim": "Native controlled virtual tree: pointer disclosure OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] pointer release OK",
+      "claim": "Native controlled virtual tree: pointer release OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] end visible branch OK",
+      "claim": "Native controlled virtual tree: end visible branch OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] large branch expand OK",
+      "claim": "Native controlled virtual tree: large branch expand OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] last file reveal virtualized OK",
+      "claim": "Native controlled virtual tree: last file reveal virtualized OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] wheel OK",
+      "claim": "Native controlled virtual tree: wheel OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] resize OK",
+      "claim": "Native controlled virtual tree: resize OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] collapse promotes current and clamps OK",
+      "claim": "Native controlled virtual tree: collapse promotes current and clamps OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] reject ready",
+      "claim": "Native controlled virtual tree: reject ready",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] model rejects expansion OK",
+      "claim": "Native controlled virtual tree: model rejects expansion OK",
+      "source": "tools/fixtures/sdk_tree.rs"
+    },
+    {
+      "marker": "[TREE] ok",
+      "claim": "Native controlled virtual tree: ok",
+      "source": "tools/fixtures/sdk_tree.rs"
+    }
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "application failed:",
+    "gui_server: FAIL",
+    "gui_server: PANIC"
+  ]
+}

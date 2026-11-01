@@ -3,6 +3,9 @@
 #![forbid(unsafe_code)]
 extern crate alloc;
 
+mod tree;
+mod tree_events;
+pub use tree::{TreeCommand, TreeError, TreeItem, TreeItemState, TreeModel, TreeRow, TreeState};
 mod list;
 pub use list::{ListCommand,ListGeometry,ListItem,ListSelection,SelectionMode};
 mod focus;
@@ -77,6 +80,7 @@ pub enum UiError {
     InvalidPopup,
     InvalidWorkspace,
     InvalidList,
+    InvalidTree,
     InvalidLayout,
     InvalidSize,
     Allocation,
