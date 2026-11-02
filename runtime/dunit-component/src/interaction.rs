@@ -129,6 +129,9 @@ impl<C: Component> Application<C> {
             }
         }
         let mut message = None;
+        let keyboard = self
+            .keyboard_activation_key()
+            .map(alloc::string::String::from);
         self.view.visit_mut(&mut |v| {
             if !v.focusable() || v.interaction.disabled {
                 return;
@@ -136,6 +139,10 @@ impl<C: Component> Application<C> {
             let old = v.interaction;
             let hit = event != PointerEvent::Leave && target == Some(v.key.as_str());
             v.interaction.hovered = hit;
+            if keyboard.as_deref() == Some(v.key.as_str()) && event != PointerEvent::Down {
+                changed |= old != v.interaction;
+                return;
+            }
             match event {
                 PointerEvent::Down => {
                     v.interaction.focused = hit;

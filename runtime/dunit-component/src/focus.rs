@@ -172,7 +172,10 @@ impl<C: Component> Application<C> {
                 .bar_focus
                 .insert(bar.key.clone(), target.into());
         }
-        let allowed = self.in_scope(target);
+        if !self.window_focused && !target.is_empty() {
+            self.suspended_focus = Some(target.into());
+        }
+        let allowed = self.window_focused && self.in_scope(target);
         self.view.visit_mut(&mut |v| {
             v.interaction.focused =
                 allowed && v.focusable() && !v.interaction.disabled && v.key == target;

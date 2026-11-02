@@ -16,6 +16,10 @@ pub enum UiEventKind {
         character: u32,
         modifiers: u8,
     },
+    NativeKeyUp {
+        scancode: i32,
+        modifiers: u8,
+    },
     Pointer {
         event: PointerEvent,
         position: Option<(f32, f32)>,
@@ -30,7 +34,10 @@ pub enum UiEventKind {
 }
 impl UiEventKind {
     fn keyboard(&self) -> bool {
-        matches!(self, Self::Key(_) | Self::NativeKey { .. })
+        matches!(
+            self,
+            Self::Key(_) | Self::NativeKey { .. } | Self::NativeKeyUp { .. }
+        )
     }
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -203,7 +210,10 @@ impl<C: Component> Application<C> {
         self.view.flatten(&mut nodes);
         nodes
             .into_iter()
-            .find(|v| v.interaction.pressed || v.input.as_ref().is_some_and(|i| i.dragging))
+            .find(|v| {
+                (v.interaction.pressed && self.keyboard_activation_key() != Some(v.key.as_str()))
+                    || v.input.as_ref().is_some_and(|i| i.dragging)
+            })
             .map(|v| v.key.as_str())
     }
     /// End a cancelled gesture without committing a click or editing a model.
@@ -242,6 +252,15 @@ impl<C: Component> Application<C> {
         target: Option<&str>,
         kind: UiEventKind,
     ) -> Result<RouteOutcome> {
+        if matches!(
+            kind,
+            UiEventKind::Pointer {
+                event: PointerEvent::Down,
+                ..
+            }
+        ) {
+            self.cancel_keyboard_activation();
+        }
         let leaving = matches!(
             kind,
             UiEventKind::Pointer {

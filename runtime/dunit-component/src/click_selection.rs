@@ -39,6 +39,7 @@ struct Press {
 }
 #[derive(Clone, Debug)]
 struct Capture {
+    fixed_anchor: Option<usize>,
     key: String,
     text: String,
     unit: TextSelectionUnit,
@@ -147,14 +148,33 @@ impl<C: Component> Application<C> {
     where
         C::Message: Clone,
     {
+        self.pointer_text_at_with_modifiers(event, target, position, clicks, sample, 0)
+    }
+    /// Native Shift extends the existing anchor; Ctrl selects a word and
+    /// Ctrl+Shift extends the existing anchor to that word boundary.
+    pub fn pointer_text_at_with_modifiers(
+        &mut self,
+        event: PointerEvent,
+        target: Option<&str>,
+        position: Option<(&str, usize)>,
+        clicks: &mut TextClickState,
+        sample: TextClickSample,
+        modifiers: u8,
+    ) -> Result<bool>
+    where
+        C::Message: Clone,
+    {
+        if modifiers & !15 != 0 {
+            return Err(crate::UiError::InvalidInput);
+        }
         let kind = crate::UiEventKind::Pointer {
             event,
             position: Some((sample.x, sample.y)),
             button: 0,
-            modifiers: 0,
+            modifiers,
         };
         self.dispatch_input(target, kind, |app| {
-            app.pointer_text_at_default(event, target, position, clicks, sample)
+            app.pointer_text_at_default(event, target, position, clicks, sample, modifiers)
         })
     }
     fn pointer_text_at_default(
@@ -164,6 +184,7 @@ impl<C: Component> Application<C> {
         position: Option<(&str, usize)>,
         clicks: &mut TextClickState,
         sample: TextClickSample,
+        modifiers: u8,
     ) -> Result<bool>
     where
         C::Message: Clone,
@@ -207,10 +228,29 @@ impl<C: Component> Application<C> {
                     return;
                 }
                 if let Some(i) = &mut v.input {
-                    let unit = clicks.press(key, i.editor.text(), sample);
-                    let anchor = range(&i.editor, index, unit);
-                    place_range(&mut i.editor, anchor.start, anchor.end);
+                    if modifiers & 3 != 0 {
+                        clicks.cancel();
+                    }
+                    let unit = if modifiers & 2 != 0 {
+                        TextSelectionUnit::Word
+                    } else if modifiers & 1 != 0 {
+                        TextSelectionUnit::Character
+                    } else {
+                        clicks.press(key, i.editor.text(), sample)
+                    };
+                    let hit = range(&i.editor, index, unit);
+                    let fixed_anchor = (modifiers & 1 != 0).then(|| i.editor.anchor());
+                    let anchor = if modifiers & 1 != 0 {
+                        let original = i.editor.anchor();
+                        let endpoint = if index < original { hit.start } else { hit.end };
+                        place_range(&mut i.editor, original, endpoint);
+                        original..original
+                    } else {
+                        place_range(&mut i.editor, hit.start, hit.end);
+                        hit
+                    };
                     clicks.capture = Some(Capture {
+                        fixed_anchor,
                         key: key.into(),
                         text: i.editor.text().into(),
                         unit,
@@ -255,7 +295,14 @@ impl<C: Component> Application<C> {
                     return;
                 }
                 let target = range(&i.editor, index, capture.unit);
-                if capture.unit == TextSelectionUnit::Character {
+                if let Some(anchor) = capture.fixed_anchor {
+                    let endpoint = if index < anchor {
+                        target.start
+                    } else {
+                        target.end
+                    };
+                    place_range(&mut i.editor, anchor, endpoint);
+                } else if capture.unit == TextSelectionUnit::Character {
                     place_range(&mut i.editor, capture.anchor.start, target.start);
                 } else if target.end <= capture.anchor.start {
                     place_range(&mut i.editor, capture.anchor.end, target.start);

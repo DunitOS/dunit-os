@@ -45,6 +45,7 @@ mod slider;
 pub use slider::{SliderCommand, SliderGeometry, SliderOptions, SliderOrientation, SliderRange};
 mod input;
 mod interaction;
+mod lifecycle;
 mod motion;
 mod renderer;
 mod theme;
@@ -121,6 +122,10 @@ pub trait Component {
 /// Propagate a view validation error: the model may have consumed the message,
 /// while the previous valid view is retained for diagnostics.
 pub struct Application<C: Component> {
+    pub(crate) keyboard_press: Option<lifecycle::KeyboardPress>,
+    pub(crate) held_activation_scans: [bool; 128],
+    pub(crate) window_focused: bool,
+    pub(crate) suspended_focus: Option<alloc::string::String>,
     pub(crate) event_dispatch_depth: usize,
     pub(crate) rename_focus: Option<(alloc::string::String, alloc::string::String)>,
     pub(crate) dialog_focus: workspace::DialogFocus,
@@ -133,6 +138,10 @@ impl<C: Component> Application<C> {
         let view = component.view();
         view.validate()?;
         let mut app = Self {
+            keyboard_press: None,
+            held_activation_scans: [false; 128],
+            window_focused: true,
+            suspended_focus: None,
             event_dispatch_depth: 0,
             rename_focus: None,
             dialog_focus: Default::default(),
@@ -160,6 +169,7 @@ impl<C: Component> Application<C> {
         self.view = view;
         self.sync_dialog(focused);
         self.sync_rename();
+        self.reconcile_keyboard_press();
         Ok(())
     }
     /// Dispatch focused text editing and control navigation before root shortcuts.

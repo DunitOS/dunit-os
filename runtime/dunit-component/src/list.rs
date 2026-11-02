@@ -217,7 +217,7 @@ impl<C: Component> Application<C> {
         }
         Ok(false)
     }
-    /// Plain pointer selects one row. Explicit modifiers support future seats.
+    /// Pointer selection supports Shift range and Ctrl additive/toggle selection.
     pub fn list_pointer(
         &mut self,
         event: PointerEvent,
