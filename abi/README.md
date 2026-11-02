@@ -135,10 +135,18 @@ limits and remaining M7 work are in [SDK foundation](../docs/sdk/m7-start.md).
 
 ## Queued pointer input (M7, approved 31 October 2026)
 
-`ReadPointerEvent` (90) reads one 32-byte little-endian event using an owned
+`ReadPointerEvent` (90) reads one explicitly selected little-endian event using an owned
 `INPUT_MASTER` handle. EAGAIN means no queued event; invalid output does not
 consume an event. `abi/pointer-input` shares the codec between kernel and
 `libdunit::pointer::read`. Button transitions survive render stalls; pure motion
 may coalesce. Overflow and ownership handover explicitly reset the consumer's
 press/capture baseline. `GetMouseState` (60), including its wheel accumulator,
 remains compatible. See the [complete contract](../docs/sdk/pointer-events-proposal.md).
+
+The compatible modifier extension approved 2 November 2026 keeps length 32 as
+exact v1. Length 40 returns those same bytes plus a u32 Shift/Ctrl/Alt/Super mask
+at 32..36 (bits 0..3), captured at enqueue, and zero reserved bytes at 36..40.
+Other lengths return EINVAL. `libdunit::pointer::read_with_modifiers` uses v2;
+the existing `read` still uses v1. Pure motion coalesces only with equal masks.
+Both formats retain an event on failed user copy. No syscall number or right
+changes. See the [approved extension](../docs/sdk/pointer-modifier-snapshot-proposal.md).

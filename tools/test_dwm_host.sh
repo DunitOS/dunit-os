@@ -6,6 +6,7 @@ test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o "$test_dir/libdunit_pointer_abi.rlib"
 for source in kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
+    kernel/src/drivers/keyboard_queue.rs \
     userspace/system_apps/gui_server/src/lua_policy.rs \
     userspace/system_apps/gui_server/src/shell_geometry.rs \
     userspace/system_apps/gui_settings/src/document_editor.rs \

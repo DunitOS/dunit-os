@@ -17,6 +17,14 @@ mod sync {
         }
     }
 }
+mod drivers {
+    pub mod keyboard {
+        pub static MODIFIERS: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+        pub fn modifier_mask() -> u8 {
+            MODIFIERS.load(core::sync::atomic::Ordering::Relaxed)
+        }
+    }
+}
 #[path = "../src/input/mod.rs"]
 #[allow(dead_code)]
 mod input;
@@ -63,6 +71,45 @@ fn pointer_tracks_display_geometry() {
     assert_eq!(
         input::read_pointer_event(|_| panic!("empty queue copied")),
         Ok(false)
+    );
+
+    // Snapshot at enqueue survives later key changes and failed v2 user copies.
+    drivers::keyboard::MODIFIERS.store(3, core::sync::atomic::Ordering::Relaxed);
+    input::push_mouse_absolute(50, 60, 1, 0);
+    drivers::keyboard::MODIFIERS.store(0, core::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        input::read_pointer_event_with_modifiers(|_| Err(-14)),
+        Err(-14)
+    );
+    let mut captured = None;
+    assert_eq!(
+        input::read_pointer_event_with_modifiers(|bytes| {
+            captured = dunit_pointer_abi::PointerEventWithModifiers::decode(bytes);
+            Ok(())
+        }),
+        Ok(true)
+    );
+    let captured = captured.unwrap();
+    assert_eq!(captured.modifiers, 3);
+    assert_eq!(
+        (captured.event.x, captured.event.y, captured.event.buttons),
+        (50, 60, 1)
+    );
+    assert_eq!(
+        input::read_pointer_event_with_modifiers(|_| panic!("empty v2 queue copied")),
+        Ok(false)
+    );
+    drivers::keyboard::MODIFIERS.store(2, core::sync::atomic::Ordering::Relaxed);
+    input::reset_pointer_queue();
+    drivers::keyboard::MODIFIERS.store(0, core::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        input::read_pointer_event_with_modifiers(|bytes| {
+            let reset = dunit_pointer_abi::PointerEventWithModifiers::decode(bytes).unwrap();
+            assert_eq!(reset.modifiers, 2);
+            assert_eq!(reset.event.flags, dunit_pointer_abi::LOST_BEFORE);
+            Ok(())
+        }),
+        Ok(true)
     );
 
     input::set_mouse_bounds(0, 0);

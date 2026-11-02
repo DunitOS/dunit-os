@@ -42,6 +42,196 @@
           }
         },
         {
+          "wait_marker": "[POINTERQ] sleeping; inject Shift and Ctrl clicks then release modifiers",
+          "timeout": 30
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "shift"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 50
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "shift"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 50
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ctrl"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 50
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ctrl"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 50
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "left",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "wait_marker": "[POINTERQ] modifier snapshots survive key releases and failed v2 copy OK",
+          "timeout": 30
+        },
+        {
           "wait_marker": "[POINTERQ] handover and queue OK",
           "timeout": 30
         }
@@ -54,7 +244,8 @@
     "[POINTERQ] short down/up retained while sleeping OK",
     "[POINTERQ] handover and queue OK",
     "[EXEC] /app/pointer_queue_test returned code=0",
-    "[POINTERQ] start"
+    "[POINTERQ] start",
+    "[POINTERQ] modifier snapshots survive key releases and failed v2 copy OK"
   ],
   "forbidden": [
     "[PANIC]",
