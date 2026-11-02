@@ -2,14 +2,20 @@
 use crate::{
     time::Duration,
     window::{
-        DamageRect, Window, WindowEvent, IN_DOWN, IN_KEY, IN_LEAVE, IN_MOVE, IN_SCROLL, IN_UP,
+        DamageRect, Window, WindowEvent, IN_DOWN, IN_FOCUS_IN, IN_FOCUS_OUT, IN_KEY, IN_KEY_UP,
+        IN_LEAVE, IN_MOVE, IN_SCROLL, IN_UP,
     },
     Error, Result as NativeResult,
 };
 pub use dunit_component::*;
+#[path = "ui_metrics.rs"]
+pub(crate) mod metrics;
+pub use metrics::{ComponentMetrics, MetricTime, WindowMetrics};
 #[path = "ui_files.rs"]
 mod files;
 pub use files::{choose_file, NativeDirectorySource};
+#[path = "ui_lifecycle.rs"]
+mod lifecycle;
 #[path = "ui_list.rs"]
 mod list;
 #[path = "ui_overlays.rs"]
@@ -62,6 +68,8 @@ const MOTION_FRAME: Duration = Duration::from_millis(16);
 /// CPU invalidation drives buffer repair and existing gui-v1 damage metadata.
 /// Unchanged views skip publication; the compositor retains unchanged pixels.
 pub struct ComponentWindow<C: Component> {
+    metrics_enabled: bool,
+    metrics: ComponentMetrics,
     application: Application<C>,
     renderer: Renderer,
     window: Window,
@@ -84,6 +92,8 @@ impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
         let application = Application::new(component).map_err(native)?;
         let mut ui = Self {
+            metrics_enabled: false,
+            metrics: Default::default(),
             application,
             renderer,
             window: Window::open(width, height)?,
@@ -242,6 +252,22 @@ impl<C: Component> ComponentWindow<C> {
     pub fn input_scroll_x(&self, key: &str) -> Option<f32> {
         self.renderer.input_scroll_x(key)
     }
+    /// Opt-in aggregate diagnostics. Enabling does not reset existing samples.
+    pub fn enable_metrics(&mut self, enabled: bool) {
+        self.metrics_enabled = enabled;
+        self.window.enable_metrics(enabled);
+    }
+    /// Reset counters, not event queues or application state. Already queued
+    /// input may therefore be delivered without a receive in the new interval.
+    pub fn reset_metrics(&mut self) {
+        self.metrics = Default::default();
+        self.window.reset_metrics();
+    }
+    pub fn metrics(&self) -> ComponentMetrics {
+        let mut metrics = self.metrics;
+        metrics.window = self.window.metrics();
+        metrics
+    }
     pub fn last_render(&self) -> RenderStats {
         self.last_render
     }
@@ -258,20 +284,30 @@ impl<C: Component> ComponentWindow<C> {
         self.redraw()
     }
     fn redraw(&mut self) -> NativeResult<()> {
+        let metrics_enabled = self.metrics_enabled;
+        let redraw_started = metrics::start(metrics_enabled);
+        if metrics_enabled {
+            self.metrics.redraw_calls = self.metrics.redraw_calls.saturating_add(1);
+        }
         let clock = self.motion_clock;
         let mut sampled = None;
         let renderer = &mut self.renderer;
         let application = &self.application;
         let last = &mut self.last_render;
         let uploaded = &mut self.uploaded_pixels;
+        let metrics = &mut self.metrics;
         let result = self.window.try_draw_damage(|frame| {
             let (w, h) = frame.size();
             sampled = Some(crate::time::Instant::now()?);
             let now =
                 u64::try_from(clock.elapsed()?.as_millis()).map_err(|_| Error(libdunit::EINVAL))?;
-            *last = renderer
-                .render_application_at(application, w, h, now)
-                .map_err(native)?;
+            let render_started = metrics::start(metrics_enabled);
+            if metrics_enabled {
+                metrics.render_calls = metrics.render_calls.saturating_add(1);
+            }
+            let rendered = renderer.render_application_at(application, w, h, now);
+            metrics.render.finish(metrics_enabled, render_started);
+            *last = rendered.map_err(native)?;
             if last.damage.is_none() && !frame.requires_full_frame() {
                 *uploaded = 0;
                 return Ok(None);
@@ -287,9 +323,15 @@ impl<C: Component> ComponentWindow<C> {
                     h: d.height,
                 }
             };
-            *uploaded = frame.copy_pixels(renderer.pixels(), Some(damage))?;
+            let copy_started = metrics::start(metrics_enabled);
+            let copied = frame.copy_pixels(renderer.pixels(), Some(damage));
+            metrics.copy.finish(metrics_enabled, copy_started);
+            *uploaded = copied?;
             Ok(Some(damage))
         });
+        self.metrics
+            .redraw_total
+            .finish(metrics_enabled, redraw_started);
         self.failed |= result.is_err();
         if result.is_ok() {
             self.motion_frame = sampled;
@@ -465,7 +507,7 @@ impl<C: Component> ComponentWindow<C> {
             Some(WindowEvent::Input(input))
                 if matches!(input.kind, IN_MOVE | IN_DOWN | IN_UP | IN_LEAVE) =>
             {
-                if matches!(input.kind, IN_DOWN | IN_UP) && input.value != 0 {
+                if matches!(input.kind, IN_DOWN | IN_UP) && input.pointer_button() != 0 {
                     return Ok(event);
                 }
                 self.pointer_position = if input.kind == IN_LEAVE {
@@ -516,7 +558,7 @@ impl<C: Component> ComponentWindow<C> {
                     }) {
                         if self
                             .application
-                            .table_pointer(key, row, column, 0)
+                            .table_pointer(key, row, column, input.pointer_modifiers() & 3)
                             .map_err(native)?
                         {
                             self.text_clicks.cancel();
@@ -541,7 +583,12 @@ impl<C: Component> ComponentWindow<C> {
                         .and_then(|g| g.row_at(input.x as f32, input.y as f32));
                     if self
                         .application
-                        .list_pointer(pointer, target.as_deref(), row, 0)
+                        .list_pointer(
+                            pointer,
+                            target.as_deref(),
+                            row,
+                            input.pointer_modifiers() & 3,
+                        )
                         .map_err(native)?
                     {
                         self.text_clicks.cancel();
@@ -615,6 +662,7 @@ impl<C: Component> ComponentWindow<C> {
                     position,
                     input.x as f32,
                     input.y as f32,
+                    input.pointer_modifiers(),
                 )? {
                     if let Some((key, position)) = capture.as_deref().zip(text_position) {
                         self.application.set_input_affinity(key, position);

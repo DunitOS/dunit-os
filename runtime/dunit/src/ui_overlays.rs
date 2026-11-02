@@ -163,7 +163,7 @@ where
         } else {
             changed |= self.application.dismiss_tooltip();
         }
-        if input.kind == IN_DOWN && input.value == 1 {
+        if input.kind == IN_DOWN && input.pointer_button() == 1 {
             let opened = target.as_deref().is_some_and(|key| {
                 self.application
                     .open_context_menu(key, Some((input.x as f32, input.y as f32)))
@@ -177,7 +177,7 @@ where
             }
             return Ok(true);
         }
-        if matches!(input.kind, IN_DOWN | IN_UP) && input.value != 0 {
+        if matches!(input.kind, IN_DOWN | IN_UP) && input.pointer_button() != 0 {
             if changed {
                 self.redraw()?;
             }

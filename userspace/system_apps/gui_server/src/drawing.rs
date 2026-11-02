@@ -270,49 +270,7 @@ pub(super) fn blit_surface(
         sy += 1;
     }
 }
-/// A classic top-left arrow cursor. 'X' = black outline, '.' = white fill,
-/// ' ' = transparent. Hotspot is the top-left corner (0,0).
-pub(super) const CURSOR: [&str; 17] = [
-    "X                ",
-    "XX               ",
-    "X.X              ",
-    "X..X             ",
-    "X...X            ",
-    "X....X           ",
-    "X.....X          ",
-    "X......X         ",
-    "X.......X        ",
-    "X........X       ",
-    "X.....XXXXX      ",
-    "X..X..X          ",
-    "X.X X..X         ",
-    "XX  X..X         ",
-    "X    X..X        ",
-    "     X..X        ",
-    "      XX         ",
-];
-
-/// Draw the arrow cursor into the back buffer with its hotspot at (px, py).
-pub(super) fn draw_cursor(buf: &mut [u32], bw: usize, bh: usize, px: i32, py: i32) {
-    for (ry, row) in CURSOR.iter().enumerate() {
-        let dy = py + ry as i32;
-        if dy < 0 || dy as usize >= bh {
-            continue;
-        }
-        let drow = dy as usize * bw;
-        for (rx, ch) in row.bytes().enumerate() {
-            let color = match ch {
-                b'X' => 0xFF000000,
-                b'.' => 0xFFFFFFFF,
-                _ => continue,
-            };
-            let dx = px + rx as i32;
-            if dx >= 0 && (dx as usize) < bw {
-                buf[drow + dx as usize] = color;
-            }
-        }
-    }
-}
+pub(super) use crate::cursor::draw_cursor;
 // ===========================================================================
 // DWM shell — top panel / taskbar (M4 slice 5)
 // ===========================================================================

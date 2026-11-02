@@ -75,6 +75,7 @@ impl Cache {
         back: &mut [u32],
         bw: usize,
         bh: usize,
+        performance: &mut crate::performance::Profiler,
     ) -> bool {
         let mut stable =
             !c.blocked && c.shell.reusable(c.now) && !c.window_effects.animating(c.now);
@@ -181,13 +182,10 @@ impl Cache {
         if !same {
             return false;
         }
-        let mut blockers = c.shell.damage_blockers(c.now, c.effects);
-        blockers.push(Rect {
-            x: c.mouse.0,
-            y: c.mouse.1,
-            w: CURSOR.iter().map(|s| s.len()).max().unwrap_or(0) as u32,
-            h: CURSOR.len() as u32,
-        });
+        // The cache key includes pointer position: this path has a stationary
+        // opaque software cursor. Restore its pixels after applying client
+        // damage instead of treating it as a whole-scene fallback blocker.
+        let blockers = c.shell.damage_blockers(c.now, c.effects);
         let Some(p) = plan::plan(&surfaces, &updates, &blockers, bw as u32, bh as u32) else {
             return false;
         };
@@ -218,6 +216,7 @@ impl Cache {
                 return false;
             }
         }
+        draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1);
         for copy in &p.copies {
             let r = copy.destination;
             self.present.clear();
@@ -232,7 +231,10 @@ impl Cache {
                     self.present.len() * 4,
                 )
             };
-            if libdunit::fb_present(bytes, r.w, r.h, r.x as u32, r.y as u32) != 0 {
+            let perf_present = performance.stamp();
+            let present_result = libdunit::fb_present(bytes, r.w, r.h, r.x as u32, r.y as u32);
+            performance.present(perf_present,(r.w as u64)*(r.h as u64));
+            if present_result != 0 {
                 return false;
             }
         }

@@ -12,6 +12,7 @@ where
         position: Option<(&str, usize)>,
         x: f32,
         y: f32,
+        modifiers: u8,
     ) -> NativeResult<bool> {
         let config = position
             .and_then(|(key, _)| self.renderer.input_click_config(key))
@@ -22,7 +23,7 @@ where
             .as_millis()
             .min(u64::MAX as u128) as u64;
         self.application
-            .pointer_text_at(
+            .pointer_text_at_with_modifiers(
                 pointer,
                 target,
                 position,
@@ -33,6 +34,7 @@ where
                     y,
                     config,
                 },
+                modifiers,
             )
             .map_err(native)
     }

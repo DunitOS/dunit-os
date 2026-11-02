@@ -50,7 +50,7 @@ where
                 }
             }
             if matches!(input.kind, IN_MOVE | IN_DOWN | IN_UP | IN_LEAVE)
-                && (!matches!(input.kind, IN_DOWN | IN_UP) || input.value == 0)
+                && (!matches!(input.kind, IN_DOWN | IN_UP) || input.pointer_button() == 0)
             {
                 let event = match input.kind {
                     IN_DOWN => PointerEvent::Down,

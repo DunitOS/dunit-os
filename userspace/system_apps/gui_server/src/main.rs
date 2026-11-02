@@ -17,10 +17,15 @@ use gui_protocol_v1::Opcode;
 mod lua_policy;
 mod animation;
 mod protocol_runtime;
+mod input_lifecycle;
+mod frame_pacing;
+mod frame_runtime;
+mod performance;
 mod client_buffers;
 mod damage_plan;
 mod damage_runtime;
 use protocol_runtime::*;
+mod cursor;
 mod drawing;
 use drawing::*;
 mod composite;
@@ -805,22 +810,27 @@ fn pump_clients(
     clients: &mut Vec<ClientState>,
     reload: &mut bool,
     notify_out: &mut Vec<alloc::string::String>,
-) {
+    performance: &mut performance::Profiler,
+    deadline: Option<frame_pacing::FrameDeadline>,
+) -> Result<(),isize> {
     let mut rx = [0u8; 256];
     let mut sender: u32 = 0;
     for _ in 0..64 {
-        let n = libdunit::ipc_recv_from(&mut rx, &mut sender);
-        if n <= 0 {
-            break; // EAGAIN (queue empty) or error — nothing more this tick
+        if let Some(deadline)=deadline {
+            if deadline.due(frame_runtime::monotonic_ns()?){break;}
         }
+        let n = libdunit::ipc_recv_from(&mut rx, &mut sender);
+        if n == libdunit::EAGAIN {break;}
+        if n < 0 {return Err(n);}
         let n = n as usize;
+        performance.ipc_packet();
         let idx = match clients.iter().position(|c| c.pid == sender) {
             Some(i) => i,
             None => continue, // message from an unknown pid — ignore
         };
         handle_client_payload(server, &mut clients[idx], &rx[..n], reload, notify_out);
-
     }
+    Ok(())
 }
 
 // --- Desktop wallpaper (ported from the legacy Stack A renderer) ---------
@@ -1128,7 +1138,7 @@ fn apply_display_mode(d: &settings::Display) {
     }
 }
 
-/// Pointer edges and client capture survive framebuffer/session recreation.
+/// Input ownership survives framebuffer/session recreation.
 #[derive(Default)]
 struct PointerSession {
     input: u32,
@@ -1136,6 +1146,7 @@ struct PointerSession {
     left: bool,
     right: bool,
     captured_pid: Option<u32>,
+    keyboard: input_lifecycle::Lifecycle,
 }
 
 /// Run one interactive desktop session. Returns `true` when the session asked to
@@ -1526,6 +1537,7 @@ fn run_desktop_session(
     let mut pressed_win = pointer.captured_pid.and_then(|pid|
         wins.iter().position(|w| w.alive && w.pid == pid));
     let mut input_focus: Option<usize> = None; // window under the pointer
+    let mut keyboard_lifecycle=core::mem::take(&mut pointer.keyboard);
     let mut last_lx = i32::MIN;
     let mut last_ly = i32::MIN;
     // Bounded so a headless run (mouse never moves) still terminates and lets
@@ -1670,15 +1682,28 @@ fn run_desktop_session(
     let mut lua_expected: Vec<(u32, u32, u32)> = Vec::new();
     // Client-posted notification texts collected by `pump_clients` this tick
     // (NOTIFY_MAGIC), turned into config-gated toasts right after the pump. Reused
-    // across frames (cleared each tick) so no per-frame allocation in the hot path.
+    // across frames (drained after applying policy). Idle protocol service can
+    // append before the next frame without a clear dropping those requests.
     let mut notify_requests: Vec<alloc::string::String> = Vec::new();
+    let mut shell_clicks: Vec<(u32,bool)> = Vec::new();
+    let mut performance = performance::Profiler::new(cfg.diagnostics.performance);
+    let mut render=cfg.render;
     loop {
+        let frame_start=frame_runtime::monotonic_ns().unwrap_or_else(|error|{
+            libdunit::println(&alloc::format!("gui_server: FAIL frame clock {}",error));libdunit::exit(1)
+        });
+        let perf_work = performance.stamp();
+        performance.queues();
         let animation_clock = animation_time_ms();
         let animation_now = animation_clock.unwrap_or(previous_animation_time);
         // Advance any runtime-spawned clients through their protocol handshake,
         // then hand each newly-ready client a cascaded, focused window.
-        notify_requests.clear();
-        pump_clients(server, clients, &mut reload_requested, &mut notify_requests);
+        // Idle IPC service may already have queued notifications for this frame.
+        let perf_pump = performance.stamp();
+        if let Err(error)=pump_clients(server, clients, &mut reload_requested, &mut notify_requests, &mut performance,None){
+            libdunit::println(&alloc::format!("gui_server: FAIL protocol pump {}",error));libdunit::exit(1);
+        }
+        performance.finish(performance::Stage::Pump, perf_pump);
 
         // Live settings reload (GUI<->TOML round-trip): a gui_settings client
         // rewrote the config and pinged us. Re-read it and re-seed everything
@@ -1746,8 +1771,11 @@ fn run_desktop_session(
                     pointer.left = prev_left;
                     pointer.right = prev_right;
                     pointer.captured_pid = pressed_win.map(|wi| wins[wi].pid);
+                    pointer.keyboard = keyboard_lifecycle;
                     return true;
                 }
+                performance.configure(ncfg.diagnostics.performance);
+                render=ncfg.render;
                 lua_engine.cancel();
                 event_engine.cancel();
                 let _=event_engine.submit(lua_policy::Event{name:"reload",window_id:0,target:0});
@@ -2320,13 +2348,20 @@ fn run_desktop_session(
         }
         shell.advance(animation_now);
         ins=shell.insets;
-        // Read queued device transitions, not frame-to-frame button snapshots.
-        // Pure motion is coalesced in the kernel; deferring remaining records to
-        // the next iteration keeps rendering/IPC fair without dropping edges.
+        let perf_input = performance.stamp();
+        // Route every queued transition in order, bounded independently of
+        // queue refill. A stationary pass still reconciles moved window geometry.
+        shell_clicks.clear();
+        let mut batch=frame_pacing::InputBatch::new();
+        let mut pointer_sample=batch.next(||libdunit::pointer::read(pointer.input)).unwrap_or_else(|error|{
+            libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));libdunit::exit(1)
+        });
+        let (mx,my,wx,wy,menu_view,menu_org,menu_ly,qs_applet,qs_edge)=loop {
         let mut m = pointer.state;
         m.wheel = 0;
-        match libdunit::pointer::read(pointer.input) {
-            Ok(Some(event)) => {
+        match pointer_sample.take().expect("input batch always starts with a record or stationary pass") {
+            frame_pacing::PointerSample::Queued(event) => {
+                performance.pointer(event.wheel, event.flags & libdunit::pointer::LOST_BEFORE != 0);
                 m = libdunit::MouseState { x: event.x, y: event.y,
                     buttons: event.buttons, wheel: event.wheel };
                 if event.flags & libdunit::pointer::LOST_BEFORE != 0 {
@@ -2343,11 +2378,7 @@ fn run_desktop_session(
                     prev_right = m.right();
                 }
             }
-            Ok(None) => {},
-            Err(error) => {
-                libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));
-                libdunit::exit(1);
-            }
+            frame_pacing::PointerSample::Stationary => {},
         }
         // A live modeset can shrink bounds while old events remain queued.
         m.x = m.x.min(bw.saturating_sub(1) as u32);
@@ -2359,6 +2390,7 @@ fn run_desktop_session(
         let (wx,wy)=desktop_motion::logical_point(workspace_input.rect,mx,my,bw,bh);
         let left = m.left();
         let press = left && !prev_left;
+        if press {if let Some(target)=shell.event_target(mx,my){shell_clicks.push(target);}}
         let release = !left && prev_left;
         let right = m.right();
         let rpress = right && !prev_right;
@@ -2382,6 +2414,8 @@ fn run_desktop_session(
         let (qs_applet,qs_edge)=active_qs_anchor.or_else(||shell.first_quicksettings_anchor()).unwrap_or(((0,0,0,0),panel_edge));
         let in_shell = |x: i32, y: i32| shell.contains(x,y);
 
+        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+
         // --- Right-button press: forward to the content window under the cursor
         // as IN_DOWN with button=1 (context-menu trigger). Panel/dock/title are
         // shell-owned and ignore the right button; a right-click there is a no-op.
@@ -2393,6 +2427,7 @@ fn run_desktop_session(
                 if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && !effects.covers(wins[wi].pid,animation_now) && effects.input_geometry(&wins[wi],animation_now).in_content(wx,wy) {
                     z.retain(|&i| i != wi);
                     z.push(wi);
+                    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
                     let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_DOWN,x,y,1);
                     break;
                 }
@@ -2551,6 +2586,7 @@ fn run_desktop_session(
                     }
                 } else if wins[wi].in_content(wx, wy) {
                     // Click landed on client content: forward it to the client.
+                    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
                     let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_DOWN,x,y,0);
                     pressed_win = Some(wi);
                 }
@@ -2579,6 +2615,8 @@ fn run_desktop_session(
             wins[wi].cx = ncx;
             wins[wi].cy = ncy;
         }
+
+        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
 
         // --- Pointer focus + motion routed to the topmost content window ---
         let cur = if drag.is_some() || shell.contains(mx,my) || menu_open || qs_open {
@@ -2633,11 +2671,7 @@ fn run_desktop_session(
         // a clean, window-less boot impossible.) The loop is still bounded by the
         // `ticks >= 60000` headless guard at the bottom.
 
-        let focused = z
-            .iter()
-            .rev()
-            .copied()
-            .find(|&i| wins[i].alive && wins[i].ws == current_ws && !wins[i].minimized);
+        let focused = keyboard_window(&wins,&z,current_ws);
 
         // --- Mouse wheel: forward the tick's scroll delta to the focused window
         // as IN_SCROLL (delta in `lx`). Clients that don't scroll ignore it; the
@@ -2648,6 +2682,13 @@ fn run_desktop_session(
             }
         }
 
+        pointer_sample=batch.next(||libdunit::pointer::read(pointer.input)).unwrap_or_else(|error|{
+            libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));libdunit::exit(1)
+        });
+        if pointer_sample.is_none(){break (mx,my,wx,wy,menu_view,menu_org,menu_ly,qs_applet,qs_edge);}
+        };
+        let focused=keyboard_window(&wins,&z,current_ws);
+
         // --- Keyboard: drain the seat and route events to the focused window ---
         // The compositor is the sole reader of the kernel key ring. Every key
         // press (make) for a non-modifier key is forwarded to the focused window
@@ -2657,13 +2698,22 @@ fn run_desktop_session(
         //   button = cooked ASCII byte (0 for extended/arrow/nav keys)
         // Old clients read only the ASCII byte in `button` (unchanged); the
         // terminal decodes scancode+mods for control keys (Ctrl-C, arrows, …).
-        // Modifier-only presses and key releases are dropped — their state is
-        // already reflected in the `mods` field of the events we do send.
+        // Legacy clients retain make-only delivery. Negotiated clients also
+        // receive matching nonmodifier releases and keyboard focus transitions;
+        // compositor-owned keys never gain a client key owner.
         if focused.is_some() && wins.len() > initial_wins && !input_ready_announced {
             libdunit::println("gui_server: desktop input ready");
             input_ready_announced = true;
         }
         while let Some(ev) = libdunit::get_key_event() {
+            performance.key();
+            // Synchronize before every key, not once per frame: a preceding
+            // shortcut or switcher commit may already have raised another window.
+            sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+            let key_observation=keyboard_lifecycle.observe(ev.scancode,ev.pressed);
+            if let Some(pid)=key_observation.released_to {
+                send_input(clients,pid,IN_KEY_UP,ev.scancode as i32,ev.mods as i32,0);
+            }
             // Window switcher (M4, config-gated). The compositor owns the seat, so
             // it intercepts the switcher gesture BEFORE forwarding keys to clients:
             //   * `switch_mod`+Tab arms/advances an MRU overlay (Tab is swallowed,
@@ -2757,17 +2807,21 @@ fn run_desktop_session(
             if !ev.pressed || is_modifier_scancode(ev.scancode) {
                 continue;
             }
-            if let Some(wi) = focused {
-                send_input(clients,
-                    wins[wi].pid,
-                    IN_KEY,
-                    ev.scancode as i32,
-                    ev.mods as i32,
-                    ev.ascii as u32,
-                );
+            // Re-resolve after shortcuts have changed z/workspace. Negotiated
+            // clients suppress held repeats that began in an earlier focus
+            // scope; the legacy make-only stream remains unchanged.
+            sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+            if let Some(wi) = keyboard_window(&wins,&z,current_ws) {
+                let pid=wins[wi].pid;
+                let lifecycle=clients.iter().find(|c|c.pid==pid).is_some_and(|c|c.features&gui_protocol_v1::wire::FEATURE_INPUT_LIFECYCLE!=0);
+                if !lifecycle || keyboard_lifecycle.deliver_make(ev.scancode,pid,key_observation.fresh) {
+                    send_input(clients,pid,IN_KEY,ev.scancode as i32,ev.mods as i32,ev.ascii as u32);
+                }
             }
         }
+        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
 
+        performance.finish(performance::Stage::Input, perf_input);
         for win in wins.iter_mut().filter(|w|w.alive&&!w.rule_applied) {
             let app=apps.apps.get(win.app as usize).map(|a|a.id.as_str()).unwrap_or("");
             let rule=policy.for_app(app);
@@ -2802,7 +2856,7 @@ fn run_desktop_session(
             if menu_open!=observed_menu {let _=event_engine.submit(lua_policy::Event{name:if menu_open{"launcher_open"}else{"launcher_close"},window_id:0,target:0});}
             let hover=shell.event_target(mx,my);
             if hover!=hovered_component {if let Some((target,_))=hover {let _=event_engine.submit(lua_policy::Event{name:"panel_hover",window_id:0,target});}hovered_component=hover;}
-            if press {if let Some((target,widget))=hover {let _=event_engine.submit(lua_policy::Event{name:if widget{"widget_click"}else{"panel_click"},window_id:0,target});}}
+            for (target,widget) in shell_clicks.drain(..) {let _=event_engine.submit(lua_policy::Event{name:if widget{"widget_click"}else{"panel_click"},window_id:0,target});}
             for target in shell.due_widget_updates(animation_now){let _=event_engine.submit(lua_policy::Event{name:"widget_update",window_id:0,target});}
             observed.clear();observed.extend(wins.iter().map(|w|(w.pid,w.alive,w.minimized,w.state)));
             observed_ws=current_ws;observed_focus=focus;observed_menu=menu_open;
@@ -2977,6 +3031,9 @@ fn run_desktop_session(
             lua_expected.clear();
         }
 
+        // Policy/Lua commands may have changed focus after keyboard dispatch.
+        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+
         let damage_duration=if animation_clock.is_some(){anim_duration_ms}else{0};
         let mut desktop_widget_stats=libdunit::SystemStats::default();
         let desktop_widget_stats_valid=wg.enabled&&!desk_widgets.is_empty()
@@ -2989,12 +3046,14 @@ fn run_desktop_session(
             ||(menu_closed_at!=0&&animation_now.saturating_sub(menu_closed_at)<damage_duration as u64)
             ||animation::progress(animation_now,ws_switch_tick,damage_duration,lua_ease_out)<255
             ||desktop_tracks.animating(animation_now)||desktop_motion::changed(&workspace_damage_view,bw,bh);
+        let perf_compose = performance.begin_compose();
         let partial=damage_cache.compose(damage_runtime::Context{
             wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),now:animation_now,
             duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,effects:&fx,
             shell:&shell,window_effects:&effects,blocked:damage_blocked,
             widgets:(wg.enabled,widget_seconds,desktop_widget_stats.memory_used_percent(),desktop_widget_stats.process_running),
-        },clients,&mut back,bw,bh);
+        },clients,&mut back,bw,bh,&mut performance);
+        performance.composition(partial,damage_blocked);
         if !partial {
         // Desktop backdrop: the wallpaper (pre-scaled) when present, else a
         // subtle vertical gradient (or a flat fill when the gradient effect is
@@ -3310,7 +3369,10 @@ fn run_desktop_session(
 
         let bytes =
             unsafe { core::slice::from_raw_parts(back.as_ptr() as *const u8, back.len() * 4) };
-        if libdunit::fb_present(bytes, fb.width, fb.height, 0, 0)!=0 {
+        let perf_present = performance.stamp();
+        let present_result = libdunit::fb_present(bytes, fb.width, fb.height, 0, 0);
+        performance.present(perf_present,(fb.width as u64)*(fb.height as u64));
+        if present_result!=0 {
             damage_cache.invalidate();
             libdunit::println("gui_server: FAIL framebuffer present");
         }
@@ -3320,14 +3382,22 @@ fn run_desktop_session(
         }
 
         }
+        performance.finish_compose(perf_compose);
         for c in clients.iter_mut(){c.dirty=None;c.buffers.copied=0;}
+        let perf_done = performance.stamp();
         complete_desktop_frames(server,clients);
+        performance.finish(performance::Stage::FrameDone,perf_done);
         previous_animation_time = animation_now;
-        libdunit::sleep_ms(16);
+        performance.finish(performance::Stage::Work,perf_work);
+        let deadline=frame_pacing::FrameDeadline::new(frame_start,render.frame_interval_ms);
+        if let Err(error)=frame_runtime::wait_for_frame(deadline,server,clients,&mut reload_requested,&mut notify_requests,&mut performance){
+            libdunit::println(&alloc::format!("gui_server: FAIL frame wait {}",error));libdunit::exit(1);
+        }
+        performance.frame();
         ticks += 1;
-        // Report average ms/frame once the loop is warm (a single line, so the
-        // blur/compositing cost shows up in the headless serial log without
-        // spamming it). >16 ms means compositing overran the frame budget.
+        // Report the average whole loop period (work plus deadline wait), not
+        // pure compositing cost. The PIT-backed clock has 10 ms resolution.
+        // Optional PERF-SERVER diagnostics separate coarse elapsed stages.
         if ticks == 20 {
             let mut st = libdunit::SystemStats::default();
             if libdunit::get_system_stats(&mut st) >= 0 {
@@ -3354,6 +3424,8 @@ fn run_desktop_session(
         }
     }
 
+    performance.flush();
+    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,true);
     // Session over: tell every client to exit its input loop so serve_two_clients
     // can reap them (a QUIT to an already-exited pid is a harmless no-op).
     for w in wins.iter() {

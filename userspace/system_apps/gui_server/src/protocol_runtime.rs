@@ -416,7 +416,7 @@ pub(super) fn drive_reconfigure(
     ok
 }
 
-pub(super) use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_KEY, IN_SCROLL, IN_QUIT};
+pub(super) use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_KEY, IN_KEY_UP, IN_FOCUS_IN, IN_FOCUS_OUT, IN_SCROLL, IN_QUIT};
 
 /// How long the maximize/restore self-test waits for a client to re-import the
 /// work-area-sized buffer before advancing anyway (in desktop ticks; ~60/s, so
@@ -435,10 +435,11 @@ pub(super) fn send_input(clients: &mut [ClientState], pid: u32, kind: u8, lx: i3
         value: button,
     };
     let Some(client) = clients.iter_mut().find(|c| c.pid == pid) else { return; };
+    let Some(input)=input.for_features(client.features) else {return;};
     if client.buffers.frame.is_none() {
         // An unmapped surface has no pointer/key target, but close still needs
         // to terminate an idle client without waiting for a remap.
-        if kind == IN_QUIT { libdunit::ipc_send(pid, &input.encode()); }
+        if matches!(kind,IN_QUIT|IN_FOCUS_OUT) { libdunit::ipc_send(pid, &input.encode()); }
         return;
     }
     if !client.presented {
@@ -462,6 +463,7 @@ pub(super) fn is_modifier_scancode(sc: u8) -> bool {
 pub(super) struct ClientState {
     pub(super) pid: u32,
     pub(super) conn: gui_protocol_v1::server::ConnId,
+    pub(super) features: u64,
     pub(super) slot_x: u32,
     pub(super) slot_y: u32,
     pub(super) buf_ptr: *const u8,
@@ -500,6 +502,7 @@ impl ClientState {
         ClientState {
             pid: 0,
             conn: 0,
+            features: 0,
             slot_x: 0,
             slot_y: 0,
             buf_ptr: core::ptr::null(),
@@ -562,6 +565,7 @@ pub(super) fn handle_client_payload(
     let importing=matches!(request,Some(Request::ImportBuffer{..}));
     let cap=if importing {c.buffers.capability(header.object)}else{None};
     let replies=server.deliver(c.conn,payload,cap);
+    c.features=server.negotiated_features(c.conn).unwrap_or(0);
     let accepted=replies.iter().any(|reply| {
         let Ok(h)=gui_protocol_v1::Header::decode(reply) else{return false;};
         gui_protocol_v1::Opcode::from_u16(h.opcode_raw).and_then(|op|
@@ -999,6 +1003,36 @@ pub(super) fn complete_desktop_frames(server: &mut Server, clients: &mut [Client
             for (conn, packet) in server.reconfigure(c.conn, c.surface, w, h, 1, state) {
                 if conn == c.conn { libdunit::ipc_send(c.pid, &packet); }
             }
+        }
+    }
+}
+
+/// Current topmost keyboard window, independent of pointer hover.
+pub(super) fn keyboard_window(wins: &[Win], z: &[usize], workspace: usize) -> Option<usize> {
+    z.iter().rev().copied().find(|&i| {
+        wins[i].alive && wins[i].ws == workspace && !wins[i].minimized
+    })
+}
+/// Keep OUT before IN and both before the next input to a newly focused client.
+pub(super) fn sync_keyboard_focus(
+    lifecycle: &mut crate::input_lifecycle::Lifecycle,
+    clients: &mut [ClientState],
+    wins: &[Win],
+    z: &[usize],
+    workspace: usize,
+    blocked: bool,
+) {
+    let next = if blocked {
+        None
+    } else {
+        keyboard_window(wins, z, workspace).map(|i| wins[i].pid)
+    };
+    if let Some(change) = lifecycle.focus(next) {
+        if let Some(pid) = change.previous {
+            send_input(clients, pid, IN_FOCUS_OUT, 0, 0, 0);
+        }
+        if let Some(pid) = change.current {
+            send_input(clients, pid, IN_FOCUS_IN, 0, 0, 0);
         }
     }
 }

@@ -102,7 +102,7 @@ fn validate_mode(text: &str, base: &crate::Applications, references_required: bo
                 if applications.len() + base.apps.iter().filter(|app| !applications.contains(&app.id.as_str())).count() > MAX_APPS {
                     return Err(error(section.into(), "too many applications"));
                 }
-            } else if !crate::shell::section(section) && !crate::policy::section(section) && section != "shell" && !matches!(section, "dock" | "launcher" | "startup" | "workspaces")
+            } else if !crate::shell::section(section) && !crate::policy::section(section) && section != "shell" && section != "diagnostics" && section != "render" && !matches!(section, "dock" | "launcher" | "startup" | "workspaces")
                 && !schema.lines().any(|s| s == format!("[{}]", section))
             {
                 return Err(error(section.into(), "unknown section"));
@@ -121,6 +121,10 @@ fn validate_mode(text: &str, base: &crate::Applications, references_required: bo
         fields.push(field.clone());
         let checked = if crate::shell::section(section) || crate::policy::section(section) || section == "shell" {
             Ok(()) // Typed shell parsing and complete tree validation below.
+        } else if section == "diagnostics" {
+            crate::Diagnostics::field(key,input).map(|_| ())
+        } else if section == "render" {
+            crate::Render::field(key,input).map(|_| ())
         } else if section.starts_with("application.") {
             if matches!(key, "name" | "exec" | "icon" | "label") {
                 string(input).map(|_| ())

@@ -15,7 +15,8 @@ use core::{
     time::Duration,
 };
 pub use gui_protocol_v1::control::{
-    Input, IN_DOWN, IN_KEY, IN_LEAVE, IN_MOVE, IN_QUIT, IN_SCROLL, IN_UP,
+    Input, IN_DOWN, IN_FOCUS_IN, IN_FOCUS_OUT, IN_KEY, IN_KEY_UP, IN_LEAVE, IN_MOVE, IN_QUIT,
+    IN_SCROLL, IN_UP,
 };
 pub use gui_protocol_v1::wire::{Event as ProtocolEvent, Rect as DamageRect};
 use gui_protocol_v1::{
@@ -158,6 +159,9 @@ fn valid_damage(r: DamageRect, w: u32, h: u32) -> bool {
 /// close/failure: existing gui-v1 bootstrap has no reconnect/session identifier.
 /// This type is deliberately neither Send nor Sync (one inbox and serial stream).
 pub struct Window {
+    metrics_enabled: bool,
+    metrics: crate::ui::metrics::WindowMetrics,
+    features: u64,
     surface: u64,
     live_buffers: Vec<u64>,
     protocol_error: Option<(u64, u64, u32, u32)>,
@@ -184,11 +188,50 @@ impl Window {
     /// bootstrap. Its claimed PID must equal the kernel-authenticated sender.
     /// Subsequent messages are accepted only from that sender.
     pub fn open(width: u32, height: u32) -> Result<Self> {
+        Self::open_features(width, height, FEATURE_INPUT_LIFECYCLE)
+    }
+    /// Compatibility clients can explicitly retain legacy cooked-only input.
+    pub fn open_legacy(width: u32, height: u32) -> Result<Self> {
+        Self::open_features(width, height, 0)
+    }
+    /// Enable or disable aggregate diagnostics without resetting prior samples.
+    /// Disabled by default; the disabled path makes no diagnostic clock calls.
+    pub fn enable_metrics(&mut self, enabled: bool) {
+        self.metrics_enabled = enabled;
+        if enabled {
+            self.metrics.input_queue_high_water =
+                self.metrics.input_queue_high_water.max(self.inputs.len());
+            self.metrics.protocol_queue_high_water = self
+                .metrics
+                .protocol_queue_high_water
+                .max(self.pending.len());
+        }
+    }
+    pub fn reset_metrics(&mut self) {
+        self.metrics = Default::default();
+        if self.metrics_enabled {
+            self.metrics.input_queue_high_water = self.inputs.len();
+            self.metrics.protocol_queue_high_water = self.pending.len();
+        }
+    }
+    pub fn metrics(&self) -> crate::ui::WindowMetrics {
+        let mut metrics = self.metrics;
+        metrics.input_queued = self.inputs.len();
+        metrics.protocol_queued = self.pending.len();
+        metrics
+    }
+    pub fn input_lifecycle(&self) -> bool {
+        self.features & FEATURE_INPUT_LIFECYCLE != 0
+    }
+    fn open_features(width: u32, height: u32, offered: u64) -> Result<Self> {
         buffer_bytes(width, height)?;
         if STARTED.swap(true, Ordering::AcqRel) {
             return Err(Error(libdunit::EBUSY));
         }
         let mut window = Self {
+            metrics_enabled: false,
+            metrics: Default::default(),
+            features: 0,
             surface: 1,
             live_buffers: Vec::new(),
             protocol_error: None,
@@ -228,7 +271,7 @@ impl Window {
             Request::Hello {
                 min_minor: 0,
                 max_minor: 0,
-                offered_features: 0,
+                offered_features: offered,
                 required_features: 0,
             },
         )?;
@@ -236,6 +279,12 @@ impl Window {
             .until(|_, e| matches!(e, Event::Welcome { request, .. } if *request == hello))?;
         if !matches!(welcome, Event::Welcome { formats, .. } if formats & FORMATS_XRGB8888 != 0) {
             return Err(Error(libdunit::EOPNOTSUPP));
+        }
+        if let Event::Welcome { features, .. } = welcome {
+            if features & !offered != 0 {
+                return Err(Error(libdunit::EIO));
+            }
+            window.features = features;
         }
         window.request(
             window.surface,
@@ -315,11 +364,18 @@ impl Window {
             let Some((n, _)) = self.receive(&mut bytes, start, timeout)? else {
                 return Ok(None);
             };
-            if let Some(input) = Input::decode(&bytes[..n]) {
+            if let Some(input) = Input::decode_for_features(&bytes[..n], self.features) {
+                if self.metrics_enabled {
+                    self.metrics.input_received = self.metrics.input_received.saturating_add(1);
+                }
                 if self.inputs.len() == MAX_DEFERRED {
                     return Err(Error(libdunit::ENOBUFS));
                 }
                 self.inputs.push_back(input);
+                if self.metrics_enabled {
+                    self.metrics.input_queue_high_water =
+                        self.metrics.input_queue_high_water.max(self.inputs.len());
+                }
                 // Let next_event return input promptly, including a quit.
                 return Ok(None);
             }
@@ -367,6 +423,12 @@ impl Window {
                     return Err(Error(libdunit::ENOBUFS));
                 }
                 self.pending.push_back((header, event));
+                if self.metrics_enabled {
+                    self.metrics.protocol_queue_high_water = self
+                        .metrics
+                        .protocol_queue_high_water
+                        .max(self.pending.len());
+                }
             }
             if start.elapsed()? >= TRANSACTION {
                 return Err(Error(libdunit::EAGAIN));
@@ -521,10 +583,21 @@ impl Window {
         &mut self,
         mut paint: impl FnMut(&mut Frame<'_>) -> Result<Option<DamageRect>>,
     ) -> Result<()> {
+        let started = crate::ui::metrics::start(self.metrics_enabled);
+        let result = self.try_draw_damage_inner(&mut paint);
+        self.metrics
+            .draw_total
+            .finish(self.metrics_enabled, started);
+        result
+    }
+    fn try_draw_damage_inner(
+        &mut self,
+        paint: &mut impl FnMut(&mut Frame<'_>) -> Result<Option<DamageRect>>,
+    ) -> Result<()> {
         let start = Instant::now()?;
         let mut result = Err(Error(libdunit::EAGAIN));
         for _ in 0..MAX_RETRIES {
-            result = self.draw_inner(&mut paint);
+            result = self.draw_inner(paint);
             if result.is_ok() {
                 return result;
             }
@@ -599,6 +672,7 @@ impl Window {
         if !valid_damage(damage, self.width, self.height) {
             return Err(Error(libdunit::EINVAL));
         }
+        let import_started = crate::ui::metrics::start(self.metrics_enabled);
         let duplicate = checked(libdunit::handle_dup(
             buffer.handle,
             libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
@@ -616,7 +690,11 @@ impl Window {
         }
         .encode();
         checked(libdunit::ipc_send(self.peer, &announcement))?;
-        self.request(
+        // These requests have a defined FIFO dependency: IMPORT consumes the
+        // preceding CAP1, ATTACH names that imported object, then COMMIT publishes
+        // it. Queue them together instead of adding a server round trip between
+        // each request. Every RESULT and the presentation barrier are still read.
+        let import = self.send(
             object,
             Request::ImportBuffer {
                 width: self.width,
@@ -626,8 +704,7 @@ impl Window {
                 offset: 0,
             },
         )?;
-        self.live_buffers.push(object);
-        self.request(
+        let attach = self.send(
             self.surface,
             Request::AttachBuffer {
                 buffer: object,
@@ -641,21 +718,52 @@ impl Window {
                 frame_callback: 1,
             },
         )?;
+        if self.metrics_enabled {
+            self.metrics.commits = self.metrics.commits.saturating_add(1);
+        }
         let surface = self.surface;
+        self.until(|h, e| {
+            h.object == object && matches!(e, Event::Result { request } if *request == import)
+        })?;
+        // Keep the imported object in recovery bookkeeping before consuming a
+        // possible stale-configure error from the later COMMIT. CONFIGURE stays
+        // queued by until(), and COMMIT is still the latest client serial.
+        self.live_buffers.push(object);
+        self.until(|h, e| {
+            h.object == surface && matches!(e, Event::Result { request } if *request == attach)
+        })?;
+        self.metrics
+            .import_attach
+            .finish(self.metrics_enabled, import_started);
+        let commit_started = crate::ui::metrics::start(self.metrics_enabled);
         self.until(|h, e| {
             h.object == surface && matches!(e, Event::Result { request } if *request == commit)
         })?;
+        self.metrics
+            .commit_result
+            .finish(self.metrics_enabled, commit_started);
+        let frame_started = crate::ui::metrics::start(self.metrics_enabled);
         let (_, frame) = self.until(|h, e| {
             h.object == surface && matches!(e, Event::FrameDone { commit: c, .. } if *c == commit)
         })?;
+        self.metrics
+            .frame_done
+            .finish(self.metrics_enabled, frame_started);
         if !matches!(frame, Event::FrameDone { status: 0, .. }) {
             return Err(Error(libdunit::EIO));
+        }
+        if self.metrics_enabled {
+            self.metrics.completed_frames = self.metrics.completed_frames.saturating_add(1);
         }
         if let Some(old) = self.current.take() {
             if !self.released.contains(&old.object) {
                 return Err(Error(libdunit::EIO));
             }
+            let retire_started = crate::ui::metrics::start(self.metrics_enabled);
             self.request(old.object, Request::DestroyBuffer)?;
+            self.metrics
+                .retire
+                .finish(self.metrics_enabled, retire_started);
             self.live_buffers.retain(|id| *id != old.object);
             // RELEASE + DESTROY_RESULT is the last-reader barrier. This mapping
             // becomes writable only on the next unpublished drawing callback.
@@ -688,6 +796,17 @@ impl Window {
         }
         result
     }
+    fn pop_input(&mut self) -> Option<WindowEvent> {
+        let input = self.inputs.pop_front()?;
+        if self.metrics_enabled {
+            self.metrics.input_delivered = self.metrics.input_delivered.saturating_add(1);
+        }
+        Some(if input.kind == IN_QUIT {
+            WindowEvent::CloseRequested
+        } else {
+            WindowEvent::Input(input)
+        })
+    }
     fn next_inner(&mut self, timeout: Duration) -> Result<Option<WindowEvent>> {
         if core::mem::take(&mut self.resized) {
             return Ok(Some(WindowEvent::Resized {
@@ -695,25 +814,15 @@ impl Window {
                 height: self.height,
             }));
         }
-        if let Some(input) = self.inputs.pop_front() {
-            return Ok(Some(if input.kind == IN_QUIT {
-                WindowEvent::CloseRequested
-            } else {
-                WindowEvent::Input(input)
-            }));
+        if let Some(event) = self.pop_input() {
+            return Ok(Some(event));
         }
         let packet = match self.pending.pop_front() {
             Some(packet) => Some(packet),
             None => self.packet(Instant::now()?, timeout)?,
         };
         let Some((header, event)) = packet else {
-            return Ok(self.inputs.pop_front().map(|input| {
-                if input.kind == IN_QUIT {
-                    WindowEvent::CloseRequested
-                } else {
-                    WindowEvent::Input(input)
-                }
-            }));
+            return Ok(self.pop_input());
         };
         Ok(Some(match event {
             Event::Configure { .. } if header.object == self.surface => {

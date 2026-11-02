@@ -22,6 +22,10 @@ pub use applications::{AppEntry, Applications, MAX_APPS, MAX_WS};
 pub(crate) use applications::{parse_apps, parse_apps_seeded};
 pub use catalog::{validate_document_with_manifests, validate_installed_document};
 mod validation;
+mod diagnostics;
+mod render;
+pub use render::Render;
+pub use diagnostics::Diagnostics;
 pub mod shell;
 pub mod policy;
 pub use validation::{validate, ConfigError};
@@ -948,6 +952,8 @@ pub fn save_user_document(text:&str)->Result<(),ConfigError>{
 /// `!valid` (garbage/empty file), so a bad edit never wipes a working desktop.
 #[derive(Clone)]
 pub struct Config {
+    pub render: Render,
+    pub diagnostics: Diagnostics,
     pub settings: Settings,
     pub apps: Applications,
     pub shell: shell::ShellConfig,
@@ -959,6 +965,8 @@ impl Config {
     /// The pure built-in default (no config file): baselines, marked valid.
     pub fn defaults() -> Config {
         Config {
+            diagnostics: Diagnostics {performance:false},
+            render: Render::default(),
             settings: Settings::defaults(),
             apps: Applications::baseline(),
             shell: shell::ShellConfig::default(),
@@ -1199,7 +1207,9 @@ fn resolve_config(text: &str, mut settings: Settings, mut apps: Applications, sa
         && !apps.apps.is_empty()
         && apps.apps.len() <= MAX_APPS
         && (settings.applied > 0 || saw_apps || shell.explicit);
-    Ok(Config { settings, apps, shell, policy, valid })
+    let diagnostics = Diagnostics::resolve(text)?;
+    let render=Render::resolve(text)?;
+    Ok(Config { settings, apps, shell, policy, diagnostics, render, valid })
 }
 
 /// Forward-migrate a parsed document from an older schema `from` to

@@ -9,6 +9,12 @@ where
         &mut self,
         event: Option<WindowEvent>,
     ) -> NativeResult<Option<WindowEvent>> {
+        if let Some(WindowEvent::Input(input)) = &event {
+            if input.kind == IN_FOCUS_IN || input.kind == IN_FOCUS_OUT {
+                self.focus_lifecycle(input.kind == IN_FOCUS_IN)?;
+                return Ok(event);
+            }
+        }
         self.wake_scrollbars(&event)?;
         let Some(WindowEvent::Input(input)) = &event else {
             return self.dispatch_event_default(event);
@@ -44,8 +50,16 @@ where
                     event: pointer,
                     position: (pointer != PointerEvent::Leave)
                         .then_some((input.x as f32, input.y as f32)),
-                    button: input.value as i32,
-                    modifiers: 0,
+                    button: input.pointer_button() as i32,
+                    modifiers: input.pointer_modifiers(),
+                },
+            )
+        } else if input.kind == IN_KEY_UP {
+            (
+                self.application.focused_key().map(String::from),
+                UiEventKind::NativeKeyUp {
+                    scancode: input.x,
+                    modifiers: input.y as u8,
                 },
             )
         } else if input.kind == IN_KEY {
@@ -106,7 +120,25 @@ where
             self.redraw()?;
         }
         if outcome.default_prevented {
+            if matches!(&event,Some(WindowEvent::Input(i)) if i.kind==IN_KEY_UP||i.kind==IN_KEY) {
+                let changed = self.application.cancel_keyboard_activation();
+                if let Some(WindowEvent::Input(i)) = &event {
+                    if i.kind == IN_KEY_UP {
+                        self.application
+                            .key_release(i.x, i.y as u8)
+                            .map_err(native)?;
+                    }
+                }
+                if changed {
+                    self.redraw()?;
+                }
+            }
             return Ok(event);
+        }
+        if let Some(WindowEvent::Input(input)) = &event {
+            if self.key_lifecycle(input)? {
+                return Ok(event);
+            }
         }
         self.dispatch_event_default(event)
     }
