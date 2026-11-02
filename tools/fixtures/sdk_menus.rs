@@ -156,11 +156,19 @@ fn main() -> dunit::Result<()> {
     )?;
     marker("ready")?;
     let mut stage = 0;
+    let mut outside_armed = false;
     let mut tip_since = 0;
     loop {
         let event = ui.next_event(Duration::from_millis(100))?;
         assert!(!matches!(event, Some(WindowEvent::CloseRequested)));
         assert!(!ui.component().actions.contains(&"bad"));
+        // Native Enter opens this control on release. The harness must observe
+        // the reopened popup before testing an outside click, not race its make.
+        if stage == 6 && !outside_armed && owner(&ui, "pick") {
+            assert!(ui.popup_state().is_some());
+            outside_armed = true;
+            marker("outside guard popup open OK")?;
+        }
         let status = match stage {
             0 if focused(&ui, "file") => Some("bar tab focus OK"),
             1 if focused(&ui, "pick") => Some("bar one tab stop OK"),
@@ -180,7 +188,7 @@ fn main() -> dunit::Result<()> {
                 assert!(ui.popup_state().is_none());
                 Some("pointer option OK")
             }
-            6 if ui.popup_state().is_none()
+            6 if outside_armed && ui.popup_state().is_none()
                 && matches!(event,Some(WindowEvent::Input(i)) if i.kind==IN_UP) =>
             {
                 assert_eq!(ui.component().apply, 0);

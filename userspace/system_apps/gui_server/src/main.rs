@@ -1143,6 +1143,7 @@ fn apply_display_mode(d: &settings::Display) {
 struct PointerSession {
     input: u32,
     state: libdunit::MouseState,
+    modifiers: u8,
     left: bool,
     right: bool,
     captured_pid: Option<u32>,
@@ -2353,14 +2354,16 @@ fn run_desktop_session(
         // queue refill. A stationary pass still reconciles moved window geometry.
         shell_clicks.clear();
         let mut batch=frame_pacing::InputBatch::new();
-        let mut pointer_sample=batch.next(||libdunit::pointer::read(pointer.input)).unwrap_or_else(|error|{
+        let mut pointer_sample=batch.next(||libdunit::pointer::read_with_modifiers(pointer.input)).unwrap_or_else(|error|{
             libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));libdunit::exit(1)
         });
         let (mx,my,wx,wy,menu_view,menu_org,menu_ly,qs_applet,qs_edge)=loop {
         let mut m = pointer.state;
         m.wheel = 0;
         match pointer_sample.take().expect("input batch always starts with a record or stationary pass") {
-            frame_pacing::PointerSample::Queued(event) => {
+            frame_pacing::PointerSample::Queued(sample) => {
+                pointer.modifiers = sample.modifiers as u8;
+                let event = sample.event;
                 performance.pointer(event.wheel, event.flags & libdunit::pointer::LOST_BEFORE != 0);
                 m = libdunit::MouseState { x: event.x, y: event.y,
                     buttons: event.buttons, wheel: event.wheel };
@@ -2368,7 +2371,7 @@ fn run_desktop_session(
                     // A new owner or an overrun has no trustworthy press history.
                     // Leave cancels client presses/selection without activation.
                     for wi in [pressed_win, input_focus.filter(|wi| Some(*wi) != pressed_win)].into_iter().flatten() {
-                        if wins[wi].alive { send_input(clients,wins[wi].pid,IN_LEAVE,0,0,0); }
+                        if wins[wi].alive { send_pointer(clients,wins[wi].pid,IN_LEAVE,0,0, 0, pointer.modifiers); }
                     }
                     drag = None;
                     pressed_win = None;
@@ -2428,7 +2431,7 @@ fn run_desktop_session(
                     z.retain(|&i| i != wi);
                     z.push(wi);
                     sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
-                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_DOWN,x,y,1);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_DOWN,x,y, 1, pointer.modifiers);
                     break;
                 }
             }
@@ -2587,7 +2590,7 @@ fn run_desktop_session(
                 } else if wins[wi].in_content(wx, wy) {
                     // Click landed on client content: forward it to the client.
                     sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
-                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_DOWN,x,y,0);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_DOWN,x,y, 0, pointer.modifiers);
                     pressed_win = Some(wi);
                 }
             }
@@ -2637,7 +2640,7 @@ fn run_desktop_session(
         if cur != input_focus {
             if let Some(old) = input_focus {
                 if wins[old].alive {
-                    send_input(clients, wins[old].pid, IN_LEAVE, 0, 0, 0);
+                    send_pointer(clients, wins[old].pid, IN_LEAVE, 0, 0, 0, pointer.modifiers);
                 }
             }
             input_focus = cur;
@@ -2646,7 +2649,7 @@ fn run_desktop_session(
         if let Some(wi) = cur {
             let (lx,ly)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);
             if lx != last_lx || ly != last_ly {
-                send_input(clients, wins[wi].pid, IN_MOVE, lx, ly, 0);
+                send_pointer(clients, wins[wi].pid, IN_MOVE, lx, ly, 0, pointer.modifiers);
                 last_lx = lx;
                 last_ly = ly;
             }
@@ -2656,7 +2659,7 @@ fn run_desktop_session(
         if release {
             if let Some(wi) = pressed_win {
                 if wins[wi].alive {
-                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_input(clients, wins[wi].pid,IN_UP,x,y,0);
+                    let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_UP,x,y, 0, pointer.modifiers);
                 }
             }
             pressed_win = None;
@@ -2678,11 +2681,11 @@ fn run_desktop_session(
         // terminal uses it to move through its scrollback history.
         if m.wheel != 0 {
             if let Some(wi) = focused {
-                send_input(clients, wins[wi].pid, IN_SCROLL, m.wheel, 0, 0);
+                send_pointer(clients, wins[wi].pid, IN_SCROLL, m.wheel, 0, 0, pointer.modifiers);
             }
         }
 
-        pointer_sample=batch.next(||libdunit::pointer::read(pointer.input)).unwrap_or_else(|error|{
+        pointer_sample=batch.next(||libdunit::pointer::read_with_modifiers(pointer.input)).unwrap_or_else(|error|{
             libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));libdunit::exit(1)
         });
         if pointer_sample.is_none(){break (mx,my,wx,wy,menu_view,menu_org,menu_ly,qs_applet,qs_edge);}

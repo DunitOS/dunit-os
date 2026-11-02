@@ -204,6 +204,10 @@
           }
         },
         {
+          "wait_marker": "[MENUS] outside guard popup open OK",
+          "timeout": 45
+        },
+        {
           "relative_motion": {
             "x": 127,
             "y": -27,
@@ -793,7 +797,8 @@
     "[MENUS] escape one level OK",
     "[MENUS] escape restores bar OK",
     "[MENUS] ok",
-    "[GUI-EXIT] app=sdk_menus_fixture kind=0 code=0"
+    "[GUI-EXIT] app=sdk_menus_fixture kind=0 code=0",
+    "[MENUS] outside guard popup open OK"
   ],
   "forbidden": [
     "[PANIC]",

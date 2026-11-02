@@ -426,6 +426,15 @@ pub(super) use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_
 /// stalls on a client exercising its right to keep its own size.
 pub(super) const ST_SETTLE_TICKS: u32 = 240;
 
+/// Pack the immutable device snapshot; feature projection below strips modifiers
+/// for legacy clients. Keyboard-drain order must never supply pointer modifiers.
+pub(super) fn send_pointer(clients: &mut [ClientState], pid: u32, kind: u8,
+    x: i32, y: i32, button: u8, modifiers: u8) {
+    let value = gui_protocol_v1::control::pointer_value(button, modifiers)
+        .expect("validated pointer modifier snapshot");
+    send_input(clients, pid, kind, x, y, value);
+}
+
 /// Send one input control message to a client.
 pub(super) fn send_input(clients: &mut [ClientState], pid: u32, kind: u8, lx: i32, ly: i32, button: u32) {
     let input = gui_protocol_v1::control::Input {

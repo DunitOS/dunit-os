@@ -1,0 +1,18 @@
+[meta]
+schema_version = 2
+[startup]
+entries = ["sdk_modifiers_fixture"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[effects]
+anim = false
+[rules.main]
+app = "sdk_modifiers_fixture"
+x = 100
+y = 100
+width = 640
+height = 360
+floating = true
