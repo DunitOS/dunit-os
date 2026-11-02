@@ -1,5 +1,5 @@
 //! Input geometry and painting. Editing remains in the widget layer.
-use crate::{CaretAffinity, ScrollArea, Surface, TextPosition, VisualLines};
+use crate::{CaretAffinity, PreparedInput, ScrollArea, Surface, TextPosition, VisualLines};
 use alloc::string::String;
 use dunit_style::Style;
 use dunit_text::Font;
@@ -193,9 +193,19 @@ impl TextInput {
     /// Actual text extents (excluding placeholder), including insertion caret
     /// width so dragging the horizontal bar can reveal the full final caret.
     pub fn scroll_axes(&self, font: &Font, style: &Style, rect: Rect) -> (ScrollAxis, ScrollAxis) {
+        let lines = self.visual_lines(font, style, rect);
+        self.scroll_axes_with_lines(font, style, rect, &lines)
+    }
+    /// Extents using geometry prepared for the same value/font/style/width.
+    pub fn scroll_axes_with_lines(
+        &self,
+        font: &Font,
+        style: &Style,
+        rect: Rect,
+        lines: &VisualLines,
+    ) -> (ScrollAxis, ScrollAxis) {
         let content = self.content_rect(style, rect);
         let px = style.number("font-size").unwrap_or(0.);
-        let lines = self.visual_lines(font, style, rect);
         let text_width = lines.max_width();
         let mut x = ScrollAxis {
             offset: self.scroll_x,
@@ -264,6 +274,24 @@ impl TextInput {
             self.password,
         )
     }
+    /// Prepare once after final layout. Value geometry is shared by every
+    /// consumer; a distinct placeholder map exists only while it is displayed.
+    pub fn prepare(&self, font: &Font, style: &Style, rect: Rect) -> PreparedInput {
+        let value = self.visual_lines(font, style, rect);
+        let placeholder = (self.value.is_empty() && !self.placeholder.is_empty()).then(|| {
+            let content = self.content_rect(style, rect);
+            VisualLines::new(
+                &self.placeholder,
+                font,
+                style.number("font-size").unwrap_or(0.),
+                (content.w - style.number("caret-width").unwrap_or(0.).max(0.)).max(0.),
+                self.multiline,
+                self.soft_wrap,
+                false,
+            )
+        });
+        PreparedInput { value, placeholder }
+    }
     fn vertical_limit(&self, font: &Font, style: &Style, rect: Rect) -> f32 {
         if !self.multiline {
             return 0.;
@@ -277,10 +305,20 @@ impl TextInput {
     }
     /// Preserve the prior viewport while keeping the insertion caret visible.
     pub fn fit_scroll(&mut self, font: &Font, style: &Style, rect: Rect) {
+        let lines = self.visual_lines(font, style, rect);
+        self.fit_scroll_with_lines(font, style, rect, &lines);
+    }
+    /// Fit using the same immutable map that will be painted in this snapshot.
+    pub fn fit_scroll_with_lines(
+        &mut self,
+        font: &Font,
+        style: &Style,
+        rect: Rect,
+        lines: &VisualLines,
+    ) {
         let content = self.content_rect(style, rect);
         let px = style.number("font-size").unwrap_or(0.);
         let width = (content.w - style.number("caret-width").unwrap_or(0.).max(0.)).max(0.);
-        let lines = self.visual_lines(font, style, rect);
         let total = lines.max_width();
         let (x, row) = lines.position(TextPosition {
             index: self.boundary(self.cursor),
@@ -293,7 +331,7 @@ impl TextInput {
                 self.scroll_y,
                 row as f32 * height,
                 (content.h - height).max(0.),
-                self.vertical_limit(font, style, rect),
+                (lines.lines.len() as f32 * height - content.h).max(0.),
             )
         } else {
             0.
@@ -338,6 +376,18 @@ impl TextInput {
         x: f32,
         y: f32,
     ) -> TextPosition {
+        let lines = self.visual_lines(font, style, rect);
+        self.hit_position_with_lines(font, style, rect, x, y, &lines)
+    }
+    pub fn hit_position_with_lines(
+        &self,
+        font: &Font,
+        style: &Style,
+        rect: Rect,
+        x: f32,
+        y: f32,
+        lines: &VisualLines,
+    ) -> TextPosition {
         let px = style.number("font-size").unwrap_or(0.);
         let content = self.content_rect(style, rect);
         let height = font.line_metrics(px).line_height();
@@ -346,8 +396,7 @@ impl TextInput {
         } else {
             0
         };
-        self.visual_lines(font, style, rect)
-            .hit(row, x - content.x + self.scroll_x)
+        lines.hit(row, x - content.x + self.scroll_x)
     }
     pub fn hit_index_at(&self, font: &Font, style: &Style, rect: Rect, x: f32, y: f32) -> usize {
         self.hit_position_at(font, style, rect, x, y).index
@@ -362,11 +411,22 @@ impl TextInput {
         command: dunit_widgets::text_input::EditCommand,
         goal: Option<f32>,
     ) -> Option<(TextPosition, Option<f32>)> {
-        use dunit_widgets::text_input::EditCommand::*;
         if !self.multiline || !self.soft_wrap {
             return None;
         }
         let lines = self.visual_lines(font, style, rect);
+        self.visual_navigation_with_lines(command, goal, &lines)
+    }
+    pub fn visual_navigation_with_lines(
+        &self,
+        command: dunit_widgets::text_input::EditCommand,
+        goal: Option<f32>,
+        lines: &VisualLines,
+    ) -> Option<(TextPosition, Option<f32>)> {
+        use dunit_widgets::text_input::EditCommand::*;
+        if !self.multiline || !self.soft_wrap {
+            return None;
+        }
         let (x, row) = lines.position(TextPosition {
             index: self.cursor,
             affinity: self.affinity,
@@ -403,6 +463,17 @@ impl TextInput {
         })
     }
     pub(crate) fn paint(&self, font: &Font, style: &Style, rect: Rect, surface: &mut Surface) {
+        let prepared = self.prepare(font, style, rect);
+        self.paint_prepared(font, style, rect, surface, &prepared);
+    }
+    pub(crate) fn paint_prepared(
+        &self,
+        font: &Font,
+        style: &Style,
+        rect: Rect,
+        surface: &mut Surface,
+        prepared: &PreparedInput,
+    ) {
         self.paint_spinbox(style, rect, surface);
         let content = self.content_rect(style, rect);
         let px = style.number("font-size").unwrap_or(0.);
@@ -444,16 +515,8 @@ impl TextInput {
         let selection_end = self.boundary(self.anchor.max(self.cursor));
         let caret_width = style.number("caret-width").unwrap_or(0.).max(0.);
         let cursor = self.boundary(self.cursor);
-        let lines = VisualLines::new(
-            text,
-            font,
-            px,
-            (content.w - caret_width).max(0.),
-            self.multiline,
-            self.soft_wrap,
-            self.password && !placeholder,
-        );
-        let caret_lines = self.visual_lines(font, style, rect);
+        let caret_lines = prepared.lines();
+        let lines = prepared.placeholder.as_ref().unwrap_or(caret_lines);
         let (caret_x, caret_row) = caret_lines.position(TextPosition {
             index: cursor,
             affinity: self.affinity,
@@ -518,7 +581,7 @@ impl TextInput {
                         let advance =
                             font.glyph_metrics(glyph).advance as f32 * font.scale_for_px(px);
                         if pen + ink_max >= content.x {
-                            if let Some(bitmap) = font.rasterize(glyph, px) {
+                            if let Some(bitmap) = surface.rasterize(font, glyph, px) {
                                 let round = |v: f32| {
                                     if v < 0. {
                                         (v - 0.5) as i32

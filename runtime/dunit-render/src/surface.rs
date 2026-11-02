@@ -1,7 +1,9 @@
 //! The ARGB8888 pixel surface and its drawing primitives.
 
+use alloc::sync::Arc;
+use core::ops::Deref;
 use dunit_style::value::Color;
-use dunit_text::GlyphBitmap;
+use dunit_text::{Font, GlyphBitmap, GlyphCache, GlyphId};
 use dunit_ui::Rect;
 
 /// Pack an DSS [`Color`] into a `0xAARRGGBB` pixel.
@@ -9,6 +11,19 @@ pub fn pack_argb(c: Color) -> u32 {
     ((c.a as u32) << 24) | ((c.r as u32) << 16) | ((c.g as u32) << 8) | (c.b as u32)
 }
 
+pub(crate) enum PaintGlyph {
+    Owned(GlyphBitmap),
+    Shared(Arc<GlyphBitmap>),
+}
+impl Deref for PaintGlyph {
+    type Target = GlyphBitmap;
+    fn deref(&self) -> &GlyphBitmap {
+        match self {
+            Self::Owned(bitmap) => bitmap,
+            Self::Shared(bitmap) => bitmap,
+        }
+    }
+}
 /// A mutable ARGB8888 pixel buffer. Pixels are `0xAARRGGBB`; `stride` is the
 /// number of pixels per row (`>= width`), so a surface can address a sub-window
 /// of a larger buffer.
@@ -18,12 +33,40 @@ pub struct Surface<'a> {
     pub height: usize,
     pub stride: usize,
     clip: (usize, usize, usize, usize),
+    glyph_cache: Option<&'a mut GlyphCache>,
 }
 
 impl<'a> Surface<'a> {
     /// A surface over a tightly packed `width * height` buffer (stride = width).
     pub fn new(pixels: &'a mut [u32], width: usize, height: usize) -> Surface<'a> {
-        Surface { pixels, width, height, stride: width, clip: (0, 0, width, height) }
+        Surface {
+            pixels,
+            width,
+            height,
+            stride: width,
+            clip: (0, 0, width, height),
+            glyph_cache: None,
+        }
+    }
+
+    /// A surface using a renderer-owned mask cache. Colors/positions remain
+    /// paint-time data; the cache stores coverage only.
+    pub fn with_glyph_cache(
+        pixels: &'a mut [u32],
+        width: usize,
+        height: usize,
+        cache: &'a mut GlyphCache,
+    ) -> Self {
+        Self {
+            glyph_cache: Some(cache),
+            ..Self::new(pixels, width, height)
+        }
+    }
+    pub(crate) fn rasterize(&mut self, font: &Font, glyph: GlyphId, px: f32) -> Option<PaintGlyph> {
+        match self.glyph_cache.as_deref_mut() {
+            Some(cache) => cache.rasterize(font, glyph, px).map(PaintGlyph::Shared),
+            None => font.rasterize(glyph, px).map(PaintGlyph::Owned),
+        }
     }
 
     /// Intersect a temporary clip with the current one. Drawing coordinates
@@ -32,7 +75,9 @@ impl<'a> Surface<'a> {
     pub fn with_clip(&mut self, rect: Rect, draw: impl FnOnce(&mut Self)) {
         let previous = self.clip;
         self.clip = self.clip_rect(rect.x, rect.y, rect.w.max(0.0), rect.h.max(0.0));
-        if self.clip.0 < self.clip.2 && self.clip.1 < self.clip.3 { draw(self); }
+        if self.clip.0 < self.clip.2 && self.clip.1 < self.clip.3 {
+            draw(self);
+        }
         self.clip = previous;
     }
 

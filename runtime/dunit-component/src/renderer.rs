@@ -1,6 +1,8 @@
 use crate::{Color, Result, UiError, View};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use dunit_render::{paint_clipped_with_lists, ScrollArea, Surface, TextInput};
+use dunit_render::{
+    paint_clipped_with_prepared_inputs, PreparedInput, ScrollArea, Surface, TextInput,
+};
 #[path = "collection_layout.rs"]
 mod collection_layout;
 #[path = "input_click_style.rs"]
@@ -68,6 +70,7 @@ struct Snapshot {
     styles: Vec<Style>,
     targets: Vec<Style>,
     inputs: Vec<Option<TextInput>>,
+    input_layouts: Vec<Option<PreparedInput>>,
     sliders: Vec<Option<f32>>,
     progress: Vec<Option<dunit_widgets::progress::ProgressPaint>>,
     busy_interval_ms: Option<u64>,
@@ -80,6 +83,7 @@ struct Snapshot {
 
 /// Retains a private CPU canvas; no published shared buffer is ever mutated.
 pub struct Renderer {
+    glyph_cache: dunit_text::GlyphCache,
     font: Font,
     cascade: Cascade,
     background: Color,
@@ -100,6 +104,7 @@ pub struct Renderer {
 impl Renderer {
     pub fn new(font: Font, cascade: Cascade, background: Color) -> Self {
         Self {
+            glyph_cache: Default::default(),
             font,
             cascade,
             background,
@@ -159,24 +164,37 @@ impl Renderer {
         let snapshot = self.previous.as_ref()?;
         let id = snapshot.tree.by_name(key)?;
         let input = snapshot.inputs[id.0 as usize].as_ref()?;
-        Some(input.hit_index(
-            &self.font,
-            &snapshot.styles[id.0 as usize],
-            snapshot.layout.rect(id),
-            x,
-        ))
+        let style = &snapshot.styles[id.0 as usize];
+        let rect = snapshot.layout.rect(id);
+        Some(
+            input
+                .hit_position_with_lines(
+                    &self.font,
+                    style,
+                    rect,
+                    x,
+                    input.content_rect(style, rect).y - input.scroll_y,
+                    snapshot.input_layouts[id.0 as usize].as_ref()?.lines(),
+                )
+                .index,
+        )
     }
     pub fn input_index_at(&self, key: &str, x: f32, y: f32) -> Option<usize> {
         let p = self.previous.as_ref()?;
         let id = p.tree.by_name(key)?;
         let input = p.inputs[id.0 as usize].as_ref()?;
-        Some(input.hit_index_at(
-            &self.font,
-            &p.styles[id.0 as usize],
-            p.layout.rect(id),
-            x,
-            y,
-        ))
+        Some(
+            input
+                .hit_position_with_lines(
+                    &self.font,
+                    &p.styles[id.0 as usize],
+                    p.layout.rect(id),
+                    x,
+                    y,
+                    p.input_layouts[id.0 as usize].as_ref()?.lines(),
+                )
+                .index,
+        )
     }
     pub fn input_scroll_y(&self, key: &str) -> Option<f32> {
         let p = self.previous.as_ref()?;
@@ -258,6 +276,7 @@ impl Renderer {
     }
     pub fn set_theme(&mut self, theme: crate::Theme, font: Option<Font>) {
         if let Some(font) = font {
+            self.glyph_cache.clear();
             self.font = font;
         }
         self.set_style(theme.cascade, theme.background);
@@ -408,6 +427,7 @@ impl Renderer {
             &areas,
             &measure_after,
         )?;
+        let mut input_layouts: Vec<Option<PreparedInput>> = (0..tree.len()).map(|_| None).collect();
         let inputs: Vec<Option<TextInput>> = tree
             .iter()
             .map(|n| {
@@ -498,19 +518,30 @@ impl Renderer {
                             || p.password != paint.password
                             || (!p.focused && paint.focused)
                     });
+                    let prepared = paint.prepare(&self.font, &styles[n.id.0 as usize], rect);
                     if geometry_changed || caret_changed || activity_changed || !paint.multiline {
-                        paint.fit_scroll(&self.font, &styles[n.id.0 as usize], rect);
+                        paint.fit_scroll_with_lines(
+                            &self.font,
+                            &styles[n.id.0 as usize],
+                            rect,
+                            prepared.lines(),
+                        );
                     }
                     if !view.interaction.disabled {
                         if let Some(&(x, y)) = self.input_offsets.get(&view.key) {
-                            let (mut ax, mut ay) =
-                                paint.scroll_axes(&self.font, &styles[n.id.0 as usize], rect);
+                            let (mut ax, mut ay) = paint.scroll_axes_with_lines(
+                                &self.font,
+                                &styles[n.id.0 as usize],
+                                rect,
+                                prepared.lines(),
+                            );
                             ax.move_by(x - ax.offset);
                             ay.move_by(y - ay.offset);
                             paint.scroll_x = ax.offset;
                             paint.scroll_y = ay.offset;
                         }
                     }
+                    input_layouts[n.id.0 as usize] = Some(prepared);
                     paint
                 })
             })
@@ -521,7 +552,12 @@ impl Renderer {
             .iter()
             .map(|n| {
                 inputs[n.id.0 as usize].as_ref().map(|input| {
-                    input.scroll_axes(&self.font, &styles[n.id.0 as usize], layout.rect(n.id))
+                    input.scroll_axes_with_lines(
+                        &self.font,
+                        &styles[n.id.0 as usize],
+                        layout.rect(n.id),
+                        input_layouts[n.id.0 as usize].as_ref().unwrap().lines(),
+                    )
                 })
             })
             .collect();
@@ -595,6 +631,7 @@ impl Renderer {
             input_scroll_axes,
             input_activity,
             inputs,
+            input_layouts,
             tree,
             layout,
             styles,
@@ -641,10 +678,15 @@ impl Renderer {
             self.size = (width, height);
         }
         if let Some(damage) = damage {
-            let mut surface = Surface::new(&mut self.pixels, width as usize, height as usize);
+            let mut surface = Surface::with_glyph_cache(
+                &mut self.pixels,
+                width as usize,
+                height as usize,
+                &mut self.glyph_cache,
+            );
             let rect = damage.rect();
             surface.with_clip(rect, |s| s.clear(self.background));
-            let painted = paint_clipped_with_lists(
+            let painted = paint_clipped_with_prepared_inputs(
                 &next.tree,
                 &next.layout,
                 &|id| next.styles[id.0 as usize].clone(),
@@ -656,6 +698,7 @@ impl Renderer {
                 &|id| next.sliders[id.0 as usize],
                 &|id| next.progress[id.0 as usize],
                 &|id| next.lists[id.0 as usize].as_ref(),
+                &|id| next.input_layouts[id.0 as usize].as_ref(),
             );
             let painted =
                 painted.and_then(|()| next.overlays.paint(&self.font, &mut surface, rect));

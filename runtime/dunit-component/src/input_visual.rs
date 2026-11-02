@@ -6,12 +6,13 @@ impl Renderer {
     pub fn input_position_at(&self, key: &str, x: f32, y: f32) -> Option<TextPosition> {
         let p = self.previous.as_ref()?;
         let id = p.tree.by_name(key)?;
-        Some(p.inputs[id.0 as usize].as_ref()?.hit_position_at(
+        Some(p.inputs[id.0 as usize].as_ref()?.hit_position_with_lines(
             &self.font,
             &p.styles[id.0 as usize],
             p.layout.rect(id),
             x,
             y,
+            p.input_layouts[id.0 as usize].as_ref()?.lines(),
         ))
     }
     /// Route a raw editing command. Wrapped vertical/line movement uses pixels
@@ -40,12 +41,10 @@ impl Renderer {
             {
                 return None;
             }
-            input.visual_navigation(
-                &self.font,
-                &p.styles[id.0 as usize],
-                p.layout.rect(id),
+            input.visual_navigation_with_lines(
                 command,
                 binding.visual_goal,
+                p.input_layouts[id.0 as usize].as_ref()?.lines(),
             )
         })();
         if let Some((position, goal)) = target {

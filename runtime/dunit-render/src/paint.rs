@@ -7,13 +7,15 @@ use dunit_ui::layout::Layout;
 use dunit_ui::tree::{NodeId, Tree};
 use dunit_ui::Rect;
 
-use crate::{surface::Surface, PaintResult, ScrollArea, TextInput};
+use crate::{surface::Surface, PaintResult, PreparedInput, ScrollArea, TextInput};
 
 /// Resolve visible collection rows at their place in document paint order.
 pub type ListOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a crate::ListPaint>;
 
 /// Resolve retained input snapshots in document order.
 pub type InputOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a TextInput>;
+/// Optional immutable geometry for the corresponding input snapshot.
+pub type PreparedInputOf<'a> = &'a dyn Fn(NodeId) -> Option<&'a PreparedInput>;
 
 /// Resolve a scroll viewport and scrollbar in document coordinates.
 pub type SliderOf<'a> = &'a dyn Fn(NodeId) -> Option<f32>;
@@ -52,6 +54,7 @@ pub fn paint(
         font,
         surface,
         false,
+        &|_| None,
         &|_| None,
         &|_| None,
         &|_| None,
@@ -185,6 +188,37 @@ pub fn paint_clipped_with_lists(
     progress_of: ProgressOf<'_>,
     list_of: ListOf<'_>,
 ) -> PaintResult {
+    paint_clipped_with_prepared_inputs(
+        tree,
+        layout,
+        style_of,
+        font,
+        surface,
+        clip,
+        input_of,
+        scroll_of,
+        slider_of,
+        progress_of,
+        list_of,
+        &|_| None,
+    )
+}
+/// The generic painter can share an input's prepared geometry with layout/hit
+/// consumers. Omitted geometry follows the standalone compatibility path.
+pub fn paint_clipped_with_prepared_inputs(
+    tree: &Tree,
+    layout: &Layout,
+    style_of: StyleOf,
+    font: &Font,
+    surface: &mut Surface,
+    clip: Rect,
+    input_of: InputOf<'_>,
+    scroll_of: ScrollOf<'_>,
+    slider_of: SliderOf<'_>,
+    progress_of: ProgressOf<'_>,
+    list_of: ListOf<'_>,
+    prepared_of: PreparedInputOf<'_>,
+) -> PaintResult {
     let mut result = Ok(());
     if !tree.is_empty() {
         surface.with_clip(clip, |s| {
@@ -201,6 +235,7 @@ pub fn paint_clipped_with_lists(
                 slider_of,
                 progress_of,
                 list_of,
+                prepared_of,
             );
         });
     }
@@ -220,6 +255,7 @@ fn paint_node(
     slider_of: SliderOf<'_>,
     progress_of: ProgressOf<'_>,
     list_of: ListOf<'_>,
+    prepared_of: PreparedInputOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     let style = style_of(id);
@@ -248,6 +284,7 @@ fn paint_node(
                     slider_of,
                     progress_of,
                     list_of,
+                    prepared_of,
                 )
             })
         } else {
@@ -266,6 +303,7 @@ fn paint_node(
                 slider_of,
                 progress_of,
                 list_of,
+                prepared_of,
             )
         }
     };
@@ -295,6 +333,7 @@ fn paint_contents(
     slider_of: SliderOf<'_>,
     progress_of: ProgressOf<'_>,
     list_of: ListOf<'_>,
+    prepared_of: PreparedInputOf<'_>,
 ) -> PaintResult {
     let rect = layout.rect(id);
     surface.backdrop_blur(
@@ -361,7 +400,11 @@ fn paint_contents(
         .then(|| input_of(id))
         .flatten()
     {
-        input.paint(font, style, rect, surface);
+        if let Some(prepared) = prepared_of(id) {
+            input.paint_prepared(font, style, rect, surface, prepared);
+        } else {
+            input.paint(font, style, rect, surface);
+        }
     } else if dunit_style::indicator::Indicator::supports(tag) {
         let [top, right, bottom, left] = style.padding().unwrap_or([0.; 4]);
         let content = Rect {
@@ -413,6 +456,7 @@ fn paint_contents(
                 slider_of,
                 progress_of,
                 list_of,
+                prepared_of,
             )?;
         }
         Ok(())
@@ -462,7 +506,7 @@ pub(crate) fn paint_text(
 
     let (glyphs, _advance) = font.layout_line(text, px);
     for g in glyphs {
-        if let Some(bmp) = font.rasterize(g.glyph, px) {
+        if let Some(bmp) = surface.rasterize(font, g.glyph, px) {
             let ox = round_i32(origin_x + g.x) + bmp.left;
             let oy = round_i32(baseline) - bmp.top;
             surface.blit_glyph(&bmp, ox, oy, ink);

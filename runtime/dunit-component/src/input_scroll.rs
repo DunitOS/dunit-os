@@ -120,12 +120,13 @@ impl Renderer {
                 input
             });
         let input = adjusted.as_ref().unwrap_or(input);
-        let index = input.hit_position_at(
+        let index = input.hit_position_with_lines(
             &self.font,
             &p.styles[id.0 as usize],
             p.layout.rect(id),
             x,
             y,
+            p.input_layouts[id.0 as usize].as_ref()?.lines(),
         );
         if input.focused {
             self.input_offsets
@@ -190,7 +191,14 @@ impl Renderer {
         input.scroll_x = axis_x.offset;
         input.scroll_y = axis_y.offset;
         let (x, y) = clamped_point(viewport, x, y);
-        let index = input.hit_position_at(&self.font, style, rect, x, y);
+        let index = input.hit_position_with_lines(
+            &self.font,
+            style,
+            rect,
+            x,
+            y,
+            p.input_layouts[id.0 as usize].as_ref()?.lines(),
+        );
         self.input_offsets
             .insert(String::from(key), (input.scroll_x, input.scroll_y));
         Some(index)

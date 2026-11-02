@@ -22,12 +22,14 @@ mod clip;
 mod effects;
 mod indicator;
 mod paint;
+mod prepared_input;
 mod progress;
 pub mod raster;
 mod scroll;
 mod slider;
 mod surface;
 mod text_input;
+pub use prepared_input::PreparedInput;
 
 pub use effects::visual_bounds;
 pub use paint::{
@@ -44,7 +46,7 @@ pub type PaintResult = core::result::Result<(), alloc::collections::TryReserveEr
 
 mod list;
 pub use list::{ListPaint, ListRowPaint, TreeRowPaint};
-pub use paint::paint_clipped_with_lists;
+pub use paint::{paint_clipped_with_lists, paint_clipped_with_prepared_inputs, PreparedInputOf};
 mod table;
 pub use table::TablePaint;
 

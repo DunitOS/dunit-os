@@ -1,7 +1,10 @@
 //! The [`Font`] handle: owns the font bytes, exposes character→glyph mapping,
 //! scaled metrics, single-glyph rasterization and simple left-to-right layout.
 
-use alloc::vec::Vec;
+use alloc::{
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 
 use crate::outline::Outline;
 use crate::parse::{Reader, Sfnt};
@@ -71,7 +74,7 @@ enum Cmap {
 /// A parsed TrueType font that owns its backing bytes.
 #[derive(Clone)]
 pub struct Font {
-    data: Vec<u8>,
+    data: Arc<Vec<u8>>,
     units_per_em: u16,
     horizontal_bounds: (i16, i16),
     vertical_bounds: (i16, i16),
@@ -89,6 +92,12 @@ pub struct Font {
 }
 
 impl Font {
+    pub(crate) fn source_matches(&self, source: &Weak<Vec<u8>>) -> bool {
+        core::ptr::eq(Arc::as_ptr(&self.data), source.as_ptr())
+    }
+    pub(crate) fn source_weak(&self) -> Weak<Vec<u8>> {
+        Arc::downgrade(&self.data)
+    }
     /// Parse a TrueType (`glyf`-outline) font from owned bytes.
     pub fn parse(data: Vec<u8>) -> Result<Self> {
         let sfnt = Sfnt::parse(&data)?;
@@ -129,7 +138,7 @@ impl Font {
         let cmap = parse_cmap(sfnt.require(b"cmap")?)?;
 
         Ok(Font {
-            data,
+            data: Arc::new(data),
             units_per_em,
             horizontal_bounds: (x_min, x_max),
             vertical_bounds: (y_min, y_max),
@@ -156,14 +165,20 @@ impl Font {
     /// must additionally account for their rasterizer padding and rounding.
     pub fn horizontal_bounds_px(&self, px: f32) -> (f32, f32) {
         let scale = self.scale_for_px(px);
-        (self.horizontal_bounds.0 as f32 * scale, self.horizontal_bounds.1 as f32 * scale)
+        (
+            self.horizontal_bounds.0 as f32 * scale,
+            self.horizontal_bounds.1 as f32 * scale,
+        )
     }
 
     /// Declared font-wide vertical ink bounds relative to the baseline, with
     /// positive coordinates pointing upwards (the TrueType coordinate space).
     pub fn vertical_bounds_px(&self, px: f32) -> (f32, f32) {
         let scale = self.scale_for_px(px);
-        (self.vertical_bounds.0 as f32 * scale, self.vertical_bounds.1 as f32 * scale)
+        (
+            self.vertical_bounds.0 as f32 * scale,
+            self.vertical_bounds.1 as f32 * scale,
+        )
     }
 
     /// Number of glyphs in the font.
@@ -201,18 +216,27 @@ impl Font {
         let hmtx = &self.data[self.hmtx.0..self.hmtx.1];
         let n = self.num_h_metrics as usize;
         if n == 0 {
-            return GlyphMetrics { advance: 0, left_side_bearing: 0 };
+            return GlyphMetrics {
+                advance: 0,
+                left_side_bearing: 0,
+            };
         }
         let gid = glyph.0 as usize;
         if gid < n {
             let o = gid * 4;
             let advance = be_u16(hmtx, o);
             let lsb = be_u16(hmtx, o + 2) as i16;
-            GlyphMetrics { advance, left_side_bearing: lsb }
+            GlyphMetrics {
+                advance,
+                left_side_bearing: lsb,
+            }
         } else {
             let advance = be_u16(hmtx, (n - 1) * 4);
             // Monospaced tail lsb array follows the hMetrics; default to 0.
-            GlyphMetrics { advance, left_side_bearing: 0 }
+            GlyphMetrics {
+                advance,
+                left_side_bearing: 0,
+            }
         }
     }
 
@@ -226,7 +250,10 @@ impl Font {
         } else {
             // Short loca stores half-offsets.
             let o = gid as usize * 2;
-            (be_u16_opt(loca, o)? as usize * 2, be_u16_opt(loca, o + 2)? as usize * 2)
+            (
+                be_u16_opt(loca, o)? as usize * 2,
+                be_u16_opt(loca, o + 2)? as usize * 2,
+            )
         };
         if end <= start {
             return None; // empty glyph (no contours)
@@ -258,7 +285,11 @@ impl Font {
         let mut pen = 0.0f32;
         for ch in text.chars() {
             let g = self.glyph_index(ch);
-            glyphs.push(LaidGlyph { glyph: g, x: pen, ch });
+            glyphs.push(LaidGlyph {
+                glyph: g,
+                x: pen,
+                ch,
+            });
             pen += self.glyph_metrics(g).advance as f32 * s;
         }
         (glyphs, pen)
@@ -285,7 +316,13 @@ fn be_u32(data: &[u8], o: usize) -> Option<u32> {
 
 fn lookup_cmap(cmap: &Cmap, ch: u32) -> u16 {
     match cmap {
-        Cmap::Format4 { end_code, start_code, id_delta, id_range_offset, glyph_id_array } => {
+        Cmap::Format4 {
+            end_code,
+            start_code,
+            id_delta,
+            id_range_offset,
+            glyph_id_array,
+        } => {
             if ch > 0xFFFF {
                 return 0;
             }
@@ -357,11 +394,11 @@ fn parse_cmap(cmap: &[u8]) -> Result<Cmap> {
 /// Higher is better; platform 1 (Macintosh) is a last resort.
 fn cmap_score(platform: u16, encoding: u16) -> i32 {
     match (platform, encoding) {
-        (0, _) => 4,           // Unicode platform, any encoding
-        (3, 10) => 3,          // Windows UCS-4 (full Unicode)
-        (3, 1) => 2,           // Windows BMP (UCS-2)
-        (3, _) => 1,           // other Windows encoding
-        _ => 0,                // Macintosh / unknown
+        (0, _) => 4,  // Unicode platform, any encoding
+        (3, 10) => 3, // Windows UCS-4 (full Unicode)
+        (3, 1) => 2,  // Windows BMP (UCS-2)
+        (3, _) => 1,  // other Windows encoding
+        _ => 0,       // Macintosh / unknown
     }
 }
 
@@ -390,7 +427,13 @@ fn parse_cmap4(cmap: &[u8], off: usize) -> Result<Cmap> {
         glyph_id_array.push(v);
         o += 2;
     }
-    Ok(Cmap::Format4 { end_code, start_code, id_delta, id_range_offset, glyph_id_array })
+    Ok(Cmap::Format4 {
+        end_code,
+        start_code,
+        id_delta,
+        id_range_offset,
+        glyph_id_array,
+    })
 }
 
 fn parse_cmap12(cmap: &[u8], off: usize) -> Result<Cmap> {
@@ -405,5 +448,3 @@ fn parse_cmap12(cmap: &[u8], off: usize) -> Result<Cmap> {
     }
     Ok(Cmap::Format12 { groups })
 }
-
-

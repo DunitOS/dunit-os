@@ -28,10 +28,12 @@
 
 extern crate alloc;
 
-pub mod parse;
-pub mod outline;
-pub mod raster;
+mod cache;
+pub use cache::{GlyphCache, DEFAULT_GLYPH_CACHE_BYTES, DEFAULT_GLYPH_CACHE_ENTRIES};
 pub mod font;
+pub mod outline;
+pub mod parse;
+pub mod raster;
 
 pub use font::{Font, GlyphId, GlyphMetrics, LaidGlyph, LineMetrics};
 pub use raster::{GlyphBitmap, Raster};

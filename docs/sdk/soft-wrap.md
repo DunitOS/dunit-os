@@ -41,3 +41,19 @@ lines, zero width, both caret affinities, pointer placement, vertical goal,
 Shift selection, rejected edits/history, resize/reveal and fresh-render pixels.
 Wrapped pixels and both caret positions also match an explicit-LF reference
 without mutating the wrapped model.
+
+The retained renderer prepares one immutable `PreparedInput` after final layout
+for each input snapshot. Its value `VisualLines` map is reused for caret fitting,
+vertical limits, scroll extents, painting, caret positioning, hit testing and
+visual navigation. An empty field prepares a separate placeholder map only when
+placeholder text is actually displayed. This removes repeated whole-document
+geometry passes within a render; it is not a persistent text or glyph cache.
+
+Every render rebuilds geometry from the current text, resolved font/style,
+content width, password and wrapping settings, so edits, undo, resize and theme
+changes cannot retain a stale map. The current snapshot keeps it through input
+hit testing until the next render replaces that snapshot. Scroll/caret/focus
+changes do not alter the map itself. Existing `TextInput` struct literals and
+standalone methods remain valid; the old painter prepares locally when no
+prepared-input lookup is supplied. Custom prepared callers must use geometry
+from the same text/font/style/width as the input they paint.
