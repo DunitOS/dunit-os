@@ -21,8 +21,8 @@ approved scope under CLAUDE.md §1; it does not close the entire M7.6 milestone.
 - The pointer payload keeps the button in low 8 bits and reserves bits 8..11 for
   Shift/Ctrl/Alt/Super. Central codec helpers validate/decode it; legacy projection
   strips those bits. SDK selection/routing consumes modifiers supplied by that
-  payload. **The live compositor currently sends zero pointer modifiers:** correct
-  device snapshots require the separate queue contract described below.
+  payload. The compositor now forwards the enqueue-time device snapshot from the
+  separately approved 40-byte pointer queue record described below.
 - The kernel key-event ABI already contains make/break and modifiers and is
   unchanged. No syscall, privilege or kernel/userspace boundary change is part
   of the implemented keyboard/focus extension.
@@ -30,16 +30,17 @@ approved scope under CLAUDE.md §1; it does not close the entire M7.6 milestone.
   nonzero key-up text and malformed focus payloads. The historical legacy decoder
   and its accepted short quit/leave forms remain unchanged.
 
-## Pointer snapshot decision remains separate
+## Separately approved pointer snapshot decision
 
 Keyboard and pointer records come from independent queues without a common
 ordering/timestamp. Sampling the last drained keyboard state cannot reliably
 recover modifiers at a queued click. The approved proposal required another
 human decision before changing that public pointer-queue contract.
-[Pointer modifier snapshots](pointer-modifier-snapshot-proposal.md) now describes
-the proposed compatible length-selected ReadPointerEvent extension. It is not
-implemented or covered by the earlier approval. Native Shift/Ctrl pointer
-selection remains pending; no approximate modifiers are fabricated.
+[Pointer modifier snapshots](pointer-modifier-snapshot-proposal.md) describes
+the compatible length-selected ReadPointerEvent extension approved subsequently
+when the user requested the entire M7.6 implementation. V1 remains byte-exact;
+v2 carries the snapshot captured when the pointer event was enqueued. Native
+Shift/Ctrl/Ctrl+Shift selection is implemented without fabricated modifiers.
 
 ## Verification coverage
 

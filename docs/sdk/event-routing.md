@@ -35,9 +35,9 @@ stable owner. Focus changes are not synthesized as widget key events.
 
 Pointer coordinates are available for native events and `pointer_text_at`;
 plain host `pointer` calls supply no coordinates. The codec and SDK route supplied
-pointer modifiers, but the live compositor sends zero until the
-[pointer snapshot contract](pointer-modifier-snapshot-proposal.md) is approved and
-implemented. Reading the last keyboard state would misorder queued clicks.
+pointer modifiers captured when the device event was enqueued, through the
+[approved pointer snapshot contract](pointer-modifier-snapshot-proposal.md).
+Reading the last keyboard state would misorder queued clicks.
 Legacy peers retain their earlier event stream; routing invents no releases,
 focus changes or device modifier snapshots for them.
 

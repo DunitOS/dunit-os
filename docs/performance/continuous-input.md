@@ -111,7 +111,9 @@ The system remains UP and software rendered. No claim about KVM speedup or SMP
 is made. Clients still redraw synchronously for each handled event; this patch
 reduces the cost without changing delivery semantics. Long-field editing still
 rebuilds its full value map once per render. A versioned kernel pointer modifier
-snapshot is a separate pending ABI decision, not part of these fixes.
+snapshot was a separate pending ABI decision at measurement time; it was
+subsequently [approved and implemented](../sdk/pointer-modifier-snapshot-proposal.md)
+in the M7.6 widget completion increment. These recorded timings predate it.
 
 ## Reproduction and validation
 

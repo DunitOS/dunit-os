@@ -71,8 +71,9 @@ helpers/configuration); text/cache and renderer suites separately passed 14 and
 warnings remain in the DWM host harness; the changed crate suites have no warnings.
 ABI generation still reports 90 syscalls, 25 errno and 7 rights in sync.
 
-Native pointer modifier snapshots await the separate
-[snapshot decision](pointer-modifier-snapshot-proposal.md). Cross-surface popup
+The subsequent [widget completion increment](m7-6-completion.md) implements the
+separately approved [pointer snapshots](pointer-modifier-snapshot-proposal.md).
+The counts above describe this earlier increment. Cross-surface popup
 roles and an actual system IME remain separate contracts. System clipboard is
 M7.7; full client migration/removal of manual hit tests is M7.11. File chooser
 native snapshots explicitly fail with ENOBUFS at the existing buffer limit.

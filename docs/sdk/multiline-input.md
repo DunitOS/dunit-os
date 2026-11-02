@@ -77,8 +77,9 @@ sign convention, with regression coverage for backlog direction and clamping.
 
 Extended grapheme editing and [double/triple click](click-selection.md) are supported.
 [Soft wrapping](soft-wrap.md) uses one visual-line map for paint, hit testing, caret,
-scrolling and navigation. System IME, native pointer modifiers, clipboard (M7.7)
-and application migration remain open roadmap work. Generic vertical [scroll regions](scroll-areas.md) are
+scrolling and navigation. Native Shift/Ctrl/Ctrl+Shift selection uses enqueue-time
+pointer snapshots. System IME, clipboard (M7.7) and application migration remain
+separate roadmap work. Generic vertical [scroll regions](scroll-areas.md) are
 available for child controls and content, and their shared two-axis scrollbar
 geometry also controls Textarea. Textarea reserves both themed gutters; bar
 gestures preserve selection/history and a manual viewport, including when the

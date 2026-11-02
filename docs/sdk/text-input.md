@@ -29,9 +29,14 @@ owns the accepted text; the SDK does not keep an independent authoritative value
   Replacing selected text with itself collapses selection without creating a
   model message or undo entry.
 - Primary click places the cursor; dragging selects within the client, including
-  across another node in the same window. Pointer Leave cancels capture. The
-  current native channel does not report pointer modifiers, so native Shift+click
-  is not implemented. Double/triple click remains open. Timed
+  across another node in the same window. Pointer Leave cancels capture.
+  Shift+click extends the existing anchor, Ctrl+click selects a whole word and
+  Ctrl+Shift+click extends by whole words. Double/triple click selects and drags
+  whole words/logical lines through the shared [text gesture](click-selection.md)
+  controller. Native modifier delivery requires the approved per-event
+  [pointer snapshot](pointer-modifier-snapshot-proposal.md), rather than sampling
+  keyboard state after a queued click. Its final native verification is recorded
+  in the [M7.6 acceptance matrix](m7-6-completion.md). Timed
   [selection edge autoscroll](selection-autoscroll.md) supports horizontal drag
   selection with a stationary captured pointer.
 - Enter is not inserted into a single-line field; root application shortcuts may
@@ -104,8 +109,10 @@ and guest exit 0. All guest launches use `tools/qemu_test.py`.
 
 [Multiline fields](multiline-input.md) extend the same editor with LF lines and
 a vertical viewport. [Double/triple click](click-selection.md) and extended grapheme editing
-are supported. Native pointer modifiers, system IME, clipboard and integration
-into migrated applications remain open. There is no
+are supported, including native Shift/Ctrl/Ctrl+Shift pointer gestures. System
+IME, clipboard and integration into migrated applications have separate gates in the
+[M7.6 acceptance matrix](m7-6-completion.md). System IME is future work; metadata
+for a future IME/a11y bridge do not implement that service. There is no
 local imitation of the system clipboard; Ctrl+C/V depend on M7.7.
 
 Validation on 28 October 2026: 47 component, 22 widget, 36 renderer, 13 native

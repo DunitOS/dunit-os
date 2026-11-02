@@ -1,0 +1,142 @@
+{
+  "date": "2026-11-02",
+  "base_revision": "05d5b28",
+  "scope": "M7.6 widget implementation and acceptance; M7.7 clipboard and M7.11 migration remain dependency gates",
+  "host_tests_passed": 650,
+  "python_tests_passed": 19,
+  "qemu_accelerator": "tcg",
+  "qemu_vcpus": 1,
+  "native": [
+    {
+      "fixture": "buttons",
+      "contract": "tools/sdk_buttons_markers.json",
+      "required_markers": 13,
+      "result": "OK"
+    },
+    {
+      "fixture": "checks",
+      "contract": "tools/sdk_checks_markers.json",
+      "required_markers": 18,
+      "result": "OK"
+    },
+    {
+      "fixture": "input",
+      "contract": "tools/sdk_input_markers.json",
+      "required_markers": 20,
+      "result": "OK"
+    },
+    {
+      "fixture": "multiline",
+      "contract": "tools/sdk_multiline_markers.json",
+      "required_markers": 19,
+      "result": "OK"
+    },
+    {
+      "fixture": "scroll",
+      "contract": "tools/sdk_scroll_markers.json",
+      "required_markers": 19,
+      "result": "OK"
+    },
+    {
+      "fixture": "scroll_xy",
+      "contract": "tools/sdk_scroll_xy_markers.json",
+      "required_markers": 28,
+      "result": "OK"
+    },
+    {
+      "fixture": "autoscroll",
+      "contract": "tools/sdk_autoscroll_markers.json",
+      "required_markers": 20,
+      "result": "OK"
+    },
+    {
+      "fixture": "slider",
+      "contract": "tools/sdk_slider_markers.json",
+      "required_markers": 17,
+      "result": "OK"
+    },
+    {
+      "fixture": "vertical_slider",
+      "contract": "tools/sdk_vertical_slider_markers.json",
+      "required_markers": 21,
+      "result": "OK"
+    },
+    {
+      "fixture": "spinbox",
+      "contract": "tools/sdk_spinbox_markers.json",
+      "required_markers": 22,
+      "result": "OK"
+    },
+    {
+      "fixture": "progress",
+      "contract": "tools/sdk_progress_markers.json",
+      "required_markers": 14,
+      "result": "OK"
+    },
+    {
+      "fixture": "menus",
+      "contract": "tools/sdk_menus_markers.json",
+      "required_markers": 32,
+      "result": "OK"
+    },
+    {
+      "fixture": "workspace",
+      "contract": "tools/sdk_workspace_markers.json",
+      "required_markers": 38,
+      "result": "OK"
+    },
+    {
+      "fixture": "list",
+      "contract": "tools/sdk_list_markers.json",
+      "required_markers": 21,
+      "result": "OK"
+    },
+    {
+      "fixture": "tree",
+      "contract": "tools/sdk_tree_markers.json",
+      "required_markers": 25,
+      "result": "OK"
+    },
+    {
+      "fixture": "collections",
+      "contract": "tools/sdk_collections_markers.json",
+      "required_markers": 40,
+      "result": "OK"
+    },
+    {
+      "fixture": "lifecycle",
+      "contract": "tools/sdk_lifecycle_markers.json",
+      "required_markers": 23,
+      "result": "OK"
+    },
+    {
+      "fixture": "theme",
+      "contract": "tools/sdk_theme_markers.json",
+      "required_markers": 7,
+      "result": "OK"
+    },
+    {
+      "fixture": "modifiers",
+      "contract": "tools/sdk_modifiers_markers.json",
+      "required_markers": 29,
+      "result": "OK"
+    },
+    {
+      "fixture": "pointer",
+      "contract": "tools/pointer_queue_markers.json",
+      "required_markers": 7,
+      "result": "OK"
+    }
+  ],
+  "theme_pixel_references": [
+    "dark exact",
+    "light exact",
+    "restored exact"
+  ],
+  "new_native_modifier_clicks": 20,
+  "notes": [
+    "Menu harness now waits for actual popup reopening after native Enter release before testing outside click; all earlier required markers and assertions retained.",
+    "Single-fixture cached builds were used because the combined overlay exceeded the unchanged 128 MiB installer FAT payload."
+  ],
+  "implementation_revision": "83b3011"
+}

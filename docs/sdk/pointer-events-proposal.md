@@ -26,7 +26,9 @@ fetched main branch before implementation. `abi/pointer-input` owns the Rust
 record codec shared by the kernel and libdunit.
 
 Arguments are an INPUT_MASTER handle, an output address, and an output byte
-length. The operation accepts exactly a 32-byte v1 record. The handle must be
+length. V1 requests use exactly 32 bytes; the separately approved
+[modifier snapshot extension](pointer-modifier-snapshot-proposal.md) adds an
+explicit 40-byte request while preserving these v1 bytes. The handle must be
 owned by the caller and carry the existing INPUT_MASTER right. No new rights
 bits or ambient input privilege are introduced.
 

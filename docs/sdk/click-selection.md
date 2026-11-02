@@ -22,7 +22,10 @@ The stationary edge-autoscroll timer uses the same anchor. Release ends capture;
 focus loss, disable, removal or externally replaced text cancels capture.
 Read-only fields still support selection. All indices normalize to valid UTF-8
 boundaries; this does not implement grapheme segmentation or Unicode shaping.
-Native Shift+click still requires delivery of pointer modifiers by gui-v1.
+Native Shift+click extends the existing anchor; Ctrl+click selects a word and
+Ctrl+Shift+click extends to its word boundary. The compositor forwards the
+[enqueue-time modifier snapshot](pointer-modifier-snapshot-proposal.md), including
+when the physical modifier is released before the pointer queue is read.
 
 `TextClickState`, `TextClickConfig` and `TextClickSample` expose deterministic
 host input. The native adapter samples its monotonic clock and reads the policy

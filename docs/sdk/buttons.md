@@ -69,8 +69,8 @@ activation, including their historical repeat behavior. These paths do not
 pretend to receive releases or inter-window focus events. Pure host tests use
 `key_press`/`key_release` and `window_focus` to exercise the negotiated lifecycle.
 The accepted [gui-v1 contract](m7-6-input-extension-proposal.md) changes no syscall.
-Correct native pointer modifier snapshots still await a
-[separate queue decision](pointer-modifier-snapshot-proposal.md).
+Native pointer modifiers use the separately
+[approved enqueue-time snapshots](pointer-modifier-snapshot-proposal.md).
 
 ## Verification
 

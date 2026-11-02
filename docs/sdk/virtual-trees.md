@@ -121,4 +121,6 @@ wheel and window resize; it verifies nested levels, disabled skip, large-branch
 virtualization and End reveal, collapse promotion/clamp and rejected expansion.
 The marker contract includes clean GUI exit and the existing DF entry regression.
 It captures hierarchy/selection, the final file and the collapsed workspace.
-Tables, sorting controls and in-place renaming remain open in the roadmap.
+[Tables and sorting](tables.md) and controlled in-place renaming are implemented
+on the same collection foundation. See the [M7.6 acceptance matrix](m7-6-completion.md)
+for their contracts and final verification status.

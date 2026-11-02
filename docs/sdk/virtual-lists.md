@@ -98,8 +98,10 @@ python3 tools/test_sdk_gui_fixture.py list --accel tcg
 The native fixture verifies actual Tab/arrows/Shift/Ctrl/Space/Ctrl+A,
 End/PageUp reveal, pointer hit testing, wheel, stable keys on reorder, window
 resize, shrink and rejected proposals. It captures selection/end/shrink frames.
-The collection roadmap item remains open for trees, tables, sorting controls
-and in-place renaming.
+[Tree views](virtual-trees.md), [tables and sorting](tables.md), and controlled
+in-place renaming now share this collection foundation. Their host/native
+contracts and the current final verification status are listed in the
+[M7.6 acceptance matrix](m7-6-completion.md).
 
 ## Kernel entry regression found by the native workload
 

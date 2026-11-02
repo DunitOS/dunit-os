@@ -1,14 +1,18 @@
-# Pointer modifier snapshots — proposed compatible ReadPointerEvent extension
+# Pointer modifier snapshots — approved compatible ReadPointerEvent extension
 
 The approved gui-v1 lifecycle proposal explicitly requires a separate decision
-if pointer-queue public semantics must change. That condition is now confirmed:
+if pointer-queue public semantics must change. That condition was confirmed:
 keyboard and pointer have independent queues, and the compositor drains a queued
 pointer record before draining keyboard records. Neither queue shares a timestamp
 or sequence. Sampling current/last keyboard modifiers can therefore apply the
 state from a later release to an earlier click. Draining keys first merely changes
 the race. This must not be represented as correct pointer selection.
 
-Recommended contract (not implemented before approval):
+Approved on 2 November 2026: after the 32/40-byte decision was presented, the user
+instructed “Делай сразу весь M7.6”. The compatible extension below is implemented.
+The original keyboard/focus approval alone did not cover this kernel change.
+
+Contract:
 
 - Keep syscall 90, its three existing arguments (INPUT_MASTER handle, output,
   length), privilege checks, EAGAIN and transactional EFAULT behavior.
@@ -34,4 +38,12 @@ Recommended contract (not implemented before approval):
 
 Alternative: a unified timestamped/ordered keyboard+pointer stream. This is a
 larger ABI and delivery change, unnecessary for a per-pointer modifier snapshot.
-The length-selected v2 is recommended for the narrow behavior required here.
+The length-selected v2 is the approved narrow contract for this behavior.
+
+Verification: the native pointer queue contract passed v1 short clicks, v2
+Shift/Ctrl snapshots after key releases, failed-copy retention, access denial
+and ownership handover. The `modifiers` GUI fixture passed 20 actual pointer
+gestures across Input, Textarea, List, Tree and Table, with exact selections,
+unchanged text/undo state and bounded rows for 10,000-item collections. The
+compositor explicitly requests v2 and fails on an unsupported old kernel rather
+than approximating modifiers from the independently drained keyboard queue.
