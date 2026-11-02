@@ -1999,10 +1999,12 @@ fn sys_send_message(target_pid: u32, msg: *const u8, len: usize) -> i64 {
     let target = crate::process::ProcessId(target_pid as u64);
     match crate::ipc::send_bytes(sender, target, &data) {
         Ok(()) => {
-            syscall_log(format_args!(
-                "[IPC] send from={} to={} len={}\n",
-                sender.0, target.0, len
-            ));
+            if crate::serial::debug_trace_enabled() {
+                syscall_log(format_args!(
+                    "[IPC] send from={} to={} len={}\n",
+                    sender.0, target.0, len
+                ));
+            }
             len as i64
         }
         Err(error) => ipc_error_to_errno(error),
@@ -2025,7 +2027,9 @@ fn sys_receive_message(msg: *mut u8, len: usize) -> i64 {
     if let Err(error) = copy_buffer_to_user(msg, &buffer[..received]) {
         return error;
     }
-    syscall_log(format_args!("[IPC] recv pid={} len={}\n", pid.0, received));
+    if crate::serial::debug_trace_enabled() {
+        syscall_log(format_args!("[IPC] recv pid={} len={}\n", pid.0, received));
+    }
     received as i64
 }
 
@@ -2053,10 +2057,12 @@ fn sys_receive_message_from(msg: *mut u8, len: usize, sender_out: *mut u32) -> i
     if let Err(error) = copy_buffer_to_user(sender_out as *mut u8, &sender_bytes) {
         return error;
     }
-    syscall_log(format_args!(
-        "[IPC] recv pid={} from={} len={}\n",
-        pid.0, sender.0, received
-    ));
+    if crate::serial::debug_trace_enabled() {
+        syscall_log(format_args!(
+            "[IPC] recv pid={} from={} len={}\n",
+            pid.0, sender.0, received
+        ));
+    }
     received as i64
 }
 
