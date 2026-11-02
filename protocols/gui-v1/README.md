@@ -102,10 +102,12 @@ NEW или ACTIVE -- fatal error / EOF / peer death --> CLOSED
 выбирает максимальную общую версию; v1.0 поддерживает только [0,0]. Major в
 header обязан быть 1. После WELCOME header содержит выбранную версию.
 `required_features` обязан быть подмножеством `offered_features`.
-В v1.0 feature bit 0 = ARGB8888; XRGB8888 обязателен без feature bit. Сервер
+В v1.0 feature bit 0 = ARGB8888; bit 1 = INPUT_LIFECYCLE для live INP1.
+XRGB8888 обязателен без feature bit. Сервер
 возвращает поддерживаемое подмножество offered; неизвестные offered bits
 игнорируются **только в HELLO**, неподдержанный required bit — UNSUPPORTED.
-formats: bit 0 XRGB8888, bit 1 ARGB8888, совпадает с negotiated features.
+`formats`: bit 0 XRGB8888, bit 1 ARGB8888. INPUT_LIFECYCLE не меняет
+маску pixel formats.
 
 Сервер закрывает NEW после 5 s monotonic без полного HELLO. Клиент при ожидании
 WELCOME дольше 5 s закрывает endpoint. В ACTIVE отсутствует idle timeout.
@@ -447,4 +449,39 @@ snapshot containing geometry, stride, offset and damage. Pending imports and
 attachments cannot replace the displayed image. The SDK window/event adapter
 and conservative partial composition are described in
 [window.md](../../docs/sdk/window.md) and [components.md](../../docs/sdk/components.md).
-Broader application migration remains separate work; no wire bytes changed.
+Broader application migration remains separate work; legacy wire bytes are preserved.
+
+
+### Negotiated INP1 lifecycle extension
+
+`FEATURE_INPUT_LIFECYCLE = 1 << 1` is offered in HELLO and accepted only through
+WELCOME. It does not bump the protocol version, change the 20-byte INP1 envelope,
+add a syscall or authorize a popup surface role. Connections without that bit
+retain the established event kinds and pointer values.
+
+| Kind | Value | Fields |
+| --- | ---: | --- |
+| KEY_UP | 7 | x = existing scancode, y = modifiers, value = 0 |
+| FOCUS_IN | 8 | x = y = value = 0 |
+| FOCUS_OUT | 10 | x = y = value = 0 |
+
+For negotiated MOVE/DOWN/UP/LEAVE/SCROLL, value's low eight bits retain the button
+and bits 8–11 carry Shift/Ctrl/Alt/Super respectively. All higher bits are zero.
+Key modifiers also use only those four bits. FOCUS_OUT cancels transient capture,
+pressed states, menus/tooltips and pending keyboard activation in the SDK. Focus
+and key-up events are never sent to a legacy connection.
+
+`Input::decode_for_features` checks the accepted feature set. Negotiated input
+requires exactly 20 bytes, zero reserved bytes, known kinds, valid modifier bits,
+zero cooked text on key-up and zero focus payloads. The historical `Input::decode`
+remains unchanged and does not recognize new lifecycle kinds; feature fallback
+retains its eight-byte quit/leave signals and existing legacy field acceptance.
+`pointer_value` packs validated modifiers; `pointer_button`/`pointer_modifiers`
+read the canonical fields. Compositors use `Input::for_features` or
+`encode_for_features` to suppress new kinds and strip pointer modifiers for
+legacy clients. Invalid canonical events fail rather than being encoded.
+`Server::negotiated_features` returns an accepted set only for ACTIVE connections.
+
+`tests/input_lifecycle.rs` exercises all feature combinations, format independence,
+new golden bytes, legacy projection for all pointer kinds/button values and all
+modifier masks, malformed fields/lengths, fallback and bounded arbitrary input.

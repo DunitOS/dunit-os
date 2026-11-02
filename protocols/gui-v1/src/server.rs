@@ -35,7 +35,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::wire::{
-    ErrorCode, Event, Header, Opcode, Request, DIM_MAX, DIM_MIN, FEATURE_ARGB8888,
+    ErrorCode, Event, Header, Opcode, Request, DIM_MAX, DIM_MIN, FEATURE_ARGB8888, FEATURE_INPUT_LIFECYCLE,
     FORMATS_ARGB8888, FORMATS_XRGB8888, FORMAT_ARGB8888, FORMAT_XRGB8888, MAX_DAMAGE_RECTS,
     POLICY_OPCODE_HI, POLICY_OPCODE_LO, ROLE_TOPLEVEL, VERSION_MAJOR, VERSION_MINOR,
 };
@@ -379,7 +379,7 @@ impl Server {
                 if required_features & !offered_features != 0 {
                     return error(obj, ser, ErrorCode::Malformed, true);
                 }
-                let supported = FEATURE_ARGB8888;
+                let supported = FEATURE_ARGB8888 | FEATURE_INPUT_LIFECYCLE;
                 if required_features & !supported != 0 {
                     return error(obj, ser, ErrorCode::Unsupported, true);
                 }
@@ -771,6 +771,12 @@ impl Server {
     /// Read-only view of a connection, for assertions in tests.
     pub fn connection(&self, conn: ConnId) -> Option<&Connection> {
         self.conns.get(&conn)
+    }
+
+    /// Negotiated feature bits are authoritative only after HELLO succeeds.
+    /// Pending, closed and unknown connections have no accepted feature set.
+    pub fn negotiated_features(&self, conn: ConnId) -> Option<u64> {
+        self.conns.get(&conn).filter(|c| c.phase == Phase::Active).map(|c| c.features)
     }
 
     /// Advance the injected clock to `now_ns` (monotonic) and close every

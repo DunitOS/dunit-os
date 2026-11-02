@@ -22,6 +22,8 @@ pub const VERSION_MINOR: u16 = 0;
 
 /// Feature bit 0 = ARGB8888 (spec §3). XRGB8888 needs no feature bit.
 pub const FEATURE_ARGB8888: u64 = 1 << 0;
+/// Feature bit 1 = negotiated live INP1 keyboard/pointer lifecycle.
+pub const FEATURE_INPUT_LIFECYCLE: u64 = 1 << 1;
 
 /// Pixel formats (spec §8).
 pub const FORMAT_XRGB8888: u32 = 1;

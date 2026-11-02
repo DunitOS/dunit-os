@@ -1,7 +1,8 @@
 //! Existing live IPC control messages used alongside DGUI packets.
 //!
 //! This module centralizes their established little-endian layout. It does not
-//! introduce opcodes, capabilities, syscall changes or a new wire version.
+//! introduce DGUI opcodes, capabilities, syscall changes or a new wire version.
+//! The input-lifecycle extension is sent only after its feature is negotiated.
 
 pub const CTRL_MAGIC: u32 = u32::from_le_bytes(*b"CAP1");
 pub const INPUT_MAGIC: u32 = u32::from_le_bytes(*b"INP1");
@@ -17,7 +18,19 @@ pub const IN_UP: u8 = 3;
 pub const IN_LEAVE: u8 = 4;
 pub const IN_KEY: u8 = 5;
 pub const IN_SCROLL: u8 = 6;
+pub const IN_KEY_UP: u8 = 7;
+pub const IN_FOCUS_IN: u8 = 8;
 pub const IN_QUIT: u8 = 9;
+pub const IN_FOCUS_OUT: u8 = 10;
+/// Native Shift/Ctrl/Alt/Super, in that order.
+pub const INPUT_MODIFIERS_MASK: u8 = 0x0f;
+const POINTER_VALUE_MASK: u32 = 0x0fff;
+
+/// Canonical lifecycle pointer payload: button in low byte, modifiers above it.
+/// The legacy projection strips modifiers without changing the button byte.
+pub fn pointer_value(button: u8, modifiers: u8) -> Option<u32> {
+    (modifiers & !INPUT_MODIFIERS_MASK == 0).then_some(button as u32 | ((modifiers as u32) << 8))
+}
 
 fn word(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
@@ -40,7 +53,10 @@ impl Bootstrap {
         bytes
     }
     pub fn decode(bytes: &[u8]) -> Option<Self> {
-        (bytes.len() == 8).then(|| Self { compositor: word(bytes, 0), client: word(bytes, 4) })
+        (bytes.len() == 8).then(|| Self {
+            compositor: word(bytes, 0),
+            client: word(bytes, 4),
+        })
     }
 }
 
@@ -97,6 +113,68 @@ impl Input {
         }
         bytes
     }
+    /// Low-byte button. A feature-aware decode validates the packed value.
+    pub const fn pointer_button(self) -> u8 {
+        self.value as u8
+    }
+    /// Shift/Ctrl/Alt/Super from a negotiated pointer payload.
+    pub const fn pointer_modifiers(self) -> u8 {
+        ((self.value >> 8) & INPUT_MODIFIERS_MASK as u32) as u8
+    }
+    pub const fn is_pointer(self) -> bool {
+        matches!(self.kind, IN_MOVE | IN_DOWN | IN_UP | IN_LEAVE | IN_SCROLL)
+    }
+    fn lifecycle_valid(self) -> bool {
+        match self.kind {
+            IN_MOVE | IN_DOWN | IN_UP | IN_LEAVE | IN_SCROLL => {
+                self.value & !POINTER_VALUE_MASK == 0
+            }
+            IN_KEY => self.y >= 0 && self.y & !(INPUT_MODIFIERS_MASK as i32) == 0,
+            IN_KEY_UP => {
+                self.y >= 0 && self.y & !(INPUT_MODIFIERS_MASK as i32) == 0 && self.value == 0
+            }
+            IN_FOCUS_IN | IN_FOCUS_OUT => self.x == 0 && self.y == 0 && self.value == 0,
+            IN_QUIT => true,
+            _ => false,
+        }
+    }
+    /// Project a canonical compositor event onto one connection's negotiated
+    /// contract. Legacy clients receive no new kinds and no packed modifiers.
+    pub fn for_features(mut self, features: u64) -> Option<Self> {
+        if !self.lifecycle_valid() {
+            return None;
+        }
+        if features & crate::wire::FEATURE_INPUT_LIFECYCLE == 0 {
+            if matches!(self.kind, IN_KEY_UP | IN_FOCUS_IN | IN_FOCUS_OUT) {
+                return None;
+            }
+            if self.is_pointer() {
+                self.value = self.pointer_button() as u32;
+            }
+        }
+        Some(self)
+    }
+    pub fn encode_for_features(self, features: u64) -> Option<[u8; INPUT_LEN]> {
+        Some(self.for_features(features)?.encode())
+    }
+    /// Decode exactly the negotiated contract. With no lifecycle feature the
+    /// historical decoder retains its existing payload-free leave/quit forms.
+    pub fn decode_for_features(bytes: &[u8], features: u64) -> Option<Self> {
+        if features & crate::wire::FEATURE_INPUT_LIFECYCLE == 0 {
+            return Self::decode(bytes);
+        }
+        if bytes.len() != INPUT_LEN || !has_magic(bytes, INPUT_MAGIC) || bytes[5..8] != [0, 0, 0] {
+            return None;
+        }
+        let input = Self {
+            kind: bytes[4],
+            x: word(bytes, 8) as i32,
+            y: word(bytes, 12) as i32,
+            value: word(bytes, 16),
+        };
+        input.lifecycle_valid().then_some(input)
+    }
+    /// Legacy decoder. New kinds remain unrecognized unless negotiated.
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < 8 || !has_magic(bytes, INPUT_MAGIC) {
             return None;
