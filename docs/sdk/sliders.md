@@ -44,9 +44,13 @@ decrease, with the same bounds and page commands in either orientation.
 Changing a stable key between the two element kinds resets transient focus and
 capture; rebuilding or resizing the same kind preserves focus.
 
-Wheel-based value changes, tick marks, tooltips and keyboard key-up visuals are
-not included.
-It adds no kernel syscall or GUI wire format.
+Wheel-based value changes, tick marks, tooltips and a separate held-arrow slider
+visual are not included. Arrow/page value changes remain key-make actions;
+negotiated key-up does not repeat a value change. Negotiated window focus-out
+cancels capture without rolling back an already accepted value, and focus-in can
+restore its stable focus owner. Legacy peers retain their existing behavior.
+The slider API adds no syscall; its window adapter shares the
+[approved gui-v1 lifecycle](m7-6-input-extension-proposal.md).
 
 ## Shared appearance and drawing
 

@@ -57,6 +57,8 @@ mouse input, cancellation, readonly, disabled traversal, ordinary button
 activation and resize in one VM, through `tools/qemu_test.py`.
 
 This is an integer control. Decimal formatting, wheel stepping and mouse-hold
-repeat are outside this increment. Window deactivation does not commit a draft:
-current gui-v1 has no keyboard-focus-out event. Focus changes inside the component
-commit as described above.
+repeat are outside this increment. Window deactivation does not commit a draft.
+With negotiated [input lifecycle](m7-6-input-extension-proposal.md), focus-out
+cancels transient capture and hides the caret while preserving the draft; focus-in
+restores a still-valid focused control. Legacy peers receive no such notification.
+Focus changes inside the component commit as described above.

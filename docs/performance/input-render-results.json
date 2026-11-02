@@ -1,0 +1,341 @@
+{
+  "baseline": [
+    {
+      "case": "wheel",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 36529,
+      "median_render_us": 36506,
+      "median_update_us": 18,
+      "damaged_frames": 24,
+      "damaged_pixels": 4494336,
+      "wall_samples_us": [
+        40342,
+        38091,
+        36529,
+        36520,
+        34414
+      ],
+      "render_samples_us": [
+        40316,
+        38069,
+        36506,
+        36499,
+        34394
+      ],
+      "update_samples_us": [
+        22,
+        18,
+        19,
+        17,
+        16
+      ]
+    },
+    {
+      "case": "short",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 9433,
+      "median_render_us": 9264,
+      "median_update_us": 181,
+      "damaged_frames": 24,
+      "damaged_pixels": 691200,
+      "wall_samples_us": [
+        9524,
+        10392,
+        9202,
+        8927,
+        9433
+      ],
+      "render_samples_us": [
+        9345,
+        10204,
+        9018,
+        8744,
+        9264
+      ],
+      "update_samples_us": [
+        176,
+        185,
+        181,
+        181,
+        166
+      ]
+    },
+    {
+      "case": "long",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 139026,
+      "median_render_us": 131853,
+      "median_update_us": 7179,
+      "damaged_frames": 24,
+      "damaged_pixels": 3168000,
+      "wall_samples_us": [
+        138268,
+        138904,
+        142183,
+        150673,
+        139026
+      ],
+      "render_samples_us": [
+        130888,
+        131853,
+        135091,
+        143341,
+        131842
+      ],
+      "update_samples_us": [
+        7375,
+        7046,
+        7087,
+        7327,
+        7179
+      ]
+    }
+  ],
+  "prepared": [
+    {
+      "case": "wheel",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 35811,
+      "median_render_us": 35790,
+      "median_update_us": 18,
+      "damaged_frames": 24,
+      "damaged_pixels": 4494336,
+      "wall_samples_us": [
+        35811,
+        37416,
+        33548,
+        34861,
+        36953
+      ],
+      "render_samples_us": [
+        35790,
+        37394,
+        33529,
+        34841,
+        36928
+      ],
+      "update_samples_us": [
+        18,
+        19,
+        17,
+        17,
+        22
+      ]
+    },
+    {
+      "case": "short",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 8830,
+      "median_render_us": 8663,
+      "median_update_us": 173,
+      "damaged_frames": 24,
+      "damaged_pixels": 691200,
+      "wall_samples_us": [
+        8154,
+        8519,
+        8830,
+        8838,
+        9942
+      ],
+      "render_samples_us": [
+        8021,
+        8252,
+        8680,
+        8663,
+        9652
+      ],
+      "update_samples_us": [
+        131,
+        265,
+        148,
+        173,
+        288
+      ]
+    },
+    {
+      "case": "long",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 94128,
+      "median_render_us": 87013,
+      "median_update_us": 6966,
+      "damaged_frames": 24,
+      "damaged_pixels": 3168000,
+      "wall_samples_us": [
+        95130,
+        93328,
+        94128,
+        97544,
+        92445
+      ],
+      "render_samples_us": [
+        88259,
+        85646,
+        87013,
+        90575,
+        85610
+      ],
+      "update_samples_us": [
+        6867,
+        7658,
+        7112,
+        6966,
+        6832
+      ]
+    }
+  ],
+  "final": [
+    {
+      "case": "wheel",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 10193,
+      "median_render_us": 10180,
+      "median_update_us": 12,
+      "damaged_frames": 24,
+      "damaged_pixels": 4494336,
+      "wall_samples_us": [
+        9463,
+        10029,
+        10352,
+        10385,
+        10193
+      ],
+      "render_samples_us": [
+        9451,
+        9960,
+        10336,
+        10371,
+        10180
+      ],
+      "update_samples_us": [
+        9,
+        67,
+        13,
+        12,
+        11
+      ]
+    },
+    {
+      "case": "short",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 7843,
+      "median_render_us": 7682,
+      "median_update_us": 159,
+      "damaged_frames": 24,
+      "damaged_pixels": 691200,
+      "wall_samples_us": [
+        7208,
+        8171,
+        9704,
+        7843,
+        7039
+      ],
+      "render_samples_us": [
+        7064,
+        7893,
+        9523,
+        7682,
+        6898
+      ],
+      "update_samples_us": [
+        142,
+        275,
+        179,
+        159,
+        139
+      ]
+    },
+    {
+      "case": "long",
+      "clock": "host_monotonic_wall",
+      "viewport": [
+        640,
+        360
+      ],
+      "events": 24,
+      "warmups": 1,
+      "trials": 5,
+      "median_wall_us": 53098,
+      "median_render_us": 46111,
+      "median_update_us": 6984,
+      "damaged_frames": 24,
+      "damaged_pixels": 3168000,
+      "wall_samples_us": [
+        52633,
+        54808,
+        53098,
+        54368,
+        52478
+      ],
+      "render_samples_us": [
+        46071,
+        47802,
+        46111,
+        46907,
+        46012
+      ],
+      "update_samples_us": [
+        6559,
+        7004,
+        6984,
+        7457,
+        6464
+      ]
+    }
+  ]
+}

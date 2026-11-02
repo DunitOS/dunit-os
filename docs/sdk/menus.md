@@ -132,10 +132,13 @@ service.
 
 This increment covers noneditable select, action menus with nested submenus and
 separators, menu bars, context providers and plain delayed tooltips. Popups are
-inside one client surface. Current gui-v1 has no keyboard-focus-out/global
-outside-click notification: a click inside the client dismisses a popup, but a
-click in another window cannot automatically dismiss it through this API.
-Cross-surface popup windows and that focus contract remain separate work.
+inside one client surface. A client that negotiated
+[INPUT_LIFECYCLE](m7-6-input-extension-proposal.md) receives keyboard focus-out:
+the SDK closes its popup and tooltip when focus transfers to another client,
+and focus return does not reopen them. Legacy peers retain the previous behavior
+and cannot infer an external focus change. Cross-surface popup windows and a
+general global outside-click/grab contract remain separate work; keyboard focus
+loss is not a promise to observe every click outside a surface.
 
 Fifteen host scenarios cover validation/accessibility, controlled rejection,
 roving focus, mnemonics, nested/empty/disabled menus, pointer cancellation and

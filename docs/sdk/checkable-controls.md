@@ -21,10 +21,13 @@ comes from the new view. Changing kind/group, removal and disabled transitions
 reset transient interaction. Disabled checked controls keep their model value
 and checked appearance.
 
-All controls activate on primary-pointer release inside the same armed node, or
-on a focused Space/Enter cooked key event. Moving away, leaving the client or
-Escape cancels a pointer press. Returning does not rearm it. Keyboard key-up and
-external focus-out limits are unchanged from the push-button contract.
+All controls activate on primary-pointer release inside the same armed node.
+With negotiated native input lifecycle, focused Space/Enter arms on make and
+activates once on matching key-up; repeats remain held. Escape, keyboard focus-out,
+disable/removal or a changed focus owner cancels that activation. Returning focus
+or a late release does not rearm it. Legacy peers and pure `Application::key`
+retain immediate cooked-key activation. Pointer cancellation and all keyboard
+lifecycle rules are shared with the [push-button contract](buttons.md).
 
 ## Radio groups
 
@@ -89,9 +92,9 @@ radio wrap and disabled skip, group Tab navigation, resize with retained values,
 disabled pointer rejection, `[CHECKS] ok` and guest exit 0. Its full contract
 contains 18 required markers and forbids panic/failure markers.
 
-This completes the next button family slice. Text fields, scrolling, other
-widget families, application migration and the key-release protocol decision
-remain open roadmap work.
+The shared [approved lifecycle](m7-6-input-extension-proposal.md) now supplies
+native key-up/focus events to this family. System clipboard, full application
+migration and the other remaining M7.6 gates are not closed by that change.
 
 Validation on 28 October 2026: 41 component, 28 renderer, 12 widget, 18 style,
 13 native SDK and 16 Python tooling checks passed. Final checkable runs passed

@@ -50,6 +50,14 @@ Published buffers are never exposed as writable slices. `close` completes
 DISCONNECT; Drop attempts a nonblocking disconnect and releases both local
 backings, including on errors.
 
+Publication queues the existing CAP1, IMPORT_BUFFER, ATTACH_BUFFER and COMMIT
+messages in their required FIFO order before waiting for the three matching
+RESULTs. This removes two application/server round-trip gaps without adding a
+wire operation or another frame in flight. `draw` still waits for matching
+FrameDone, observes BUFFER_RELEASE and waits for DESTROY_RESULT before reusing
+the old backing. A concurrent CONFIGURE is retained while reading replies; a
+stale COMMIT follows the same bounded surface-recovery path described below.
+
 `try_draw_damage` accepts a fallible callback returning `Some(DamageRect)` for
 changed pixels or `None` for an unchanged frame. The latter skips publication
 unless a new surface needs its first full image. Rectangles must be nonempty

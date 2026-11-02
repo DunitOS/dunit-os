@@ -68,7 +68,10 @@ Empty values display the configured placeholder.
 The focused cursor blinks through the existing wait-set/deadline loop. The DSS
 `caret-blink` duration controls it; zero means a steady cursor. It does not spin
 or extend the caller's requested timeout. Read-only fields also show a cursor.
-The existing protocol's lack of keyboard-focus-out notification still applies.
+With negotiated [input lifecycle](m7-6-input-extension-proposal.md), keyboard
+focus-out hides the caret and cancels drag/selection timers without editing the
+text or history. Focus-in restores a valid stable owner. Legacy peers keep the
+old event stream and cannot infer external keyboard focus loss.
 
 Invalid model values are rejected as `UiError::InvalidInput`: control characters,
 line separators, values over `max_chars` Unicode scalars or the technical

@@ -177,3 +177,43 @@ software based; large blur areas and many surfaces cost CPU and memory.
 Bundled event policies live in `scripts/events/`; the layout picker discovers
 nonempty `.lua` files in the configured layout's parent directory. Empty drafts
 are not executable layout choices. Both layout and event paths remain editable.
+
+## Aggregate performance diagnostics
+
+`[diagnostics] performance = true` enables compositor diagnostics; absence or
+`false` adds no diagnostic clock/statistics syscalls or serial reports. The
+setting is validated with the complete document and can be reloaded atomically.
+Settings-only saves preserve this independent table.
+
+`[PERF-SERVER]` reports one aggregate per 128 completed desktop iterations and
+flushes a shorter final window at session exit. Fields ending in `_ms` are sums
+within that window, not individual frame latencies: `work_ms` excludes sleep;
+`pump_ms` covers client IPC dispatch and texture updates; `input_ms` covers device
+input and its desktop policy; `compose_ms` excludes separately measured
+`present_ms`; `done_ms` covers frame completion/control delivery; `sleep_ms` is
+time blocked in frame pacing. Idle IPC service contributes to `pump_ms` outside
+the frame's `work_ms`; these spans must not be summed as exclusive CPU time.
+Maximum work/wait intervals are also reported.
+
+Event counts include pointer records, records carrying wheel, LOST_BEFORE,
+keyboard records, received client IPC, full/partial frames and frames whose
+scene blocks the partial path. `present_calls` and `present_pixels` count
+presentation attempts. `ipc_qmax` is a sampled global IPC backlog maximum at
+iteration starts, with `ready_max` from the same SystemStats snapshot; neither
+is an exact per-client queue peak or kernel pointer queue depth.
+
+Span stamps use the existing monotonic ClockGetTime syscall, avoiding a full
+SystemStats scan per span. The current clock is PIT-derived at 10ms resolution;
+sub-tick costs can be zero and work in IRQ-masked syscalls can be undercounted.
+Use aggregate sums with host-side input-to-result timing. The existing
+`gui_server: frame ~N ms` line measures complete iteration periods, including
+sleep; it is not a pure compositing cost measurement. Diagnostic reporting is
+outside the measured stage sums, so the output itself is not free.
+
+`[render] frame_interval_ms = 16` sets the desired interval (validated integer
+1..1000 ms, reloadable; absence keeps 16). Work is charged against an absolute
+frame-start deadline, and IPC readiness wakes the wait-set to serve requests
+before the next composition. FrameDone still follows composition. Each input
+iteration drains at most 64 pointer records without merging wheel/button edges.
+The current 100 Hz clock limits cadence precision. See the measured
+[continuous-input report](../performance/continuous-input.md).

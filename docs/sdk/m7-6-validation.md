@@ -57,12 +57,22 @@ captures rename, table, picker, overwrite, selection and wrapped-text screenshot
 
 ## Milestone gates still open
 
-This is not a declaration that the entire M7.6 milestone is closed. Held-key
-pressed states, keyboard-focus loss and native pointer modifiers require the
-[gui-v1 lifecycle decision](m7-6-input-extension-proposal.md). Cross-surface popup
-roles and an actual system IME are separate contracts. The roadmap already places
-system clipboard in M7.7 and full client migration/removal of manual client hit
-tests in M7.11; neither is simulated here. File chooser native directory snapshots
-explicitly fail with ENOBUFS at the existing maximum-buffer limit rather than
-silently claiming a complete truncated listing. No wire or privilege change has
-been made while the lifecycle proposal awaits approval.
+The original 2026-11-01 increment above did not close M7.6. On 2026-11-02 the
+approved [gui-v1 lifecycle contract](m7-6-input-extension-proposal.md) added native
+key-up, held activation and focus-loss cancellation, with legacy negotiation.
+The two-client `lifecycle` QEMU fixture passed all markers and both exits were 0.
+Resize recovery passed, and dark/light/restored theme pixels matched exactly.
+Continuous-input testing passed all twelve measured phases with exact event/value
+assertions; [measurements and limits](../performance/continuous-input.md).
+
+The final host batch passed 497 tests (protocol, component, native SDK and DWM
+helpers/configuration); text/cache and renderer suites separately passed 14 and
+63 tests, plus 11 Python harness tests. Existing standalone imported-module
+warnings remain in the DWM host harness; the changed crate suites have no warnings.
+ABI generation still reports 90 syscalls, 25 errno and 7 rights in sync.
+
+Native pointer modifier snapshots await the separate
+[snapshot decision](pointer-modifier-snapshot-proposal.md). Cross-surface popup
+roles and an actual system IME remain separate contracts. System clipboard is
+M7.7; full client migration/removal of manual hit tests is M7.11. File chooser
+native snapshots explicitly fail with ENOBUFS at the existing buffer limit.

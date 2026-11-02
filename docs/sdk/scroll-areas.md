@@ -30,7 +30,9 @@ blocks its own scrolling; it does not recursively disable its children.
 - Tab traverses the region and its controls. A new focused descendant is
   revealed, from inner viewports outward. Resizing its viewport also reveals
   it. Manual scrolling survives no-op model rebuilds and color-only theme
-  reloads. This does not add global focus/keyboard notification to gui-v1.
+  reloads. The separate negotiated [window lifecycle](m7-6-input-extension-proposal.md)
+  now cancels scrollbar capture on keyboard focus-out without changing offsets;
+  legacy clients retain their existing notification limits.
 - Up/Down move vertically by the themed step; Left/Right move horizontally.
   PageUp/PageDown page vertically; Home/End reach the vertical limits. Axis-aware
   pure APIs support line/page/end commands on either axis. Native text editing and radio navigation have priority;

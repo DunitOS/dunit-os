@@ -27,10 +27,19 @@ press/drag state without emitting a click or modifying text selection.
 including raw arrow/function keys, collection navigation, text editing,
 scrollbars, wheel, menus, sliders and splitters. Nested application helpers are
 suppressed only for that dispatch; errors restore routing for the next event.
-Native packets use `UiEventKind::NativeKey`; direct cooked key calls use `Key`.
+Native make packets use `UiEventKind::NativeKey`; negotiated releases use
+`NativeKeyUp`. Direct cooked key calls use `Key`. Negotiated FOCUS_IN/FOCUS_OUT
+are handled as window lifecycle before widget routing: focus-out cancels gestures,
+pending activation, overlays and selection timers; focus-in restores a valid
+stable owner. Focus changes are not synthesized as widget key events.
+
 Pointer coordinates are available for native events and `pointer_text_at`;
-plain host `pointer` calls supply no coordinates. The current gui-v1 channel
-has no pointer modifiers or key-up delivery: routing does not synthesize them.
+plain host `pointer` calls supply no coordinates. The codec and SDK route supplied
+pointer modifiers, but the live compositor sends zero until the
+[pointer snapshot contract](pointer-modifier-snapshot-proposal.md) is approved and
+implemented. Reading the last keyboard state would misorder queued clicks.
+Legacy peers retain their earlier event stream; routing invents no releases,
+focus changes or device modifier snapshots for them.
 
 Programmatic commands such as `edit`, `table_command` or `update` do not invent
 hardware events. Timers and view reconciliation are also separate operations.
