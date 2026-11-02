@@ -1,0 +1,26 @@
+[meta]
+schema_version = 2
+[startup]
+entries = ["sdk_latency_fixture"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"
+[effects]
+anim = false
+[rules.main]
+app = "sdk_latency_fixture"
+x = 100
+y = 100
+width = 640
+height = 360
+floating = true
+[diagnostics]
+performance = true

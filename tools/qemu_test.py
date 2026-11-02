@@ -402,10 +402,22 @@ def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
     Marker waits only inspect this command's output. Every wait and injection
     shares the command deadline, so an unresponsive guest cannot hang the run.
     """
+    measurements = {}
     for step in steps:
         if time.monotonic() >= deadline:
             raise RuntimeError("command actions exceeded command timeout")
-        if "wait_marker" in step:
+        if "measure_start" in step:
+            label = step["measure_start"]
+            if not isinstance(label, str) or not label or label in measurements:
+                raise ValueError("measurement needs a unique nonempty label")
+            measurements[label] = time.perf_counter_ns()
+        elif "measure_end" in step:
+            label = step["measure_end"]
+            if label not in measurements:
+                raise ValueError("measurement was not started")
+            elapsed = time.perf_counter_ns() - measurements.pop(label)
+            print("[INPUT-TIMING] " + json.dumps({"phase": label, "wall_ns": elapsed}), flush=True)
+        elif "wait_marker" in step:
             marker = step["wait_marker"]
             wait_deadline = min(deadline, time.monotonic() + float(step.get("timeout", 20)))
             while True:
@@ -455,6 +467,8 @@ def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
                 time.sleep(min(interval, max(0, deadline - time.monotonic())))
         else:
             raise ValueError(f"unknown command action: {step!r}")
+    if measurements:
+        raise ValueError("unfinished input measurement")
 
 
 def resolve_ovmf() -> tuple[Path, Path]:

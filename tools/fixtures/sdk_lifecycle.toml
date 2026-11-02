@@ -1,0 +1,31 @@
+[meta]
+schema_version = 2
+[startup]
+entries = ["sdk_lifecycle_peer", "sdk_lifecycle_fixture"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"
+[effects]
+anim = false
+[rules.main]
+app = "sdk_lifecycle_fixture"
+x = 100
+y = 100
+width = 480
+height = 280
+floating = true
+[rules.peer]
+app = "sdk_lifecycle_peer"
+x = 800
+y = 100
+width = 320
+height = 200
+floating = true

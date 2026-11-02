@@ -12,6 +12,9 @@ for source in kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     userspace/system_apps/gui_terminal/src/terminal_model_tests.rs \
     userspace/system_apps/gui_server/src/composite.rs \
     userspace/system_apps/gui_server/src/damage_plan.rs \
+    userspace/system_apps/gui_server/src/cursor.rs \
+    userspace/system_apps/gui_server/src/frame_pacing.rs \
+    userspace/system_apps/gui_server/src/input_lifecycle.rs \
     userspace/system_apps/gui_server/src/window_effects_tests.rs \
     userspace/system_apps/gui_server/src/animation.rs
 do

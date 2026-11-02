@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
@@ -35,22 +35,29 @@ def main(fixture=None):
     with tempfile.TemporaryDirectory(prefix=f'sdk-{fixture}-', dir=ROOT / 'build') as folder:
         if not args.reuse_image:
             folder = Path(folder)
-            app_folder = folder / 'app'
-            create(argparse.Namespace(path=app_folder, id=app_id, name=f'SDK {fixture} fixture', kind='gui'))
-            if fixture in ('component', 'resize'):
-                with (app_folder / 'Cargo.toml').open('a') as manifest_file:
-                    manifest_file.write('dwm_settings = { path = '
-                        + json.dumps(str(ROOT / 'userspace/dwm_settings')) + ' }\n')
-            (app_folder / 'src/main.rs').write_text(TEST_ATTRIBUTES + (ROOT / f'tools/fixtures/{source_name}.rs').read_text())
-            manifest, package, app = project(app_folder)
-            artifact = build(manifest, package, app)
             overlay = folder / 'overlay'
-            executable = overlay / 'app' / app.binary
-            executable.parent.mkdir(parents=True)
-            shutil.copyfile(artifact, executable)
-            metadata = overlay / 'system/share/dunit/apps' / app.id / 'dunit.toml'
-            metadata.parent.mkdir(parents=True)
-            metadata.write_text(installed_manifest(app))
+            def install_fixture(source, identity, name):
+                app_folder = folder / identity
+                create(argparse.Namespace(path=app_folder, id=identity, name=name, kind='gui'))
+                fixture_cache = ROOT / 'build/sdk-fixture-target'
+                fixture_cache.mkdir(exist_ok=True)
+                (app_folder / 'target').symlink_to(fixture_cache, target_is_directory=True)
+                if fixture in ('component', 'resize'):
+                    with (app_folder / 'Cargo.toml').open('a') as manifest_file:
+                        manifest_file.write('dwm_settings = { path = '
+                            + json.dumps(str(ROOT / 'userspace/dwm_settings')) + ' }\n')
+                (app_folder / 'src/main.rs').write_text(TEST_ATTRIBUTES + (ROOT / f'tools/fixtures/{source}.rs').read_text())
+                manifest, package, app = project(app_folder)
+                artifact = build(manifest, package, app)
+                executable = overlay / 'app' / app.binary
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(artifact, executable)
+                metadata = overlay / 'system/share/dunit/apps' / app.id / 'dunit.toml'
+                metadata.parent.mkdir(parents=True)
+                metadata.write_text(installed_manifest(app))
+            install_fixture(source_name, app_id, f'SDK {fixture} fixture')
+            if fixture == 'lifecycle':
+                install_fixture('sdk_lifecycle_peer', 'sdk_lifecycle_peer', 'Legacy input peer')
             shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
             if fixture in ('theme', 'effects', 'backdrop', 'motion'):
                 profile = (ROOT / 'assets/dwm/sdk/dark.dss').read_text()
