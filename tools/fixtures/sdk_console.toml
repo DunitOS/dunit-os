@@ -1,0 +1,25 @@
+[meta]
+schema_version = 2
+[application.sdk_console_cli]
+exec = "/app/console command"
+[application.shell]
+name = "Default shell"
+exec = "/app/gui_terminal"
+[launcher]
+terminal = "/app/gui_terminal"
+entries = ["sdk_console_tui"]
+[dock]
+entries = ["sdk_console_cli", "sdk_console_tui", "shell"]
+[startup]
+entries = ["sdk_console_cli"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[effects]
+anim = false
+[bindings.shell]
+scancode = 31
+modifiers = "super"
+action = "launch:shell"

@@ -234,6 +234,7 @@ entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui
 # Launcher-menu entries (the hamburger dropdown), top-to-bottom. Same id rules
 # as `[dock]`; omit to list the whole registry.
 [launcher]
+terminal = "/app/gui_terminal"
 entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
 
 # Autostart: apps spawned at desktop bring-up, in order (ids may repeat). EMPTY

@@ -18,7 +18,7 @@ extern crate alloc;
 mod preserve;
 mod catalog;
 mod applications;
-pub use applications::{AppEntry, Applications, MAX_APPS, MAX_WS};
+pub use applications::{AppEntry, AppKind, Applications, MAX_APPS, MAX_WS};
 pub(crate) use applications::{parse_apps, parse_apps_seeded};
 pub use catalog::{validate_document_with_manifests, validate_installed_document};
 mod validation;

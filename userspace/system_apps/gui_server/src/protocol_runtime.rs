@@ -610,7 +610,8 @@ pub(super) fn refresh_client(server:&Server,c:&mut ClientState) {
     }
 
 }
-/// Bring one client online: reserve a protocol connection, spawn the `exec` ELF,
+/// Bring one client online: reserve a protocol connection, spawn the GUI ELF
+/// (or configured terminal adapter for CLI/TUI),
 /// and hand it the `[our_pid][client_id]` handshake it blocks on at startup. The
 /// returned `ClientState` is *pending* — its buffer is mapped and it becomes
 /// `ready` only once its protocol handshake is pumped (see `pump_clients`). The
@@ -623,11 +624,20 @@ pub(super) fn spawn_client(
     slot_x: u32,
     slot_y: u32,
     app_idx: u8,
-    exec: &str,
+    entry: &settings::AppEntry,
+    terminal: Option<&str>,
 ) -> Option<ClientState> {
+    let (exec, command) = match entry.kind {
+        settings::AppKind::Gui => (entry.exec.as_str(), None),
+        settings::AppKind::Cli | settings::AppKind::Tui => (terminal?, Some(entry.exec.as_str())),
+    };
     let conn = server.connect()?;
-    let pid = libdunit::spawn(exec);
+    let pid = match command {
+        Some(command) => libdunit::process::spawn_args(exec, &[exec, "--execute", command]),
+        None => libdunit::spawn(exec),
+    };
     if pid <= 0 {
+        server.disconnect_peer(conn);
         return None;
     }
     let mut c = ClientState::empty();
@@ -666,9 +676,8 @@ pub(super) fn try_launch(
     let Some(entry) = apps.apps.get(ri) else {
         return false;
     };
-    let exec = entry.exec.as_str();
     let name = entry.name.as_str();
-    if let Some(mut c) = spawn_client(server, *next_id, 0, 0, ri as u8, exec) {
+    if let Some(mut c) = spawn_client(server, *next_id, 0, 0, ri as u8, entry, apps.terminal.as_deref()) {
         c.ws = current_ws;
         clients.push(c);
         *next_id += 1;
@@ -719,7 +728,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         };
         let sx = 300 + (k as u32) * 70;
         let sy = 100 + (k as u32) * 90;
-        if let Some(c) = spawn_client(&mut server, next_id, sx, sy, ri as u8, entry.exec.as_str()) {
+        if let Some(c) = spawn_client(&mut server, next_id, sx, sy, ri as u8, entry, cfg.apps.terminal.as_deref()) {
             clients.push(c);
             next_id += 1;
         }

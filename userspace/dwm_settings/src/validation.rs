@@ -131,6 +131,13 @@ fn validate_mode(text: &str, base: &crate::Applications, references_required: bo
             } else {
                 Err("unknown application field")
             }
+        } else if section == "launcher" && key == "terminal" {
+            config_string(input).and_then(|path| {
+                if path.starts_with('/') && !path.starts_with("//") && path != "/"
+                    && !path.split('/').skip(1).any(|p| p.is_empty() || p == "." || p == "..")
+                    && !path.chars().any(|c| c.is_control()) { Ok(()) }
+                else { Err("terminal adapter must be a normalized absolute executable path") }
+            })
         } else if matches!(section, "dock" | "launcher" | "startup") && key == "entries" {
             match list(input) {
                 Ok(ids) => {
@@ -196,6 +203,11 @@ fn validate_mode(text: &str, base: &crate::Applications, references_required: bo
     let mut settings = Settings::defaults();
     crate::parse_into(text, &mut settings);
     let (apps, _) = crate::parse_apps_seeded(text, base);
+    if apps.terminal.is_none() && apps.dock.iter().chain(&apps.launcher).chain(&apps.startup)
+        .any(|&i| apps.apps[i].kind != crate::AppKind::Gui) {
+        return Err(ConfigError { line: 0, field: "launcher.terminal".into(),
+            reason: "CLI/TUI desktop entries require a terminal adapter" });
+    }
     crate::shell::resolve(text, &settings, &apps).map_err(|error|locate(text,error))?;
     crate::policy::resolve(text, &apps).map_err(|error|locate(text,error))?;
     Ok(())

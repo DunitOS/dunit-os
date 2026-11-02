@@ -4,7 +4,8 @@
 //! Untrusted terminal client for the M4 userspace DWM (Stack B).
 //!
 //! The last legacy GUI app reborn on the userspace stack. It owns a PTY, spawns
-//! the `dsh` shell as the slave, and bridges three streams: keystrokes the
+//! the `dsh` shell or an explicit command as the slave, and bridges three streams:
+//! keystrokes the
 //! compositor routes to the focused window (IN_KEY) are written into the pty
 //! master; the shell's stdout is drained from the master into an on-screen
 //! scrollback; that scrollback is painted into our own shared buffer via the M4
@@ -345,7 +346,17 @@ fn resize_surface(
 }
 
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::RawEnvp) -> ! {
+    libdunit::init_runtime(argc, argv, envp);
+    let arguments: Vec<&str> = (0..libdunit::argc()).filter_map(libdunit::arg).collect();
+    let command = if arguments.len() == 1 {
+        alloc::vec!["dsh"]
+    } else if arguments.len() >= 3 && arguments[1] == "--execute" && !arguments[2].is_empty() {
+        arguments[2..].to_vec()
+    } else {
+        libdunit::println("gui_terminal: FAIL expected --execute executable [arguments]");
+        libdunit::exit(2);
+    };
     // 0) Load this app's config (apps/gui_terminal.toml). A missing/garbage file
     // yields the built-in baseline. The resolved values drive the prompt (via the
     // shell's env), the font, the background (with alpha), and the text palette;
@@ -519,7 +530,7 @@ pub extern "C" fn _start() -> ! {
         libdunit::exit(6);
     }
 
-    // 9) Spawn the shell as our pty slave: dsh's stdin/stdout are the pty rings.
+    // 9) Spawn the shell/command as our PTY slave; keep argv distinct.
     let pty = libdunit::pty_create();
     if pty <= 0 {
         libdunit::println("gui_terminal: FAIL pty create");
@@ -530,12 +541,14 @@ pub extern "C" fn _start() -> ! {
     // Hand the shell its prompt through the environment (desktop policy lives in
     // config, not baked into dsh): `[terminal] prompt` → `PROMPT=<value>`.
     let prompt_env = alloc::format!("PROMPT={}", tcfg.prompt.as_str());
-    if libdunit::pty_spawn_env("dsh", pty, &[&prompt_env]) <= 0 {
+    let child = libdunit::process::pty_spawn_args(command[0], pty, &command, &[&prompt_env]);
+    if child <= 0 {
         libdunit::println("gui_terminal: FAIL pty spawn");
         libdunit::pty_close(pty);
         libdunit::handle_close(buf);
         libdunit::exit(9);
     }
+    let mut child = Some(child as u32);
 
     // 10) Bridge loop: block on compositor IPC (short timeout). Forward IN_KEY
     //     bytes into the pty master; on any wake, drain the shell's stdout into
@@ -626,7 +639,7 @@ pub extern "C" fn _start() -> ! {
                 _ => {}
             }
         }
-        // Drain whatever the shell has produced since the last tick.
+        // Drain whatever the child has produced since the last tick.
         loop {
             let r = libdunit::pty_read(pty, &mut sbuf);
             if r > 0 {
@@ -635,12 +648,34 @@ pub extern "C" fn _start() -> ! {
                 break; // EAGAIN / EOF / EPIPE — nothing more this tick
             }
         }
+        if let Some(pid) = child {
+            let mut status = libdunit::WaitStatus::empty();
+            let result = libdunit::wait(pid, &mut status);
+            if result >= 0 {
+                // Keep the final output visible until the window is closed.
+                // Reap once; the dead child must not leave a zombie per launch.
+                child = None;
+                libdunit::println(&alloc::format!("gui_terminal: child={} exited kind={} code={}", command[0], status.kind, status.code));
+            } else if result != libdunit::EAGAIN {
+                libdunit::println("gui_terminal: FAIL child wait");
+                break;
+            }
+        }
         if term.dirty {
             render(px, &font, &term, cur_w, cur_h, bg);
             term.dirty = false;
         }
     }
 
+    if let Some(pid) = child {
+        libdunit::kill(pid);
+        let mut status = libdunit::WaitStatus::empty();
+        if libdunit::wait(pid, &mut status) < 0 {
+            libdunit::println("gui_terminal: FAIL child cleanup");
+            libdunit::exit(10);
+        }
+        libdunit::println(&alloc::format!("gui_terminal: child={} stopped on close", command[0]));
+    }
     libdunit::pty_close(pty);
     release_buffer(
         cur_buf,

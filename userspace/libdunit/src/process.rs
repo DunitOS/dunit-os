@@ -56,6 +56,34 @@ pub fn resolve_program(name: &str) -> Result<String, isize> {
     Err(error)
 }
 
+/// Spawn with explicit argv and inherited environment using the existing
+/// SpawnArgs transaction (no file actions). Strings remain distinct; no shell
+/// parsing occurs. Kernel limits and errors are preserved. This syscall creates
+/// an unprivileged child, including when called by a privileged desktop service.
+pub fn spawn_args(path: &str, argv: &[&str]) -> isize {
+    if argv.is_empty() || argv.iter().any(|s| s.as_bytes().contains(&0)) {
+        return crate::EINVAL;
+    }
+    let resolved = match resolve_program(path) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
+    let env = environment(&[]);
+    let mut block = Vec::new();
+    for value in argv.iter().copied().chain(env.iter().map(String::as_str)) {
+        block.extend_from_slice(value.as_bytes());
+        block.push(0);
+    }
+    crate::syscall5(
+        crate::SYSCALL_SPAWN_ARGS,
+        resolved.as_ptr() as usize,
+        resolved.len(),
+        block.as_ptr() as usize,
+        block.len(),
+        argv.len(),
+    )
+}
+
 /// A nonzero sixth argument selects argv followed by environment strings.
 /// All strings are NUL terminated; empty arguments are preserved.
 pub fn pty_spawn_args(path: &str, id: u32, argv: &[&str], env: &[&str]) -> isize {

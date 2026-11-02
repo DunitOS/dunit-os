@@ -6,7 +6,7 @@ The Rust `dunit_app_manifest` parser uses TOML with `core + alloc`; it does not
 need a host OS backend. Known capability names are generated directly from
 `abi/rights.abi`. Parsing and discovery never grant capabilities.
 
-GUI entries supply their ID, display name, icon and `/app/<binary>` executable
+Installed entries supply their ID, display name, icon and `/app/<binary>` executable
 to the existing userspace application registry. Launcher, dock, app groups,
 shortcuts and startup then resolve those same IDs. Nothing is registered in
 the kernel, and the compositor has no application-name dispatch table.
@@ -17,6 +17,7 @@ schema_version = 2
 [dock]
 entries = ["example.monitor"]
 [launcher]
+terminal = "/app/gui_terminal"
 entries = ["example.monitor"]
 [startup]
 entries = []
@@ -31,10 +32,30 @@ normal registry defaults apply. A profile without application tables inherits
 the packaged legacy registry as before, alongside installed GUI manifests.
 Legacy applications can keep their current desktop tables until migrated.
 
-CLI/TUI manifests are checked but are not inserted into the GUI registry: a
-terminal launch adapter is not implemented yet. They continue to run through
-`cargo dunit` and the terminal. GUI generation and SDK window helpers remain
-separate M7 work.
+CLI/TUI manifests now enter the same registry with their original kind. Startup,
+dock and launcher share the same launch path: GUI runs directly; CLI/TUI runs
+the configured `[launcher] terminal` executable with distinct argv entries
+`[adapter, "--execute", executable]`. No command string or shell interpolation is
+used. The adapter path is desktop policy, not an application-name table in the
+compositor. The packaged default selects `/app/gui_terminal`; explicit profiles
+may select another adapter implementing this command-line interface.
+
+The adapter field is optional for GUI-only selections. Selecting a CLI/TUI entry
+without it rejects the complete configuration; console entries are never launched
+invisibly. The path must be normalized and absolute. Applications not selected in
+dock/launcher/startup do not require an adapter. Existing explicit list ordering,
+empty selections and legacy GUI tables retain their meaning. CLI/TUI entries
+without an icon use the existing derived-label fallback. Settings-only saves
+preserve the independent launcher table.
+
+`gui_terminal --execute executable [arguments...]` runs that command on its PTY;
+running it without arguments still opens `dsh` with the configured prompt. Each
+argument is forwarded separately, including paths with spaces. A completed child
+is reaped once and its final output remains visible until the window closes.
+Closing a terminal with a running child terminates and reaps that owned child.
+The existing SpawnArgs syscall creates the adapter unprivileged; PTY spawn and
+manifest discovery grant no additional rights. No ABI, manifest-schema or gui-v1
+wire change is involved.
 
 Discovery checks normalized IDs and paths, supported schemas, unknown keys,
 required metadata, duplicate/unknown rights and existence of executable files.
@@ -62,6 +83,7 @@ cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
 DUNIT_ROOT="$PWD" cargo test --manifest-path userspace/dwm_settings/Cargo.toml
 python3 tools/test_dunit_cli.py
 python3 tools/test_sdk_catalog.py --accel tcg
+python3 tools/test_sdk_gui_fixture.py console --accel tcg
 ```
 
 The native fixture has ID `example.monitor` and executes the existing
@@ -104,3 +126,15 @@ After the fault-return fix, 20 complete thread-test processes passed on KVM and
 cargo-dunit workflow then passed on TCG (including empty/error/panic rejection
 and Calculator), followed by the installed catalog, DWM engine, SDK API and
 GUI resize/restore regressions. Compiler warnings stayed at 13/99.
+
+Verified console increment on 2 November 2026: the native `console` fixture
+passed on TCG. It launches a CLI with a space-containing executable path through
+startup, a TUI through launcher keyboard navigation, and a legacy shell through
+a configured desktop binding. CLI/TUI assert exact argv and `hello` from real
+keyboard input, write stdout/stderr through their PTYs, and exercise normal child
+exit and cancellation on close. The legacy shell executes `echo shellok`. All
+three terminal windows exit 0; required boot markers pass and GUI faults remain
+forbidden. Screenshots capture final CLI output, ANSI TUI output and the shell.
+The unchanged installed-GUI catalog regression also passed. Configuration host
+tests passed 40 checks, terminal model tests 10; ABI generation remains in sync
+at 90 syscalls, 25 errno and 7 rights.

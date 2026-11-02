@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
@@ -36,9 +36,9 @@ def main(fixture=None):
         if not args.reuse_image:
             folder = Path(folder)
             overlay = folder / 'overlay'
-            def install_fixture(source, identity, name):
+            def install_fixture(source, identity, name, kind='gui'):
                 app_folder = folder / identity
-                create(argparse.Namespace(path=app_folder, id=identity, name=name, kind='gui'))
+                create(argparse.Namespace(path=app_folder, id=identity, name=name, kind=kind))
                 fixture_cache = ROOT / 'build/sdk-fixture-target'
                 fixture_cache.mkdir(exist_ok=True)
                 (app_folder / 'target').symlink_to(fixture_cache, target_is_directory=True)
@@ -55,7 +55,13 @@ def main(fixture=None):
                 metadata = overlay / 'system/share/dunit/apps' / app.id / 'dunit.toml'
                 metadata.parent.mkdir(parents=True)
                 metadata.write_text(installed_manifest(app))
-            install_fixture(source_name, app_id, f'SDK {fixture} fixture')
+                return executable
+            if fixture == 'console':
+                executable = install_fixture(source_name, 'sdk_console_cli', 'Console CLI', 'cli')
+                shutil.copyfile(executable, overlay / 'app/console command')
+                install_fixture(source_name, 'sdk_console_tui', 'Console TUI', 'tui')
+            else:
+                install_fixture(source_name, app_id, f'SDK {fixture} fixture')
             if fixture == 'lifecycle':
                 install_fixture('sdk_lifecycle_peer', 'sdk_lifecycle_peer', 'Legacy input peer')
             shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)

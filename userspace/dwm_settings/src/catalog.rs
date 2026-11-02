@@ -1,7 +1,7 @@
 //! Installed metadata is read at startup/reload; desktop composition stays user policy.
 use crate::{AppEntry, Applications, ConfigError, MAX_APPS};
 use alloc::{format, string::String, vec, vec::Vec};
-use dunit_app_manifest::{Application, Kind};
+use dunit_app_manifest::Application;
 const ROOT: &str = "/system/share/dunit/apps";
 const MAX_CATALOG: usize = 256;
 fn error(path: &str, reason: &'static str) -> ConfigError {
@@ -17,13 +17,11 @@ pub(crate) fn entries(manifests: &[Application]) -> Result<Applications, ConfigE
         if manifests[..index].iter().any(|other| other.id == app.id) {
             return Err(error(&app.id, "duplicate installed application id"));
         }
-        if app.kind != Kind::Gui {
-            continue;
-        }
         if result.apps.len() == MAX_APPS {
             return Err(error(ROOT, "too many desktop applications"));
         }
         result.apps.push(AppEntry {
+            kind: app.kind.clone(),
             id: app.id.clone(),
             name: app.name.clone(),
             exec: format!("/app/{}", app.binary),

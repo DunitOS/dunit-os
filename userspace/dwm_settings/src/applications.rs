@@ -1,6 +1,7 @@
 //! Application registry and user composition, independent of filesystem discovery.
 use crate::{parse_bool, parse_str_array, parse_uint, strip_comment, unquote};
 use alloc::{string::String, vec::Vec};
+pub use dunit_app_manifest::Kind as AppKind;
 
 /// Upper bound on registered applications (safety cap, not a pixel count): a
 /// malformed config cannot make the compositor allocate an unbounded registry.
@@ -14,6 +15,7 @@ pub const MAX_WS: usize = 9;
 /// `label` default to derivations of `id` so a minimal entry is just an `id`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct AppEntry {
+    pub kind: AppKind,
     /// Registry key from `[application.<id>]`; also the default exec/icon stem.
     pub id: String,
     /// Human-readable window/taskbar title.
@@ -34,6 +36,8 @@ pub struct AppEntry {
 /// `[workspaces]`. Replaces the compositor's hardcoded `LAUNCH_APPS`/`WS_COUNT`.
 #[derive(Clone)]
 pub struct Applications {
+    /// Optional terminal adapter executable, invoked with --execute and argv.
+    pub terminal: Option<String>,
     pub apps: Vec<AppEntry>,
     /// Dock icons, in order, as indices into `apps`.
     pub dock: Vec<usize>,
@@ -55,6 +59,7 @@ impl AppEntry {
     /// Legacy table defaults; installed metadata supplies its own executable and icon.
     fn new(id: &str, name: &str, label: &str) -> AppEntry {
         AppEntry {
+            kind: AppKind::Gui,
             id: String::from(id),
             name: String::from(name),
             exec: String::from(id),
@@ -69,6 +74,7 @@ impl Applications {
     /// identities and default lists are loaded from the packaged TOML document.
     pub fn baseline() -> Applications {
         Applications {
+            terminal: None,
             apps: Vec::new(),
             dock: Vec::new(),
             launcher: Vec::new(),
@@ -102,6 +108,7 @@ pub(crate) fn parse_apps_seeded(text: &str, base: &Applications) -> (Application
     let (mut have_dock, mut have_launcher, mut have_startup) = (false, false, false);
     let mut workspaces = base.workspaces;
     let mut self_test = base.self_test;
+    let mut terminal = base.terminal.clone();
 
     let mut section = String::new(); // full header, e.g. "application.gui_files"
     for raw in text.lines() {
@@ -143,6 +150,8 @@ pub(crate) fn parse_apps_seeded(text: &str, base: &Applications) -> (Application
         } else if section == "dock" && key == "entries" {
             dock_ids = parse_str_array(rhs);
             have_dock = true;
+        } else if section == "launcher" && key == "terminal" {
+            terminal = Some(String::from(unquote(rhs)));
         } else if section == "launcher" && key == "entries" {
             launcher_ids = parse_str_array(rhs);
             have_launcher = true;
@@ -205,6 +214,7 @@ pub(crate) fn parse_apps_seeded(text: &str, base: &Applications) -> (Application
 
     (
         Applications {
+            terminal,
             apps,
             dock,
             launcher,
