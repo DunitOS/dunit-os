@@ -292,6 +292,9 @@ impl<Msg> View<Msg> {
         if self.input.is_some() {
             return Some("textbox");
         }
+        if self.kind.tag() == "Text" {
+            return Some("statictext");
+        }
         self.activation.as_ref()?;
         Some(match self.kind.tag() {
             "Checkbox" => "checkbox",
@@ -328,6 +331,9 @@ impl<Msg> View<Msg> {
         }
         if let Some(input) = &self.input {
             return Some(&input.label);
+        }
+        if self.kind.tag() == "Text" {
+            return self.text.as_deref();
         }
         self.activation.as_ref().and(self.text.as_deref())
     }

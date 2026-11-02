@@ -83,6 +83,28 @@ fn messages_rebuild_typed_view_without_markup_escaping() {
 }
 
 #[test]
+fn static_text_metadata_follows_content_without_becoming_a_control() {
+    let mut app = counter();
+    let text = &app.view().children()[1];
+    assert_eq!(text.accessibility_role(), Some("statictext"));
+    assert_eq!(text.accessibility_label(), Some("0 hello"));
+    assert_eq!(text.accessibility_checked(), None);
+    assert_eq!(text.accessibility_pressed(), None);
+    assert_eq!(app.view().accessibility_role(), None);
+    assert_eq!(app.view().accessibility_label(), None);
+    assert!(!app.key(Key::plain('\t')).unwrap());
+    assert_eq!(app.focused_key(), None);
+    app.update(Msg::Text("Привет <world>".into())).unwrap();
+    assert_eq!(
+        app.view().children()[1].accessibility_label(),
+        Some("0 Привет <world>")
+    );
+    let empty = View::<()>::text("empty", "").disabled(true);
+    assert_eq!(empty.accessibility_role(), Some("statictext"));
+    assert_eq!(empty.accessibility_label(), Some(""));
+}
+
+#[test]
 fn unchanged_view_has_zero_damage_and_one_label_does_not_repaint_header() {
     let mut app = counter();
     let mut r = renderer();
