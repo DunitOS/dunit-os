@@ -7,6 +7,7 @@ pub mod shared_buffer;
 pub mod process;
 pub mod wait_set;
 pub mod pointer;
+pub mod file_cap;
 mod exec_path;
 
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -1127,6 +1128,29 @@ pub fn wait(pid: u32, status: &mut WaitStatus) -> isize {
         pid as usize,
         status as *mut WaitStatus as usize,
     )
+}
+
+/// Atomically duplicate an attenuated capability and enqueue its packet. The
+/// recipient's handle replaces one aligned u32 field at `handle_offset`.
+pub fn ipc_send_handle(pid:u32,handle:u32,rights:u32,data:&[u8],handle_offset:usize)->isize {
+    syscall6(SYSCALL_IPC_SEND_HANDLE,pid as usize,handle as usize,rights as usize,
+        data.as_ptr() as usize,data.len(),handle_offset)
+}
+/// Nonblocking receive with kernel-authenticated attachment provenance. Zero
+/// `attachment` means an ordinary packet. An attached handle is now caller-owned.
+pub fn ipc_recv_handle(data:&mut[u8],sender:&mut u32,attachment:&mut u32)->isize {
+    syscall6(SYSCALL_IPC_RECEIVE_HANDLE,data.as_mut_ptr() as usize,data.len(),
+        sender as *mut _ as usize,attachment as *mut _ as usize,0,0)
+}
+
+/// Blocking attachment-aware receive, sharing the normal wait-set mechanism.
+pub fn ipc_recv_handle_blocking(buf:&mut[u8],sender:&mut u32,attachment:&mut u32,timeout_ms:u64)->isize {
+    loop {
+        let received=ipc_recv_handle(buf,sender,attachment);
+        if received!=EAGAIN{return received;}
+        let waited=wait_ipc_event(timeout_ms);if waited<0{return waited;}
+        if timeout_ms!=0{return ipc_recv_handle(buf,sender,attachment);}
+    }
 }
 
 pub fn ipc_send(pid: u32, data: &[u8]) -> isize {

@@ -328,3 +328,34 @@ fn rejected_proposal_keeps_prior_history_and_selection() {
         .pointer_at(P::Move, Some("input"), Some(("input", editor(&a).cursor())))
         .unwrap());
 }
+
+#[test]
+fn transfer_paste_is_one_controlled_utf8_edit_and_one_undo() {
+    let mut a=app();a.key(Key::plain('\t')).unwrap();a.edit(E::SelectAll).unwrap();
+    let context=a.input_context().unwrap();assert_eq!(context.export_text(),Some("Aé界"));
+    assert!(a.insert_at_context(&context,"я👩‍💻e\u{301}").unwrap());
+    assert_eq!(a.component().calls,1);assert_eq!(editor(&a).text(),"я👩‍💻e\u{301}");
+    a.edit(E::Undo).unwrap();assert_eq!(editor(&a).text(),"Aé界");
+    assert_eq!(editor(&a).selection(),0.."Aé界".len());
+}
+#[test]
+fn asynchronous_transfer_rejects_focus_cursor_model_and_undo_aba() {
+    for change in 0..5 {
+        let mut a=app();a.key(Key::plain('\t')).unwrap();a.edit(E::SelectAll).unwrap();let context=a.input_context().unwrap();
+        match change {
+            0=>{a.window_focus(false);a.window_focus(true);},
+            1=>{a.key(Key::plain('\t')).unwrap();a.key(Key::plain('\t')).unwrap();},
+            2=>{a.update(Msg::External("Aé界".into())).unwrap();},
+            3=>{a.edit(E::Insert('x')).unwrap();a.edit(E::Undo).unwrap();},
+            _=>{a.edit(E::Left{extend:false,word:false}).unwrap();a.edit(E::SelectAll).unwrap();},
+        }
+        assert!(!a.insert_at_context(&context,"unwanted").unwrap());
+        assert_eq!(a.component().value,"Aé界");
+    }
+}
+#[test]
+fn rejected_transfer_preserves_complete_editor_state() {
+    let mut a=app();a.key(Key::plain('\t')).unwrap();a.edit(E::SelectAll).unwrap();a.update(Msg::Reject).unwrap();
+    let old=editor(&a).clone();let context=a.input_context().unwrap();
+    assert!(!a.insert_at_context(&context,"whole paste").unwrap());assert_eq!(editor(&a),&old);assert_eq!(a.component().calls,1);
+}

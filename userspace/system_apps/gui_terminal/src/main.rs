@@ -15,11 +15,14 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
-use gui_protocol_v1::control::{IN_KEY, IN_SCROLL, IN_QUIT};
+use gui_protocol_v1::control::{IN_KEY,IN_SCROLL,IN_DOWN,IN_MOVE,IN_UP,IN_LEAVE,IN_FOCUS_IN,IN_FOCUS_OUT};
+use dunit::window::{Window,WindowEvent,PixelFormat};
+mod pending_input;
+mod terminal_transfer;
 
 use alloc::vec::Vec;
 
-use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888, MAGIC};
+
 
 use dunit_render::Surface;
 use dunit_style::value::Color;
@@ -75,23 +78,12 @@ fn encode_key(scancode: u8, mods: u8, ascii: u8, out: &mut [u8; 4]) -> usize {
     esc.len()
 }
 
-const SURFACE: u64 = 1;
-const BUFFER: u64 = 2;
-const W: u32 = 560;
-const H: u32 = 360;
-const FMT_XRGB8888: u32 = 1;
-/// ARGB8888: the buffer carries a straight-alpha channel. Selected instead of
-/// XRGB when `[terminal] bg_alpha < 255`, so the compositor blends the terminal's
-/// translucent background over the desktop. Must match the protocol's
-/// `FORMAT_ARGB8888`; the compositor validates the imported buffer's format
-/// against the CreateSurface format on every commit.
-const FMT_ARGB8888: u32 = 2;
-
+const W:u32=560;
+const H:u32=360;
 /// Poll cadence: block on compositor IPC at most this long, then drain the pty
 /// and repaint. The compositor blits our buffer every tick regardless.
 const POLL_MS: u64 = 40;
 
-// APPEND_MARKER
 
 /// Load the terminal's TTF, falling back to the shipped monospace default in the
 /// initrd (/assets/fonts) on any error — assets live on the filesystem, not baked
@@ -120,11 +112,8 @@ fn panic(_: &PanicInfo) -> ! {
     libdunit::exit(101)
 }
 
-fn u64_at(p: &[u8], off: usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&p[off..off + 8]);
-    u64::from_le_bytes(a)
-}
+fn fatal(why:&str,error:isize)->!{libdunit::println(&alloc::format!("gui_terminal: FAIL {} ({})",why,error));libdunit::exit(1)}
+fn checked<T>(result:dunit::Result<T>,why:&str)->T{result.unwrap_or_else(|error|fatal(why,error.0))}
 
 /// Fixed layout metric: the point size the scrollback renders at, paired with
 /// `ROW_PX`. This is a rendering invariant (not user palette), so it stays a
@@ -176,27 +165,21 @@ fn col(argb: u32) -> Color {
 /// `clear` — NOT `fill_rect`, which would blend over the previous frame and drift
 /// the alpha toward opaque. Glyphs draw opaque on top, so text stays crisp while
 /// the background lets the desktop show through when `bg_alpha < 255`.
-fn render(px: *mut u8, font: &Font, term: &Term, w: u32, h: u32, bg: u32) {
-    let pixels = unsafe { core::slice::from_raw_parts_mut(px as *mut u32, (w * h) as usize) };
+fn render(pixels:&mut[u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32) {
     let mut surf = Surface::new(pixels, w as usize, h as usize);
     surf.clear(col(bg));
 
     // The document is `scrollback` (evicted rows) followed by the live `grid`.
     // `scroll` counts how many rows the view is lifted above the live bottom
     // (0 = pinned to the bottom, where the cursor lives).
-    let sb = term.scrollback.len();
-    let total = sb + term.rows;
-    let visible = term.rows.min(total);
-    let bottom = (total - 1).saturating_sub(term.scroll);
-    let start = (bottom + 1).saturating_sub(visible);
-    for (i, idx) in (start..=bottom).enumerate() {
-        let y = PAD_Y + i as i32 * ROW_PX;
-        let row = if idx < sb {
-            &term.scrollback[idx]
-        } else {
-            &term.grid[idx - sb]
-        };
-        draw_row(&mut surf, font, term.cell_w, y, row);
+    let sb=term.scrollback.len();let start=term.visible_start();
+    for (i,idx)in (start..start+term.rows).enumerate(){
+        let y=PAD_Y+i as i32*ROW_PX;
+        let row=if idx<sb{&term.scrollback[idx]}else{&term.grid[idx-sb]};
+        for column in 0..term.cols{
+            if term.selected(idx,column){surf.fill_rect((PAD_X+column as i32*term.cell_w)as f32,y as f32,term.cell_w as f32,ROW_PX as f32,col(term.palette.ansi[4]));}
+        }
+        draw_row(&mut surf,font,term.cell_w,y,row);
     }
 
     // Block caret: only when pinned to the bottom (scroll == 0), drawn as a
@@ -238,111 +221,17 @@ fn draw_row(surf: &mut Surface, font: &Font, cell_w: i32, y: i32, row: &[Cell]) 
     }
 }
 
-// APPEND_START
-
-fn release_buffer(handle: u32, address: usize, bytes: usize) {
-    if libdunit::shared_buffer::release(handle, address, bytes) < 0 {
-        libdunit::println("gui_terminal: failed to release shared mapping");
-    }
-}
-
-/// Re-negotiate the surface at a new size after a server-pushed CONFIGURE: back
-/// a FRESH kernel buffer of `new_w*new_h`, render the scrollback into it at the
-/// new geometry, then replay the buffer half of the handshake with a NEW object
-/// id (the compositor's freshness gate rejects a re-used id). Returns the new
-/// `(handle, mapped ptr)`; the OLD buffer handle is closed. `serial` advances so
-/// every request keeps a unique, increasing client serial. This is the terminal
-/// half of maximize/restore — the compositor owns the geometry, we re-buffer.
-#[allow(clippy::too_many_arguments)]
-fn resize_surface(
-    compositor: u32,
-    old_buf: u32,
-    old_address: usize,
-    old_bytes: usize,
-    font: &Font,
-    term: &Term,
-    new_w: u32,
-    new_h: u32,
-    obj: u64,
-    token: u64,
-    serial: &mut u64,
-    bg: u32,
-    fmt: u32,
-) -> Option<(u32, *mut u8)> {
-    let bytes = (new_w as usize)
-        .checked_mul(new_h as usize)?
-        .checked_mul(4)?;
-    let nb = libdunit::handle_create_shared(bytes);
-    if nb <= 0 {
-        return None;
-    }
-    let nb = nb as u32;
-    let mapped = libdunit::handle_map(nb, 0, bytes);
-    if mapped <= 0 {
-        libdunit::handle_close(nb);
-        return None;
-    }
-    let npx = mapped as usize as *mut u8;
-    render(npx, font, term, new_w, new_h, bg);
-
-    // Transfer the fresh buffer (read-only) and announce {handle, size, object}.
-    let dup = libdunit::handle_dup(
-        nb,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        if dup > 0 {
-            libdunit::handle_close(dup as u32);
-        }
-        release_buffer(nb, npx as usize, bytes);
-        return None;
-    }
-    // Commit the configure only after allocation, mapping and transfer succeed.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &ack);
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: obj as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // IMPORT (fresh object id) / ATTACH / COMMIT (new token).
-    let import = Request::ImportBuffer {
-        width: new_w,
-        height: new_h,
-        stride: new_w * 4,
-        format: fmt,
-        offset: 0,
-    }
-    .encode(obj, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &import);
-    let attach = Request::AttachBuffer {
-        buffer: obj,
-        damage: Vec::new(),
-    }
-    .encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &attach);
-    let commit = Request::Commit {
-        configure: token,
-        frame_callback: 1,
-    }
-    .encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &commit);
-
-    // Release the old backing buffer; the compositor now blits the new one.
-    release_buffer(old_buf, old_address, old_bytes);
-    Some((nb, npx))
+fn paint(window:&mut Window,term:&mut Term,font:&Font,bg:u32){
+    let mut resized=None;
+    checked(window.draw(|frame|{
+        let (w,h)=frame.size();let cols=cols_for(w,term.cell_w);let rows=visible_rows_for(h);
+        if cols!=term.cols||rows!=term.rows{
+            let mut candidate=term.clone();candidate.resize(cols,rows);
+            render(frame.pixels_mut(),font,&candidate,w,h,bg);resized=Some(candidate);
+        }else{render(frame.pixels_mut(),font,term,w,h,bg);resized=None;}
+    }),"present frame");
+    if let Some(candidate)=resized{*term=candidate;}
+    term.dirty=false;
 }
 
 #[no_mangle]
@@ -379,9 +268,9 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
     // written into every background pixel each frame via `Surface::clear`.
     let bg = (tcfg.bg_alpha << 24) | (tcfg.bg & 0x00FF_FFFF);
     let fmt = if tcfg.bg_alpha < 255 {
-        FMT_ARGB8888
+        PixelFormat::Argb8888
     } else {
-        FMT_XRGB8888
+        PixelFormat::Xrgb8888
     };
     // The live text palette (default fg + ANSI slots) comes straight from config.
     let palette = Palette {
@@ -392,149 +281,26 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
     libdunit::println(&alloc::format!(
         "gui_terminal: argb bg_alpha={} fmt={}",
         tcfg.bg_alpha,
-        if fmt == FMT_ARGB8888 {
+        if fmt == PixelFormat::Argb8888 {
             "argb8888"
         } else {
             "xrgb8888"
         },
     ));
 
-    // 1) Handshake: compositor pid + our client id (id is a tint hint only).
-    let mut m = [0u8; 8];
-    if libdunit::ipc_recv_blocking(&mut m, 0) < 8 {
-        libdunit::println("gui_terminal: FAIL recv handshake");
-        libdunit::exit(1);
-    }
-    let compositor = u32::from_le_bytes([m[0], m[1], m[2], m[3]]);
-
-    // 2) Create + map our own shared buffer and paint the initial (empty) frame.
-    let bytes = (W * H * 4) as usize;
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        libdunit::println("gui_terminal: FAIL create buffer");
-        libdunit::exit(2);
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println("gui_terminal: FAIL map buffer");
-        libdunit::exit(3);
-    }
-    let mut px = mapped as usize as *mut u8;
-    let font = match load_font(&tcfg) {
-        Ok(f) => f,
-        Err(_) => {
-            libdunit::println("gui_terminal: FAIL font parse");
-            libdunit::exit(7);
-        }
-    };
-    let cell_w = mono_cell_w(&font);
-    let mut term = Term::new(palette, cols_for(W, cell_w), visible_rows_for(H), cell_w);
-    // The surface's live geometry. The compositor may resize us via a
-    // server-pushed CONFIGURE, so track it rather than reusing the W/H consts.
-    let mut cur_buf = buf;
-    let mut cur_w = W;
-    let mut cur_h = H;
-    render(px, &font, &term, cur_w, cur_h, bg);
-
-    let mut rx = [0u8; 256];
-
-    // 3) HELLO -> WELCOME.
-    let hello = Request::Hello {
-        min_minor: 0,
-        max_minor: 0,
-        offered_features: FEATURE_ARGB8888,
-        required_features: 0,
-    }
-    .encode(0, 1);
-    libdunit::ipc_send(compositor, &hello);
-    if libdunit::ipc_recv_blocking(&mut rx, 0) <= 0 {
-        libdunit::println("gui_terminal: FAIL welcome");
-        libdunit::exit(4);
-    }
-
-    // 4) CREATE_SURFACE -> RESULT + CONFIGURE (capture the configure token).
-    let create = Request::CreateSurface {
-        role: 1,
-        width: W,
-        height: H,
-        format: fmt,
-    }
-    .encode(SURFACE, 2);
-    libdunit::ipc_send(compositor, &create);
-    libdunit::ipc_recv_blocking(&mut rx, 0); // RESULT
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0); // CONFIGURE
-    let token = if n >= 32 { u64_at(&rx, 24) } else { 0 };
-
-    // 5) ACK_CONFIGURE -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, 3);
-    libdunit::ipc_send(compositor, &ack);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 6) Transfer the buffer capability (read-only) and announce it.
-    let dup = libdunit::handle_dup(
-        buf,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        libdunit::println("gui_terminal: FAIL cap transfer");
-        libdunit::exit(5);
-    }
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: BUFFER as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
-    let import = Request::ImportBuffer {
-        width: W,
-        height: H,
-        stride: W * 4,
-        format: fmt,
-        offset: 0,
-    }
-    .encode(BUFFER, 4);
-    libdunit::ipc_send(compositor, &import);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let attach = Request::AttachBuffer {
-        buffer: BUFFER,
-        damage: alloc::vec::Vec::new(),
-    }
-    .encode(SURFACE, 5);
-    libdunit::ipc_send(compositor, &attach);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let commit = Request::Commit {
-        configure: token,
-        frame_callback: 1,
-    }
-    .encode(SURFACE, 6);
-    libdunit::ipc_send(compositor, &commit);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 8) FRAME_DONE from the compositor's composition tick.
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-    let ok = n >= 32 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8021;
-    if ok {
-        libdunit::println("gui_terminal: surface presented OK");
-    } else {
-        libdunit::println("gui_terminal: FAIL no frame done");
-        libdunit::handle_close(buf);
-        libdunit::exit(6);
-    }
+    let font=load_font(&tcfg).unwrap_or_else(|_|fatal("font parse",libdunit::EINVAL));
+    let cell_w=mono_cell_w(&font);
+    let mut window=checked(Window::open_format(W,H,fmt),"window handshake");
+    let (width,height)=window.size();
+    let mut term=Term::new(palette,cols_for(width,cell_w),visible_rows_for(height),cell_w);
+    paint(&mut window,&mut term,&font,bg);
+    libdunit::println("gui_terminal: surface presented OK");
+    let mut transfers=terminal_transfer::Transfers::start(&mut window);
 
     // 9) Spawn the shell/command as our PTY slave; keep argv distinct.
     let pty = libdunit::pty_create();
     if pty <= 0 {
         libdunit::println("gui_terminal: FAIL pty create");
-        libdunit::handle_close(buf);
         libdunit::exit(8);
     }
     let pty = pty as u32;
@@ -545,99 +311,48 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
     if child <= 0 {
         libdunit::println("gui_terminal: FAIL pty spawn");
         libdunit::pty_close(pty);
-        libdunit::handle_close(buf);
         libdunit::exit(9);
     }
     let mut child = Some(child as u32);
 
-    // 10) Bridge loop: block on compositor IPC (short timeout). Forward IN_KEY
-    //     bytes into the pty master; on any wake, drain the shell's stdout into
-    //     the scrollback and repaint if it changed. A server-pushed CONFIGURE
-    //     (maximize/restore) re-buffers us at the new geometry. Exit on IN_QUIT.
-    let mut sbuf = [0u8; 256];
-    let mut next_obj: u64 = 3; // fresh buffer object id per resize (> import id 2)
-    let mut serial: u64 = 7; // client request serial, continues past the handshake
+    let mut sbuf=[0u8;256];
+    let mut input=pending_input::PendingInput::new(dunit::transfer::MAX_BODY_BYTES);
     loop {
-        let n = libdunit::ipc_recv_blocking(&mut rx, POLL_MS);
-        let magic = if n >= 8 {
-            u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]])
-        } else {
-            0
-        };
-        // Server-pushed CONFIGURE (opcode 0x8010): the compositor resized us.
-        // Re-negotiate a fresh buffer at the new geometry, then keep rendering
-        // the scrollback into it (visible rows recomputed from the new height).
-        if magic == MAGIC && n >= 48 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8010 {
-            let tok = u64_at(&rx, 24);
-            let nw = u32::from_le_bytes([rx[32], rx[33], rx[34], rx[35]]);
-            let nh = u32::from_le_bytes([rx[36], rx[37], rx[38], rx[39]]);
-            if nw == 0 || nh == 0 || (nw == cur_w && nh == cur_h) {
-                let ack = Request::AckConfigure { configure: tok }.encode(SURFACE, serial);
-                serial += 1;
-                libdunit::ipc_send(compositor, &ack);
-            } else {
-                // Prepare a separate reflowed model. Allocation/transfer failure
-                // preserves both the existing grid and its backing surface.
-                let mut candidate = term.clone();
-                candidate.resize(cols_for(nw, cell_w), visible_rows_for(nh));
-                if let Some((nb, npx)) = resize_surface(
-                    compositor,
-                    cur_buf,
-                    px as usize,
-                    (cur_w as usize) * (cur_h as usize) * 4,
-                    &font,
-                    &candidate,
-                    nw,
-                    nh,
-                    next_obj,
-                    tok,
-                    &mut serial,
-                    bg,
-                    fmt,
-                ) {
-                    term = candidate;
-                    cur_buf = nb;
-                    px = npx;
-                    cur_w = nw;
-                    cur_h = nh;
-                    next_obj += 1;
-                    libdunit::println("gui_terminal: reconfigured OK");
-                } else {
-                    libdunit::println(
-                        "gui_terminal: resize failed; previous grid and surface retained",
-                    );
-                }
-            }
-        } else if let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize]) {
-            match input.kind {
-                IN_QUIT => break,
-                IN_SCROLL => {
-                    term.scroll_wheel(input.x, 3);
-                }
-                IN_KEY => {
-                    // IN_KEY carries scancode, modifiers and cooked ASCII. Decode
-                    // into a pty byte sequence: control codes for Ctrl+letter,
-                    // the cooked byte for printables/Enter/Tab, and xterm ESC
-                    // sequences for the extended nav keys (arrows/Home/End/Del).
-                    let scancode = input.x as u8;
-                    let mods = input.y as u8;
-                    let ascii = input.value as u8;
-                    // PgUp/PgDn scroll the local view a page at a time and are
-                    // never forwarded to the pty.
-                    if scancode == SC_PGUP {
-                        term.scroll_by(term.rows.saturating_sub(1), true);
-                    } else if scancode == SC_PGDN {
-                        term.scroll_by(term.rows.saturating_sub(1), false);
-                    } else {
-                        let mut seq = [0u8; 4];
-                        let len = encode_key(scancode, mods, ascii, &mut seq);
-                        if len > 0 {
-                            libdunit::pty_write(pty, &seq[..len]);
+        let mut closing=false;
+        for batch in 0..64{
+        let timeout=if batch!=0{0}else if input.is_empty(){POLL_MS}else{5};
+        match checked(window.next_event(dunit::time::Duration::from_millis(timeout)),"window event"){
+            None=>break,
+            Some(WindowEvent::CloseRequested)=>{closing=true;break;},
+            Some(WindowEvent::Resized{..})=>{
+                transfers.resized();
+                let (w,h)=window.size();term.resize(cols_for(w,cell_w),visible_rows_for(h));term.dirty=true;
+                libdunit::println("gui_terminal: reconfigured OK");
+            },
+            Some(WindowEvent::Transfer(event))=>checked(transfers.event(&mut window,event,&mut input),"transfer event"),
+            Some(WindowEvent::Input(event))=>match event.kind {
+                IN_FOCUS_IN|IN_FOCUS_OUT=>transfers.focus(event.kind==IN_FOCUS_IN,&mut term),
+                IN_DOWN|IN_UP|IN_MOVE|IN_LEAVE=>checked(transfers.pointer(&mut window,&mut term,&event),"selection"),
+                IN_SCROLL=>term.scroll_wheel(event.x,3),
+                IN_KEY=>{
+                    if !checked(transfers.key(&mut window,&term,&event),"clipboard key"){
+                        let scan=event.x as u8;
+                        if scan==SC_PGUP{term.scroll_by(term.rows.saturating_sub(1),true);}
+                        else if scan==SC_PGDN{term.scroll_by(term.rows.saturating_sub(1),false);}
+                        else if child.is_some(){let mut seq=[0;4];let len=encode_key(scan,event.y as u8,event.value as u8,&mut seq);
+                            if len!=0&&!input.push(&seq[..len]){libdunit::println("gui_terminal: input queue full");}
                         }
                     }
-                }
-                _ => {}
-            }
+                },
+                _=>{},
+            },
+            _=>{},
+        }
+        }
+        if closing{break;}
+        if let Err(error)=input.drain(|bytes|libdunit::pty_write(pty,bytes)){
+            if error==libdunit::EPIPE{input.clear();checked(transfers.read_only(&mut window),"read-only terminal");}
+            else if error!=libdunit::EAGAIN&&error!=libdunit::ENOBUFS{fatal("PTY input",error);}
         }
         // Drain whatever the child has produced since the last tick.
         loop {
@@ -654,7 +369,7 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
             if result >= 0 {
                 // Keep the final output visible until the window is closed.
                 // Reap once; the dead child must not leave a zombie per launch.
-                child = None;
+                child = None;input.clear();checked(transfers.read_only(&mut window),"read-only terminal");
                 libdunit::println(&alloc::format!("gui_terminal: child={} exited kind={} code={}", command[0], status.kind, status.code));
             } else if result != libdunit::EAGAIN {
                 libdunit::println("gui_terminal: FAIL child wait");
@@ -662,8 +377,7 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
             }
         }
         if term.dirty {
-            render(px, &font, &term, cur_w, cur_h, bg);
-            term.dirty = false;
+            paint(&mut window,&mut term,&font,bg);
         }
     }
 
@@ -677,10 +391,6 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
         libdunit::println(&alloc::format!("gui_terminal: child={} stopped on close", command[0]));
     }
     libdunit::pty_close(pty);
-    release_buffer(
-        cur_buf,
-        px as usize,
-        (cur_w as usize) * (cur_h as usize) * 4,
-    );
+    checked(window.close(),"window close");
     libdunit::exit(0)
 }

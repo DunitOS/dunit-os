@@ -137,3 +137,20 @@ fn native_wheel_up_enters_backlog_and_down_returns_to_live_bottom() {
     t.scroll_wheel(i32::MAX, usize::MAX);
     assert_eq!(t.scroll, 0);
 }
+
+#[test]
+fn selected_output_preserves_unicode_soft_wrap_and_hard_lines() {
+    let mut t=term(4,4);t.feed("абвгде\nxy".as_bytes());
+    t.select_start(0,1);t.select_extend(2,2);t.select_end();
+    assert_eq!(t.selected_text().as_deref(),Some("бвгде\nxy"));
+    assert!(t.selected(t.visible_start(),1));assert!(!t.selected(t.visible_start(),0));
+    t.select_start(2,2);t.select_extend(0,1);t.select_end();
+    assert_eq!(t.selected_text().as_deref(),Some("бвгде\nxy"));
+    t.resize(8,4);assert!(t.selected_text().is_none());
+}
+#[test]
+fn selection_tracks_scrollback_identity_and_expires_when_evicted() {
+    let mut t=term(4,2);t.feed(b"one\ntwo");t.select_start(0,0);t.select_extend(0,3);t.select_end();
+    t.feed(b"\nnew");assert_eq!(t.selected_text().as_deref(),Some("one"));
+    for _ in 0..201{t.feed(b"\nx");}assert!(t.selected_text().is_none());
+}

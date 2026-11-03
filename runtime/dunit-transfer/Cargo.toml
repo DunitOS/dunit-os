@@ -1,0 +1,8 @@
+[package]
+name = "dunit_transfer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libdunit = { path = "../../userspace/libdunit" }
+gui_protocol_v1 = { path = "../../protocols/gui-v1" }

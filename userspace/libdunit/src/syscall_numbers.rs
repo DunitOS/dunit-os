@@ -92,3 +92,7 @@ pub const SYSCALL_POLL: usize = 87;
 pub const SYSCALL_IOCTL: usize = 88;
 pub const SYSCALL_WAIT_SET_WAIT: usize = 89;
 pub const SYSCALL_READ_POINTER_EVENT: usize = 90;
+pub const SYSCALL_FILE_CAP_OPEN: usize = 91;
+pub const SYSCALL_FILE_CAP_OP: usize = 92;
+pub const SYSCALL_IPC_SEND_HANDLE: usize = 93;
+pub const SYSCALL_IPC_RECEIVE_HANDLE: usize = 94;

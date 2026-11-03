@@ -1,0 +1,37 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/handle_test --persist-prepare"
+    ]
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "[TERM-007] Starting main loop",
+      "source": "userspace/system_apps/handle_test/src/file_caps.rs"
+    },
+    {
+      "marker": "[DUNITFS] auto-mounted",
+      "claim": "[DUNITFS] auto-mounted",
+      "source": "userspace/system_apps/handle_test/src/file_caps.rs"
+    },
+    {
+      "marker": "[FILE-CAPS] DunitFS inode/copy/cross-fs/sync ok",
+      "claim": "[FILE-CAPS] DunitFS inode/copy/cross-fs/sync ok",
+      "source": "userspace/system_apps/handle_test/src/file_caps.rs"
+    }
+  ],
+  "forbidden": [
+    {
+      "marker": "[PANIC]",
+      "why": "Native persistent capability failure",
+      "source": "userspace/system_apps/handle_test/src/file_caps.rs"
+    },
+    {
+      "marker": "handle_test: FAIL",
+      "why": "Native persistent capability failure",
+      "source": "userspace/system_apps/handle_test/src/file_caps.rs"
+    }
+  ]
+}

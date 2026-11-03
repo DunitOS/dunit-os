@@ -70,6 +70,11 @@ cargo dunit run --manifest-path demo/Cargo.toml
 cargo dunit test --manifest-path demo/Cargo.toml
 ```
 
+GUI runs and native GUI fixtures use the existing `dwm` image composition with
+`limine_sdk_terminal.conf`: the desktop and SDK overlay fit the fixed installer
+ESP without packaging every unrelated CLI/libc test executable. Kernel/ABI
+smoke runs retain the full composition. Both paths still use `tools/qemu_test.py`.
+
 See the [window API and its limits](window.md). The starter uses a typed root
 component and the [shared SDK theme](themes.md). Its native buffer-lifetime test
 still issues 201 real low-level commits; it does not substitute unchanged-view

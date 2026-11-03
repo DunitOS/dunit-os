@@ -766,6 +766,17 @@ impl QuickSettings {
     }
 }
 
+/// Transfer broker policy shared by clipboard and drag-and-drop.
+#[derive(Clone,Copy,PartialEq,Eq)]
+pub struct Transfers { pub timeout_ms:u32,pub drag_threshold_px:u32,pub trace:bool }
+impl Transfers {
+    pub const fn baseline()->Self{Self{timeout_ms:5000,drag_threshold_px:6,trace:false}}
+    fn apply(&mut self,key:&str,value:&str){
+        if key=="trace"{if let Some(value)=parse_bool(value){self.trace=value;}return;}
+        if let Some(n)=parse_uint(value){match key{"timeout_ms"=>self.timeout_ms=n.clamp(500,60_000),"drag_threshold_px"=>self.drag_threshold_px=n.clamp(1,64),_=>{}}}
+    }
+}
+
 /// Desktop notification policy (`[notifications]` table). Transient toasts posted
 /// by the compositor (launch feedback) or by clients over the notify IPC channel.
 /// `corner` uses the same 0=TL/1=TR/2=BL/3=BR convention as `[widgets] corner`.
@@ -879,6 +890,7 @@ impl Scripts {
 #[derive(Clone, Copy)]
 pub struct Settings {
     pub scripts: Scripts,
+    pub transfers: Transfers,
     pub meta: Meta,
     pub theme: Theme,
     pub layout: Layout,
@@ -902,6 +914,7 @@ impl Settings {
     pub const fn defaults() -> Self {
         Settings {
             scripts: Scripts::baseline(),
+            transfers: Transfers::baseline(),
             meta: Meta::baseline(),
             theme: Theme::baseline(),
             layout: Layout::baseline(),
@@ -1070,6 +1083,9 @@ pub fn parse_into(text: &str, settings: &mut Settings) {
         } else if section == "notifications" {
             settings.notifications.apply(key, value);
             settings.applied += 1;
+        } else if section == "transfers" {
+            settings.transfers.apply(key,value);
+            settings.applied+=1;
         } else if section == "scripts" {
             settings.scripts.apply(key, value);
             settings.applied += 1;
@@ -1569,6 +1585,10 @@ pub fn to_toml(s: &Settings) -> String {
 
     out.push_str("[session]\n");
     push_bool(&mut out, "restore", s.session.restore);
+    out.push_str("\n[transfers]\n");
+    push_bool(&mut out,"trace",s.transfers.trace);
+    push_int(&mut out,"timeout_ms",s.transfers.timeout_ms as i64);
+    push_int(&mut out,"drag_threshold_px",s.transfers.drag_threshold_px as i64);
     out.push_str("\n[scripts]\n");
     push_bool(&mut out, "enabled", s.scripts.enabled);
     push_string(&mut out, "runner", s.scripts.runner.as_str());
@@ -1601,6 +1621,7 @@ pub fn roundtrip_ok(s: &Settings) -> bool {
         && back.notifications == s.notifications
         && back.session == s.session
         && back.scripts == s.scripts
+        && back.transfers == s.transfers
 }
 
 // ===========================================================================

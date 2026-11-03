@@ -384,6 +384,20 @@ impl Shell {
                     })
             })
     }
+    /// Hit a visible, individual application icon. A collapsed group does not
+    /// identify one document receiver and therefore cannot accept a file drop.
+    pub fn app_at(&self,x:i32,y:i32)->Option<usize>{
+        for panel in &self.panels{
+            if !self.visible(panel,x,y){continue;}
+            for cell in &panel.cells{
+                if self.config.components[cell.component].kind!=Kind::Apps{continue;}
+                let ids=&self.app_indices[cell.component];
+                for (index,id) in ids.iter().enumerate(){
+                    if in_rect(item_rect(cell.rect,cell.horizontal,index,ids.len(),cell.gap),x,y){return Some(*id);}
+                }
+            }
+        }None
+    }
     pub fn app_target(&self, app: usize, _apps: &Applications) -> Option<Rect> {
         for p in &self.panels {
             for cell in &p.cells {

@@ -25,6 +25,10 @@ blur, shadows and rounded corners. Settings lets you choose themes and profiles,
 edit panels, set shortcuts and define window rules. Some of these pages expose
 the configuration source directly.
 
+Text fields share a system clipboard, and Files and Terminal exchange text and
+file paths through drag and drop. Files can copy or move selected items between
+folders; dropping a file on a compatible dock entry opens it in a new process.
+
 Changes reload while the desktop is running. If a new configuration or its Lua
 reload check fails, DWM keeps the previous working desktop.
 

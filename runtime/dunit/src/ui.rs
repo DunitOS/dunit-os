@@ -24,6 +24,8 @@ mod overlays;
 mod routing;
 #[path = "ui_scroll.rs"]
 mod scroll;
+#[path = "ui_transfer.rs"]
+mod transfer;
 #[path = "ui_text.rs"]
 mod text;
 #[path = "ui_workspace.rs"]
@@ -70,13 +72,13 @@ const MOTION_FRAME: Duration = Duration::from_millis(16);
 pub struct ComponentWindow<C: Component> {
     metrics_enabled: bool,
     metrics: ComponentMetrics,
-    application: Application<C>,
-    renderer: Renderer,
+    application: alloc::boxed::Box<Application<C>>,
+    renderer: alloc::boxed::Box<Renderer>,
     window: Window,
     last_render: RenderStats,
     uploaded_pixels: u64,
     failed: bool,
-    theme: Option<crate::ui_theme::Watcher>,
+    theme: Option<alloc::boxed::Box<crate::ui_theme::Watcher>>,
     theme_error: Option<Error>,
     theme_error_detail: Option<alloc::string::String>,
     theme_checked: Option<crate::time::Instant>,
@@ -87,15 +89,19 @@ pub struct ComponentWindow<C: Component> {
     selection_frame: Option<crate::time::Instant>,
     pointer_position: Option<(i32, i32)>,
     text_clicks: TextClickState,
+    transfers: alloc::boxed::Box<transfer::Transfers>,
 }
 impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
-        let application = Application::new(component).map_err(native)?;
+        // Retained trees/theme/transfer snapshots live beyond a frame. Keep
+        // their ownership on the heap so construction does not multiply large
+        // return slots on the native 64 KiB user stack.
+        let application = alloc::boxed::Box::new(Application::new(component).map_err(native)?);
         let mut ui = Self {
             metrics_enabled: false,
             metrics: Default::default(),
             application,
-            renderer,
+            renderer:alloc::boxed::Box::new(renderer),
             window: Window::open(width, height)?,
             last_render: RenderStats::default(),
             uploaded_pixels: 0,
@@ -111,6 +117,7 @@ impl<C: Component> ComponentWindow<C> {
             selection_frame: None,
             pointer_position: None,
             text_clicks: TextClickState::default(),
+            transfers: alloc::boxed::Box::default(),
         };
         ui.redraw()?;
         Ok(ui)
@@ -130,7 +137,7 @@ impl<C: Component> ComponentWindow<C> {
         let mut renderer = Renderer::new(font, theme.cascade, theme.background);
         renderer.set_motion_enabled(watcher.animations_enabled());
         let mut ui = Self::open(width, height, component, renderer)?;
-        ui.theme = Some(watcher);
+        ui.theme = Some(alloc::boxed::Box::new(watcher));
         ui.theme_checked = Some(crate::time::Instant::now()?);
         Ok(ui)
     }
@@ -182,7 +189,7 @@ impl<C: Component> ComponentWindow<C> {
         self.renderer
             .set_motion_enabled(self.motion_requested && watcher.animations_enabled());
         self.redraw()?;
-        self.theme = Some(watcher);
+        self.theme = Some(alloc::boxed::Box::new(watcher));
         self.theme_error = None;
         self.theme_error_detail = None;
         Ok(true)
@@ -284,6 +291,7 @@ impl<C: Component> ComponentWindow<C> {
         self.redraw()
     }
     fn redraw(&mut self) -> NativeResult<()> {
+        self.sync_transfer_target()?;
         let metrics_enabled = self.metrics_enabled;
         let redraw_started = metrics::start(metrics_enabled);
         if metrics_enabled {

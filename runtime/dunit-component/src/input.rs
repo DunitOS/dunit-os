@@ -24,6 +24,18 @@ impl Default for InputOptions {
         }
     }
 }
+/// Snapshot of the exact controlled edit target for an asynchronous transfer.
+/// Cursor/anchor/history, options, model revision and focus must still match.
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct InputContext { pub key:String, editor:TextEditor, options:InputOptions, revision:u64 }
+impl InputContext {
+    pub fn export_text(&self)->Option<&str>{
+        let range=self.editor.selection();
+        (!self.options.password&&!range.is_empty()).then(||&self.editor.text()[range])
+    }
+    pub fn editor(&self)->&TextEditor{&self.editor}
+    pub fn writable(&self)->bool{!self.options.read_only}
+}
 #[derive(Clone, Debug)]
 pub(crate) struct InputBinding<M> {
     pub affinity: dunit_render::CaretAffinity,
@@ -67,6 +79,61 @@ impl<M> View<M> {
     }
 }
 impl<C: Component> Application<C> {
+    /// Collection copy is read-only model access. It never interprets Cut as
+    /// deleting application rows; that destructive policy belongs to the app.
+    pub fn collection_clipboard_text(&self)->Option<String>{
+        if !self.window_focused{return None;}
+        let view=self.view.find(self.focused_key()?)?;
+        if view.interaction.disabled{return None;}
+        let list=view.list.as_ref()?;let mut lines=alloc::vec::Vec::new();
+        if let Some(table)=&view.table{
+            let column=table.column.as_ref().and_then(|key|table.model.column(key));
+            for &index in &table.order{
+                let row=table.model.rows().get(index)?;
+                if row.disabled||!list.selection.selected.contains(&row.key){continue;}
+                let text=if let Some(column)=column{row.cells.get(column)?.text()}else{row.cells.iter().map(|cell|cell.text()).collect::<alloc::vec::Vec<_>>().join("\t")};
+                lines.push(text);
+            }
+        }else{
+            for item in &list.items{if !item.disabled&&list.selection.selected.contains(&item.key){lines.push(item.label.clone());}}
+        }
+        if lines.is_empty(){None}else{Some(lines.join("\n"))}
+    }
+    pub fn text_drop_target(&self,key:&str)->bool{
+        self.view.find(key).is_some_and(|v|!v.interaction.disabled&&v.input.as_ref().is_some_and(|i|!i.options.read_only))
+    }
+    pub fn has_text_drop_target(&self)->bool{
+        let mut nodes=alloc::vec::Vec::new();self.view.flatten(&mut nodes);
+        nodes.into_iter().any(|v|!v.interaction.disabled&&v.input.as_ref().is_some_and(|i|!i.options.read_only))
+    }
+    /// A completed drop places the caret without synthesizing another pointer
+    /// event or activation. Its later data still requires this exact context.
+    pub fn text_drop_context(&mut self,key:&str,index:usize)->Option<InputContext>{
+        if !self.window_focused||!self.in_scope(key)||!self.text_drop_target(key){return None;}
+        self.set_focus(key);self.clipboard_revision=self.clipboard_revision.wrapping_add(1);
+        self.view.visit_mut(&mut|v|{if v.key==key{if let Some(i)=&mut v.input{i.editor.place(index,false);i.dragging=false;i.caret_visible=true;}}});
+        self.input_context()
+    }
+    pub fn input_context(&self)->Option<InputContext>{
+        if !self.window_focused{return None;}
+        let key=self.focused_input_key()?;
+        let input=self.view.find(key)?.input.as_ref()?;
+        Some(InputContext{key:String::from(key),editor:input.editor.clone(),options:input.options.clone(),revision:self.clipboard_revision})
+    }
+    pub fn input_context_current(&self,context:&InputContext)->bool{
+        self.window_focused&&self.clipboard_revision==context.revision&&self.focused_input_key()==Some(context.key.as_str())
+            &&self.view.find(&context.key).and_then(|v|v.input.as_ref()).is_some_and(|i|i.editor==context.editor&&i.options==context.options)
+    }
+    pub fn place_at_context(&mut self,context:&InputContext,index:usize)->Result<bool>{
+        if !self.input_context_current(context){return Ok(false);}
+        self.edit_input(|input|input.editor.place(index,false))
+    }
+    pub fn insert_at_context(&mut self,context:&InputContext,text:&str)->Result<bool>{
+        if !context.writable()||!self.input_context_current(context){return Ok(false);}
+        let mut expected=String::from(context.editor.text());expected.replace_range(context.editor.selection(),text);
+        self.insert_text(text)?;
+        Ok(self.input_context().is_some_and(|c|c.editor.text()==expected))
+    }
     /// Dispatch a command to the focused field. Returns consumed, even for a
     /// rejected edit, so text never falls through to application shortcuts.
     pub fn edit(&mut self, command: EditCommand) -> Result<bool> {
@@ -83,6 +150,19 @@ impl<C: Component> Application<C> {
             }
             _ => {}
         }
+        self.edit_input(|input| {
+            input.editor.apply(command, input.options.max_chars, input.options.read_only)
+        })
+    }
+    /// Paste is one controlled transaction with the same rollback as keyboard
+    /// edits, including rename drafts and spinboxes. A rejected insertion does
+    /// not leave a prefix or manufacture multiple undo records.
+    pub fn insert_text(&mut self, text: &str) -> Result<bool> {
+        self.edit_input(|input| {
+            input.editor.insert_text(text, input.options.max_chars, input.options.read_only)
+        })
+    }
+    fn edit_input(&mut self, mut edit: impl FnMut(&mut InputBinding<C::Message>) -> bool) -> Result<bool> {
         let mut message = None;
         let mut previous = None;
         let mut rename_change = None;
@@ -100,9 +180,7 @@ impl<C: Component> Application<C> {
             let old_visual = (input.affinity, input.visual_goal);
             input.affinity = dunit_render::CaretAffinity::Downstream;
             input.visual_goal = None;
-            input
-                .editor
-                .apply(command, input.options.max_chars, input.options.read_only);
+            edit(input);
             input.caret_visible = true;
             if old.text() != input.editor.text() {
                 if let Some(owner) = &input.owner {
@@ -116,6 +194,7 @@ impl<C: Component> Application<C> {
                 }
             }
         });
+        if consumed {self.clipboard_revision=self.clipboard_revision.wrapping_add(1);}
         if let Some((owner, value)) = rename_change {
             message = Some(self.rename_change(&owner, value)?);
         }
@@ -256,6 +335,7 @@ impl<C: Component> Application<C> {
         C::Message: Clone,
     {
         let mut changed = self.pointer(event, target)?;
+        if position.is_some()&&event!=PointerEvent::Leave{self.clipboard_revision=self.clipboard_revision.wrapping_add(1);}
         if let Some((key, index)) = position {
             if event != PointerEvent::Leave {
                 self.view.visit_mut(&mut |v| {
@@ -294,6 +374,7 @@ impl<C: Component> Application<C> {
                 }
             }
         });
+        if changed{self.clipboard_revision=self.clipboard_revision.wrapping_add(1);}
         changed
     }
 

@@ -1,5 +1,7 @@
 mod native_fd;
 mod pointer_input;
+mod file_cap;
+mod attached_ipc;
 pub(crate) mod wait_set;
 mod terminal_ioctl;
 mod spawn_actions;
@@ -104,6 +106,10 @@ pub enum Syscall {
     Ioctl = 88,
     WaitSetWait = 89,
     ReadPointerEvent = 90,
+    FileCapOpen = 91,
+    FileCapOp = 92,
+    IpcSendHandle = 93,
+    IpcReceiveHandle = 94,
 }
 
 impl Syscall {
@@ -200,6 +206,10 @@ impl Syscall {
             88 => Some(Syscall::Ioctl),
             89 => Some(Syscall::WaitSetWait),
             90 => Some(Syscall::ReadPointerEvent),
+            91 => Some(Syscall::FileCapOpen),
+            92 => Some(Syscall::FileCapOp),
+            93 => Some(Syscall::IpcSendHandle),
+            94 => Some(Syscall::IpcReceiveHandle),
             _ => None,
         }
     }
@@ -771,6 +781,10 @@ pub extern "C" fn syscall_handler(
         ),
         Syscall::Fcntl => native_fd::fcntl(arg0 as u32, arg1 as u32, arg2),
         Syscall::ReadPointerEvent => pointer_input::read(arg0,arg1,arg2),
+        Syscall::FileCapOpen => file_cap::open(arg0,arg1,arg2),
+        Syscall::FileCapOp => file_cap::operation(arg0,arg1,arg2,arg3,arg4,arg5),
+        Syscall::IpcSendHandle => attached_ipc::send(arg0,arg1,arg2,arg3,arg4,arg5),
+        Syscall::IpcReceiveHandle => attached_ipc::receive(arg0,arg1,arg2,arg3),
         Syscall::WaitSetWait => wait_set::wait(arg0, arg1 as usize, arg2, arg3 as usize, arg4, arg5),
         Syscall::Poll => native_fd::poll(arg0 as *mut u8, arg1 as usize, arg2),
         Syscall::Ioctl => terminal_ioctl::ioctl(arg0 as u32, arg1 as u32, arg2 as *mut u8, arg3 as usize),
@@ -1977,6 +1991,7 @@ fn ipc_error_to_errno(error: crate::ipc::IpcError) -> i64 {
         crate::ipc::IpcError::QueueFull => ENOBUFS,
         crate::ipc::IpcError::NoMessage => EAGAIN,
         crate::ipc::IpcError::Unavailable => EAGAIN,
+        crate::ipc::IpcError::AttachmentRequired => EOPNOTSUPP,
     }
 }
 

@@ -398,3 +398,27 @@ fn open_popup_captures_direct_list_adapters_without_changing_selection() {
     assert!(a.list_pointer(P::Down, Some("list"), Some(7), 0).unwrap());
     assert_eq!(a.component().s, selection);
 }
+
+#[test]
+fn clipboard_exports_selected_enabled_labels_without_updating_the_model() {
+    let mut a = app(M::Multiple, 4);
+    focus(&mut a);
+    a.key(Key {
+        character: 'a',
+        modifiers: 2,
+    })
+    .unwrap();
+    let calls = a.component().calls;
+    let selected = a.component().s.clone();
+    assert_eq!(
+        a.collection_clipboard_text().as_deref(),
+        Some("Document 0\nDocument 1\nDocument 3")
+    );
+    assert_eq!(a.component().calls, calls);
+    assert_eq!(a.component().s, selected);
+    a.window_focus(false);
+    assert_eq!(a.collection_clipboard_text(), None);
+    a.window_focus(true);
+    a.update(Msg::Disable).unwrap();
+    assert_eq!(a.collection_clipboard_text(), None);
+}

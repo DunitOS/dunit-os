@@ -12,6 +12,8 @@
 //! - сужение прав через dup и запрет их расширения,
 //! - невалидность хэндла после close.
 
+extern crate alloc;
+mod file_caps;
 use core::panic::PanicInfo;
 
 use libdunit::{
@@ -32,7 +34,11 @@ fn fail(reason: &str) -> ! {
 }
 
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(argc:usize,argv:*const *const u8,envp:*const *const u8) -> ! {
+    libdunit::init_runtime(argc,argv,envp);
+    if libdunit::arg(1)==Some("--cap-peer"){file_caps::peer();}
+    if libdunit::arg(1)==Some("--persist-prepare"){file_caps::persistent(false);}
+    if libdunit::arg(1)==Some("--persist-verify"){file_caps::persistent(true);}
     libdunit::println("handle_test: start");
 
     // 1) Создание объекта памяти. Права по умолчанию READ|WRITE|MAP|TRANSFER.
@@ -162,6 +168,7 @@ pub extern "C" fn _start() -> ! {
         fail("handle valid after close");
     }
 
+    file_caps::run();
     libdunit::println("handle_test: OK");
     libdunit::exit(0)
 }

@@ -121,7 +121,7 @@ stylesheet = "/assets/dwm/shell.dss"
     validate(text).unwrap();
     // Resolve uses registry IDs, so registry order has no effect on groups.
     let mut apps = dwm_settings::Applications::baseline();
-    apps.apps.push(dwm_settings::AppEntry { kind: dwm_settings::AppKind::Gui, id: "editor".into(), name: "Editor".into(), exec: "editor".into(), icon: "editor".into(), label: "Edit".into() });
+    apps.apps.push(dwm_settings::AppEntry { open_formats:Vec::new(), arguments:Vec::new(), kind: dwm_settings::AppKind::Gui, id: "editor".into(), name: "Editor".into(), exec: "editor".into(), icon: "editor".into(), label: "Edit".into() });
     let shell = resolve(text, &Settings::defaults(), &apps).unwrap();
     assert!(shell.explicit);
     assert_eq!(shell.panels.len(), 2);
@@ -214,7 +214,7 @@ width=1000
     validate(text).unwrap();
     let mut apps = dwm_settings::Applications::baseline();
     apps.workspaces = 3;
-    apps.apps.push(dwm_settings::AppEntry { kind: dwm_settings::AppKind::Gui, id: "editor".into(), name: "Editor".into(), exec: "editor".into(), icon: "editor".into(), label: "Edit".into() });
+    apps.apps.push(dwm_settings::AppEntry { open_formats:Vec::new(), arguments:Vec::new(), kind: dwm_settings::AppKind::Gui, id: "editor".into(), name: "Editor".into(), exec: "editor".into(), icon: "editor".into(), label: "Edit".into() });
     let config = resolve(text, &apps).unwrap();
     assert_eq!(config.bindings[0].modifiers, 9);
     assert!(config.bindings[0].action == Action::Launch("editor".into()));

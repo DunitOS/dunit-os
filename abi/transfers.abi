@@ -1,0 +1,77 @@
+# M7.7 transfer and file-capability values. Single source for Rust and C.
+# Regenerate with tools/gen_abi.py; --check verifies committed consumers.
+
+[Kind]
+ClipboardOffer = 1
+DragOffer = 2
+RegisterTarget = 3
+ProvideData = 4
+ClipboardRead = 5
+DragAccept = 6
+Complete = 7
+Cancel = 8
+ClipboardClear = 9
+ClipboardQuery = 10
+FileMove = 11
+Grant = 12
+GrantReceived = 13
+RegisterOpener = 14
+Result = 0x8001
+RequestData = 0x8002
+Offer = 0x8003
+DragEnter = 0x8004
+DragMotion = 0x8005
+DragLeave = 0x8006
+DragDrop = 0x8007
+Data = 0x8008
+Cancelled = 0x8009
+Finished = 0x800a
+ClipboardChanged = 0x800b
+DragAction = 0x800c
+GrantAck = 0x800d
+OpenOffer = 0x800e
+OpenData = 0x800f
+
+[Action]
+Copy = 1
+Move = 2
+Link = 4
+
+[Status]
+Ok = 0
+Denied = 1
+Invalid = 2
+Stale = 3
+Busy = 4
+Unsupported = 5
+Cancelled = 6
+TooLarge = 7
+SourceGone = 8
+TargetGone = 9
+Timeout = 10
+Failed = 11
+
+[FileOperation]
+Stat = 1
+Read = 2
+ReadDir = 3
+OpenChild = 4
+Remove = 5
+Move = 6
+CreateChild = 7
+Write = 8
+Relation = 9
+Sync = 10
+
+[FileRelation]
+Unrelated = 0
+Same = 1
+SourceAncestor = 2
+DestinationAncestor = 3
+DifferentBackend = 4
+
+[Mime]
+URI_LIST_MIME = "text/uri-list"
+TEXT_MIME = "text/plain;charset=utf-8"
+FILES_MIME = "application/x-dunit-file-list"
+RGBA_MIME = "image/x-dunit-rgba"

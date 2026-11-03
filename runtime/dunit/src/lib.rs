@@ -12,6 +12,8 @@ pub mod window;
 #[cfg(feature = "gui")]
 pub mod ui;
 #[cfg(feature = "gui")]
+pub mod text_clipboard;
+#[cfg(feature = "gui")]
 mod ui_theme;
 pub mod io;
 pub mod process;
@@ -35,3 +37,6 @@ macro_rules! println {
     () => { $crate::print!("\n") };
     ($($arg:tt)*) => { $crate::io::print(::core::format_args!("{}\n", ::core::format_args!($($arg)*))) };
 }
+
+#[cfg(feature = "gui")]
+pub use dunit_transfer as transfer;

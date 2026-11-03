@@ -13,12 +13,12 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
-use gui_protocol_v1::control::{IN_DOWN, IN_KEY, IN_QUIT};
+use gui_protocol_v1::control::{IN_DOWN,IN_UP,IN_MOVE,IN_KEY,IN_LEAVE,IN_FOCUS_OUT};
+use dunit::window::{Window,WindowEvent,PixelFormat};
+use dunit::transfer::{Action,Payload,Kind,Status};
 
 use alloc::string::String;
-use alloc::vec::Vec;
 
-use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888, MAGIC};
 
 use dunit_render::Surface;
 use dunit_style::value::Color;
@@ -31,8 +31,6 @@ const KEY_ENTER_LF: u8 = 0x0a;
 const KEY_ENTER_CR: u8 = 0x0d;
 const KEY_ESC: u8 = 0x1b;
 
-const SURFACE: u64 = 1;
-const BUFFER: u64 = 2;
 const W: u32 = 260;
 const H: u32 = 360;
 const FMT_XRGB8888: u32 = 1;
@@ -71,11 +69,7 @@ fn col(argb: u32) -> Color {
     )
 }
 
-fn u64_at(p: &[u8], off: usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&p[off..off + 8]);
-    u64::from_le_bytes(a)
-}
+
 
 fn round_i32(v: f32) -> i32 {
     if v <= 0.0 { 0 } else { (v + 0.5) as i32 }
@@ -557,8 +551,7 @@ impl Calc {
 }
 
 /// Paint the whole calculator into the mapped buffer at the given geometry.
-fn render(px: *mut u8, w: u32, h: u32, font: &Font, calc: &Calc, pal: &Palette, clear_bg: Color) {
-    let pixels = unsafe { core::slice::from_raw_parts_mut(px as *mut u32, (w * h) as usize) };
+fn render(pixels: &mut[u32], w: u32, h: u32, font: &Font, calc: &Calc, pal: &Palette, clear_bg: Color) {
     let mut s = Surface::new(pixels, w as usize, h as usize);
     // Base fill carries the configured alpha (translucent when bg_alpha < 255).
     s.clear(clear_bg);
@@ -605,88 +598,12 @@ fn render(px: *mut u8, w: u32, h: u32, font: &Font, calc: &Calc, pal: &Palette, 
     }
 }
 
-/// Re-negotiate a fresh buffer at a new geometry in response to a server-pushed
-/// CONFIGURE (maximize/restore), mirroring the file-manager's resize path.
-#[allow(clippy::too_many_arguments)]
-fn resize_surface(
-    compositor: u32,
-    font: &Font,
-    calc: &Calc,
-    pal: &Palette,
-    clear_bg: Color,
-    fmt: u32,
-    new_w: u32,
-    new_h: u32,
-    obj: u64,
-    token: u64,
-    serial: &mut u64,
-) -> Option<(u32, *mut u8)> {
-    let bytes = (new_w as usize).checked_mul(new_h as usize)?.checked_mul(4)?;
-    if new_w == 0 || new_h == 0 || bytes > 64 * 1024 * 1024 { return None; }
-    let nb = libdunit::handle_create_shared(bytes);
-    if nb <= 0 {
-        libdunit::println(&alloc::format!("gui_calc: resize create bytes={} errno={}", bytes, nb));
-        return None;
-    }
-    let nb = nb as u32;
-    let mapped = libdunit::handle_map(nb, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println(&alloc::format!("gui_calc: resize map bytes={} errno={}", bytes, mapped));
-        libdunit::handle_close(nb);
-        return None;
-    }
-    let npx = mapped as usize as *mut u8;
-    render(npx, new_w, new_h, font, calc, pal, clear_bg);
-
-
-    let dup = libdunit::handle_dup(
-        nb,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        if dup > 0 { libdunit::handle_close(dup as u32); }
-        libdunit::shared_buffer::release(nb, mapped as usize, bytes);
-        return None;
-    }
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &ack);
-
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: obj as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    let import = Request::ImportBuffer {
-        width: new_w,
-        height: new_h,
-        stride: new_w * 4,
-        format: fmt,
-        offset: 0,
-    }
-    .encode(obj, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &import);
-    let attach = Request::AttachBuffer { buffer: obj, damage: Vec::new() }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &attach);
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &commit);
-
-    Some((nb, npx))
-}
-
+fn checked<T>(result:dunit::Result<T>,operation:&str)->T{result.unwrap_or_else(|error|{libdunit::println(&alloc::format!("gui_calc: {} failed {}",operation,error.0));libdunit::exit(1)})}
+fn native(error:dunit::transfer::Error)->dunit::Error{dunit::Error(error.0)}
+fn paint(window:&mut Window,font:&Font,calc:&Calc,pal:&Palette,clear_bg:Color){checked(window.draw(|frame|{let(w,h)=frame.size();render(frame.pixels_mut(),w,h,font,calc,pal,clear_bg);}),"present frame");}
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnvp) -> ! {
+    libdunit::init_runtime(argc,argv,envp);
     // 0) Load this app's config (apps/gui_calc.toml). A missing/garbage file
     //    yields the built-in baseline. The resolved values below actually drive
     //    the palette and background transparency (config→behavior).
@@ -736,169 +653,50 @@ pub extern "C" fn _start() -> ! {
         }
     };
 
-    // 1) Handshake: compositor pid + our client id (id is a tint hint only).
-    let mut m = [0u8; 8];
-    if libdunit::ipc_recv_blocking(&mut m, 0) < 8 {
-        libdunit::println("gui_calc: FAIL recv handshake");
-        libdunit::exit(1);
-    }
-    let compositor = u32::from_le_bytes([m[0], m[1], m[2], m[3]]);
-
-    // 2) Create + map our own shared buffer and paint the initial frame.
-    let bytes = (W * H * 4) as usize;
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        libdunit::println("gui_calc: FAIL create buffer");
-        libdunit::exit(2);
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println("gui_calc: FAIL map buffer");
-        libdunit::exit(3);
-    }
-    let mut px = mapped as usize as *mut u8;
-    let mut calc = Calc::new();
-    let mut cur_buf = buf;
-    let mut cur_w = W;
-    let mut cur_h = H;
-    render(px, cur_w, cur_h, &font, &calc, &pal, clear_bg);
-
-    let mut rx = [0u8; 256];
-
-    // 3) HELLO -> WELCOME.
-    let hello = Request::Hello {
-        min_minor: 0,
-        max_minor: 0,
-        offered_features: FEATURE_ARGB8888,
-        required_features: 0,
-    }
-    .encode(0, 1);
-    libdunit::ipc_send(compositor, &hello);
-    if libdunit::ipc_recv_blocking(&mut rx, 0) <= 0 {
-        libdunit::println("gui_calc: FAIL welcome");
-        libdunit::exit(4);
-    }
-
-    // 4) CREATE_SURFACE -> RESULT + CONFIGURE (capture the configure token).
-    let create =
-        Request::CreateSurface { role: 1, width: W, height: H, format: fmt }.encode(SURFACE, 2);
-    libdunit::ipc_send(compositor, &create);
-    libdunit::ipc_recv_blocking(&mut rx, 0); // RESULT
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0); // CONFIGURE
-    let token = if n >= 32 { u64_at(&rx, 24) } else { 0 };
-
-    // 5) ACK_CONFIGURE -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, 3);
-    libdunit::ipc_send(compositor, &ack);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 6) Transfer the buffer capability (read-only) and announce it.
-    let dup = libdunit::handle_dup(
-        buf,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let cha = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if cha <= 0 {
-        libdunit::println("gui_calc: FAIL cap transfer");
-        libdunit::exit(5);
-    }
-    let ann = gui_protocol_v1::control::Capability {
-        handle: cha as u32,
-        advertised_bytes: bytes as u32,
-        object: BUFFER as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
-    let import =
-        Request::ImportBuffer { width: W, height: H, stride: W * 4, format: fmt, offset: 0 }
-            .encode(BUFFER, 4);
-    libdunit::ipc_send(compositor, &import);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let attach = Request::AttachBuffer { buffer: BUFFER, damage: Vec::new() }.encode(SURFACE, 5);
-    libdunit::ipc_send(compositor, &attach);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(SURFACE, 6);
-    libdunit::ipc_send(compositor, &commit);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 8) FRAME_DONE from the compositor's composition tick.
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-    let ok = n >= 32 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8021;
-    if ok {
-        libdunit::println("gui_calc: surface presented OK");
-    } else {
-        libdunit::println("gui_calc: FAIL no frame done");
-        libdunit::handle_close(buf);
-        libdunit::exit(6);
-    }
-
-    // 9) Interactive loop. Pointer button-down maps to a grid key; IN_KEY maps a
-    //    cooked ASCII byte to the same keys (full keyboard control); a server
-    //    CONFIGURE re-negotiates the buffer at the new geometry. Any state change
-    //    repaints the shared buffer (the compositor blits it every tick).
-    let mut next_obj: u64 = 3; // fresh buffer object id per resize (> import id 2)
-    let mut serial: u64 = 7; // client request serial, continues past the handshake
-    loop {
-        let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-        if n < 8 {
-            continue;
-        }
-        let magic = u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]);
-        if magic == MAGIC && n >= 48 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8010 {
-            let tok = u64_at(&rx, 24);
-            let nw = u32::from_le_bytes([rx[32], rx[33], rx[34], rx[35]]);
-            let nh = u32::from_le_bytes([rx[36], rx[37], rx[38], rx[39]]);
-            if nw == 0 || nh == 0 || (nw == cur_w && nh == cur_h) {
-                let ack = Request::AckConfigure { configure: tok }.encode(SURFACE, serial);
-                serial += 1;
-                libdunit::ipc_send(compositor, &ack);
-            } else if let Some((nb, npx)) = resize_surface(
-                compositor, &font, &calc, &pal, clear_bg, fmt, nw, nh, next_obj, tok,
-                &mut serial,
-            ) {
-                libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
-                cur_buf = nb;
-                px = npx;
-                cur_w = nw;
-                cur_h = nh;
-                next_obj += 1;
-                libdunit::println("gui_calc: reconfigured OK");
-            }
-            continue;
-        }
-        let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n as usize]) else {
-            continue;
+    let mut window=checked(Window::open_format(W,H,if fmt==FMT_ARGB8888{PixelFormat::Argb8888}else{PixelFormat::Xrgb8888}),"window handshake");
+    let mut calc=Calc::new();paint(&mut window,&font,&calc,&pal,clear_bg);
+    libdunit::println("gui_calc: surface presented OK");
+    let mut candidate=None;let mut source=None;
+    loop{
+        let event=checked(window.next_event(dunit::time::Duration::from_millis(40)),"window event");
+        let input=match event{
+            Some(WindowEvent::CloseRequested)=>break,
+            Some(WindowEvent::Resized{..})=>{candidate=None;paint(&mut window,&font,&calc,&pal,clear_bg);libdunit::println("gui_calc: reconfigured OK");continue;},
+            Some(WindowEvent::Transfer(event))=>{
+                let m=event.message;
+                if event.source&&matches!(m.kind,Kind::Cancelled|Kind::Finished)&&source==Some(m.request){source=None;}
+                if m.kind==Kind::Result&&source==Some(m.request)&&m.arg0!=Status::Ok as u32{source=None;libdunit::println("gui_calc: drag rejected");}
+                continue;
+            },
+            Some(WindowEvent::Input(input))=>input,
+            Some(WindowEvent::Protocol(_))|None=>continue,
         };
-        let kind = input.kind;
-        if kind == IN_QUIT {
-            break;
-        }
-        let mut dirty = false;
-        if kind == IN_DOWN {
-            let lx = input.x;
-            let ly = input.y;
-            if let Some(k) = Layout::new(cur_w as i32, cur_h as i32).key_at(lx, ly) {
-                calc.press(k);
-                dirty = true;
+        let mut dirty=false;
+        let(w,h)=window.size();let layout=Layout::new(w as i32,h as i32);
+        if input.kind==IN_FOCUS_OUT||input.kind==IN_LEAVE{candidate=None;}
+        if input.kind==IN_DOWN&&input.pointer_button()==0{
+            if input.y>=layout.pad&&input.y<layout.disp_h{
+                candidate=Some((input.x,input.y,calc.display(),dwm_settings::load().transfers.drag_threshold_px));
+            }else if let Some(key)=layout.key_at(input.x,input.y){calc.press(key);dirty=true;}
+        }else if input.kind==IN_MOVE{
+            if let Some((x,y,display,threshold))=candidate.as_ref(){
+                let dx=i64::from(input.x)-i64::from(*x);let dy=i64::from(input.y)-i64::from(*y);
+                if dx*dx+dy*dy>=i64::from(*threshold).pow(2){
+                    let payload=checked(Payload::text(display).map_err(native),"display payload");
+                    source=Some(checked(checked(window.transfers(),"transfer client").start_drag(payload,1,Action::Copy).map_err(native),"start display drag"));candidate=None;
+                }
             }
-        } else if kind == IN_KEY {
-            if let Some(k) = key_from_ascii(input.value as u8) {
-                calc.press(k);
-                dirty = true;
-            }
+        }else if input.kind==IN_UP{candidate=None;}
+        else if input.kind==IN_KEY{
+            let modifiers=input.y as u8;
+            if modifiers&libdunit::KEYMOD_CTRL!=0{
+                if input.x==0x2e&&modifiers&!(libdunit::KEYMOD_CTRL|libdunit::KEYMOD_SHIFT)==0{
+                    let payload=checked(Payload::text(&calc.display()).map_err(native),"display payload");
+                    checked(checked(window.transfers(),"transfer client").publish_clipboard(payload,1,Action::Copy).map_err(native),"copy display");
+                }
+            }else if let Some(key)=key_from_ascii(input.value as u8){calc.press(key);dirty=true;}
         }
-        if dirty {
-            render(px, cur_w, cur_h, &font, &calc, &pal, clear_bg);
-        }
+        if dirty{paint(&mut window,&font,&calc,&pal,clear_bg);}
     }
-
-    libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
-    libdunit::exit(0)
+    checked(window.close(),"window close");libdunit::exit(0)
 }

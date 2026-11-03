@@ -1,23 +1,27 @@
 # Dunit GUI protocol v1.0
 
-Статус: спецификация первого пункта M2, 2026-09-23. Нормативный контракт для
-будущей protocol crate и headless reference server; реализация и conformance
-suite ещё не выполнены. До их завершения и интеграции M3 это не frozen public
-ABI. Изменения контракта должны одновременно обновлять эту спецификацию и
-будущие тесты. «Обязан» означает требование, «может» — разрешённый вариант.
+Базовая спецификация M2, 2026-09-23; reference implementation и conformance
+suite находятся в этой crate. Live desktop также использует control-каналы,
+описанные в `src/control.rs`. «Обязан» означает требование, «может» — разрешённый вариант.
+
+M7.7 добавляет согласуемый XFR1 transfer-канал для системного clipboard и DnD:
+[контракт, права и ограничения](../../docs/sdk/m7-7-transfers.md).
+Значения генерируются из `abi/transfers.abi`; wire codec и broker находятся
+в `src/transfer.rs` и `src/transfer/broker.rs`. Legacy клиенты без feature bit
+не получают новые сообщения.
 
 ## 1. Область действия и связь с репозиторием
 
 v1 определяет соединение клиента с GUI Server, toplevel surfaces, CPU shared
 buffers, атомарный commit, configure/ack, frame callbacks, focus и ввод.
 Один seat, целочисленный scale, software composition. GPU, subsurfaces, popup,
-clipboard, drag-and-drop, IME composition, output enumeration и shell policy
-не входят в v1.0. TEXT_INPUT передаёт только готовый текст.
+IME composition, output enumeration и shell policy
+не входят в базовый v1.0. Clipboard и DnD добавлены расширением XFR1. TEXT_INPUT передаёт только готовый текст.
 
 Это отдельный протокол с magic `DGUI`, не совместимый с legacy `GUI1`
 (`GuiMessage`, `GUI_SHELL_PID=1`, DRAW_TEXT/DRAW_RECT в
 `userspace/libdunit/src/lib.rs` и обработчик `kernel/src/ui_loop.rs`). Автоматического
-fallback или угадывания формата нет. Старый desktop продолжает работать до M3.
+fallback или угадывания формата нет. Миграция live desktop в userspace выполнена в M3; GUI1 здесь упомянут как исторический формат.
 Модели `userspace/display_server/src/lib.rs` — источник идей, не wire ABI.
 
 Транспорт абстрактный: надёжный FIFO в каждом направлении, сохранение границ

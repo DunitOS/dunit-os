@@ -26,6 +26,7 @@ pub(super) fn wait_for_frame(
     reload: &mut bool,
     notifications: &mut Vec<alloc::string::String>,
     performance: &mut performance::Profiler,
+    transfers: &mut transfer_runtime::Runtime,
 ) -> Result<(), isize> {
     use libdunit::wait_set::{self, Event, Interest, INFINITE, READ};
     let interests = [Interest::ipc(0), Interest::timer(deadline.ns, 1)];
@@ -46,6 +47,7 @@ pub(super) fn wait_for_frame(
                 reload,
                 notifications,
                 performance,
+                transfers,
                 Some(deadline),
             )?;
             performance.finish(performance::Stage::Pump, stamp);

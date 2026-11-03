@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers', 'transfer', 'matrix', 'clipboard'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
@@ -31,6 +31,9 @@ def main(fixture=None):
         str(ROOT / f'tools/{source_name}_markers.json'), '--accel', args.accel,
         '--post-boot-delay', '3', '--settle', '1.5', '--timeout', '360',
         '--boot-timeout', '180', '--cmd-timeout', '180']
+    if fixture=='transfer':
+        command[command.index('--timeout')+1]='600'
+        command[command.index('--cmd-timeout')+1]='480'
     (ROOT / 'build').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f'sdk-{fixture}-', dir=ROOT / 'build') as folder:
         if not args.reuse_image:
@@ -42,7 +45,7 @@ def main(fixture=None):
                 fixture_cache = ROOT / 'build/sdk-fixture-target'
                 fixture_cache.mkdir(exist_ok=True)
                 (app_folder / 'target').symlink_to(fixture_cache, target_is_directory=True)
-                if fixture in ('component', 'resize'):
+                if fixture in ('component', 'resize', 'transfer'):
                     with (app_folder / 'Cargo.toml').open('a') as manifest_file:
                         manifest_file.write('dwm_settings = { path = '
                             + json.dumps(str(ROOT / 'userspace/dwm_settings')) + ' }\n')
@@ -60,20 +63,45 @@ def main(fixture=None):
                 executable = install_fixture(source_name, 'sdk_console_cli', 'Console CLI', 'cli')
                 shutil.copyfile(executable, overlay / 'app/console command')
                 install_fixture(source_name, 'sdk_console_tui', 'Console TUI', 'tui')
+            elif fixture in ('transfer','clipboard'):
+                executable=install_fixture(source_name,app_id,'Transfer source')
+                target_id=f'sdk_{fixture}_target'
+                metadata=overlay/'system/share/dunit/apps'/target_id/'dunit.toml'
+                metadata.parent.mkdir(parents=True)
+                document=(overlay/'system/share/dunit/apps'/app_id/'dunit.toml').read_text()
+                metadata.write_text(document.replace(f'id = "{app_id}"',f'id = "{target_id}"'))
             else:
                 install_fixture(source_name, app_id, f'SDK {fixture} fixture')
             if fixture == 'lifecycle':
                 install_fixture('sdk_lifecycle_peer', 'sdk_lifecycle_peer', 'Legacy input peer')
-            shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
+            if fixture=='matrix':
+                from dnd_matrix import prepare
+                markers=prepare(overlay)
+                command[command.index('--markers-file')+1]=str(markers)
+                command[command.index('--timeout')+1]='1800'
+                command[command.index('--cmd-timeout')+1]='1500'
+            else:
+                shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
             if fixture in ('theme', 'effects', 'backdrop', 'motion'):
                 profile = (ROOT / 'assets/dwm/sdk/dark.dss').read_text()
                 if fixture == 'motion':
                     profile += (ROOT / 'tools/fixtures/sdk_motion_profile.dss').read_text()
                 (overlay / 'sdk-theme.dss').write_text(profile)
-            subprocess.run([cargo(), 'build', '--release', '--features', 'boot-smoke-tests',
+            # GUI contracts need the desktop composition, not every unrelated
+            # CLI/libc test ELF in the fixed-size installer ESP.
+            kernel_features=[]
+            subprocess.run([cargo(), 'build', '--release', *kernel_features,
                 '-Z', 'build-std=core,alloc,compiler_builtins', '-Z', 'build-std-features=compiler-builtins-mem',
                 '-Z', 'json-target-spec'], cwd=ROOT / 'kernel', check=True)
             command += ['--build', '--initrd-overlay', str(overlay)]
+            command+=['--image-profile','dwm','--config','limine_sdk_terminal.conf']
+        if args.reuse_image and fixture=='matrix':
+            from dnd_matrix import prepare
+            overlay=Path(folder)/'overlay';overlay.mkdir()
+            markers=prepare(overlay)
+            command[command.index('--markers-file')+1]=str(markers)
+            command[command.index('--timeout')+1]='1800'
+            command[command.index('--cmd-timeout')+1]='1500'
         status = subprocess.run(command, cwd=ROOT).returncode
         if not status and fixture == 'component':
             serial = (ROOT / 'build/qemu-serial.full.log').read_text(errors='replace')

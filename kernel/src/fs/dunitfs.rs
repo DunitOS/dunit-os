@@ -365,6 +365,12 @@ pub fn auto_mount(vfs: &mut VirtualFileSystem) -> bool {
     false
 }
 impl DunitFs {
+    fn capability_path(&self,handle:FileHandle)->Result<String> {
+        let index=self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
+        let node=self.handles[index].1.node;
+        if node==usize::MAX{return Ok(String::new());}
+        self.nodes[node].as_ref().map(|n|n.path.clone()).ok_or(VfsError::NotFound)
+    }
     /// Загружает ФС, восстанавливая последнее целостное поколение.
     ///
     /// Стратегия: собрать суперблоки, чей слот физически цел (slot-CRC сходится),
@@ -857,6 +863,74 @@ impl DunitFs {
 }
 
 impl FileSystem for DunitFs {
+    fn cap_relation(&mut self,source:FileHandle,destination:FileHandle)->Result<dunit_file_cap_abi::Relation>{
+        let source=self.capability_path(source)?;let destination=self.capability_path(destination)?;
+        Ok(dunit_file_cap_abi::Relation::paths(&source,&destination))
+    }
+    fn cap_open(&mut self, path: &str, flags: OpenFlags) -> Result<FileHandle> {
+        if flags.can_write() { self.ensure_writable()?; }
+        let clean=Self::clean(path);
+        let node=if clean.is_empty() {usize::MAX} else {self.node_index(clean).ok_or(VfsError::NotFound)?};
+        let handle=self.next_handle;self.next_handle+=1;
+        self.handles.push((handle,OpenHandle{node,offset:0,flags}));
+        Ok(handle)
+    }
+    fn cap_child(&mut self, parent: FileHandle, path: &str, flags: OpenFlags) -> Result<FileHandle> {
+        if !super::file_cap::relative(path) {return Err(VfsError::InvalidPath);}
+        let mut base=self.capability_path(parent)?;
+        if self.stat_handle(parent)?.file_type!=FileType::Directory {return Err(VfsError::NotADirectory);}
+        if !base.is_empty(){base.push('/');}base.push_str(path);
+        self.cap_open(&base,flags)
+    }
+    fn cap_readdir(&mut self, handle: FileHandle) -> Result<Vec<DirEntry>> {
+        let path=self.capability_path(handle)?;
+        if self.stat_handle(handle)?.file_type!=FileType::Directory {return Err(VfsError::NotADirectory);}
+        let mut result=Vec::new();
+        for node in self.nodes.iter().flatten() {
+            if is_direct_child(&path,&node.path) {
+                let name=basename(&node.path);
+                if name.len()>64 {return Err(VfsError::FileTooBig);}
+                result.push(DirEntry::new(name,node.file_type));
+            }
+        }
+        Ok(result)
+    }
+    fn cap_remove(&mut self, handle: FileHandle) -> Result<()> {
+        let i=self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
+        if !self.handles[i].1.flags.can_write(){return Err(VfsError::PermissionDenied);}
+        let path=self.capability_path(handle)?;
+        if path.is_empty(){return Err(VfsError::PermissionDenied);}
+        match self.stat_handle(handle)?.file_type {
+            FileType::File=>self.remove(&path),
+            FileType::Directory=>self.remove_dir(&path),
+            FileType::Device=>Err(VfsError::Unsupported),
+        }
+    }
+    fn cap_move_to(&mut self, source:FileHandle,destination:FileHandle,leaf:&str)->Result<()> {
+        if !super::file_cap::relative(leaf)||leaf.contains('/'){return Err(VfsError::InvalidPath);}
+        for h in [source,destination] {
+            let i=self.handle_index(h).ok_or(VfsError::InvalidDescriptor)?;
+            if !self.handles[i].1.flags.can_write(){return Err(VfsError::PermissionDenied);}
+        }
+        let old=self.capability_path(source)?;
+        if old.is_empty(){return Err(VfsError::PermissionDenied);}
+        let mut new=self.capability_path(destination)?;
+        if self.stat_handle(destination)?.file_type!=FileType::Directory{return Err(VfsError::NotADirectory);}
+        if !new.is_empty(){new.push('/');}new.push_str(leaf);
+        let prefix=alloc::format!("{old}/");
+        if new.starts_with(&prefix){return Err(VfsError::InvalidPath);}
+        self.rename_node(&old,&new)
+    }
+    fn cap_create_child(&mut self,parent:FileHandle,leaf:&str,kind:FileType,flags:OpenFlags)->Result<FileHandle> {
+        if !super::file_cap::relative(leaf)||leaf.contains('/'){return Err(VfsError::InvalidPath);}
+        let i=self.handle_index(parent).ok_or(VfsError::InvalidDescriptor)?;
+        if !self.handles[i].1.flags.can_write(){return Err(VfsError::PermissionDenied);}
+        if self.stat_handle(parent)?.file_type!=FileType::Directory{return Err(VfsError::NotADirectory);}
+        let mut path=self.capability_path(parent)?;
+        if !path.is_empty(){path.push('/');}path.push_str(leaf);
+        match kind {FileType::File=>self.create(&path)?,FileType::Directory=>self.mkdir(&path)?,FileType::Device=>return Err(VfsError::Unsupported)}
+        self.cap_open(&path,flags)
+    }
     fn open(&mut self, path: &str, flags: OpenFlags) -> Result<FileHandle> {
         if !flags.is_valid() {
             return Err(VfsError::PermissionDenied);
@@ -948,6 +1022,7 @@ impl FileSystem for DunitFs {
     fn stat_handle(&mut self, handle: FileHandle) -> Result<FileStat> {
         let handle_index = self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
         let node = self.handles[handle_index].1.node;
+        if node==usize::MAX {return Ok(FileStat{file_type:FileType::Directory,size:0});}
         let n = self.nodes[node].as_ref().ok_or(VfsError::NotFound)?;
         Ok(FileStat {
             file_type: n.file_type,
@@ -1053,6 +1128,19 @@ impl FileSystem for DunitFs {
         self.handles.retain(|entry| entry.1.node != index);
         self.dirty = true;
         self.commit()
+    }
+
+    fn remove_dir(&mut self,path:&str)->Result<()> {
+        self.ensure_writable()?;
+        let clean=Self::clean(path);
+        if clean.is_empty(){return Err(VfsError::PermissionDenied);}
+        let index=self.node_index(clean).ok_or(VfsError::NotFound)?;
+        if self.nodes[index].as_ref().unwrap().file_type!=FileType::Directory {return Err(VfsError::NotADirectory);}
+        let prefix=alloc::format!("{clean}/");
+        if self.nodes.iter().flatten().any(|n|n.path.starts_with(&prefix)){return Err(VfsError::DirectoryNotEmpty);}
+        self.nodes[index]=None;
+        self.handles.retain(|entry|entry.1.node!=index);
+        self.dirty=true;self.commit()
     }
 
     fn rename(&mut self, old: &str, new: &str) -> Result<()> {

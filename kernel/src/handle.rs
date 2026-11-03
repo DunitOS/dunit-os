@@ -14,6 +14,7 @@
 //! - `TRANSFER` — можно ли передать хэндл другому процессу.
 
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -61,6 +62,8 @@ pub enum HandleError {
 
 /// Объект ядра, на который ссылается хэндл.
 pub enum HandleObject {
+    /// Actual filesystem open-description authority; transferable with attenuation.
+    File(Arc<crate::fs::file_cap::FileCapability>),
     /// Буфер байтов в куче ядра. Права READ/WRITE/MAP.
     Memory(Vec<u8>),
     /// Ссылка на процесс-получатель сигналов. Право SIGNAL.
@@ -173,6 +176,7 @@ impl HandleTable {
             return Err(HandleError::AccessDenied);
         }
         let object = match &current.object {
+            HandleObject::File(file) => HandleObject::File(Arc::clone(file)),
             HandleObject::Memory(data) => HandleObject::Memory(data.clone()),
             HandleObject::Endpoint(pid) => HandleObject::Endpoint(*pid),
             HandleObject::Display => HandleObject::Display,

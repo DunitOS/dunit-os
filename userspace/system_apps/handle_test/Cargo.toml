@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dunit_transfer = { path = "../../../runtime/dunit-transfer" }
 libdunit = { path = "../../libdunit" }
 
 [[bin]]

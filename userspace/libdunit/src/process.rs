@@ -60,15 +60,19 @@ pub fn resolve_program(name: &str) -> Result<String, isize> {
 /// SpawnArgs transaction (no file actions). Strings remain distinct; no shell
 /// parsing occurs. Kernel limits and errors are preserved. This syscall creates
 /// an unprivileged child, including when called by a privileged desktop service.
-pub fn spawn_args(path: &str, argv: &[&str]) -> isize {
-    if argv.is_empty() || argv.iter().any(|s| s.as_bytes().contains(&0)) {
+pub fn spawn_args(path:&str,argv:&[&str])->isize{spawn_args_env(path,argv,&[])}
+/// Explicit environment additions replace inherited values. Arguments remain
+/// literal UTF-8 strings and use the same unprivileged SpawnArgs mechanism.
+pub fn spawn_args_env(path: &str, argv: &[&str], extra:&[&str]) -> isize {
+    if argv.is_empty() || argv.iter().chain(extra.iter()).any(|s| s.as_bytes().contains(&0))
+        ||extra.iter().any(|value|!value.split_once('=').is_some_and(|(key,_)|!key.is_empty())) {
         return crate::EINVAL;
     }
     let resolved = match resolve_program(path) {
         Ok(path) => path,
         Err(error) => return error,
     };
-    let env = environment(&[]);
+    let env = environment(extra);
     let mut block = Vec::new();
     for value in argv.iter().copied().chain(env.iter().map(String::as_str)) {
         block.extend_from_slice(value.as_bytes());

@@ -51,6 +51,15 @@ enum Esc {
     OscEsc,
 }
 
+/// Selection endpoints are document cell boundaries, including scrollback.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord)]
+pub(super) struct Point {pub row:usize,pub col:usize}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(super) struct Selection {pub anchor:Point,pub end:Point}
+impl Selection {
+    fn range(self)->(Point,Point){if self.anchor<=self.end{(self.anchor,self.end)}else{(self.end,self.anchor)}}
+}
+
 /// On-screen terminal model: a real character CELL GRID (`rows`×`cols`) with a
 /// cursor at (`crow`, `ccol`), plus a `scrollback` of rows that scrolled off the
 /// top. `feed` interprets the shell's bytes like a VT — printable ASCII writes at
@@ -73,6 +82,8 @@ pub(super) struct Term {
     pub(super) dirty: bool,
     /// Rows the view is lifted above the live bottom (0 = following new output).
     pub(super) scroll: usize,
+    pub(super) selection:Option<Selection>,
+    pub(super) selecting:bool,
     esc: Esc,
     pub(super) params: [u32; 8],
     pub(super) nparams: usize,
@@ -107,6 +118,8 @@ impl Term {
             fg: palette.fg,
             dirty: true,
             scroll: 0,
+            selection:None,
+            selecting:false,
             esc: Esc::Normal,
             params: [0; 8],
             nparams: 0,
@@ -117,6 +130,43 @@ impl Term {
             echo: String::new(),
             utf8_buf: [0; 4],
             utf8_len: 0,
+        }
+    }
+
+    pub(super) fn visible_start(&self)->usize{self.scrollback.len().saturating_sub(self.scroll)}
+    pub(super) fn point(&self,visible_row:usize,col:usize)->Point{
+        Point{row:(self.visible_start()+visible_row.min(self.rows-1)).min(self.scrollback.len()+self.rows-1),col:col.min(self.cols)}
+    }
+    pub(super) fn select_start(&mut self,row:usize,col:usize){
+        let at=self.point(row,col);self.selection=Some(Selection{anchor:at,end:at});self.selecting=true;self.dirty=true;
+    }
+    pub(super) fn select_extend(&mut self,row:usize,col:usize){
+        let at=self.point(row,col);
+        if self.selecting{if let Some(s)=&mut self.selection{s.end=at;self.dirty=true;}}
+    }
+    pub(super) fn select_end(&mut self){self.selecting=false;}
+    pub(super) fn cancel_selection(&mut self){self.selection=None;self.selecting=false;self.dirty=true;}
+    pub(super) fn selected(&self,row:usize,col:usize)->bool{
+        self.selection.is_some_and(|s|{let (a,b)=s.range();a<=Point{row,col}&&Point{row,col}<b})
+    }
+    pub(super) fn selected_text(&self)->Option<String>{
+        let (a,b)=self.selection?.range();if a==b{return None;}
+        let sb=self.scrollback.len();let mut out=String::new();
+        for row in a.row..=b.row {
+            let cells=if row<sb{self.scrollback.get(row)}else{self.grid.get(row-sb)}?;
+            let start=if row==a.row{a.col.min(cells.len())}else{0};
+            let end=if row==b.row{b.col.min(cells.len())}else{cells.len()};
+            let wrapped=if row<sb{self.scroll_wrap[row]}else{self.grid_wrap[row-sb]};
+            let text:String=cells[start..end].iter().map(|c|c.ch).collect();
+            if row<b.row&&wrapped{out.push_str(&text);}else{out.push_str(text.trim_end_matches(' '));}
+            if row<b.row&&!wrapped{out.push('\n');}
+        }
+        Some(out)
+    }
+    fn trim_selection(&mut self,rows:usize){
+        if let Some(selection)=&mut self.selection {
+            if selection.anchor.row<rows||selection.end.row<rows{self.cancel_selection();}
+            else{selection.anchor.row-=rows;selection.end.row-=rows;}
         }
     }
 
@@ -149,6 +199,7 @@ impl Term {
             let excess = self.scrollback.len() - SCROLL_CAP;
             self.scrollback.drain(0..excess);
             self.scroll_wrap.drain(0..excess);
+            self.trim_selection(excess);
         }
         self.grid.push(blank_row(self.cols, self.palette.fg));
         self.grid_wrap.push(false);
@@ -211,6 +262,7 @@ impl Term {
 
     /// Blank every cell and home the cursor (`\f` / `ESC[2J`+`ESC[H`).
     pub(super) fn clear_screen(&mut self) {
+        self.cancel_selection();
         let fg = self.palette.fg;
         for row in self.grid.iter_mut() {
             for cell in row.iter_mut() {
@@ -287,6 +339,7 @@ impl Term {
         if cols == self.cols && rows == self.rows {
             return;
         }
+        self.cancel_selection();
         let cursor_row = self.scrollback.len() + self.crow;
         let mut source = self.scrollback.clone();
         source.extend(self.grid.iter().cloned());
@@ -358,6 +411,7 @@ impl Term {
             let excess = self.scrollback.len() - SCROLL_CAP;
             self.scrollback.drain(0..excess);
             self.scroll_wrap.drain(0..excess);
+            self.trim_selection(excess);
         }
         self.cols = cols;
         self.rows = rows;

@@ -161,6 +161,7 @@ impl<C: Component> Application<C> {
         Ok(true)
     }
     pub(crate) fn set_focus(&mut self, target: &str) {
+        if self.focused_key()!=Some(target){self.clipboard_revision=self.clipboard_revision.wrapping_add(1);}
         if let Some(bar) = self.view.ancestor_with(target, &|v| {
             v.menu_bar
                 || matches!(

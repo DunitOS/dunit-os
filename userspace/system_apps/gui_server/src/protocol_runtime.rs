@@ -482,6 +482,7 @@ pub(super) struct ClientState {
     pub(super) surf_w: u32,
     pub(super) surf_h: u32,
     pub(super) presented: bool,
+    pub(super) reported_size:Option<(u32,u32)>,
     /// Policy resize waits until the first composed frame has been notified.
     pub(super) pending_config: Option<(u32, u32, u32)>,
     pending_inputs: Vec<gui_protocol_v1::control::Input>,
@@ -521,6 +522,7 @@ impl ClientState {
             surf_w: 0,
             surf_h: 0,
             presented: false,
+            reported_size:None,
             pending_config: None,
             pending_inputs: Vec::new(),
             surface: 0,
@@ -537,6 +539,17 @@ impl ClientState {
 /// Process one inbound (envelope-stripped) message for client `c`: either map
 /// its announced buffer capability, or track geometry + feed the protocol
 /// packet through the Server and relay the replies back to the client.
+pub(super) fn dispatch_client_payload(
+    server:&mut Server,c:&mut ClientState,payload:&[u8],attachment:Option<dunit_transfer::OwnedHandle>,
+    reload:&mut bool,notify_out:&mut Vec<alloc::string::String>,transfers:&mut transfer_runtime::Runtime,
+){
+    let now=frame_runtime::monotonic_ns().unwrap_or(0)/1_000_000;
+    if dunit_transfer::Message::is_message(payload){transfers.packet(c.pid,payload,attachment,now);return;}
+    if attachment.is_some(){return;}
+    handle_client_payload(server,c,payload,reload,notify_out);
+    transfers.peer(c.pid,c.features&gui_protocol_v1::wire::FEATURE_DATA_TRANSFER!=0);
+}
+
 pub(super) fn handle_client_payload(
     server: &mut Server,
     c: &mut ClientState,
@@ -636,15 +649,25 @@ pub(super) fn spawn_client(
     entry: &settings::AppEntry,
     terminal: Option<&str>,
 ) -> Option<ClientState> {
+    spawn_client_args(server,id,slot_x,slot_y,app_idx,entry,terminal,&[])
+}
+pub(super) fn spawn_client_args(
+    server:&mut Server,id:u32,slot_x:u32,slot_y:u32,app_idx:u8,
+    entry:&settings::AppEntry,terminal:Option<&str>,arguments:&[&str],
+)->Option<ClientState>{
     let (exec, command) = match entry.kind {
         settings::AppKind::Gui => (entry.exec.as_str(), None),
         settings::AppKind::Cli | settings::AppKind::Tui => (terminal?, Some(entry.exec.as_str())),
     };
     let conn = server.connect()?;
-    let pid = match command {
-        Some(command) => libdunit::process::spawn_args(exec, &[exec, "--execute", command]),
-        None => libdunit::spawn(exec),
-    };
+    let mut argv=alloc::vec![exec];
+    if let Some(command)=command{argv.extend_from_slice(&["--execute",command]);}
+    argv.extend(entry.arguments.iter().map(|argument|argument.as_str()));
+    argv.extend_from_slice(arguments);
+    // GUI applications use the same unprivileged argv path as CLI/TUI clients.
+    // The launcher's administrative capability must not leak into a desktop app.
+    let identity=alloc::format!("DUNIT_APP_ID={}",entry.id.as_str());
+    let pid=libdunit::process::spawn_args_env(exec,&argv,&[&identity]);
     if pid <= 0 {
         server.disconnect_peer(conn);
         return None;
@@ -712,6 +735,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
     // resolution edit is diffed against the true boot mode (see that fn's head).
     let boot_display = cfg.settings.display;
     let mut server = Server::new();
+    let mut transfers=transfer_runtime::Runtime::new(cfg.settings.transfers.timeout_ms as u64);
     let mut clients: Vec<ClientState> = Vec::new();
     // Notification texts a client posts (NOTIFY_MAGIC) DURING bring-up — before the
     // interactive desktop loop and its per-tick `pump_clients` exist. An autostart
@@ -759,6 +783,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
             baseline.take(),
             core::mem::take(&mut bringup_reload),
             &mut pointer,
+            &mut transfers,
         ) {}
         return false;
     }
@@ -780,11 +805,13 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         // Route by the kernel-authenticated sender pid; a client cannot spoof
         // another's identity, so the protocol connections stay isolated.
         let mut sender: u32 = 0;
-        let n = libdunit::ipc_recv_blocking_from(&mut rx, &mut sender, 3000);
+        let mut attached=0;
+        let n = libdunit::ipc_recv_handle_blocking(&mut rx,&mut sender,&mut attached,3000);
         if n <= 0 {
             break;
         }
         let n = n as usize;
+        let attachment=if attached!=0{Some(unsafe{dunit_transfer::OwnedHandle::adopt(attached)})}else{None};
         let idx = match clients.iter().position(|c| c.pid == sender) {
             Some(idx) => idx,
             None => continue, // message from an unknown pid — ignore
@@ -794,7 +821,8 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         // dropping it, so the first interactive session re-applies the edited
         // `[display]` (see run_desktop_session's first-entry baseline). NOTIFYs
         // posted this early are still preserved in `pending_notifies`.
-        handle_client_payload(&mut server, &mut clients[idx], &rx[..n], &mut bringup_reload, &mut pending_notifies);
+        dispatch_client_payload(&mut server,&mut clients[idx],&rx[..n],attachment,&mut bringup_reload,&mut pending_notifies,&mut transfers);
+        transfers.flush();
 
         // A composition tick: route each FRAME_DONE to its client and blit that
         // client's committed buffer into its own slot.
@@ -850,7 +878,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         // the maximize/fullscreen mechanism across a REAL process boundary (the
         // client re-allocates its buffer and re-imports it with a fresh object
         // id), which the in-process compositor self-test cannot cover.
-        resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload);
+        resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload, &mut transfers);
     }
     // Loop so a live `[display]` change re-enters the session at the new
     // resolution (rebuilding all buffers); unprocessed notifications survive.
@@ -867,6 +895,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         baseline.take(),
         core::mem::take(&mut bringup_reload),
         &mut pointer,
+        &mut transfers,
     ) {}
 
     for c in clients.iter() {
@@ -893,6 +922,7 @@ pub(super) fn resize_one_client(
     clients: &mut [ClientState],
     pending_notifies: &mut Vec<alloc::string::String>,
     reload_seen: &mut bool,
+    transfers: &mut transfer_runtime::Runtime,
 ) {
     const NEWW: u32 = 320;
     const NEWH: u32 = 160;
@@ -914,11 +944,13 @@ pub(super) fn resize_one_client(
     let mut rx = [0u8; 256];
     for _ in 0..256 {
         let mut sender: u32 = 0;
-        let n = libdunit::ipc_recv_blocking_from(&mut rx, &mut sender, 3000);
+        let mut attached=0;
+        let n = libdunit::ipc_recv_handle_blocking(&mut rx,&mut sender,&mut attached,3000);
         if n <= 0 {
             break;
         }
         let n = n as usize;
+        let attachment=if attached!=0{Some(unsafe{dunit_transfer::OwnedHandle::adopt(attached)})}else{None};
         let idx = match clients.iter().position(|c| c.pid == sender) {
             Some(i) => i,
             None => continue,
@@ -927,7 +959,8 @@ pub(super) fn resize_one_client(
         // proof: capture its reload ping into `reload_seen` so the first interactive
         // session re-applies the edited `[display]` rather than dropping the signal.
         // A NOTIFY posted mid-resize is still preserved (bring-up race safety).
-        handle_client_payload(server, &mut clients[idx], &rx[..n], reload_seen, pending_notifies);
+        dispatch_client_payload(server,&mut clients[idx],&rx[..n],attachment,reload_seen,pending_notifies,transfers);
+        transfers.flush();
         // Route every frame callback to its owner (keeps the other clients live).
         // Mirror `pump_clients`: a client that completes its handshake here (a
         // slower startup app such as the terminal or file manager, which finishes

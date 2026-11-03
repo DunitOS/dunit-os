@@ -98,3 +98,7 @@
 88	Ioctl
 89	WaitSetWait
 90	ReadPointerEvent
+91	FileCapOpen
+92	FileCapOp
+93	IpcSendHandle
+94	IpcReceiveHandle

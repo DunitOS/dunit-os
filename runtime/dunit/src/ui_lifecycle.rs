@@ -7,6 +7,7 @@ impl<C: Component> ComponentWindow<C> {
     pub(super) fn focus_lifecycle(&mut self, focused: bool) -> NativeResult<()> {
         let changed = self.application.window_focus(focused);
         if !focused {
+            self.cancel_transfer_candidate();
             self.renderer.cancel_scroll_capture();
             self.text_clicks.cancel();
             self.selection_frame = None;

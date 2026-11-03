@@ -49,6 +49,7 @@ pub enum MessageType {
 #[derive(Debug, Clone)]
 pub struct Message {
     pub sender: ProcessId,
+    pub attachment: u32,
     pub msg_type: MessageType,
     pub len: usize,
     pub data: [u8; MAX_MESSAGE_SIZE],
@@ -58,6 +59,7 @@ impl Message {
     pub fn new(sender: ProcessId, msg_type: MessageType) -> Self {
         Self {
             sender,
+            attachment: 0,
             msg_type,
             len: 0,
             data: [0; MAX_MESSAGE_SIZE],
@@ -80,6 +82,7 @@ pub enum IpcError {
     QueueFull,
     NoMessage,
     Unavailable,
+    AttachmentRequired,
 }
 
 pub struct IpcManager {
@@ -255,6 +258,7 @@ pub fn recv_bytes_with_sender(
     if queue.is_empty() {
         return Err(IpcError::NoMessage);
     }
+    if queue[0].attachment != 0 { return Err(IpcError::AttachmentRequired); }
     let len = queue[0].len;
     if out.len() < len {
         return Err(IpcError::MessageTooLarge);
@@ -268,4 +272,21 @@ pub fn ipc_stats() -> IpcStats {
     get_ipc_manager()
         .map(|manager| manager.stats())
         .unwrap_or_default()
+}
+
+/// Authenticated attachment metadata is supplied only by the atomic handle syscall.
+pub fn send_attached(sender: ProcessId, target: ProcessId, data: &[u8], attachment: u32) -> Result<(), IpcError> {
+    if data.is_empty() || data.len()>MAX_MESSAGE_SIZE {return Err(IpcError::MessageTooLarge);}
+    let mut message=Message::with_data(sender,MessageType::WindowClose{window_id:0},data);
+    message.attachment=attachment;
+    get_ipc_manager().ok_or(IpcError::Unavailable)?.send_message(target,message)?;
+    crate::process::wake_ipc_waiters(target);Ok(())
+}
+pub fn peek_attached(pid:ProcessId)->Result<Message,IpcError> {
+    get_ipc_manager().ok_or(IpcError::Unavailable)?.message_queues.get(&pid)
+        .and_then(|q|q.first()).cloned().ok_or(IpcError::NoMessage)
+}
+pub fn consume_attached(pid:ProcessId)->Result<(),IpcError> {
+    let q=get_ipc_manager().ok_or(IpcError::Unavailable)?.message_queues.get_mut(&pid).ok_or(IpcError::NoMessage)?;
+    if q.is_empty(){return Err(IpcError::NoMessage);}q.remove(0);Ok(())
 }

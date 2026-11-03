@@ -109,11 +109,11 @@ and guest exit 0. All guest launches use `tools/qemu_test.py`.
 
 [Multiline fields](multiline-input.md) extend the same editor with LF lines and
 a vertical viewport. [Double/triple click](click-selection.md) and extended grapheme editing
-are supported, including native Shift/Ctrl/Ctrl+Shift pointer gestures. System
-IME, clipboard and integration into migrated applications have separate gates in the
-[M7.6 acceptance matrix](m7-6-completion.md). System IME is future work; metadata
-for a future IME/a11y bridge do not implement that service. There is no
-local imitation of the system clipboard; Ctrl+C/V depend on M7.7.
+are supported, including native Shift/Ctrl/Ctrl+Shift pointer gestures.
+[System clipboard and text DnD](m7-7-transfers.md) use the compositor broker:
+Ctrl+C/X/V preserve controlled updates, password/readonly rules and undo history.
+System IME and broader application migration have separate roadmap gates;
+metadata for a future IME/a11y bridge do not implement that service.
 
 Validation on 28 October 2026: 47 component, 22 widget, 36 renderer, 13 native
 SDK, 18 style and 16 Python tooling checks passed (152 total). Final native

@@ -10,6 +10,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dunit_shell = { path = "../../../runtime/dunit-shell" }
 libdunit = { path = "../../libdunit" }
 
 [[bin]]

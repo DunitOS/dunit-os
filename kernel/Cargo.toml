@@ -51,6 +51,7 @@ name = "vfs_properties"
 harness = true
 
 [dependencies]
+dunit_file_cap_abi = { path = "../abi/file-cap" }
 dunit_pointer_abi = { path = "../abi/pointer-input" }
 dunit_wait_abi = { path = "../abi/wait-set" }
 bootloader = "0.9"

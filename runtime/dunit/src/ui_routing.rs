@@ -7,8 +7,9 @@ where
 {
     pub(super) fn dispatch_event(
         &mut self,
-        event: Option<WindowEvent>,
+        mut event: Option<WindowEvent>,
     ) -> NativeResult<Option<WindowEvent>> {
+        if let Some(WindowEvent::Transfer(transfer))=&mut event{self.transfer_event(transfer)?;return Ok(event);}
         if let Some(WindowEvent::Input(input)) = &event {
             if input.kind == IN_FOCUS_IN || input.kind == IN_FOCUS_OUT {
                 self.focus_lifecycle(input.kind == IN_FOCUS_IN)?;
@@ -120,6 +121,7 @@ where
             self.redraw()?;
         }
         if outcome.default_prevented {
+            self.cancel_transfer_candidate();
             if matches!(&event,Some(WindowEvent::Input(i)) if i.kind==IN_KEY_UP||i.kind==IN_KEY) {
                 let changed = self.application.cancel_keyboard_activation();
                 if let Some(WindowEvent::Input(i)) = &event {
@@ -136,6 +138,8 @@ where
             return Ok(event);
         }
         if let Some(WindowEvent::Input(input)) = &event {
+            if self.transfer_pointer(input)? {return Ok(event);}
+            if self.transfer_key(input)? {return Ok(event);}
             if self.key_lifecycle(input)? {
                 return Ok(event);
             }

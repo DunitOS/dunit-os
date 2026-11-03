@@ -150,3 +150,30 @@ Other lengths return EINVAL. `libdunit::pointer::read_with_modifiers` uses v2;
 the existing `read` still uses v1. Pure motion coalesces only with equal masks.
 Both formats retain an event on failed user copy. No syscall number or right
 changes. See the [approved extension](../docs/sdk/pointer-modifier-snapshot-proposal.md).
+
+
+## File capabilities and attached IPC (M7.7)
+
+Syscalls 91–94 are additive: `FileCapOpen(path,len,rights)`,
+`FileCapOp(handle,operation,ptr,len,offset,rights)`,
+`IpcSendHandle(target,handle,rights,message,len,offset)` and
+`IpcReceiveHandle(message,len,sender_out,handle_out)`. Success returns a
+handle, byte/entry count or zero according to the operation; errors use the
+existing negative errno convention. `offset` on attached send identifies the
+u32 handle field to rewrite to the receiver's actual handle ID.
+
+`abi/transfers.abi` generates operation/relation values and XFR1 kinds/actions/
+statuses into Rust and `include/dunit/transfer.h`. `libdunit::file_cap` defines
+the typed wrappers, including Stat, Read, ReadDir, OpenChild, Remove, Move,
+CreateChild, Write, Relation and Sync. ReadDir returns the actual entry count,
+including when greater than the supplied array capacity. Relative child names
+are single components; rights cannot exceed the parent capability. Move
+requires WRITE on source and destination and never overwrites an existing name.
+Cross-backend Move is EOPNOTSUPP. Copy is userspace policy.
+
+Attached IPC requires recipient opt-in through syscall 94. It atomically copies
+and attenuates an owned handle, attests its identity to the receiver, and rolls
+back on a full queue. Legacy receive refuses an attached head without consuming
+it; invalid output buffers and insufficient capacity also preserve the message.
+The kernel has no clipboard owner, MIME negotiation or desktop application list.
+See [M7.7 lifetime and scope](../docs/sdk/m7-7-transfers.md).

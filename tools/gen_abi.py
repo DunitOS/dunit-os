@@ -228,6 +228,8 @@ def main() -> int:
     rights_rust, rights_c = render_rights_rust(rights), render_rights_c(rights)
     outputs = [(RUST_OUT, rust), (C_OUT, c), (ERRNO_RUST_OUT, errno_rust), (ERRNO_C_OUT, errno_c),
                (RIGHTS_RUST_OUT, rights_rust), (RIGHTS_C_OUT, rights_c)]
+    from gen_transfer_values import outputs as transfer_outputs
+    outputs.extend(transfer_outputs(ROOT,screaming))
     if check_only:
         stale = [p for p, text in outputs if p.read_text(encoding="utf-8") != text]
         if stale:

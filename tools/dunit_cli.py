@@ -181,7 +181,8 @@ def boot(args, app, artifact, tests):
                 markers["forbidden"] += ["gui_server: FAIL", "gui_server: PANIC"]
             marker_path = staging / "markers.json"
             marker_path.write_text(json.dumps(markers))
-            checked([cargo(), "build", "--release", "--features", "boot-smoke-tests",
+            kernel_features=[] if app.kind=="gui" else ["--features","boot-smoke-tests"]
+            checked([cargo(), "build", "--release", *kernel_features,
                      "-Z", "build-std=core,alloc,compiler_builtins",
                      "-Z", "build-std-features=compiler-builtins-mem", "-Z", "json-target-spec"], cwd=ROOT / "kernel")
             command = [sys.executable, str(ROOT / "tools/qemu_test.py"), "--build",
@@ -192,6 +193,7 @@ def boot(args, app, artifact, tests):
                        "--cmd", guest_command]
             if app.kind == "gui":
                 command[-2:] = ["--cmd", "exec /app/setup import-desktop /sdk-desktop.toml", "--cmd", "exec /app/gui_server"]
+                command += ["--image-profile","dwm","--config","limine_sdk_terminal.conf"]
             checked(command, cwd=ROOT)
 
 

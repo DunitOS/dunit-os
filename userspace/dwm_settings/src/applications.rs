@@ -16,6 +16,10 @@ pub const MAX_WS: usize = 9;
 #[derive(Clone, PartialEq, Eq)]
 pub struct AppEntry {
     pub kind: AppKind,
+    /// MIME representations accepted when opening a document from the dock.
+    pub open_formats:Vec<String>,
+    /// Distinct initial argv words, never a shell command string.
+    pub arguments:Vec<String>,
     /// Registry key from `[application.<id>]`; also the default exec/icon stem.
     pub id: String,
     /// Human-readable window/taskbar title.
@@ -60,6 +64,8 @@ impl AppEntry {
     fn new(id: &str, name: &str, label: &str) -> AppEntry {
         AppEntry {
             kind: AppKind::Gui,
+            open_formats:Vec::new(),
+            arguments:Vec::new(),
             id: String::from(id),
             name: String::from(name),
             exec: String::from(id),
@@ -144,6 +150,8 @@ pub(crate) fn parse_apps_seeded(text: &str, base: &Applications) -> (Application
                     "exec" => app.exec = String::from(value),
                     "icon" => app.icon = String::from(value),
                     "label" => app.label = String::from(value),
+                    "open_formats" => app.open_formats=parse_str_array(rhs),
+                    "arguments" => app.arguments=parse_str_array(rhs),
                     _ => {}
                 }
             }

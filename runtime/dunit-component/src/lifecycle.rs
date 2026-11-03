@@ -20,6 +20,7 @@ impl<C: Component> Application<C> {
         if self.window_focused == focused {
             return false;
         }
+        self.clipboard_revision=self.clipboard_revision.wrapping_add(1);
         if !focused {
             self.suspended_focus = self.focused_key().map(String::from);
             self.window_focused = false;

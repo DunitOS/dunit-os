@@ -13,14 +13,15 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
-use gui_protocol_v1::control::{IN_DOWN, IN_KEY, IN_SCROLL, IN_QUIT};
+use gui_protocol_v1::control::{IN_DOWN,IN_KEY,IN_SCROLL,IN_FOCUS_IN,IN_FOCUS_OUT};
+use dunit::window::{Window,WindowEvent};
+mod text_transfer;
 mod document_editor;
 use document_editor::{Editor, Section};
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888};
 
 use dunit_render::Surface;
 use dunit_style::value::Color;
@@ -28,12 +29,9 @@ use dunit_text::Font;
 
 use dwm_settings::{Effects, Settings, Theme};
 
-const SURFACE: u64 = 1;
-const BUFFER: u64 = 2;
 const W: u32 = 600;
 const H: u32 = 600;
 const FOOTER_H: u32 = 72;
-const FMT_XRGB8888: u32 = 1;
 
 /// Load the configured TTF (`[desktop] font`) from the VFS, falling back to the
 /// shipped /assets default font on any error — the desktop font is a live config knob.
@@ -660,7 +658,7 @@ fn push_int(s: &mut String, mut v: i32) {
 
 
 /// Paint the whole editor into the shared surface and return the hit rects.
-fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
+fn render(pixels: &mut[u32], font: &Font, app: &App) -> Vec<Hotspot> {
     // Maintain the full form on small surfaces and expose its clipped portion
     // through scrolling. Large surfaces expand the backdrop without stretching text.
     let canvas_w = app.width.max(if app.editor_section().is_some() { 1200 } else { W });
@@ -1059,12 +1057,6 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
         }
     }
     drop(surf);
-    let pixels = unsafe {
-        core::slice::from_raw_parts_mut(
-            px_ptr as *mut u32,
-            app.width as usize * app.height as usize,
-        )
-    };
     let mut target = Surface::new(pixels, app.width as usize, app.height as usize);
     target.clear(col(theme.menu));
     drop(target);
@@ -1180,116 +1172,9 @@ fn render(px_ptr: *mut u8, font: &Font, app: &App) -> Vec<Hotspot> {
     spots
 }
 
-/// Respond to a server CONFIGURE with a fresh backing buffer and object id.
-/// Keep the old local surface intact until the replacement has been queued.
-#[allow(clippy::too_many_arguments)]
-fn resize_surface(
-    compositor: u32,
-    font: &Font,
-    app: &mut App,
-    width: u32,
-    height: u32,
-    token: u64,
-    object: u64,
-    serial: &mut u64,
-) -> Option<(u32, *mut u8)> {
-    let bytes = (width as usize)
-        .checked_mul(height as usize)?
-        .checked_mul(4)?;
-    // Bound allocations and ensure the footer can remain visible. This is a
-    // buffer safety limit, independent of desktop resolution preferences.
-    let canvas_bytes = (width.max(W) as usize)
-        .checked_mul(height.saturating_sub(FOOTER_H).max(app.content_height()) as usize)?
-        .checked_mul(4)?;
-    if width < 144
-        || height < FOOTER_H + 16
-        || bytes > 64 * 1024 * 1024
-        || canvas_bytes > 64 * 1024 * 1024
-    {
-        return None;
-    }
-    let handle = libdunit::handle_create_shared(bytes);
-    if handle <= 0 {
-        libdunit::println(&alloc::format!("gui_settings: resize create bytes={} errno={}", bytes, handle));
-        return None;
-    }
-    let handle = handle as u32;
-    let mapping = libdunit::handle_map(handle, 0, bytes);
-    if mapping <= 0 {
-        libdunit::handle_close(handle);
-        return None;
-    }
-    let duplicate = libdunit::handle_dup(
-        handle,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    if duplicate <= 0 {
-        libdunit::shared_buffer::release(handle, mapping as usize, bytes);
-        return None;
-    }
-    let remote = libdunit::handle_transfer(duplicate as u32, compositor);
-    if remote <= 0 {
-        libdunit::handle_close(duplicate as u32);
-        libdunit::shared_buffer::release(handle, mapping as usize, bytes);
-        return None;
-    }
-    let announcement = gui_protocol_v1::control::Capability {
-        handle: remote as u32,
-        advertised_bytes: bytes as u32,
-        object: object as u32,
-    }
-    .encode();
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    let import = Request::ImportBuffer {
-        width,
-        height,
-        stride: width * 4,
-        format: FMT_XRGB8888,
-        offset: 0,
-    }
-    .encode(object, *serial);
-    *serial += 1;
-    let attach = Request::AttachBuffer {
-        buffer: object,
-        damage: Vec::new(),
-    }
-    .encode(SURFACE, *serial);
-    *serial += 1;
-    let commit = Request::Commit {
-        configure: token,
-        frame_callback: 1,
-    }
-    .encode(SURFACE, *serial);
-    *serial += 1;
-    let destroy = Request::DestroyBuffer.encode(object - 1, *serial);
-    *serial += 1;
-    let previous = (app.width, app.height, app.scroll_x, app.scroll_y);
-    app.width = width;
-    app.height = height;
-    app.scroll_x = app.scroll_x.min((if app.editor_section().is_some() { 1200u32 } else { W }).saturating_sub(width) as i32);
-    app.scroll_y = app
-        .scroll_y
-        .min(app.content_height().saturating_sub(height.saturating_sub(FOOTER_H)) as i32);
-    render(mapping as usize as *mut u8, font, app);
-    for packet in [
-        &ack[..],
-        &announcement[..],
-        &import[..],
-        &attach[..],
-        &commit[..],
-        &destroy[..],
-    ] {
-        if libdunit::ipc_send(compositor, packet) < 0 {
-            app.width = previous.0;
-            app.height = previous.1;
-            app.scroll_x = previous.2;
-            app.scroll_y = previous.3;
-            libdunit::shared_buffer::release(handle, mapping as usize, bytes);
-            return None;
-        }
-    }
-    Some((handle, mapping as usize as *mut u8))
+fn checked<T>(result:dunit::Result<T>,operation:&str)->T{result.unwrap_or_else(|error|{libdunit::println(&alloc::format!("gui_settings: {} failed {}",operation,error.0));libdunit::exit(1)})}
+fn paint(window:&mut Window,font:&Font,app:&App)->Vec<Hotspot>{
+    let mut spots=Vec::new();checked(window.draw(|frame|{spots=render(frame.pixels_mut(),font,app);}),"present frame");spots
 }
 
 #[panic_handler]
@@ -1298,143 +1183,14 @@ fn panic(_: &PanicInfo) -> ! {
     libdunit::exit(101)
 }
 
-fn u64_at(p: &[u8], off: usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&p[off..off + 8]);
-    u64::from_le_bytes(a)
-}
-
-// APPEND_START
-
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
-    // 1) Handshake: compositor pid + our client id (id is a tint hint only).
-    let mut m = [0u8; 8];
-    if libdunit::ipc_recv_blocking(&mut m, 0) < 8 {
-        libdunit::println("gui_settings: FAIL recv handshake");
-        libdunit::exit(1);
-    }
-    let compositor = u32::from_le_bytes([m[0], m[1], m[2], m[3]]);
-
-    // 2) Create + map our own shared buffer and paint the initial editor.
-    let bytes = (W * H * 4) as usize;
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        libdunit::println("gui_settings: FAIL create buffer");
-        libdunit::exit(2);
-    }
-    let mut buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println("gui_settings: FAIL map buffer");
-        libdunit::exit(3);
-    }
-    let mut px = mapped as usize as *mut u8;
-    let font = match load_font() {
-        Ok(f) => f,
-        Err(_) => {
-            libdunit::println("gui_settings: FAIL font parse");
-            libdunit::exit(7);
-        }
-    };
-    let mut app = App::new();
-    let mut spots = render(px, &font, &app);
-
-    let mut rx = [0u8; 256];
-
-    // 3) HELLO -> WELCOME.
-    let hello = Request::Hello {
-        min_minor: 0,
-        max_minor: 0,
-        offered_features: FEATURE_ARGB8888,
-        required_features: 0,
-    }
-    .encode(0, 1);
-    libdunit::ipc_send(compositor, &hello);
-    if libdunit::ipc_recv_blocking(&mut rx, 0) <= 0 {
-        libdunit::println("gui_settings: FAIL welcome");
-        libdunit::exit(4);
-    }
-    // APPEND_START2
-
-    // 4) CREATE_SURFACE -> RESULT + CONFIGURE (capture the configure token).
-    let create = Request::CreateSurface {
-        role: 1,
-        width: W,
-        height: H,
-        format: FMT_XRGB8888,
-    }
-    .encode(SURFACE, 2);
-    libdunit::ipc_send(compositor, &create);
-    libdunit::ipc_recv_blocking(&mut rx, 0); // RESULT
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0); // CONFIGURE
-    let token = if n >= 32 { u64_at(&rx, 24) } else { 0 };
-
-    // 5) ACK_CONFIGURE -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, 3);
-    libdunit::ipc_send(compositor, &ack);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 6) Transfer the buffer capability (read-only) and announce it.
-    let dup = libdunit::handle_dup(
-        buf,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        libdunit::println("gui_settings: FAIL cap transfer");
-        libdunit::exit(5);
-    }
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: BUFFER as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
-    let import = Request::ImportBuffer {
-        width: W,
-        height: H,
-        stride: W * 4,
-        format: FMT_XRGB8888,
-        offset: 0,
-    }
-    .encode(BUFFER, 4);
-    libdunit::ipc_send(compositor, &import);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let attach = Request::AttachBuffer {
-        buffer: BUFFER,
-        damage: alloc::vec::Vec::new(),
-    }
-    .encode(SURFACE, 5);
-    libdunit::ipc_send(compositor, &attach);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let commit = Request::Commit {
-        configure: token,
-        frame_callback: 1,
-    }
-    .encode(SURFACE, 6);
-    libdunit::ipc_send(compositor, &commit);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    // APPEND_START3
-
-    // 8) FRAME_DONE from the compositor's composition tick.
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-    let ok = n >= 32 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8021;
-    if ok {
-        libdunit::println("gui_settings: surface presented OK");
-    } else {
-        libdunit::println("gui_settings: FAIL no frame done");
-        libdunit::handle_close(buf);
-        libdunit::exit(6);
-    }
-
+pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnvp)->!{
+    libdunit::init_runtime(argc,argv,envp);
+    let font=load_font().unwrap_or_else(|_|{libdunit::println("gui_settings: FAIL font parse");libdunit::exit(7)});
+    let mut window=checked(Window::open(W,H),"window handshake");
+    let mut app=App::new();let (width,height)=window.size();app.width=width;app.height=height;
+    let mut spots=paint(&mut window,&font,&app);
+    libdunit::println("gui_settings: surface presented OK");
     // 8.5) Headless resolution-picker proof (config-gated `[startup] self_test`,
     //      true only in test.toml — NEVER on the real desktop). The automated
     //      harness has no mouse, so we actuate the SAME `apply(ResNext)` path a
@@ -1455,9 +1211,8 @@ pub extern "C" fn _start() -> ! {
             guard += 1;
         }
         if dwm_settings::save(&app.s) {
-            let sig = gui_protocol_v1::control::RELOAD;
-            libdunit::ipc_send(compositor, &sig);
-            spots = render(px, &font, &app);
+            checked(window.reload_desktop(),"reload desktop");
+            spots = paint(&mut window, &font, &app);
             let (tw, th) = RES_PRESETS[app.res_idx];
             let mut msg = String::from("gui_settings: res picker self-test picked ");
             push_int(&mut msg, tw as i32);
@@ -1470,7 +1225,7 @@ pub extern "C" fn _start() -> ! {
             app.res_idx = previous_resolution;
             app.status = "Save failed. Previous settings restored.";
             app.error = true;
-            spots = render(px, &font, &app);
+            spots = paint(&mut window, &font, &app);
             libdunit::println("gui_settings: FAIL resolution picker save");
         }
     }
@@ -1479,90 +1234,55 @@ pub extern "C" fn _start() -> ! {
     //    Settings, writes them back to the config (RAM this session) and pings
     //    the compositor to reload — the GUI<->TOML round-trip applied live. We
     //    then repaint our shared buffer so the swatch/value reflects the change.
-    let mut serial = 7u64;
-    let mut next_buffer = BUFFER + 1;
-    let mut draft_repaint = false;
-    loop {
-        // Drain queued edits before rasterizing the complete source editor.
-        // A burst of keystrokes must not fill the IPC mailbox behind repaints.
-        let n = if draft_repaint {
-            let pending = libdunit::ipc_recv(&mut rx);
-            if pending > 0 { pending } else {
-                spots = render(px, &font, &app);
-                draft_repaint = false;
-                libdunit::ipc_recv_blocking(&mut rx, 0)
-            }
-        } else { libdunit::ipc_recv_blocking(&mut rx, 0) };
-        if n >= 48
-            && u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]) == gui_protocol_v1::wire::MAGIC
-            && u16::from_le_bytes([rx[8], rx[9]]) == 0x8010
-        {
-            let width = u32::from_le_bytes([rx[32], rx[33], rx[34], rx[35]]);
-            let height = u32::from_le_bytes([rx[36], rx[37], rx[38], rx[39]]);
-            let token = u64_at(&rx, 24);
-            let previous_bytes = app.width as usize * app.height as usize * 4;
-            if let Some((new_buf, new_px)) = resize_surface(
-                compositor,
-                &font,
-                &mut app,
-                width,
-                height,
-                token,
-                next_buffer,
-                &mut serial,
-            ) {
-                libdunit::shared_buffer::release(buf, px as usize, previous_bytes);
-                buf = new_buf;
-                px = new_px;
-                next_buffer += 1;
-                spots = render(px, &font, &app);
-                libdunit::println("gui_settings: reconfigured OK");
-            } else {
-                app.status = "Resize failed; previous surface retained.";
-                app.error = true;
-                spots = render(px, &font, &app);
-            }
-            continue;
-        }
-        if n >= 32
-            && u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]) == gui_protocol_v1::wire::MAGIC
-            && u16::from_le_bytes([rx[8], rx[9]]) == 0x8003
-        {
-            app.status = "Compositor rejected a surface request.";
-            app.error = true;
-            spots = render(px, &font, &app);
-            libdunit::println("gui_settings: surface protocol error");
-            continue;
-        }
-        let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n.max(0) as usize]) else {
-            continue;
+    let mut draft_repaint=false;
+    let mut transfers=text_transfer::Transfers::default();
+    checked(transfers.register_opener(&mut window),"register document opener");
+    loop{
+        checked(transfers.sync(&mut window,&app),"text target registration");
+        let event=checked(window.next_event(dunit::time::Duration::from_millis(if draft_repaint{0}else{40})),"window event");
+        let input=match event{
+            None=>{if draft_repaint{spots=paint(&mut window,&font,&app);draft_repaint=false;}continue;},
+            Some(WindowEvent::CloseRequested)=>break,
+            Some(WindowEvent::Resized{width,height})=>{
+                app.width=width;app.height=height;
+                app.scroll_x=app.scroll_x.min((if app.editor_section().is_some(){1200u32}else{W}).saturating_sub(width)as i32);
+                app.scroll_y=app.scroll_y.min(app.content_height().saturating_sub(height.saturating_sub(FOOTER_H))as i32);
+                spots=paint(&mut window,&font,&app);draft_repaint=false;transfers.invalidate();
+                libdunit::println("gui_settings: reconfigured OK");continue;
+            },
+            Some(WindowEvent::Transfer(event))=>{draft_repaint|=checked(transfers.event(&mut window,&mut app,&spots,&font,event),"transfer event");continue;},
+            Some(WindowEvent::Protocol(_))=>continue,
+            Some(WindowEvent::Input(input))=>input,
         };
-        let kind = input.kind;
-        if kind == IN_QUIT {
-            break;
+        let kind=input.kind;
+        if matches!(kind,IN_FOCUS_IN|IN_FOCUS_OUT){transfers.focus(kind==IN_FOCUS_IN);continue;}
+        if kind==IN_KEY&&checked(transfers.key(&mut window,&app,&input),"clipboard command"){continue;}
+        if let Some(repaint)=checked(transfers.pointer(&mut window,&mut app,&spots,&font,&input),"text drag"){
+            if repaint{spots=paint(&mut window,&font,&app);}continue;
         }
-        if kind == IN_SCROLL && n >= 12 {
+        if kind==IN_KEY||kind==IN_DOWN{transfers.invalidate();}
+        if kind == IN_SCROLL {
             let delta = input.x;
             app.apply(Action::Scroll(0, delta.saturating_mul(-32)));
-            spots = render(px, &font, &app);
+            spots = paint(&mut window, &font, &app);
         }
-        if kind == IN_KEY && n >= 17 && app.page == 12 && app.profile_focused {
-            app.profile_path.key(input.x as u8, input.value as u8);
+        if kind == IN_KEY && app.page == 12 && app.profile_focused {
+            app.profile_path.input(&input);
             app.document_error.clear();
             app.status = "Path edited. Import complete desktop validates the file before saving.";
             app.error = false;
             draft_repaint = true;
         }
-        if kind == IN_KEY && n >= 17 && app.editor_section().is_some() {
+        if kind == IN_KEY && app.editor_section().is_some() {
             app.document_error.clear();
             if let Some(editor) = &mut app.editor {
-                editor.key(input.x as u8, input.value as u8);
+                editor.input(&input);
                 app.status = "Draft only. Apply validates and saves; Revert reloads the saved document.";
                 app.error = false;
                 draft_repaint = true;
             }
         }
-        if kind == IN_DOWN && n >= 16 {
+        if kind == IN_DOWN {
             let lx = input.x;
             let ly = input.y;
             let mut act = None;
@@ -1609,8 +1329,7 @@ pub extern "C" fn _start() -> ! {
                         },
                         Ok(()) => {
                             app.refresh_document(); app.s = dwm_settings::load(); app.refresh_color_choices();
-                            let signal = gui_protocol_v1::control::RELOAD;
-                            app.error = libdunit::ipc_send(compositor, &signal) < 0;
+                            app.error = window.reload_desktop().is_err();
                             app.status = if app.error { "Document saved; reload request failed." }
                                 else { "Document validated and saved; desktop reload requested." };
                             libdunit::println("gui_settings: complete document saved");
@@ -1619,14 +1338,14 @@ pub extern "C" fn _start() -> ! {
                             }
                         },
                     }
-                    spots = render(px, &font, &app);
+                    spots = paint(&mut window, &font, &app);
                     continue;
                 }
                 if matches!(a, Action::SelectPage(_) | Action::Scroll(_, _) | Action::EditLine(_)
                     | Action::InsertLine | Action::NewTable | Action::DeleteLine | Action::EditorPage(_)
                     | Action::RevertDocument | Action::SelectProfile(_) | Action::FocusProfilePath) {
                     app.apply(a);
-                    spots = render(px, &font, &app);
+                    spots = paint(&mut window, &font, &app);
                     match a {
                         Action::SelectPage(page) => libdunit::println(&alloc::format!("gui_settings: page {}", page)),
                         Action::Scroll(_, _) => libdunit::println(&alloc::format!("gui_settings: scroll {},{}", app.scroll_x, app.scroll_y)),
@@ -1647,7 +1366,7 @@ pub extern "C" fn _start() -> ! {
                             app.status = error;
                             app.error = true;
                             libdunit::println(&alloc::format!("gui_settings: theme rejected; previous settings retained: {}",error));
-                            spots = render(px, &font, &app);
+                            spots = paint(&mut window, &font, &app);
                             continue;
                         }
                     }
@@ -1663,7 +1382,7 @@ pub extern "C" fn _start() -> ! {
                     app.status = "Save failed. Previous settings restored.";
                     app.error = true;
                     libdunit::println("gui_settings: save failed; previous settings retained");
-                    spots = render(px, &font, &app);
+                    spots = paint(&mut window, &font, &app);
                     continue;
                 }
                 if app.editor.as_ref().map(|e| !e.dirty).unwrap_or(false) { app.refresh_document(); }
@@ -1671,19 +1390,18 @@ pub extern "C" fn _start() -> ! {
                     app.refresh_color_choices();
                     libdunit::println(&alloc::format!("gui_settings: theme saved {}", app.themes[index]));
                 }
-                let sig = gui_protocol_v1::control::RELOAD;
-                if libdunit::ipc_send(compositor, &sig) < 0 {
+                if window.reload_desktop().is_err() {
                     app.status = "Saved; desktop reload could not be requested.";
                     app.error = true;
                 } else {
                     app.status = "Saved and desktop reload requested (session RAM).";
                     app.error = false;
                 }
-                spots = render(px, &font, &app);
+                spots = paint(&mut window, &font, &app);
             }
         }
     }
 
-    libdunit::shared_buffer::release(buf, px as usize, app.width as usize * app.height as usize * 4);
+    checked(window.close(),"window close");
     libdunit::exit(0)
 }

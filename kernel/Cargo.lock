@@ -48,6 +48,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "dunit_file_cap_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_pointer_abi"
 version = "0.1.0"
 
@@ -165,6 +169,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "bootloader",
+ "dunit_file_cap_abi",
  "dunit_pointer_abi",
  "dunit_wait_abi",
  "proptest",

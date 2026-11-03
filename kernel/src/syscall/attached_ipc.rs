@@ -1,0 +1,123 @@
+//! Atomic capability delivery with kernel-authenticated attachment provenance.
+use super::*;
+pub(super) fn send(
+    target: u64,
+    handle: u64,
+    rights: u64,
+    message: u64,
+    len: u64,
+    offset: u64,
+) -> i64 {
+    let _irq = crate::sync::InterruptGuard::new();
+    if target == 0
+        || target > u32::MAX as u64
+        || handle > u32::MAX as u64
+        || rights > u32::MAX as u64
+        || rights as u32 & !crate::handle::RIGHTS_ALL != 0
+    {
+        return EINVAL;
+    }
+    if len == 0 || len > crate::ipc::MAX_MESSAGE_SIZE as u64 {
+        return EMSGSIZE;
+    }
+    if offset % 4 != 0 || offset.checked_add(4).is_none_or(|end| end > len) {
+        return EINVAL;
+    }
+    let mut bytes = match copy_buffer_from_user(message as *const u8, len as usize) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    let target = crate::process::ProcessId(target);
+    match crate::process::with_process_mut(target, |p| Ok(p.ipc_handles_enabled)) {
+        Ok(true) => {}
+        Ok(false) => return EOPNOTSUPP,
+        Err(_) => return ENOENT,
+    }
+    let sender = match crate::process::current_process() {
+        Some(p) => p.pid,
+        None => return EINVAL,
+    };
+    let object = {
+        let process = match crate::process::current_process_mut() {
+            Some(p) => p,
+            None => return EINVAL,
+        };
+        match process.handle_rights(handle as u32) {
+            Ok(r) if r & crate::handle::RIGHT_TRANSFER != 0 => {}
+            Ok(_) => return EACCES,
+            Err(e) => return handle_error_to_errno(e),
+        }
+        let duplicate = match process
+            .handle_dup(handle as u32, rights as u32 | crate::handle::RIGHT_TRANSFER)
+        {
+            Ok(h) => h,
+            Err(e) => return handle_error_to_errno(e),
+        };
+        match process.handle_take_for_transfer(duplicate) {
+            Ok((object, _)) => object,
+            Err(e) => {
+                let _ = process.handle_close(duplicate);
+                return handle_error_to_errno(e);
+            }
+        }
+    };
+    // Target existence was verified under the same IRQ guard, so insertion
+    // cannot race teardown. The source's original handle is never moved.
+    let received = match crate::process::with_process_mut(target, |p| {
+        Ok(p.handle_receive(object, rights as u32))
+    }) {
+        Ok(h) => h,
+        Err(e) => return process_error_to_errno(e),
+    };
+    bytes[offset as usize..offset as usize + 4].copy_from_slice(&received.to_le_bytes());
+    match crate::ipc::send_attached(sender, target, &bytes, received) {
+        Ok(()) => len as i64,
+        Err(e) => {
+            let _ = crate::process::with_process_mut(target, |p| {
+                let _ = p.handle_close(received);
+                Ok(())
+            });
+            ipc_error_to_errno(e)
+        }
+    }
+}
+pub(super) fn receive(message: u64, len: u64, sender: u64, handle: u64) -> i64 {
+    let _irq = crate::sync::InterruptGuard::new();
+    if len == 0 || len > crate::ipc::MAX_MESSAGE_SIZE as u64 {
+        return EMSGSIZE;
+    }
+    for (pointer, size) in [(message, len as usize), (sender, 4), (handle, 4)] {
+        if let Err(e) = validate_user_mapping(pointer, size, true) {
+            return e;
+        }
+    }
+    // Opt in only after every destination has been validated. Even EAGAIN
+    // establishes support, allowing peers to send before the next poll.
+    let pid = match crate::process::current_process_mut() {
+        Some(p) => {
+            p.ipc_handles_enabled = true;
+            p.pid
+        }
+        None => return EINVAL,
+    };
+    let packet = match crate::ipc::peek_attached(pid) {
+        Ok(p) => p,
+        Err(e) => return ipc_error_to_errno(e),
+    };
+    if packet.len > len as usize {
+        return EMSGSIZE;
+    }
+    for (pointer, data) in [
+        (message, &packet.data[..packet.len]),
+        (sender, &(packet.sender.0 as u32).to_le_bytes()),
+        (handle, &packet.attachment.to_le_bytes()),
+    ] {
+        if let Err(e) = copy_buffer_to_user(pointer as *mut u8, data) {
+            return e;
+        }
+    }
+    match crate::ipc::consume_attached(pid) {
+        Ok(()) => packet.len as i64,
+        Err(e) => ipc_error_to_errno(e),
+    }
+}

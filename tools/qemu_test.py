@@ -317,7 +317,7 @@ def forbidden_marker_hits(text: str, markers: list[str | dict]) -> list[str]:
     return hits
 
 
-def build_iso(config: str, variant: str | None = None, overlay: Path | None = None) -> Path:
+def build_iso(config: str, variant: str | None = None, overlay: Path | None = None, profile: str = "full") -> Path:
     """Build the ISO via the Makefile. Returns the ISO path."""
     if shutil.which("make") is None:
         raise RuntimeError("`make` not found; cannot --build")
@@ -325,7 +325,8 @@ def build_iso(config: str, variant: str | None = None, overlay: Path | None = No
     print(f"[qemu_test] building ISO ({selection}) ...", file=sys.stderr)
     subprocess.run(
         (["make", f"iso-{variant}"] if variant else ["make", "iso", f"LIMINE_CONFIG={config}"])
-        + ([f"INITRD_OVERLAY={overlay.resolve()}"] if overlay is not None else []),
+        + ([f"INITRD_OVERLAY={overlay.resolve()}"] if overlay is not None else [])
+        + ([f"IMAGE_PROFILE={profile}"] if not variant else []),
         cwd=REPO_ROOT,
         check=True,
     )
@@ -419,10 +420,13 @@ def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
             print("[INPUT-TIMING] " + json.dumps({"phase": label, "wall_ns": elapsed}), flush=True)
         elif "wait_marker" in step:
             marker = step["wait_marker"]
+            occurrences=step.get("occurrences",1)
+            if not isinstance(occurrences,int) or not 1<=occurrences<=1024:
+                raise ValueError("marker occurrences must be between 1 and 1024")
             wait_deadline = min(deadline, time.monotonic() + float(step.get("timeout", 20)))
             while True:
                 serial.pump()
-                if marker in serial.text[output_start:]:
+                if serial.text[output_start:].count(marker)>=occurrences:
                     break
                 if time.monotonic() >= wait_deadline:
                     raise RuntimeError(f"command action marker not seen: {marker!r}")
@@ -551,7 +555,7 @@ def run(args: argparse.Namespace) -> RunResult:
 
     is_disk = False
     if args.build:
-        image = build_iso(args.config, args.variant, args.initrd_overlay)
+        image = build_iso(args.config, args.variant, args.initrd_overlay, args.image_profile)
     elif args.build_disk:
         image = build_disk(args.config, workdir)
         is_disk = True
@@ -830,6 +834,9 @@ def main() -> int:
     parser.add_argument("--workdir", help="where to place qmp socket / serial log (default build/)")
     parser.add_argument("--qemu-arg", action="append",
                         help="extra raw argument passed to qemu (repeatable)")
+    from image_profile import PROFILES
+    parser.add_argument("--image-profile",choices=PROFILES,default="full",
+                        help="composition for a developer --build ISO; independent of its boot config")
     parser.add_argument("--scratch-disk", type=int, metavar="SIZE_MB",
                         help="attach a blank raw AHCI scratch disk of SIZE_MB MiB before "
                              "booting (for the installer self-test; enumerates as sda on an ISO boot)")
@@ -855,6 +862,8 @@ def main() -> int:
                         help="serial substring that must NOT appear (repeatable); merged with --markers-file")
     args = parser.parse_args()
 
+    if args.image_profile!="full" and (not args.build or args.variant):
+        parser.error("--image-profile requires a developer --build (without --variant)")
     if args.initrd_overlay and (not args.build or args.variant):
         parser.error("--initrd-overlay requires --build without a release --variant")
     if args.variant and not args.build:

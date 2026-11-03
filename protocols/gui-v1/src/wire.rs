@@ -24,6 +24,8 @@ pub const VERSION_MINOR: u16 = 0;
 pub const FEATURE_ARGB8888: u64 = 1 << 0;
 /// Feature bit 1 = negotiated live INP1 keyboard/pointer lifecycle.
 pub const FEATURE_INPUT_LIFECYCLE: u64 = 1 << 1;
+/// Feature bit 2 = negotiated XFR1 clipboard and drag-and-drop data transfer.
+pub const FEATURE_DATA_TRANSFER: u64 = 1 << 2;
 
 /// Pixel formats (spec §8).
 pub const FORMAT_XRGB8888: u32 = 1;

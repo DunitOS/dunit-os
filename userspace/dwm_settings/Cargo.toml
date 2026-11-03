@@ -15,6 +15,7 @@ name = "dwm_settings"
 crate-type = ["rlib"]
 
 [dependencies]
+gui_protocol_v1 = { path = "../../protocols/gui-v1" }
 libdunit = { path = "../libdunit" }
 # Shared terminal palette presets (SSOT), also linked by the kernel terminal.
 term_theme = { path = "../../runtime/term_theme" }

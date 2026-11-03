@@ -313,6 +313,15 @@ impl TextEditor {
         true
     }
 
+    /// Replace the complete selection as one edit and one undo entry. Validation
+    /// and limits apply to the whole insertion, never to a partial prefix.
+    pub fn insert_text(&mut self, text: &str, max_chars: usize, read_only: bool) -> bool {
+        if read_only || !self.accepts(self.text()) || !self.accepts(text) {
+            return false;
+        }
+        self.replace(self.selection(), text, max_chars)
+    }
+
     /// Returns whether text or selection changed. Rejected edits preserve all state.
     /// Read-only editors accept navigation and selection, including word selection,
     /// but reject edits and history traversal.

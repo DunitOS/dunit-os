@@ -572,3 +572,21 @@ fn stale_cell_click_cannot_select_replacement_or_escape_new_modal_scope() {
         assert_ne!(app.focused_key(), Some("table"));
     }
 }
+
+#[test]
+fn clipboard_exports_the_active_column_or_whole_row_as_tsv() {
+    let mut a = app(4);
+    focus(&mut a);
+    assert_eq!(
+        a.collection_clipboard_text().as_deref(),
+        Some("Document 0\t4\tFile")
+    );
+    a.table_command(K::NextColumn).unwrap();
+    assert_eq!(a.collection_clipboard_text().as_deref(), Some("4"));
+    let mut state = a.component().state.clone();
+    state.column = Some("name".into());
+    a.update(Msg::State(state)).unwrap();
+    let calls = a.component().calls;
+    assert_eq!(a.collection_clipboard_text().as_deref(), Some("Document 0"));
+    assert_eq!(a.component().calls, calls);
+}

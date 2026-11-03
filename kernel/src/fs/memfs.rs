@@ -218,6 +218,15 @@ impl MemFs {
         self.open_handles.iter().position(|(id, _)| *id == handle)
     }
 
+    fn capability_path(&self, handle: FileHandle) -> Result<String> {
+        let h = &self.open_handles[self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?].1;
+        if let Some(i) = usize::MAX.checked_sub(h.node_id).filter(|i| *i < BASE_DIRS.len()) {
+            return Ok(String::from(BASE_DIRS[i]));
+        }
+        self.nodes.iter().find(|n| n.id == h.node_id && n.linked)
+            .map(|n| n.path.clone()).ok_or(VfsError::NotFound)
+    }
+
     fn is_direct_child(parent: &str, child: &str) -> bool {
         let parent = Self::clean(parent);
         let child = Self::clean(child);
@@ -234,6 +243,68 @@ impl MemFs {
 }
 
 impl FileSystem for MemFs {
+    fn cap_relation(&mut self,source:FileHandle,destination:FileHandle)->Result<dunit_file_cap_abi::Relation>{
+        let source=self.capability_path(source)?;let destination=self.capability_path(destination)?;
+        Ok(dunit_file_cap_abi::Relation::paths(&source,&destination))
+    }
+    fn cap_open(&mut self, path: &str, flags: OpenFlags) -> Result<FileHandle> {
+        let clean = Self::clean(path);
+        // The virtual root spans mount points, not one backend inode.
+        if clean.is_empty() { return Err(VfsError::Unsupported); }
+        let node_id = if let Some(i) = BASE_DIRS.iter().position(|p| *p == clean) {
+            usize::MAX - i
+        } else {
+            self.nodes[self.node_index(clean).ok_or(VfsError::NotFound)?].id
+        };
+        let handle = self.next_handle.fetch_add(1, Ordering::SeqCst);
+        self.open_handles.push((handle, OpenMemHandle { node_id, offset: 0, flags }));
+        Ok(handle)
+    }
+    fn cap_child(&mut self, parent: FileHandle, path: &str, flags: OpenFlags) -> Result<FileHandle> {
+        if !super::file_cap::relative(path) { return Err(VfsError::InvalidPath); }
+        let base = self.capability_path(parent)?;
+        if self.stat_handle(parent)?.file_type != FileType::Directory { return Err(VfsError::NotADirectory); }
+        let mut child=base; child.push('/'); child.push_str(path);
+        self.cap_open(&child, flags)
+    }
+    fn cap_readdir(&mut self, handle: FileHandle) -> Result<Vec<DirEntry>> {
+        let path = self.capability_path(handle)?;
+        if self.stat_handle(handle)?.file_type != FileType::Directory { return Err(VfsError::NotADirectory); }
+        if self.nodes.iter().filter(|n|n.linked&&Self::is_direct_child(&path,&n.path))
+            .any(|n|Self::basename(&n.path).len()>64) {return Err(VfsError::FileTooBig);}
+        self.readdir(&path)
+    }
+    fn cap_remove(&mut self, handle: FileHandle) -> Result<()> {
+        let index = self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
+        if !self.open_handles[index].1.flags.can_write() { return Err(VfsError::PermissionDenied); }
+        let path = self.capability_path(handle)?;
+        match self.stat_handle(handle)?.file_type {
+            FileType::File => self.remove(&path),
+            FileType::Directory => self.remove_dir(&path),
+            FileType::Device => Err(VfsError::Unsupported),
+        }
+    }
+    fn cap_move_to(&mut self, source: FileHandle, destination: FileHandle, leaf: &str) -> Result<()> {
+        if !super::file_cap::relative(leaf) || leaf.contains('/') { return Err(VfsError::InvalidPath); }
+        for h in [source,destination] {
+            let i=self.handle_index(h).ok_or(VfsError::InvalidDescriptor)?;
+            if !self.open_handles[i].1.flags.can_write() { return Err(VfsError::PermissionDenied); }
+        }
+        let old=self.capability_path(source)?;
+        let mut new=self.capability_path(destination)?;
+        if self.stat_handle(destination)?.file_type != FileType::Directory { return Err(VfsError::NotADirectory); }
+        new.push('/');new.push_str(leaf);
+        self.rename(&old,&new)
+    }
+    fn cap_create_child(&mut self,parent:FileHandle,leaf:&str,kind:FileType,flags:OpenFlags)->Result<FileHandle> {
+        if !super::file_cap::relative(leaf)||leaf.contains('/'){return Err(VfsError::InvalidPath);}
+        let i=self.handle_index(parent).ok_or(VfsError::InvalidDescriptor)?;
+        if !self.open_handles[i].1.flags.can_write(){return Err(VfsError::PermissionDenied);}
+        if self.stat_handle(parent)?.file_type!=FileType::Directory{return Err(VfsError::NotADirectory);}
+        let mut path=self.capability_path(parent)?;path.push('/');path.push_str(leaf);
+        match kind {FileType::File=>self.create(&path)?,FileType::Directory=>self.mkdir(&path)?,FileType::Device=>return Err(VfsError::Unsupported)}
+        self.cap_open(&path,flags)
+    }
     fn open(&mut self, path: &str, flags: OpenFlags) -> Result<FileHandle> {
         if !flags.is_valid() {
             return Err(VfsError::InvalidPath);
@@ -399,6 +470,9 @@ impl FileSystem for MemFs {
             .handle_index(handle)
             .ok_or(VfsError::InvalidDescriptor)?;
         let node_id = self.open_handles[hidx].1.node_id;
+        if usize::MAX.checked_sub(node_id).is_some_and(|i| i < BASE_DIRS.len()) {
+            return Ok(FileStat { file_type: FileType::Directory, size: 0 });
+        }
         let node = self
             .nodes
             .iter()
@@ -597,7 +671,12 @@ impl FileSystem for MemFs {
         {
             return Err(VfsError::DirectoryNotEmpty);
         }
-        self.nodes.remove(idx);
+        let node_id = self.nodes[idx].id;
+        if self.open_handles.iter().any(|(_, h)| h.node_id == node_id) {
+            self.nodes[idx].linked = false;
+        } else {
+            self.nodes.remove(idx);
+        }
         Ok(())
     }
 

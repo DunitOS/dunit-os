@@ -15,7 +15,7 @@ import json, sys
 from pathlib import Path
 records = [json.loads(line) for line in open(sys.argv[1])]
 libraries = [r for r in records if r.get('reason') == 'compiler-artifact']
-for name in ('libdunit', 'dunit_app_manifest'):
+for name in ('libdunit', 'dunit_app_manifest', 'gui_protocol_v1'):
     filenames = [p for r in libraries if r['target']['name'] == name
                  for p in r['filenames']]
     # Pass both code and metadata when Cargo reports split artifacts. Older
@@ -26,7 +26,9 @@ print('\n'.join(sorted({str(Path(p).parent) for r in libraries for p in r['filen
 PY
 )
 links=()
-for directory in "${artifacts[@]:4}"; do links+=(-L "dependency=$directory"); done
+for directory in "${artifacts[@]:6}"; do links+=(-L "dependency=$directory"); done
+protocol=(--extern "gui_protocol_v1=${artifacts[4]}")
+if [ -n "${artifacts[5]}" ]; then protocol+=(--extern "gui_protocol_v1=${artifacts[5]}"); fi
 native=(--extern "native=${artifacts[0]}")
 manifest=(--extern "dunit_app_manifest=${artifacts[2]}")
 if [ -n "${artifacts[1]}" ]; then native+=(--extern "native=${artifacts[1]}"); fi
@@ -52,17 +54,17 @@ rustc --edition=2021 --crate-type rlib --crate-name libdunit "$test_dir/libdunit
 rustc --edition=2021 --crate-type rlib --crate-name term_theme runtime/term_theme/src/lib.rs -o "$test_dir/libterm_theme.rlib"
 rustc --edition=2021 --crate-type rlib --crate-name dwm_settings userspace/dwm_settings/src/lib.rs \
     --extern libdunit="$test_dir/liblibdunit.rlib" --extern term_theme="$test_dir/libterm_theme.rlib" \
-    "${manifest[@]}" \
+    "${protocol[@]}" "${manifest[@]}" \
     -L dependency="$test_dir" "${links[@]}" -o "$test_dir/libdwm_settings.rlib"
 DUNIT_ROOT="$PWD" rustc --edition=2021 --test --crate-name dwm_settings userspace/dwm_settings/src/lib.rs \
     --extern libdunit="$test_dir/liblibdunit.rlib" --extern term_theme="$test_dir/libterm_theme.rlib" \
-    "${manifest[@]}" -L dependency="$test_dir" \
+    "${protocol[@]}" "${manifest[@]}" -L dependency="$test_dir" \
     "${links[@]}" -o "$test_dir/unit-tests"
 "$test_dir/unit-tests"
 for source in userspace/dwm_settings/tests/*.rs; do
     DUNIT_ROOT="$PWD" rustc --edition=2021 --test "$source" \
         --extern dwm_settings="$test_dir/libdwm_settings.rlib" \
-        "${manifest[@]}" -L dependency="$test_dir" \
+        "${protocol[@]}" "${manifest[@]}" -L dependency="$test_dir" \
         "${links[@]}" -o "$test_dir/integration-tests"
     "$test_dir/integration-tests"
 done

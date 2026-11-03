@@ -17,6 +17,7 @@ use gui_protocol_v1::Opcode;
 mod lua_policy;
 mod animation;
 mod protocol_runtime;
+mod transfer_runtime;
 mod input_lifecycle;
 mod frame_pacing;
 mod frame_runtime;
@@ -811,6 +812,7 @@ fn pump_clients(
     reload: &mut bool,
     notify_out: &mut Vec<alloc::string::String>,
     performance: &mut performance::Profiler,
+    transfers: &mut transfer_runtime::Runtime,
     deadline: Option<frame_pacing::FrameDeadline>,
 ) -> Result<(),isize> {
     let mut rx = [0u8; 256];
@@ -819,16 +821,19 @@ fn pump_clients(
         if let Some(deadline)=deadline {
             if deadline.due(frame_runtime::monotonic_ns()?){break;}
         }
-        let n = libdunit::ipc_recv_from(&mut rx, &mut sender);
+        let mut attached=0;
+        let n = libdunit::ipc_recv_handle(&mut rx, &mut sender, &mut attached);
         if n == libdunit::EAGAIN {break;}
         if n < 0 {return Err(n);}
         let n = n as usize;
         performance.ipc_packet();
+        let attachment=if attached!=0{Some(unsafe{dunit_transfer::OwnedHandle::adopt(attached)})}else{None};
         let idx = match clients.iter().position(|c| c.pid == sender) {
             Some(i) => i,
             None => continue, // message from an unknown pid — ignore
         };
-        handle_client_payload(server, &mut clients[idx], &rx[..n], reload, notify_out);
+        dispatch_client_payload(server,&mut clients[idx],&rx[..n],attachment,reload,notify_out,transfers);
+        transfers.flush();
     }
     Ok(())
 }
@@ -1162,6 +1167,7 @@ fn run_desktop_session(
     first_baseline: Option<settings::Display>,
     pending_reload: bool,
     pointer: &mut PointerSession,
+    transfers: &mut transfer_runtime::Runtime,
 ) -> bool {
     // Load config FIRST: `[display]` must program the video mode BEFORE we query
     // the framebuffer, so bw/bh and every buffer derived from them size to the
@@ -1171,6 +1177,7 @@ fn run_desktop_session(
     // Slice C: `theme`/`ly`/`fx` are `mut` because a gui_settings "reload" signal
     // re-reads the config live and re-seeds them (see the reload block in `loop`).
     let cfg = settings::load_config();
+    transfers.configure(cfg.settings.transfers);
     // Boot-time schema/shape gate (mirrors the live-reload path): a config from a
     // FUTURE schema, or one that parsed to an incoherent shape, is `!valid`. Rather
     // than half-apply an unknown layout we fall back WHOLESALE to the built-in
@@ -1701,7 +1708,10 @@ fn run_desktop_session(
         // then hand each newly-ready client a cascaded, focused window.
         // Idle IPC service may already have queued notifications for this frame.
         let perf_pump = performance.stamp();
-        if let Err(error)=pump_clients(server, clients, &mut reload_requested, &mut notify_requests, &mut performance,None){
+        transfers.input(keyboard_lifecycle.current(),pressed_win.filter(|i|wins[*i].alive&&pointer.state.left()).map(|i|wins[i].pid));
+        for client in clients.iter(){transfers.peer(client.pid,client.features&gui_protocol_v1::wire::FEATURE_DATA_TRANSFER!=0);}
+        transfers.tick(animation_now);
+        if let Err(error)=pump_clients(server, clients, &mut reload_requested, &mut notify_requests, &mut performance,transfers,None){
             libdunit::println(&alloc::format!("gui_server: FAIL protocol pump {}",error));libdunit::exit(1);
         }
         performance.finish(performance::Stage::Pump, perf_pump);
@@ -1807,6 +1817,7 @@ fn run_desktop_session(
                 // Quick-settings + notification policy travel through the same
                 // reload (single source of truth); close any open flyout so a
                 // now-disabled applet can't leave a stale card behind.
+                transfers.configure(ncfg.settings.transfers);
                 quicksettings = ncfg.settings.quicksettings;
                 qs_open = false;
                 active_qs_anchor=None;
@@ -1931,6 +1942,7 @@ fn run_desktop_session(
                 if let Some(app) = apps.apps.get(clients[ci].app as usize) {
                     libdunit::println(&alloc::format!("[GUI-EXIT] app={} kind={} code={}", app.id, st.kind, st.code));
                 }
+                transfers.disconnected(clients[ci].pid);
                 clients.remove(ci);
                 reap_windows_of(
                     pid,
@@ -2373,6 +2385,7 @@ fn run_desktop_session(
                     for wi in [pressed_win, input_focus.filter(|wi| Some(*wi) != pressed_win)].into_iter().flatten() {
                         if wins[wi].alive { send_pointer(clients,wins[wi].pid,IN_LEAVE,0,0, 0, pointer.modifiers); }
                     }
+                    transfers.cancel();
                     drag = None;
                     pressed_win = None;
                     input_focus = None;
@@ -2389,6 +2402,7 @@ fn run_desktop_session(
         pointer.state = m;
         let mx = m.x as i32;
         let my = m.y as i32;
+        transfers.position(mx,my);
         let workspace_input=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);
         let (wx,wy)=desktop_motion::logical_point(workspace_input.rect,mx,my,bw,bh);
         let left = m.left();
@@ -2591,6 +2605,7 @@ fn run_desktop_session(
                     // Click landed on client content: forward it to the client.
                     sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
                     let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_DOWN,x,y, 0, pointer.modifiers);
+                    transfers.begin_press(wins[wi].pid,mx,my);
                     pressed_win = Some(wi);
                 }
             }
@@ -2637,6 +2652,9 @@ fn run_desktop_session(
             }
             c
         };
+        // Preserve the existing client's implicit button grab until a real
+        // transfer takes it over, including a first movement outside its window.
+        let cur=if left&&!transfers.dragging(){pressed_win.filter(|wi|wins[*wi].alive).or(cur)}else{cur};
         if cur != input_focus {
             if let Some(old) = input_focus {
                 if wins[old].alive {
@@ -2646,7 +2664,13 @@ fn run_desktop_session(
             input_focus = cur;
             last_lx = i32::MIN; // force the next motion to be delivered
         }
-        if let Some(wi) = cur {
+        if transfers.dragging() {
+            let hit=cur.map(|wi|{let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);(wins[wi].pid,x,y)});
+            let opener=shell.app_at(mx,my).filter(|index|apps.apps.get(*index).is_some_and(|entry|!entry.open_formats.is_empty()));
+            if let Some(index)=opener{transfers.pointer_opener(index,&apps.apps[index].open_formats,transfers.action(pointer.modifiers),animation_now);}
+            else{transfers.pointer(hit,transfers.action(pointer.modifiers),animation_now);}
+        }
+        if let Some(wi) = cur.filter(|_|!transfers.dragging()) {
             let (lx,ly)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);
             if lx != last_lx || ly != last_ly {
                 send_pointer(clients, wins[wi].pid, IN_MOVE, lx, ly, 0, pointer.modifiers);
@@ -2657,12 +2681,25 @@ fn run_desktop_session(
 
         // --- Button release: deliver UP to the window that captured the press ---
         if release {
-            if let Some(wi) = pressed_win {
+            if transfers.dragging(){
+                if let Some(wi)=transfers.active().and_then(|(_,_,target,_)|target).and_then(|pid|wins.iter().position(|w|w.pid==pid&&w.alive)){
+                    raise_window(&mut z,wi);
+                    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                }
+                transfers.drop_pointer(animation_now);
+                while let Some((index,id))=transfers.take_launch(){
+                    let launched=try_launch(server,clients,&apps,index,current_ws,&mut next_id,ly.max_windows,&mut notifs,&notifications,animation_now);
+                    let pid=if launched{clients.last().map(|client|client.pid)}else{None};
+                    transfers.launch_result(id,pid,animation_now);
+                }
+            }
+            else if let Some(wi) = pressed_win {
                 if wins[wi].alive {
                     let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_UP,x,y, 0, pointer.modifiers);
                 }
             }
             pressed_win = None;
+            transfers.end_press();
         }
         prev_left = left;
         prev_right = right;
@@ -2710,6 +2747,7 @@ fn run_desktop_session(
         }
         while let Some(ev) = libdunit::get_key_event() {
             performance.key();
+            if ev.pressed&&ev.scancode==SC_ESC&&transfers.active().is_some(){transfers.cancel();continue;}
             // Synchronize before every key, not once per frame: a preceding
             // shortcut or switcher commit may already have raised another window.
             sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
@@ -3045,7 +3083,7 @@ fn run_desktop_session(
             desktop_widget_stats.uptime_ticks/desktop_widget_stats.uptime_hz
         }else{0};
         let workspace_damage_view=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);
-        let damage_blocked=menu_open||menu_was_open||qs_open||switcher.active||!notifs.is_empty()
+        let damage_blocked=transfers.active().is_some()||menu_open||menu_was_open||qs_open||switcher.active||!notifs.is_empty()
             ||(menu_closed_at!=0&&animation_now.saturating_sub(menu_closed_at)<damage_duration as u64)
             ||animation::progress(animation_now,ws_switch_tick,damage_duration,lua_ease_out)<255
             ||desktop_tracks.animating(animation_now)||desktop_motion::changed(&workspace_damage_view,bw,bh);
@@ -3367,6 +3405,28 @@ fn run_desktop_session(
             }
         }
 
+        if transfers.dragging() {
+            if let Some((_,source,target,action))=transfers.active(){
+                if let Some(w)=target.and_then(|pid|wins.iter().find(|w|w.pid==pid&&w.alive)){
+                    let g=effects.input_geometry(w,animation_now);let (x,y,ww,hh)=g.outer();
+                    let b=ly.border.max(1);let color=theme.menu_hover;
+                    fill_rect(&mut back,bw,bh,x,y,ww,b,color);fill_rect(&mut back,bw,bh,x,y+hh-b,ww,b,color);
+                    fill_rect(&mut back,bw,bh,x,y,b,hh,color);fill_rect(&mut back,bw,bh,x+ww-b,y,b,hh,color);
+                }
+                if let Some(rect)=transfers.opener().and_then(|index|shell.app_target(index,&apps)){
+                    let(x,y,w,h)=rect;let b=ly.border.max(1);let color=theme.menu_hover;
+                    fill_rect(&mut back,bw,bh,x,y,w,b,color);fill_rect(&mut back,bw,bh,x,y+h-b,w,b,color);
+                    fill_rect(&mut back,bw,bh,x,y,b,h,color);fill_rect(&mut back,bw,bh,x+w-b,y,b,h,color);
+                }
+                let side=ly.panel_font_px.max(1);let gap=ly.border.max(1);
+                let x=mx+side+gap;let y=my+side+gap;
+                if let Some(icon)=wins.iter().find(|w|w.pid==source).and_then(|w|app_icons.get(w.app as usize)).and_then(|i|i.as_ref()){
+                    blit_icon(&mut back,bw,bh,&icon.pixels,icon.width,icon.height,x,y,side,side);
+                }
+                let label=match action{Some(dunit_transfer::Action::Copy)=>"+",Some(dunit_transfer::Action::Move)=>">",Some(dunit_transfer::Action::Link)=>"@",None=>"x"};
+                draw_shell_text(&mut back,bw,bh,font.as_ref(),x+side+gap,y,ly.panel_font_px,theme.panel_text,label.as_bytes());
+            }
+        }
         draw_cursor(&mut back, bw, bh, mx, my);
 
 
@@ -3389,11 +3449,20 @@ fn run_desktop_session(
         for c in clients.iter_mut(){c.dirty=None;c.buffers.copied=0;}
         let perf_done = performance.stamp();
         complete_desktop_frames(server,clients);
+        if transfers.tracing(){for client in clients.iter_mut().filter(|client|client.ready&&client.presented){
+            let size=(client.surf_w,client.surf_h);
+            if client.reported_size!=Some(size){
+                client.reported_size=Some(size);
+                if let Some(app)=apps.apps.get(client.app as usize){libdunit::println(&alloc::format!("[GUI-SIZE] app={} width={} height={}",app.id,size.0,size.1));}
+            }
+        }}
         performance.finish(performance::Stage::FrameDone,perf_done);
         previous_animation_time = animation_now;
         performance.finish(performance::Stage::Work,perf_work);
+        transfers.input(keyboard_lifecycle.current(),pressed_win.filter(|i|wins[*i].alive&&pointer.state.left()).map(|i|wins[i].pid));
+        transfers.flush();
         let deadline=frame_pacing::FrameDeadline::new(frame_start,render.frame_interval_ms);
-        if let Err(error)=frame_runtime::wait_for_frame(deadline,server,clients,&mut reload_requested,&mut notify_requests,&mut performance){
+        if let Err(error)=frame_runtime::wait_for_frame(deadline,server,clients,&mut reload_requested,&mut notify_requests,&mut performance,transfers){
             libdunit::println(&alloc::format!("gui_server: FAIL frame wait {}",error));libdunit::exit(1);
         }
         performance.frame();

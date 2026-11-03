@@ -22,6 +22,8 @@ pub(crate) fn entries(manifests: &[Application]) -> Result<Applications, ConfigE
         }
         result.apps.push(AppEntry {
             kind: app.kind.clone(),
+            open_formats:Vec::new(),
+            arguments:Vec::new(),
             id: app.id.clone(),
             name: app.name.clone(),
             exec: format!("/app/{}", app.binary),

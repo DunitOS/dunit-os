@@ -120,6 +120,7 @@ impl<C: Component> Application<C> {
         if self.blocked_pointer(target) {
             return Ok(true);
         }
+        if event==PointerEvent::Down {self.clipboard_revision=self.clipboard_revision.wrapping_add(1);}
         let mut open = None;
         let mut changed = false;
         if event == PointerEvent::Down && self.focused_input_key() != target {

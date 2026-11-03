@@ -13,6 +13,7 @@ edition = "2021"
 dunit_render = { path = "../../../runtime/dunit-render" }
 dunit_image = { path = "../../dunit_image" }
 libdunit = { path = "../../libdunit" }
+dunit_transfer = { path = "../../../runtime/dunit-transfer" }
 gui_protocol_v1 = { path = "../../../protocols/gui-v1" }
 dwm_settings = { path = "../../dwm_settings" }
 dunit_text = { path = "../../../runtime/dunit-text" }

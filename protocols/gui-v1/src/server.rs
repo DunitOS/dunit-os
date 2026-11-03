@@ -35,7 +35,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::wire::{
-    ErrorCode, Event, Header, Opcode, Request, DIM_MAX, DIM_MIN, FEATURE_ARGB8888, FEATURE_INPUT_LIFECYCLE,
+    ErrorCode, Event, Header, Opcode, Request, DIM_MAX, DIM_MIN, FEATURE_ARGB8888, FEATURE_INPUT_LIFECYCLE, FEATURE_DATA_TRANSFER,
     FORMATS_ARGB8888, FORMATS_XRGB8888, FORMAT_ARGB8888, FORMAT_XRGB8888, MAX_DAMAGE_RECTS,
     POLICY_OPCODE_HI, POLICY_OPCODE_LO, ROLE_TOPLEVEL, VERSION_MAJOR, VERSION_MINOR,
 };
@@ -379,7 +379,7 @@ impl Server {
                 if required_features & !offered_features != 0 {
                     return error(obj, ser, ErrorCode::Malformed, true);
                 }
-                let supported = FEATURE_ARGB8888 | FEATURE_INPUT_LIFECYCLE;
+                let supported = FEATURE_ARGB8888 | FEATURE_INPUT_LIFECYCLE | FEATURE_DATA_TRANSFER;
                 if required_features & !supported != 0 {
                     return error(obj, ser, ErrorCode::Unsupported, true);
                 }

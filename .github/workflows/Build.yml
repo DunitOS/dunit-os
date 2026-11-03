@@ -67,6 +67,8 @@ jobs:
           rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o /tmp/libdunit_pointer_abi.rlib
           rustc --edition=2021 --test kernel/tests/input_geometry.rs --extern dunit_pointer_abi=/tmp/libdunit_pointer_abi.rlib -o /tmp/dunit-input-geometry-test
           /tmp/dunit-input-geometry-test
+          cargo test --manifest-path runtime/dunit-shell/Cargo.toml
+          cargo test --manifest-path runtime/dunit-transfer/Cargo.toml
           cargo test --manifest-path protocols/gui-v1/Cargo.toml
           cargo test --manifest-path runtime/dunit-app-manifest/Cargo.toml
           bash tools/test_dwm_config_host.sh
@@ -80,6 +82,9 @@ jobs:
 
       - name: Image profile and SDK tooling tests
         run: |
+          python3 tools/test_dnd_matrix.py
+          python3 tools/test_transfer_generation.py
+          python3 tools/test_qemu_actions.py
           python3 tools/test_image_profiles.py
           python3 tools/test_dunit_cli.py
 
@@ -117,6 +122,22 @@ jobs:
           python3 tools/test_sdk_gui_fixture.py workspace --accel tcg
           python3 tools/test_sdk_gui_fixture.py list --accel tcg
           python3 tools/test_sdk_gui_fixture.py tree --accel tcg
+
+      - name: Native system clipboard, typed DnD and production application matrix
+        run: |
+          python3 tools/test_sdk_gui_fixture.py transfer --accel tcg
+          (cd kernel && cargo build --release --features boot-smoke-tests \
+            -Z build-std=core,alloc,compiler_builtins \
+            -Z build-std-features=compiler-builtins-mem -Z json-target-spec)
+          python3 tools/qemu_test.py --build --markers-file tools/m6_handle_markers.json \
+            --config limine_test_terminal.conf --accel tcg \
+            --boot-timeout 180 --cmd-timeout 90 --timeout 300
+          python3 tools/test_sdk_gui_fixture.py matrix --accel tcg
+          DUNIT_MATRIX_CASES='gui_files->gui_files' DUNIT_MATRIX_MOVE=1 \
+            python3 tools/test_sdk_gui_fixture.py matrix --accel tcg
+          DUNIT_MATRIX_CASES='gui_files->gui_terminal' DUNIT_MATRIX_QUOTED=1 \
+            python3 tools/test_sdk_gui_fixture.py matrix --accel tcg
+          python3 tools/test_sdk_gui_fixture.py clipboard --accel tcg
 
       - name: Optional desktop catalog compatibility
         run: |

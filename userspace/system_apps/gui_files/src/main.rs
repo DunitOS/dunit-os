@@ -13,30 +13,31 @@
 use core::panic::PanicInfo;
 
 extern crate alloc;
-use gui_protocol_v1::control::{IN_DOWN, IN_KEY, IN_QUIT};
+use gui_protocol_v1::control::{IN_DOWN,IN_UP,IN_MOVE,IN_LEAVE,IN_KEY,IN_SCROLL,IN_FOCUS_IN,IN_FOCUS_OUT};
+use dunit::window::{Window,WindowEvent,PixelFormat};
+mod file_model;
+use file_model::Files;
+mod file_transfer;
+mod filename_editor;
+mod filename_transfer;
+use filename_editor::Editor;
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use gui_protocol_v1::wire::{Request, FEATURE_ARGB8888, MAGIC};
+
 
 use dunit_render::Surface;
 use dunit_style::value::Color;
 use dunit_text::Font;
 
 // Cooked key bytes the compositor forwards in the IN_KEY `button` field.
-const KEY_BACKSPACE: u8 = 0x08;
-const KEY_DEL: u8 = 0x7f;
 const KEY_ENTER_LF: u8 = 0x0a;
 const KEY_ENTER_CR: u8 = 0x0d;
 const KEY_ESC: u8 = 0x1b;
 
-const SURFACE: u64 = 1;
-const BUFFER: u64 = 2;
-const W: u32 = 520;
-const H: u32 = 380;
-const FMT_XRGB8888: u32 = 1;
-const FMT_ARGB8888: u32 = 2;
+const W:u32=520;
+const H:u32=380;
 
 // --- Grid geometry (client-local pixels) ---
 const PAD: i32 = 10;
@@ -98,11 +99,8 @@ fn panic(_: &PanicInfo) -> ! {
     libdunit::exit(101)
 }
 
-fn u64_at(p: &[u8], off: usize) -> u64 {
-    let mut a = [0u8; 8];
-    a.copy_from_slice(&p[off..off + 8]);
-    u64::from_le_bytes(a)
-}
+fn fatal(why:&str,error:isize)->!{libdunit::println(&alloc::format!("gui_files: FAIL {} ({})",why,error));libdunit::exit(1)}
+fn checked<T>(result:dunit::Result<T>,why:&str)->T{result.unwrap_or_else(|e|fatal(why,e.0))}
 
 fn round_i32(v: f32) -> i32 {
     if v <= 0.0 {
@@ -242,245 +240,6 @@ impl Icons {
 }
 
 
-/// One listing entry (owned, so it survives across repaints).
-struct Item {
-    name: String,
-    kind: IconKind,
-}
-
-impl Item {
-    fn is_dir(&self) -> bool {
-        self.kind == IconKind::Folder
-    }
-}
-
-/// File-manager model: current directory, its (capped) entries and selection.
-struct Files {
-    path: String,
-    items: Vec<Item>,
-    /// Selected *item* index (never the ".." cell), or `None`.
-    selected: Option<usize>,
-    /// Full entry count before the on-screen cap, for the status bar.
-    total: usize,
-    /// Copy/cut clipboard: (absolute source path, `true` if cut).
-    clip: Option<(String, bool)>,
-    /// Live surface size in px. The compositor can resize us via a server-pushed
-    /// CONFIGURE, so the grid geometry (columns/rows/cap) derives from these.
-    w: i32,
-    h: i32,
-    /// Config-resolved color scheme (chrome + selection wash).
-    pal: Palette,
-    /// Per-frame base clear color, carrying the configured `bg_alpha` (a value
-    /// < 255 lets the wallpaper show through the file-manager background).
-    clear_bg: Color,
-    /// Negotiated pixel format: `FMT_XRGB8888` when opaque, `FMT_ARGB8888` when
-    /// the base carries alpha. Threaded into every ImportBuffer.
-    fmt: u32,
-}
-
-impl Files {
-    fn new(pal: Palette, clear_bg: Color, fmt: u32) -> Files {
-        let mut f = Files {
-            path: String::from("/"),
-            items: Vec::new(),
-            selected: None,
-            total: 0,
-            clip: None,
-            w: W as i32,
-            h: H as i32,
-            pal,
-            clear_bg,
-            fmt,
-        };
-        f.reload();
-        f
-    }
-
-    /// Columns that fit across the current surface width (at least one).
-    fn cols(&self) -> i32 {
-        ((self.w - 2 * PAD) / CELL_W).max(1)
-    }
-
-    /// Rows that fit between the header and status bar (at least one).
-    fn rows(&self) -> i32 {
-        ((self.h - HEADER_H - STATUS_H) / CELL_H).max(1)
-    }
-
-    /// Number of grid cells visible at the current size (columns × rows).
-    fn cap(&self) -> usize {
-        (self.cols() * self.rows()) as usize
-    }
-
-    /// Whether a ".." parent cell precedes the entries (everywhere but root).
-    fn has_parent(&self) -> bool {
-        self.path != "/"
-    }
-
-    /// Re-read the current directory (directories first, capped to the grid).
-    fn reload(&mut self) {
-        self.items.clear();
-        self.selected = None;
-        let mut raw = [libdunit::DirEntry::empty(); 64];
-        let n = libdunit::readdir(&self.path, &mut raw);
-        if n < 0 {
-            self.total = 0;
-            return;
-        }
-        let exec_dir = self.path == "/app";
-        let mut dirs: Vec<Item> = Vec::new();
-        let mut files: Vec<Item> = Vec::new();
-        for e in raw.iter().take(n as usize) {
-            let is_dir = e.file_type == libdunit::FILE_TYPE_DIRECTORY;
-            let name = String::from(e.name());
-            let kind = classify(&name, is_dir, exec_dir);
-            let item = Item { name, kind };
-            if is_dir {
-                dirs.push(item);
-            } else {
-                files.push(item);
-            }
-        }
-        self.total = dirs.len() + files.len();
-        let cap_items = self.cap().saturating_sub(self.has_parent() as usize);
-        for it in dirs.into_iter().chain(files.into_iter()) {
-            if self.items.len() >= cap_items {
-                break;
-            }
-            self.items.push(it);
-        }
-    }
-
-    /// Navigate to the parent directory (no-op at root).
-    fn go_parent(&mut self) {
-        if self.path == "/" {
-            return;
-        }
-        let bytes = self.path.as_bytes();
-        let mut cut = bytes.len();
-        while cut > 1 && bytes[cut - 1] != b'/' {
-            cut -= 1;
-        }
-        let new_len = if cut <= 1 { 1 } else { cut - 1 };
-        self.path.truncate(new_len);
-        self.reload();
-    }
-
-    /// Enter entry `idx` if it is a directory (files are ignored for now).
-    fn open(&mut self, idx: usize) {
-        if idx >= self.items.len() || !self.items[idx].is_dir() {
-            return;
-        }
-        if self.path != "/" {
-            self.path.push('/');
-        }
-        let name = self.items[idx].name.clone();
-        self.path.push_str(&name);
-        self.reload();
-    }
-
-    /// Absolute path of a child `name` in the current directory.
-    fn child_path(&self, name: &str) -> String {
-        dunit_widgets::file_browser::child_path(&self.path, name)
-    }
-
-    /// Absolute path of the selected entry, if any.
-    fn selected_path(&self) -> Option<String> {
-        self.selected.map(|i| self.child_path(&self.items[i].name))
-    }
-
-    /// Create a directory `name` in the current directory, then reload.
-    fn make_dir(&mut self, name: &str) {
-        if !name.is_empty() {
-            libdunit::mkdir(&self.child_path(name));
-            self.reload();
-        }
-    }
-
-    /// Rename the selected entry to `new`, then reload.
-    fn rename_selected(&mut self, new: &str) {
-        if new.is_empty() {
-            return;
-        }
-        if let Some(i) = self.selected {
-            let old = self.child_path(&self.items[i].name);
-            libdunit::rename(&old, &self.child_path(new));
-            self.reload();
-        }
-    }
-
-    /// Delete the selected entry (files only — the kernel refuses directories),
-    /// then reload.
-    fn delete_selected(&mut self) {
-        if let Some(p) = self.selected_path() {
-            libdunit::unlink(&p);
-            self.reload();
-        }
-    }
-
-    /// Put the selected entry on the clipboard (`cut` marks a move).
-    fn clip_selected(&mut self, cut: bool) {
-        if let Some(p) = self.selected_path() {
-            self.clip = Some((p, cut));
-        }
-    }
-
-    /// Paste the clipboard entry into the current directory. A cut is a rename
-    /// (move); a copy duplicates the file's bytes. Reloads afterwards.
-    fn paste(&mut self) {
-        let (src, cut) = match self.clip.clone() {
-            Some(c) => c,
-            None => return,
-        };
-        let base = basename(&src);
-        let dst = self.child_path(base);
-        if src == dst {
-            return;
-        }
-        if cut {
-            libdunit::rename(&src, &dst);
-            self.clip = None;
-        } else {
-            copy_file(&src, &dst);
-        }
-        self.reload();
-    }
-}
-
-/// The final path component of `path` (after the last '/').
-fn basename(path: &str) -> &str {
-    match path.rfind('/') {
-        Some(i) => &path[i + 1..],
-        None => path,
-    }
-}
-
-/// Copy the file at `src` to `dst` byte-for-byte (best-effort; directories and
-/// read/create failures are silently skipped — the caller reloads regardless).
-fn copy_file(src: &str, dst: &str) {
-    let rf = libdunit::open(src, libdunit::OPEN_READ);
-    if rf < 0 {
-        return;
-    }
-    let rf = rf as usize;
-    let wf = libdunit::open(dst, libdunit::OPEN_CREATE | libdunit::OPEN_WRITE | libdunit::OPEN_TRUNC);
-    if wf < 0 {
-        libdunit::close(rf);
-        return;
-    }
-    let wf = wf as usize;
-    let mut chunk = [0u8; 512];
-    loop {
-        let n = libdunit::read(rf, &mut chunk);
-        if n <= 0 {
-            break;
-        }
-        libdunit::write(wf, &chunk[..n as usize]);
-    }
-    libdunit::close(rf);
-    libdunit::close(wf);
-}
-
-
 fn push_u32(d: &mut String, mut v: u32) {
     if v == 0 {
         d.push('0');
@@ -501,11 +260,10 @@ fn push_u32(d: &mut String, mut v: u32) {
 
 /// Paint the whole window: header breadcrumb, icon grid, status bar, and any
 /// active overlay (context menu / text-entry / delete-confirm).
-fn render(px: *mut u8, font: &Font, files: &Files, icons: &Icons, mode: &Mode) {
+fn render(pixels:&mut[u32], font: &Font, files: &Files, icons: &Icons, mode: &Mode) {
     let w = files.w;
     let h = files.h;
     let cols = files.cols();
-    let pixels = unsafe { core::slice::from_raw_parts_mut(px as *mut u32, (w * h) as usize) };
     let mut s = Surface::new(pixels, w as usize, h as usize);
 
     // Straight-alpha base: `clear` writes the configured bg (with its alpha)
@@ -521,9 +279,11 @@ fn render(px: *mut u8, font: &Font, files: &Files, icons: &Icons, mode: &Mode) {
     // Grid of cells: an optional ".." parent cell, then the entries.
     let has_parent = files.has_parent();
     let cell_count = files.items.len() + has_parent as usize;
-    for ci in 0..cell_count {
-        let col = (ci as i32) % cols;
-        let row = (ci as i32) / cols;
+    let start=files.scroll_row*cols as usize;
+    for ci in start..cell_count.min(start+files.cap()) {
+        let visible=ci-start;
+        let col = (visible as i32) % cols;
+        let row = (visible as i32) / cols;
         let cx = PAD + col * CELL_W;
         let cy = HEADER_H + row * CELL_H;
 
@@ -532,7 +292,7 @@ fn render(px: *mut u8, font: &Font, files: &Files, icons: &Icons, mode: &Mode) {
         } else {
             let ii = ci - has_parent as usize;
             let it = &files.items[ii];
-            (it.name.clone(), it.kind, files.selected == Some(ii))
+            (it.name.clone(), it.kind, files.selected(ii))
         };
 
         if is_sel {
@@ -566,20 +326,29 @@ fn render(px: *mut u8, font: &Font, files: &Files, icons: &Icons, mode: &Mode) {
         push_u32(&mut status, files.items.len() as u32);
         status.push_str(" shown)");
     }
-    if let Some(ii) = files.selected {
+    if let Some(ii) = files.current_index() {
         if ii < files.items.len() {
             status.push_str("  \u{2022}  ");
             status.push_str(&files.items[ii].name);
         }
     }
+    if !files.status.is_empty(){status=files.status.clone();}
+    if files.selection.selected.len()>1{status.push_str(&alloc::format!("  [{} selected]",files.selection.selected.len()));}
     let sb = fit_label(font, &status, 12.0, (w - 2 * PAD) as f32);
     draw_text(&mut s, font, PAD, h - 7, 12.0, &sb, files.pal.muted);
 
     // Overlays on top of the base view.
     match mode {
         Mode::Browse => {}
+        Mode::Preview=>{if let Some(preview)=&files.preview{
+            s.clear(files.clear_bg);draw_text(&mut s,font,PAD,22,14.0,&preview.path,files.pal.accent);
+            for (row,line) in preview.text.lines().skip(preview.row).take(((h-60)/18).max(0)as usize).enumerate(){
+                let shown=fit_label(font,line,12.0,(w-2*PAD)as f32);draw_text(&mut s,font,PAD,48+row as i32*18,12.0,&shown,files.pal.label);
+            }
+            draw_text(&mut s,font,PAD,h-8,11.0,"Read-only preview  •  Ctrl+C copy text  •  Esc close",files.pal.muted);
+        }},
         Mode::Menu { mx, my } => draw_menu(&mut s, font, files, *mx, *my),
-        Mode::Text { rename, buf } => draw_text_box(&mut s, font, &files.pal, w, h, *rename, buf),
+        Mode::Text { rename, editor } => draw_text_box(&mut s, font, &files.pal, w, h, *rename, editor),
         Mode::Confirm => draw_confirm(&mut s, font, files),
     }
 }
@@ -602,7 +371,7 @@ fn hit_cell(files: &Files, lx: i32, ly: i32) -> Option<Hit> {
     if col < 0 || col >= cols || row < 0 || row >= files.rows() {
         return None;
     }
-    let ci = (row * cols + col) as usize;
+    let ci = (row * cols + col) as usize+files.scroll_row*cols as usize;
     let has_parent = files.has_parent();
     if ci >= files.items.len() + has_parent as usize {
         return None;
@@ -619,8 +388,9 @@ fn hit_cell(files: &Files, lx: i32, ly: i32) -> Option<Hit> {
 enum Mode {
     Browse,
     Menu { mx: i32, my: i32 },
-    Text { rename: bool, buf: String },
+    Text { rename: bool, editor: Editor },
     Confirm,
+    Preview,
 }
 
 /// A context-menu command.
@@ -652,11 +422,12 @@ const DLG_W: i32 = 320;
 const DLG_H: i32 = 96;
 
 /// Whether `a` is applicable given the current selection / clipboard state.
-fn action_enabled(a: Action, files: &Files) -> bool {
-    match a {
-        Action::NewFolder => true,
-        Action::Rename | Action::Delete | Action::Copy | Action::Cut => files.selected.is_some(),
-        Action::Paste => files.clip.is_some(),
+fn action_enabled(action:Action,files:&Files)->bool{
+    match action{
+        Action::NewFolder|Action::Paste=>files.can_write(),
+        Action::Rename=>files.can_write()&&files.single_index().is_some(),
+        Action::Delete=>files.can_write()&&!files.selection.selected.is_empty(),
+        Action::Copy=>files.can_export(false),Action::Cut=>files.can_export(true),
     }
 }
 
@@ -705,7 +476,7 @@ fn draw_dialog(s: &mut Surface, pal: &Palette, w: i32, h: i32) -> (i32, i32) {
 }
 
 /// Draw the text-entry overlay (New Folder / Rename) with the current buffer.
-fn draw_text_box(s: &mut Surface, font: &Font, pal: &Palette, w: i32, h: i32, rename: bool, buf: &str) {
+fn draw_text_box(s: &mut Surface, font: &Font, pal: &Palette, w: i32, h: i32, rename: bool, editor: &Editor) {
     let (ox, oy) = draw_dialog(s, pal, w, h);
     let title = if rename { "Rename to:" } else { "New folder name:" };
     draw_text(s, font, ox + 14, oy + 26, 14.0, title, pal.accent);
@@ -715,10 +486,16 @@ fn draw_text_box(s: &mut Surface, font: &Font, pal: &Palette, w: i32, h: i32, re
     let fw = DLG_W - 28;
     s.fill_rect(fx as f32, fy as f32, fw as f32, 22.0, pal.bg);
     s.stroke_rect(fx as f32, fy as f32, fw as f32, 22.0, 1.0, pal.muted);
-    let shown = fit_label(font, buf, 13.0, (fw - 12) as f32);
+    let shown = fit_label(font, editor.text(), 13.0, (fw - 12) as f32);
+    let selection=editor.selection();
+    if !selection.is_empty(){
+        let left=text_width(font,&editor.text()[..selection.start],13.0).min((fw-12)as f32);
+        let right=text_width(font,&editor.text()[..selection.end],13.0).min((fw-12)as f32);
+        s.fill_rect((fx+6)as f32+left,(fy+3)as f32,(right-left).max(0.0),16.0,pal.sel_bg);
+    }
     draw_text(s, font, fx + 6, fy + 16, 13.0, &shown, pal.label);
     // Caret after the text.
-    let cw = text_width(font, &shown, 13.0);
+    let cw = text_width(font, &editor.text()[..editor.cursor()], 13.0).min((fw - 12) as f32);
     let cx = fx + 6 + round_i32(cw);
     s.fill_rect(cx as f32, (fy + 4) as f32, 1.0, 14.0, pal.label);
     draw_text(s, font, ox + 14, oy + DLG_H - 10, 11.0, "[Enter] ok   [Esc] cancel", pal.muted);
@@ -728,8 +505,7 @@ fn draw_text_box(s: &mut Surface, font: &Font, pal: &Palette, w: i32, h: i32, re
 fn draw_confirm(s: &mut Surface, font: &Font, files: &Files) {
     let (ox, oy) = draw_dialog(s, &files.pal, files.w, files.h);
     draw_text(s, font, ox + 14, oy + 26, 14.0, "Delete this file?", files.pal.accent);
-    let name = files
-        .selected
+    let name = files.current_index()
         .and_then(|i| files.items.get(i))
         .map(|it| it.name.as_str())
         .unwrap_or("");
@@ -739,100 +515,16 @@ fn draw_confirm(s: &mut Surface, font: &Font, files: &Files) {
 }
 
 
-/// Re-negotiate the surface at a new size after a server-pushed CONFIGURE: back
-/// a FRESH kernel buffer of `new_w*new_h`, re-read the directory at the new cell
-/// cap, render into the new buffer, then replay the buffer half of the handshake
-/// with a NEW object id (the compositor's freshness gate rejects a re-used id).
-/// Returns the new `(handle, mapped ptr)`; the caller releases the OLD mapping and handle on success.
-/// `serial` advances so every request keeps a unique, increasing client serial.
-#[allow(clippy::too_many_arguments)]
-fn resize_surface(
-    compositor: u32,
-    font: &Font,
-    files: &mut Files,
-    icons: &Icons,
-    mode: &Mode,
-    new_w: u32,
-    new_h: u32,
-    obj: u64,
-    token: u64,
-    serial: &mut u64,
-) -> Option<(u32, *mut u8)> {
-    let bytes = (new_w as usize).checked_mul(new_h as usize)?.checked_mul(4)?;
-    if new_w == 0 || new_h == 0 || bytes > 64 * 1024 * 1024 { return None; }
-    let nb = libdunit::handle_create_shared(bytes);
-    if nb <= 0 {
-        libdunit::println(&alloc::format!("gui_files: resize create bytes={} errno={}", bytes, nb));
-        return None;
-    }
-    let nb = nb as u32;
-    let mapped = libdunit::handle_map(nb, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println(&alloc::format!("gui_files: resize map bytes={} errno={}", bytes, mapped));
-        libdunit::handle_close(nb);
-        return None;
-    }
-    let npx = mapped as usize as *mut u8;
-
-    // ACK the new configure token so the compositor accepts our next COMMIT.
-
-    // Transfer the fresh buffer (read-only) and announce {handle, size, object}.
-    let dup = libdunit::handle_dup(
-        nb,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        if dup > 0 { libdunit::handle_close(dup as u32); }
-        libdunit::shared_buffer::release(nb, mapped as usize, bytes);
-        return None;
-    }
-    // Adopt the new geometry and re-cap the listing to the new grid, then paint.
-    files.w = new_w as i32;
-    files.h = new_h as i32;
-    files.reload();
-    render(npx, font, files, icons, mode);
-
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &ack);
-
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: obj as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // IMPORT (fresh object id) / ATTACH / COMMIT (new token).
-    let import = Request::ImportBuffer {
-        width: new_w,
-        height: new_h,
-        stride: new_w * 4,
-        format: files.fmt,
-        offset: 0,
-    }
-    .encode(obj, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &import);
-    let attach = Request::AttachBuffer { buffer: obj, damage: Vec::new() }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &attach);
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(SURFACE, *serial);
-    *serial += 1;
-    libdunit::ipc_send(compositor, &commit);
-
-    // The caller releases its previous mapping only after adopting this result.
-    Some((nb, npx))
+fn paint(window:&mut Window,files:&mut Files,font:&Font,icons:&Icons,mode:&Mode){
+    checked(window.draw(|frame|{
+        let (w,h)=frame.size();files.w=w as i32;files.h=h as i32;files.clamp_scroll();
+        render(frame.pixels_mut(),font,files,icons,mode);
+    }),"present frame");
 }
 
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnvp) -> ! {
+    libdunit::init_runtime(argc,argv,envp);
     // 0) Load this app's config (apps/gui_files.toml). A missing/garbage file
     // yields the built-in baseline. The resolved values below actually drive the
     // color scheme, icon theme and background transparency (config→behavior).
@@ -859,7 +551,7 @@ pub extern "C" fn _start() -> ! {
         sel_bg: col(fcfg.sel_bg),
     };
     let clear_bg = col((fcfg.bg_alpha << 24) | (fcfg.bg & 0x00FF_FFFF));
-    let fmt = if fcfg.bg_alpha < 255 { FMT_ARGB8888 } else { FMT_XRGB8888 };
+    let fmt = if fcfg.bg_alpha < 255 { PixelFormat::Argb8888 } else { PixelFormat::Xrgb8888 };
     // Icon theme: the per-app `[files] icon_theme` override, else the shared
     // `[desktop] icon_theme`; the shared loader resolves the configured source.
     let icon_theme = if fcfg.icon_theme.as_str().is_empty() {
@@ -868,336 +560,145 @@ pub extern "C" fn _start() -> ! {
         fcfg.icon_theme
     };
 
-    // 1) Handshake: compositor pid + our client id (id is a tint hint only).
-    let mut m = [0u8; 8];
-    if libdunit::ipc_recv_blocking(&mut m, 0) < 8 {
-        libdunit::println("gui_files: FAIL recv handshake");
-        libdunit::exit(1);
-    }
-    let compositor = u32::from_le_bytes([m[0], m[1], m[2], m[3]]);
-
-    // 2) Create + map our own shared buffer.
-    let bytes = (W * H * 4) as usize;
-    let buf = libdunit::handle_create_shared(bytes);
-    if buf <= 0 {
-        libdunit::println("gui_files: FAIL create buffer");
-        libdunit::exit(2);
-    }
-    let buf = buf as u32;
-    let mapped = libdunit::handle_map(buf, 0, bytes);
-    if mapped <= 0 {
-        libdunit::println("gui_files: FAIL map buffer");
-        libdunit::exit(3);
-    }
-    let mut px = mapped as usize as *mut u8;
-    let font = match load_font() {
-        Ok(f) => f,
-        Err(_) => {
-            libdunit::println("gui_files: FAIL font parse");
-            libdunit::exit(7);
+    let font=load_font().unwrap_or_else(|_|fatal("font parse",libdunit::EINVAL));
+    let icons=Icons::load(icon_theme.as_str());
+    let mut files=Files::new(pal,clear_bg);
+    if let Some(path)=libdunit::arg(1){
+        match dunit::transfer::File::open(path,true).or_else(|error|{
+            if matches!(error.0,libdunit::EPERM|libdunit::EACCES){dunit::transfer::File::open(path,false)}else{Err(error)}
+        }).and_then(|file|files.open_initial(file)){
+            Ok(())=>{},Err(error)=>files.error("Initial path",error),
         }
-    };
-    let icons = Icons::load(icon_theme.as_str());
-    let mut files = Files::new(pal, clear_bg, fmt);
-    let mut mode = Mode::Browse;
-    // The surface's live geometry. The compositor may resize us via a
-    // server-pushed CONFIGURE, so track it rather than reusing the W/H consts.
-    let mut cur_buf = buf;
-    let mut cur_w = W;
-    let mut cur_h = H;
-    render(px, &font, &files, &icons, &mode);
-
-    let mut rx = [0u8; 256];
-
-    // 3) HELLO -> WELCOME.
-    let hello = Request::Hello {
-        min_minor: 0,
-        max_minor: 0,
-        offered_features: FEATURE_ARGB8888,
-        required_features: 0,
     }
-    .encode(0, 1);
-    libdunit::ipc_send(compositor, &hello);
-    if libdunit::ipc_recv_blocking(&mut rx, 0) <= 0 {
-        libdunit::println("gui_files: FAIL welcome");
-        libdunit::exit(4);
-    }
-
-    // 4) CREATE_SURFACE -> RESULT + CONFIGURE (capture the configure token).
-    let create =
-        Request::CreateSurface { role: 1, width: W, height: H, format: fmt }.encode(SURFACE, 2);
-    libdunit::ipc_send(compositor, &create);
-    libdunit::ipc_recv_blocking(&mut rx, 0); // RESULT
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0); // CONFIGURE
-    let token = if n >= 32 { u64_at(&rx, 24) } else { 0 };
-
-    // 5) ACK_CONFIGURE -> RESULT.
-    let ack = Request::AckConfigure { configure: token }.encode(SURFACE, 3);
-    libdunit::ipc_send(compositor, &ack);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-
-    // 6) Transfer the buffer capability (read-only) and announce it.
-    let dup = libdunit::handle_dup(
-        buf,
-        libdunit::RIGHT_READ | libdunit::RIGHT_MAP | libdunit::RIGHT_TRANSFER,
-    );
-    let ch = if dup > 0 {
-        libdunit::handle_transfer(dup as u32, compositor)
-    } else {
-        -1
-    };
-    if ch <= 0 {
-        libdunit::println("gui_files: FAIL cap transfer");
-        libdunit::exit(5);
-    }
-    let ann = gui_protocol_v1::control::Capability {
-        handle: ch as u32,
-        advertised_bytes: bytes as u32,
-        object: BUFFER as u32,
-    }
-    .encode();
-    libdunit::ipc_send(compositor, &ann);
-
-    // 7) IMPORT / ATTACH / COMMIT (each -> RESULT).
-    let import =
-        Request::ImportBuffer { width: W, height: H, stride: W * 4, format: fmt, offset: 0 }
-            .encode(BUFFER, 4);
-    libdunit::ipc_send(compositor, &import);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let attach = Request::AttachBuffer { buffer: BUFFER, damage: alloc::vec::Vec::new() }.encode(SURFACE, 5);
-    libdunit::ipc_send(compositor, &attach);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-    let commit = Request::Commit { configure: token, frame_callback: 1 }.encode(SURFACE, 6);
-    libdunit::ipc_send(compositor, &commit);
-    libdunit::ipc_recv_blocking(&mut rx, 0);
-
-    // 8) FRAME_DONE from the compositor's composition tick.
-    let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-    let ok = n >= 32 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8021;
-    if ok {
-        libdunit::println("gui_files: surface presented OK");
-    } else {
-        libdunit::println("gui_files: FAIL no frame done");
-        libdunit::handle_close(buf);
-        libdunit::exit(6);
-    }
-
-    // 9) Interactive loop. Left-click selects / opens; the ".." cell navigates
-    //    up. Right-click (button=1) opens a context menu whose rows drive the
-    //    file operations (New Folder / Rename / Delete / Copy / Cut / Paste).
-    //    Text-entry and delete-confirm overlays consume IN_KEY. Any state change
-    //    repaints the buffer.
-    let mut next_obj: u64 = 3; // fresh buffer object id per resize (> import id 2)
-    let mut serial: u64 = 7; // client request serial, continues past the handshake
+    let mut window=checked(Window::open_format(W,H,fmt),"window handshake");
+    let mut mode=Mode::Browse;
+    let mut text_revision=0u64;
+    let mut clipboard=dunit::text_clipboard::Session::<filename_editor::Snapshot>::default();
+    paint(&mut window,&mut files,&font,&icons,&mode);
+    libdunit::println("gui_files: surface presented OK");
+    let mut transfers=file_transfer::Transfers::start();
+    checked(checked(window.transfers(),"opener client").register_opener(dunit::transfer::Offer{formats:alloc::vec![dunit::transfer::Format::Files],actions:1,preferred:dunit::transfer::Action::Copy}).map_err(|e|dunit::Error(e.0)),"register opener");
+    let mut filename_drag=filename_transfer::Transfers::default();
+    let mut queued_event=None;let mut pending_repaint=false;let mut batch=0;
     loop {
-        let n = libdunit::ipc_recv_blocking(&mut rx, 0);
-        if n < 8 {
-            continue;
-        }
-        let magic = u32::from_le_bytes([rx[0], rx[1], rx[2], rx[3]]);
-        // Server-pushed CONFIGURE (opcode 0x8010): the compositor resized us
-        // (maximize/restore). Re-negotiate a fresh buffer at the new geometry,
-        // then keep browsing at the new grid size.
-        if magic == MAGIC && n >= 48 && u16::from_le_bytes([rx[8], rx[9]]) == 0x8010 {
-            let tok = u64_at(&rx, 24);
-            let nw = u32::from_le_bytes([rx[32], rx[33], rx[34], rx[35]]);
-            let nh = u32::from_le_bytes([rx[36], rx[37], rx[38], rx[39]]);
-            if nw == 0 || nh == 0 || (nw == cur_w && nh == cur_h) {
-                let ack = Request::AckConfigure { configure: tok }.encode(SURFACE, serial);
-                serial += 1;
-                libdunit::ipc_send(compositor, &ack);
-            } else if let Some((nb, npx)) = resize_surface(
-                compositor, &font, &mut files, &icons, &mode, nw, nh, next_obj, tok,
-                &mut serial,
-            ) {
-                libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
-                cur_buf = nb;
-                px = npx;
-                cur_w = nw;
-                cur_h = nh;
-                next_obj += 1;
-                libdunit::println("gui_files: reconfigured OK");
-            }
-            continue;
-        }
-        let Some(input) = gui_protocol_v1::control::Input::decode(&rx[..n as usize]) else {
-            continue;
-        };
-        let kind = input.kind;
-        if kind == IN_QUIT {
-            break;
-        }
-        let lx = input.x;
-        let ly = input.y;
-        let button = input.value as i32;
-        let mut dirty = false;
-
-        if kind == IN_DOWN {
-            // Snapshot the mode kind so we can freely reassign `mode` below.
-            enum Mk {
-                Browse,
-                Menu(i32, i32),
-                Text,
-                Confirm,
-            }
-            let mk = match &mode {
-                Mode::Browse => Mk::Browse,
-                Mode::Menu { mx, my } => Mk::Menu(*mx, *my),
-                Mode::Text { .. } => Mk::Text,
-                Mode::Confirm => Mk::Confirm,
-            };
-            match mk {
-                Mk::Browse => {
-                    if button == 1 {
-                        // Right-click: select the cell under the cursor (if any)
-                        // so item-specific actions target it, then open the menu.
-                        if let Some(Hit::Item(ii)) = hit_cell(&files, lx, ly) {
-                            files.selected = Some(ii);
-                        }
-                        mode = Mode::Menu { mx: lx, my: ly };
-                        dirty = true;
-                    } else {
-                        match hit_cell(&files, lx, ly) {
-                            Some(Hit::Parent) => {
-                                files.go_parent();
-                                dirty = true;
+        checked(transfers.sync(&mut window,&mode,&files),"drop target registration");
+        let event=if let Some(event)=queued_event.take(){Some(event)}else{checked(window.next_event(dunit::time::Duration::from_millis(if transfers.copying(){0}else{40})),"window event")};
+        let mut dirty=false;
+        match event {
+            Some(WindowEvent::CloseRequested)=>break,
+            Some(WindowEvent::Resized{..})=>{transfers.cancel_candidate();dirty=true;libdunit::println("gui_files: reconfigured OK");},
+            Some(WindowEvent::Transfer(mut event))=>{
+                if event.message.kind==dunit::transfer::Kind::OpenData{
+                    let result=event.payload.take().ok_or(dunit::transfer::Error(libdunit::EINVAL)).and_then(|payload|files.open_received(payload.files));
+                    let status=if result.is_ok(){dunit::transfer::Status::Ok}else{dunit::transfer::Status::Failed};
+                    if let Err(error)=result{files.error("Open document",error);}
+                    checked(checked(window.transfers(),"opener client").complete(event.message.transfer,status).map_err(|e|dunit::Error(e.0)),"complete open");
+                    mode=if files.preview.is_some(){Mode::Preview}else{Mode::Browse};dirty=true;
+                }
+                dirty|=checked(clipboard.event(checked(window.transfers(),"clipboard client"),&event,|snapshot,text|{
+                    Ok(match &mut mode{Mode::Text{editor,..} if snapshot.current(editor,text_revision)=>editor.insert(text),_=>false})
+                }),"filename clipboard");
+                if dirty{text_revision=text_revision.wrapping_add(1);}
+                dirty|=checked(filename_drag.event(&mut window,&mut mode,text_revision,&files,&font,&event),"filename drop");
+                let status=files.status.clone();let generation=files.generation;
+                let repaint=!matches!(event.message.kind,dunit::transfer::Kind::DragMotion|dunit::transfer::Kind::DragEnter|dunit::transfer::Kind::DragLeave);
+                checked(transfers.event(&mut window,&mut files,event),"transfer event");
+                dirty|=repaint||status!=files.status||generation!=files.generation;
+            },
+            Some(WindowEvent::Input(input))=>{
+                let kind=input.kind;let (x,y)=(input.x,input.y);let mods=input.y as u8;let ascii=input.value as u8;
+                if checked(filename_drag.pointer(&mut window,&mut mode,&files,&font,&input,text_revision),"filename pointer"){
+                    text_revision=text_revision.wrapping_add(1);paint(&mut window,&mut files,&font,&icons,&mode);continue;
+                }
+                if kind==IN_FOCUS_IN||kind==IN_FOCUS_OUT{transfers.focus(kind==IN_FOCUS_IN);text_revision=text_revision.wrapping_add(1);}
+                else if kind==IN_LEAVE{transfers.cancel_candidate();}
+                else if kind==IN_SCROLL&&matches!(mode,Mode::Preview){if let Some(preview)=&mut files.preview{preview.row=(preview.row as i64+i64::from(input.x)).clamp(0,preview.text.lines().count().saturating_sub(1)as i64)as usize;}dirty=true;}
+                else if kind==IN_SCROLL&&matches!(mode,Mode::Browse){files.scroll(input.x);dirty=true;}
+                else if kind==IN_MOVE&&matches!(mode,Mode::Browse){transfers.motion(&mut window,&mut files,x,y);}
+                else if kind==IN_UP&&input.pointer_button()==0&&matches!(mode,Mode::Browse){
+                    if let Some((was_selected,index))=transfers.release(){if was_selected&&files.selection.selected.len()==1&&input.pointer_modifiers()==0{files.open(index);dirty=true;}}
+                }
+                else if kind==IN_DOWN{
+                    if let Mode::Menu{mx,my}=&mode{
+                        let action=menu_hit(files.w,files.h,*mx,*my,x,y).map(|row|MENU_ACTIONS[row].0);mode=Mode::Browse;
+                        if let Some(action)=action.filter(|a|action_enabled(*a,&files)){
+                            match action{
+                                Action::NewFolder=>mode=Mode::Text{rename:false,editor:Editor::new(String::new())},
+                                Action::Rename=>mode=Mode::Text{rename:true,editor:Editor::new(files.single_index().map(|i|files.items[i].name.clone()).unwrap_or_default())},
+                                Action::Delete=>mode=Mode::Confirm,
+                                Action::Copy=>transfers.publish(&mut window,&mut files,false),
+                                Action::Cut=>transfers.publish(&mut window,&mut files,true),
+                                Action::Paste=>transfers.paste(&mut window,&mut files),
                             }
-                            Some(Hit::Item(ii)) => {
-                                if files.selected == Some(ii) && files.items[ii].is_dir() {
-                                    files.open(ii);
-                                } else {
-                                    files.selected = Some(ii);
-                                }
-                                dirty = true;
-                            }
-                            None => {
-                                if files.selected.is_some() {
-                                    files.selected = None;
-                                    dirty = true;
-                                }
+                        }text_revision=text_revision.wrapping_add(1);dirty=true;
+                    }else if matches!(mode,Mode::Browse){
+                        if input.pointer_button()==1{
+                            if let Some(Hit::Item(index))=hit_cell(&files,x,y){if !files.selected(index){files.choose(index,0);}}
+                            mode=Mode::Menu{mx:x,my:y};dirty=true;
+                        }else if input.pointer_button()==0{
+                            match hit_cell(&files,x,y){
+                                Some(Hit::Parent)=>{files.go_parent();dirty=true;},
+                                Some(Hit::Item(index))=>{
+                                    let was_selected=files.selected(index);let modifiers=input.pointer_modifiers();
+                                    if !was_selected||modifiers!=0{files.choose(index,modifiers);}
+                                    transfers.press(&files,index,x,y,was_selected&&modifiers==0);dirty=true;
+                                },
+                                None=>{files.clear_selection();dirty=true;},
                             }
                         }
                     }
                 }
-                Mk::Menu(mx, my) => {
-                    match menu_hit(files.w, files.h, mx, my, lx, ly) {
-                        Some(row) => {
-                            let (action, _) = MENU_ACTIONS[row];
-                            if action_enabled(action, &files) {
-                                match action {
-                                    Action::NewFolder => {
-                                        mode = Mode::Text { rename: false, buf: String::new() };
-                                    }
-                                    Action::Rename => {
-                                        let cur = files
-                                            .selected
-                                            .map(|i| files.items[i].name.clone())
-                                            .unwrap_or_default();
-                                        mode = Mode::Text { rename: true, buf: cur };
-                                    }
-                                    Action::Delete => mode = Mode::Confirm,
-                                    Action::Copy => {
-                                        files.clip_selected(false);
-                                        mode = Mode::Browse;
-                                    }
-                                    Action::Cut => {
-                                        files.clip_selected(true);
-                                        mode = Mode::Browse;
-                                    }
-                                    Action::Paste => {
-                                        files.paste();
-                                        mode = Mode::Browse;
-                                    }
-                                }
-                            } else {
-                                mode = Mode::Browse;
-                            }
-                            dirty = true;
-                        }
-                        None => {
-                            // Click outside the menu dismisses it.
-                            mode = Mode::Browse;
-                            dirty = true;
-                        }
+                else if kind==IN_KEY{
+                    let mut transition=None;
+                    match &mut mode{
+                        Mode::Text{rename,editor}=>{
+                            if ascii==KEY_ESC{transition=Some(Mode::Browse);}
+                            else if ascii==KEY_ENTER_LF||ascii==KEY_ENTER_CR{
+                                let succeeded=if *rename{files.rename_selected(editor.text())}else{files.make_dir(editor.text())};
+                                if succeeded{transition=Some(Mode::Browse);}dirty=true;
+                            }else if mods&libdunit::KEYMOD_CTRL!=0&&mods&!(libdunit::KEYMOD_CTRL|libdunit::KEYMOD_SHIFT)==0{
+                                if let Some(command)=dunit::text_clipboard::Command::from_scancode(input.x){
+                                    checked(clipboard.command(checked(window.transfers(),"clipboard client"),command,editor.snapshot(text_revision)),"filename clipboard command");
+                                }else{dirty=editor.key(&input);}
+                            }else{dirty=editor.key(&input);}
+                            if dirty{text_revision=text_revision.wrapping_add(1);}
+                        },
+                        Mode::Preview=>{
+                            if ascii==KEY_ESC{files.preview=None;transition=Some(Mode::Browse);}
+                            else if mods&libdunit::KEYMOD_CTRL!=0&&input.x==0x2e{if let Some(preview)=&files.preview{
+                                let payload=checked(dunit::transfer::Payload::text(&preview.text).map_err(|e|dunit::Error(e.0)),"preview text");
+                                checked(checked(window.transfers(),"clipboard client").publish_clipboard(payload,1,dunit::transfer::Action::Copy).map_err(|e|dunit::Error(e.0)),"copy preview");
+                            }}
+                        },
+                        Mode::Confirm=>{if ascii==KEY_ESC{transition=Some(Mode::Browse);}else if ascii==KEY_ENTER_LF||ascii==KEY_ENTER_CR{files.delete_selected();transition=Some(Mode::Browse);}},
+                        Mode::Menu{..}=>{if ascii==KEY_ESC{transition=Some(Mode::Browse);}},
+                        Mode::Browse=>{
+                            let ctrl=mods&libdunit::KEYMOD_CTRL!=0;
+                            if ctrl&&mods&!(libdunit::KEYMOD_CTRL|libdunit::KEYMOD_SHIFT)==0{
+                                match input.x{0x2e=>transfers.publish(&mut window,&mut files,false),0x2d=>transfers.publish(&mut window,&mut files,true),0x2f=>transfers.paste(&mut window,&mut files),0x1e=>files.select_all(),_=>{}}
+                                dirty=true;
+                            }else if ascii==KEY_ESC{if !checked(transfers.cancel_operation(&mut window,&mut files),"cancel transfer"){files.clear_selection();}dirty=true;}
+                            else if matches!(input.x,0x47|0x4f|0x48|0x50|0x4b|0x4d|0x49|0x51)&&!files.items.is_empty(){
+                                let old=files.current_index().unwrap_or(0)as i64;let cols=i64::from(files.cols());
+                                let next=match input.x{0x47=>0,0x4f=>files.items.len()as i64-1,0x48=>old-cols,0x50=>old+cols,0x4b=>old-1,0x4d=>old+1,0x49=>old-cols*i64::from(files.rows()),_=>old+cols*i64::from(files.rows())};
+                                files.choose(next.clamp(0,files.items.len()as i64-1)as usize,mods);dirty=true;
+                            }else if ascii==KEY_ENTER_LF||ascii==KEY_ENTER_CR{if let Some(index)=files.current_index(){files.open(index);dirty=true;}}
+                        },
                     }
+                    if let Some(next)=transition{mode=next;text_revision=text_revision.wrapping_add(1);dirty=true;}
                 }
-                Mk::Text => {
-                    // A click outside the text field cancels the entry.
-                    mode = Mode::Browse;
-                    dirty = true;
-                }
-                Mk::Confirm => {}
-            }
-        } else if kind == IN_KEY {
-            let ascii = input.value as u8;
-            let mut transition: Option<Mode> = None;
-            let mut do_mkdir: Option<String> = None;
-            let mut do_rename: Option<String> = None;
-            let mut do_delete = false;
-            match &mut mode {
-                Mode::Text { rename, buf } => {
-                    if ascii == KEY_ESC {
-                        transition = Some(Mode::Browse);
-                    } else if ascii == KEY_ENTER_LF || ascii == KEY_ENTER_CR {
-                        if *rename {
-                            do_rename = Some(buf.clone());
-                        } else {
-                            do_mkdir = Some(buf.clone());
-                        }
-                        transition = Some(Mode::Browse);
-                    } else if ascii == KEY_BACKSPACE || ascii == KEY_DEL {
-                        buf.pop();
-                        dirty = true;
-                    } else if (0x20..0x7f).contains(&ascii) {
-                        buf.push(ascii as char);
-                        dirty = true;
-                    }
-                }
-                Mode::Confirm => {
-                    if ascii == KEY_ENTER_LF || ascii == KEY_ENTER_CR {
-                        do_delete = true;
-                        transition = Some(Mode::Browse);
-                    } else if ascii == KEY_ESC {
-                        transition = Some(Mode::Browse);
-                    }
-                }
-                Mode::Menu { .. } => {
-                    if ascii == KEY_ESC {
-                        transition = Some(Mode::Browse);
-                    }
-                }
-                Mode::Browse => {
-                    if ascii == KEY_ESC && files.selected.is_some() {
-                        files.selected = None;
-                        dirty = true;
-                    }
-                }
-            }
-            if let Some(name) = do_mkdir {
-                files.make_dir(&name);
-                dirty = true;
-            }
-            if let Some(name) = do_rename {
-                files.rename_selected(&name);
-                dirty = true;
-            }
-            if do_delete {
-                files.delete_selected();
-                dirty = true;
-            }
-            if let Some(m) = transition {
-                mode = m;
-                dirty = true;
+            },
+            _=>{},
+        }
+        if files.preview.is_some()&&matches!(mode,Mode::Browse){mode=Mode::Preview;}
+        dirty|=checked(transfers.service(&mut window,&mut files),"copy service");
+        pending_repaint|=dirty;
+        if pending_repaint&&batch<64{
+            if let Some(event)=checked(window.next_event(dunit::time::Duration::from_millis(0)),"queued window event"){
+                queued_event=Some(event);batch+=1;continue;
             }
         }
-
-        if dirty {
-            render(px, &font, &files, &icons, &mode);
-        }
+        if pending_repaint{paint(&mut window,&mut files,&font,&icons,&mode);pending_repaint=false;}batch=0;
     }
-
-    libdunit::shared_buffer::release(cur_buf, px as usize, cur_w as usize * cur_h as usize * 4);
-    libdunit::exit(0)
+    checked(window.close(),"window close");libdunit::exit(0)
 }
-

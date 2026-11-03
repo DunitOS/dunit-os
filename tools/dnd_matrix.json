@@ -1,0 +1,280 @@
+{
+  "schema_version": 1,
+  "applications": {
+    "gui_client": {
+      "source": "none",
+      "target": "none"
+    },
+    "gui_demo": {
+      "source": "none",
+      "target": "none"
+    },
+    "gui_calc": {
+      "source": "text",
+      "target": "none"
+    },
+    "gui_stat": {
+      "source": "none",
+      "target": "none"
+    },
+    "gui_files": {
+      "source": "files",
+      "target": "files_or_filename"
+    },
+    "gui_terminal": {
+      "source": "text",
+      "target": "terminal"
+    },
+    "gui_settings": {
+      "source": "text",
+      "target": "field"
+    }
+  },
+  "cells": [
+    {
+      "source": "gui_client",
+      "target": "gui_client",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_client",
+      "target": "gui_demo",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_client",
+      "target": "gui_calc",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_client",
+      "target": "gui_stat",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_client",
+      "target": "gui_files",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_client",
+      "target": "gui_terminal",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_client",
+      "target": "gui_settings",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_client",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_demo",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_calc",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_stat",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_files",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_terminal",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_demo",
+      "target": "gui_settings",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_client",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_demo",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_calc",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_stat",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_files",
+      "expected": "text"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_terminal",
+      "expected": "text"
+    },
+    {
+      "source": "gui_calc",
+      "target": "gui_settings",
+      "expected": "text"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_client",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_demo",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_calc",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_stat",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_files",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_terminal",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_stat",
+      "target": "gui_settings",
+      "expected": "unsupported_source"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_client",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_demo",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_calc",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_stat",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_files",
+      "expected": "file_copy"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_terminal",
+      "expected": "text"
+    },
+    {
+      "source": "gui_files",
+      "target": "gui_settings",
+      "expected": "text"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_client",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_demo",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_calc",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_stat",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_files",
+      "expected": "text"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_terminal",
+      "expected": "text"
+    },
+    {
+      "source": "gui_terminal",
+      "target": "gui_settings",
+      "expected": "text"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_client",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_demo",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_calc",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_stat",
+      "expected": "unsupported_target"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_files",
+      "expected": "text"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_terminal",
+      "expected": "text"
+    },
+    {
+      "source": "gui_settings",
+      "target": "gui_settings",
+      "expected": "text"
+    }
+  ]
+}

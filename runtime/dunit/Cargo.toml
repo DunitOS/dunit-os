@@ -8,8 +8,9 @@ dunit_macros = { path = "../dunit-macros" }
 libdunit = { path = "../../userspace/libdunit" }
 
 gui_protocol_v1 = { path = "../../protocols/gui-v1", optional = true }
+dunit_transfer = { path = "../dunit-transfer", optional = true }
 dunit_component = { path = "../dunit-component", optional = true }
 dwm_settings = { path = "../../userspace/dwm_settings", optional = true }
 
 [features]
-gui = ["dep:gui_protocol_v1", "dep:dunit_component", "dep:dwm_settings"]
+gui = ["dep:gui_protocol_v1", "dep:dunit_transfer", "dep:dunit_component", "dep:dwm_settings"]

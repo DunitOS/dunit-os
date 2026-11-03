@@ -176,6 +176,15 @@ impl fmt::Display for VfsError {
 pub type Result<T> = core::result::Result<T, VfsError>;
 
 pub trait FileSystem: Send {
+    /// Capability anchors are backend-owned open descriptions, including directories.
+    /// Unsupported backends must fail rather than resolving an ambient path later.
+    fn cap_relation(&mut self,_source:FileHandle,_destination:FileHandle)->Result<dunit_file_cap_abi::Relation>{Err(VfsError::Unsupported)}
+    fn cap_open(&mut self, _path: &str, _flags: OpenFlags) -> Result<FileHandle> { Err(VfsError::Unsupported) }
+    fn cap_child(&mut self, _parent: FileHandle, _path: &str, _flags: OpenFlags) -> Result<FileHandle> { Err(VfsError::Unsupported) }
+    fn cap_readdir(&mut self, _handle: FileHandle) -> Result<Vec<DirEntry>> { Err(VfsError::Unsupported) }
+    fn cap_remove(&mut self, _handle: FileHandle) -> Result<()> { Err(VfsError::Unsupported) }
+    fn cap_move_to(&mut self, _source: FileHandle, _destination: FileHandle, _leaf: &str) -> Result<()> { Err(VfsError::Unsupported) }
+    fn cap_create_child(&mut self, _parent: FileHandle, _leaf: &str, _kind: FileType, _flags: OpenFlags) -> Result<FileHandle> { Err(VfsError::Unsupported) }
     fn open(&mut self, path: &str, flags: OpenFlags) -> Result<FileHandle>;
     fn read(&mut self, handle: FileHandle, buf: &mut [u8]) -> Result<usize>;
     fn write(&mut self, handle: FileHandle, buf: &[u8]) -> Result<usize>;
@@ -285,6 +294,11 @@ struct MountPoint {
 }
 
 impl VirtualFileSystem {
+    pub fn open_capability(&mut self, cwd: &str, path: &str, flags: OpenFlags) -> Result<alloc::sync::Arc<super::file_cap::FileCapability>> {
+        let (fs, relative) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let handle = unsafe { (&mut *fs).cap_open(relative, flags)? };
+        Ok(alloc::sync::Arc::new(super::file_cap::FileCapability::new(fs, handle)))
+    }
     pub fn new() -> Self {
         Self {
             root_fs: None,

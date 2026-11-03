@@ -41,6 +41,7 @@
 extern crate alloc;
 
 pub mod control;
+pub mod transfer;
 pub mod frame;
 pub mod server;
 pub mod wire;

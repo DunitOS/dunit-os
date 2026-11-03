@@ -59,6 +59,9 @@ impl TextClickState {
         self.last = None;
         self.capture = None;
     }
+    pub fn continues_click(&self,key:&str,text:&str,sample:TextClickSample)->bool{
+        self.last.as_ref().is_some_and(|p|p.key==key&&p.text==text&&p.sample.config==sample.config&&sample.config.interval_ms>0&&sample.time_ms>=p.sample.time_ms&&sample.time_ms-p.sample.time_ms<=sample.config.interval_ms&&Self::nearby(p.sample,sample))
+    }
     fn nearby(a: TextClickSample, b: TextClickSample) -> bool {
         if ![a.x, a.y, b.x, b.y, b.config.distance]
             .iter()
@@ -75,15 +78,7 @@ impl TextClickState {
         let count = self
             .last
             .as_ref()
-            .filter(|p| {
-                p.key == key
-                    && p.text == text
-                    && p.sample.config == sample.config
-                    && sample.config.interval_ms > 0
-                    && sample.time_ms >= p.sample.time_ms
-                    && sample.time_ms - p.sample.time_ms <= sample.config.interval_ms
-                    && Self::nearby(p.sample, sample)
-            })
+            .filter(|_|self.continues_click(key,text,sample))
             .map_or(1, |p| p.count % 3 + 1);
         self.last = Some(Press {
             key: key.into(),

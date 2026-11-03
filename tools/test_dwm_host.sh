@@ -5,11 +5,11 @@ cd "$(dirname "$0")/.."
 test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o "$test_dir/libdunit_pointer_abi.rlib"
-for source in kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
+rustc --edition=2021 --crate-type rlib --crate-name dunit_file_cap_abi abi/file-cap/src/lib.rs -o "$test_dir/libdunit_file_cap_abi.rlib"
+for source in tools/test_file_caps_host.rs kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     kernel/src/drivers/keyboard_queue.rs \
     userspace/system_apps/gui_server/src/lua_policy.rs \
     userspace/system_apps/gui_server/src/shell_geometry.rs \
-    userspace/system_apps/gui_settings/src/document_editor.rs \
     userspace/system_apps/gui_terminal/src/terminal_model_tests.rs \
     userspace/system_apps/gui_server/src/composite.rs \
     userspace/system_apps/gui_server/src/damage_plan.rs \
@@ -24,9 +24,12 @@ do
     if [ "$source" = kernel/tests/input_geometry.rs ]; then
         pointer_deps=(--extern "dunit_pointer_abi=$test_dir/libdunit_pointer_abi.rlib")
     fi
+    if [ "$source" = tools/test_file_caps_host.rs ]; then pointer_deps=(--extern "dunit_file_cap_abi=$test_dir/libdunit_file_cap_abi.rlib"); fi
     rustc --edition=2021 --test "$source" "${pointer_deps[@]}" -o "$test_dir/regression"
     "$test_dir/regression"
 done
+
+cargo test --manifest-path runtime/dunit/Cargo.toml --features gui --test filename_editor --test settings_editor
 
 bash tools/test_dwm_config_host.sh
 

@@ -44,6 +44,7 @@ pub use spinbox::{SpinButton, SpinboxOptions, SpinboxRange};
 mod slider;
 pub use slider::{SliderCommand, SliderGeometry, SliderOptions, SliderOrientation, SliderRange};
 mod input;
+pub use input::InputContext;
 mod interaction;
 mod lifecycle;
 mod motion;
@@ -125,6 +126,7 @@ pub struct Application<C: Component> {
     pub(crate) keyboard_press: Option<lifecycle::KeyboardPress>,
     pub(crate) held_activation_scans: [bool; 128],
     pub(crate) window_focused: bool,
+    pub(crate) clipboard_revision:u64,
     pub(crate) suspended_focus: Option<alloc::string::String>,
     pub(crate) event_dispatch_depth: usize,
     pub(crate) rename_focus: Option<(alloc::string::String, alloc::string::String)>,
@@ -141,6 +143,7 @@ impl<C: Component> Application<C> {
             keyboard_press: None,
             held_activation_scans: [false; 128],
             window_focused: true,
+            clipboard_revision:0,
             suspended_focus: None,
             event_dispatch_depth: 0,
             rename_focus: None,
@@ -160,6 +163,7 @@ impl<C: Component> Application<C> {
         &self.view
     }
     pub fn update(&mut self, message: C::Message) -> Result<()> {
+        self.clipboard_revision=self.clipboard_revision.wrapping_add(1);
         let focused = self.focused_key().map(alloc::string::String::from);
         self.component.update(message);
         let mut view = self.component.view();

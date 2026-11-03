@@ -29,15 +29,24 @@ const MAX_RETRIES: usize = 8;
 const MAX_DEFERRED: usize = 128;
 static STARTED: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum WindowEvent {
     Resized { width: u32, height: u32 },
     Input(Input),
     CloseRequested,
     Protocol(Event),
+    Transfer(dunit_transfer::Event),
 }
 
-/// A private, writable frame before publication. Pixels are XRGB8888 words.
+/// Existing gui-v1 surface formats. Alpha uses straight ARGB pixels.
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum PixelFormat { Xrgb8888,Argb8888 }
+impl PixelFormat {
+    fn raw(self)->u32{match self{Self::Xrgb8888=>FORMAT_XRGB8888,Self::Argb8888=>FORMAT_ARGB8888}}
+    fn bit(self)->u32{match self{Self::Xrgb8888=>FORMATS_XRGB8888,Self::Argb8888=>FORMATS_ARGB8888}}
+}
+
+/// A private, writable frame before publication in the window's pixel format.
 /// The borrow cannot outlive the drawing callback or alias a committed buffer.
 pub struct Frame<'a> {
     pixels: &'a mut [u32],
@@ -162,6 +171,7 @@ pub struct Window {
     metrics_enabled: bool,
     metrics: crate::ui::metrics::WindowMetrics,
     features: u64,
+    format: PixelFormat,
     surface: u64,
     live_buffers: Vec<u64>,
     protocol_error: Option<(u64, u64, u32, u32)>,
@@ -178,6 +188,8 @@ pub struct Window {
     last_damage: Option<DamageRect>,
     pending: VecDeque<(Header, Event)>,
     inputs: VecDeque<Input>,
+    transfer: Option<dunit_transfer::Client>,
+    transfers: VecDeque<dunit_transfer::Event>,
     released: Vec<u64>,
     waiter: EventLoop,
     failed: bool,
@@ -188,11 +200,15 @@ impl Window {
     /// bootstrap. Its claimed PID must equal the kernel-authenticated sender.
     /// Subsequent messages are accepted only from that sender.
     pub fn open(width: u32, height: u32) -> Result<Self> {
-        Self::open_features(width, height, FEATURE_INPUT_LIFECYCLE)
+        Self::open_format(width,height,PixelFormat::Xrgb8888)
+    }
+    pub fn open_format(width:u32,height:u32,format:PixelFormat)->Result<Self>{
+        let features=FEATURE_INPUT_LIFECYCLE|FEATURE_DATA_TRANSFER|if format==PixelFormat::Argb8888{FEATURE_ARGB8888}else{0};
+        Self::open_features(width,height,features,format)
     }
     /// Compatibility clients can explicitly retain legacy cooked-only input.
     pub fn open_legacy(width: u32, height: u32) -> Result<Self> {
-        Self::open_features(width, height, 0)
+        Self::open_features(width, height, 0,PixelFormat::Xrgb8888)
     }
     /// Enable or disable aggregate diagnostics without resetting prior samples.
     /// Disabled by default; the disabled path makes no diagnostic clock calls.
@@ -223,7 +239,7 @@ impl Window {
     pub fn input_lifecycle(&self) -> bool {
         self.features & FEATURE_INPUT_LIFECYCLE != 0
     }
-    fn open_features(width: u32, height: u32, offered: u64) -> Result<Self> {
+    fn open_features(width: u32, height: u32, offered: u64,format:PixelFormat) -> Result<Self> {
         buffer_bytes(width, height)?;
         if STARTED.swap(true, Ordering::AcqRel) {
             return Err(Error(libdunit::EBUSY));
@@ -232,6 +248,7 @@ impl Window {
             metrics_enabled: false,
             metrics: Default::default(),
             features: 0,
+            format,
             surface: 1,
             live_buffers: Vec::new(),
             protocol_error: None,
@@ -248,6 +265,8 @@ impl Window {
             last_damage: None,
             pending: VecDeque::new(),
             inputs: VecDeque::new(),
+            transfer: None,
+            transfers: VecDeque::new(),
             released: Vec::new(),
             waiter: EventLoop::new(&[Interest::ipc(1)])?,
             failed: false,
@@ -256,13 +275,15 @@ impl Window {
         let mut bytes = [0; MAX_PACKET];
         let start = Instant::now()?;
         loop {
-            let (n, sender) = window
+            let (n, sender, attachment) = window
                 .receive(&mut bytes, start, TRANSACTION)?
                 .ok_or(Error(libdunit::EAGAIN))?;
+            if attachment.is_some() { continue; }
             if Bootstrap::decode(&bytes[..n])
                 .is_some_and(|intro| intro.compositor == sender && sender != 0)
             {
                 window.peer = sender;
+                window.transfer = Some(dunit_transfer::Client::new(sender, 0));
                 break;
             }
         }
@@ -277,7 +298,7 @@ impl Window {
         )?;
         let (_, welcome) = window
             .until(|_, e| matches!(e, Event::Welcome { request, .. } if *request == hello))?;
-        if !matches!(welcome, Event::Welcome { formats, .. } if formats & FORMATS_XRGB8888 != 0) {
+        if !matches!(welcome, Event::Welcome { formats, .. } if formats & format.bit() != 0) {
             return Err(Error(libdunit::EOPNOTSUPP));
         }
         if let Event::Welcome { features, .. } = welcome {
@@ -285,6 +306,7 @@ impl Window {
                 return Err(Error(libdunit::EIO));
             }
             window.features = features;
+            if let Some(transfer) = window.transfer.as_mut() { transfer.set_features(features); }
         }
         window.request(
             window.surface,
@@ -292,7 +314,7 @@ impl Window {
                 role: ROLE_TOPLEVEL,
                 width,
                 height,
-                format: FORMAT_XRGB8888,
+                format: window.format.raw(),
             },
         )?;
         let surface = window.surface;
@@ -332,17 +354,26 @@ impl Window {
         bytes: &mut [u8],
         start: Instant,
         timeout: Duration,
-    ) -> Result<Option<(usize, u32)>> {
+    ) -> Result<Option<(usize, u32, Option<dunit_transfer::OwnedHandle>)>> {
         loop {
             // Check before consuming too: a continuous stream of malformed
             // bootstrap packets must not keep a transaction alive forever.
             if !timeout.is_zero() && start.elapsed()? >= timeout {
                 return Ok(None);
             }
+            if let Some(transfer) = self.transfer.as_mut() {
+                transfer.flush().map_err(|e|Error(e.0))?;
+            }
             let mut sender = 0;
-            let n = libdunit::ipc_recv_from(bytes, &mut sender);
+            let mut attached = 0;
+            let n = libdunit::ipc_recv_handle(bytes, &mut sender, &mut attached);
+            // Only the syscall's attested output can create an owner. Foreign
+            // traffic drops that owner here, including malformed CAP1/XFR1.
+            let attachment = if n >= 0 && attached != 0 {
+                Some(unsafe { dunit_transfer::OwnedHandle::adopt(attached) })
+            } else { None };
             if n >= 0 && (self.peer == 0 || sender == self.peer) {
-                return Ok(Some((n as usize, sender)));
+                return Ok(Some((n as usize, sender, attachment)));
             }
             if n < 0 && n != libdunit::EAGAIN {
                 return Err(Error(n));
@@ -353,17 +384,31 @@ impl Window {
             }
             // Foreign traffic never extends the deadline or becomes an event.
             if n == libdunit::EAGAIN {
-                self.waiter
-                    .wait(crate::time::timeout_ns(timeout - elapsed)?)?;
+                let remaining = timeout - elapsed;
+                let remaining = if self.transfer.as_ref().is_some_and(|t|t.pending_send()) {
+                    remaining.min(Duration::from_millis(1))
+                } else { remaining };
+                self.waiter.wait(crate::time::timeout_ns(remaining)?)?;
             }
         }
     }
     fn packet(&mut self, start: Instant, timeout: Duration) -> Result<Option<(Header, Event)>> {
         let mut bytes = [0; MAX_PACKET];
         loop {
-            let Some((n, _)) = self.receive(&mut bytes, start, timeout)? else {
+            let Some((n, _, attachment)) = self.receive(&mut bytes, start, timeout)? else {
                 return Ok(None);
             };
+            if dunit_transfer::Message::is_message(&bytes[..n]) {
+                if self.features & FEATURE_DATA_TRANSFER == 0 { return Err(Error(libdunit::EOPNOTSUPP)); }
+                let transfer = self.transfer.as_mut().ok_or(Error(libdunit::EIO))?;
+                if let Some(event) = transfer.handle_packet(&bytes[..n], attachment).map_err(|e|Error(e.0))? {
+                    if self.transfers.len() == MAX_DEFERRED { return Err(Error(libdunit::ENOBUFS)); }
+                    self.transfers.push_back(event);
+                }
+                transfer.flush().map_err(|e|Error(e.0))?;
+                return Ok(None);
+            }
+            if attachment.is_some() { return Err(Error(libdunit::EIO)); }
             if let Some(input) = Input::decode_for_features(&bytes[..n], self.features) {
                 if self.metrics_enabled {
                     self.metrics.input_received = self.metrics.input_received.saturating_add(1);
@@ -522,7 +567,7 @@ impl Window {
                 role: ROLE_TOPLEVEL,
                 width,
                 height,
-                format: FORMAT_XRGB8888,
+                format: self.format.raw(),
             },
         )?;
         let surface = self.surface;
@@ -700,7 +745,7 @@ impl Window {
                 width: self.width,
                 height: self.height,
                 stride: self.width * 4,
-                format: FORMAT_XRGB8888,
+                format: self.format.raw(),
                 offset: 0,
             },
         )?;
@@ -781,6 +826,7 @@ impl Window {
         if self.failed {
             return Err(Error(libdunit::EPIPE));
         }
+        if let Some(transfer)=self.transfer.as_mut(){transfer.flush().map_err(|error|Error(error.0))?;}
         let mut result = self.next_inner(timeout);
         if result.is_err() && self.can_recover() {
             result = self.recover().map(|()| {
@@ -807,6 +853,18 @@ impl Window {
             WindowEvent::Input(input)
         })
     }
+    /// Request a reload of saved desktop configuration through this window's
+    /// authenticated compositor connection. It does not receive from the inbox.
+    pub fn reload_desktop(&mut self)->Result<()>{
+        let result=libdunit::ipc_send(self.peer,&gui_protocol_v1::control::RELOAD);
+        if result<0{Err(Error(result))}else{Ok(())}
+    }
+    /// Queue transfer requests here; the existing receive/event pump flushes
+    /// them and delivers replies as WindowEvent::Transfer, also during draw.
+    pub fn transfers(&mut self) -> Result<&mut dunit_transfer::Client> {
+        if self.features & FEATURE_DATA_TRANSFER == 0 { return Err(Error(libdunit::EOPNOTSUPP)); }
+        self.transfer.as_mut().ok_or(Error(libdunit::EIO))
+    }
     fn next_inner(&mut self, timeout: Duration) -> Result<Option<WindowEvent>> {
         if core::mem::take(&mut self.resized) {
             return Ok(Some(WindowEvent::Resized {
@@ -817,12 +875,13 @@ impl Window {
         if let Some(event) = self.pop_input() {
             return Ok(Some(event));
         }
+        if let Some(event) = self.transfers.pop_front() { return Ok(Some(WindowEvent::Transfer(event))); }
         let packet = match self.pending.pop_front() {
             Some(packet) => Some(packet),
             None => self.packet(Instant::now()?, timeout)?,
         };
         let Some((header, event)) = packet else {
-            return Ok(self.pop_input());
+            return Ok(self.pop_input().or_else(||self.transfers.pop_front().map(WindowEvent::Transfer)));
         };
         Ok(Some(match event {
             Event::Configure { .. } if header.object == self.surface => {

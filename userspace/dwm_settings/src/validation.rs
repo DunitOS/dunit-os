@@ -128,6 +128,18 @@ fn validate_mode(text: &str, base: &crate::Applications, references_required: bo
         } else if section.starts_with("application.") {
             if matches!(key, "name" | "exec" | "icon" | "label") {
                 string(input).map(|_| ())
+            } else if key=="arguments"{
+                list(input).and_then(|arguments|{
+                    if arguments.len()>64||arguments.iter().any(|arg|arg.len()>4096||arg.contains('\0'))||arguments.iter().map(|arg|arg.len()+1).sum::<usize>()>32*1024{return Err("application argument limits exceeded");}Ok(())
+                })
+            } else if key=="open_formats"{
+                list(input).and_then(|names|{
+                    if names.len()>gui_protocol_v1::transfer::MAX_FORMATS{return Err("too many opener formats");}
+                    for (index,name) in names.iter().enumerate(){
+                        gui_protocol_v1::transfer::Format::parse(name).map_err(|_|"invalid opener MIME format")?;
+                        if names[..index].contains(name){return Err("duplicate opener format");}
+                    }Ok(())
+                })
             } else {
                 Err("unknown application field")
             }

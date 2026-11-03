@@ -30,6 +30,7 @@ impl Lifecycle {
             cancelled: [false; 128],
         }
     }
+    pub fn current(&self)->Option<u32>{self.focused}
     pub fn focus(&mut self, next: Option<u32>) -> Option<FocusChange> {
         if next == self.focused {
             return None;

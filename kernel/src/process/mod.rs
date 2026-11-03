@@ -355,6 +355,8 @@ pub struct Process {
     /// Счётчик доставленных, но ещё не считанных сигналов (право SIGNAL).
     pending_signals: u64,
     pub(crate) wait_set: Option<Box<crate::syscall::wait_set::Pending>>,
+    /// Explicit opt-in to atomic IPC handle delivery; legacy inboxes cannot drain it.
+    pub(crate) ipc_handles_enabled: bool,
 }
 
 const USER_MMAP_BASE: usize = 0x0000_0010_0000_0000;
@@ -417,6 +419,7 @@ impl Process {
             handle_table: crate::handle::HandleTable::new(),
             pending_signals: 0,
             wait_set: None,
+            ipc_handles_enabled: false,
         };
         process.reserve_stdio();
         process
@@ -461,6 +464,7 @@ impl Process {
             handle_table: crate::handle::HandleTable::new(),
             pending_signals: 0,
             wait_set: None,
+            ipc_handles_enabled: false,
         };
         process.reserve_stdio();
         Ok(process)
@@ -1092,6 +1096,18 @@ impl Process {
 
     pub fn handle_rights(&self, handle: Handle) -> Result<u32, HandleError> {
         self.handle_table.rights(handle)
+    }
+
+    pub fn handle_create_file(&mut self, file: alloc::sync::Arc<crate::fs::file_cap::FileCapability>, rights: u32) -> Handle {
+        self.handle_table.insert(HandleObject::File(file), rights)
+    }
+
+    pub fn handle_file(&self, handle: Handle, rights: u32) -> Result<alloc::sync::Arc<crate::fs::file_cap::FileCapability>, HandleError> {
+        let entry=self.handle_table.require(handle,rights)?;
+        match &entry.object {
+            HandleObject::File(file)=>Ok(alloc::sync::Arc::clone(file)),
+            _=>Err(HandleError::WrongType),
+        }
     }
 
     pub fn handle_dup(&mut self, handle: Handle, new_rights: u32) -> Result<Handle, HandleError> {

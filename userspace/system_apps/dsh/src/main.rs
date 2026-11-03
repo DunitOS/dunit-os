@@ -125,13 +125,13 @@ fn run(line: &str) {
             out(&cwd());
             out("\n");
         }
-        "ls" => cmd_ls(rest),
-        "cd" => cmd_cd(rest),
-        "mkdir" => cmd_mkdir(rest),
-        "touch" => cmd_touch(rest),
-        "cat" => cmd_cat(rest),
-        "rm" => cmd_rm(rest),
-        "tree" => cmd_tree(rest),
+        "ls" => builtin_paths(rest,cmd_ls,true),
+        "cd" => builtin_paths(rest,cmd_cd,false),
+        "mkdir" => builtin_paths(rest,cmd_mkdir,true),
+        "touch" => builtin_paths(rest,cmd_touch,true),
+        "cat" => builtin_paths(rest,cmd_cat,true),
+        "rm" => builtin_paths(rest,cmd_rm,true),
+        "tree" => builtin_paths(rest,cmd_tree,true),
         "clear" => out("\x1b[2J\x1b[H"),
         "uname" => cmd_uname(rest),
         "whoami" => out("root\n"),
@@ -182,35 +182,21 @@ fn run_external(line: &str) {
     }
 }
 
-fn cmd_echo(rest: &str) {
-    if let Some(idx) = rest.find(">>") {
-        let text = rest[..idx].trim_end();
-        let path = rest[idx + 2..].trim();
-        if path.is_empty() {
-            out("echo: missing output file\n");
-            return;
-        }
-        let data = format!("{}\n", text);
-        if libdunit::append_string(path, &data).is_err() {
-            out(&format!("echo: {}: write error\n", path));
-        }
-        return;
+fn builtin_paths(rest:&str,command:fn(&str),multiple:bool){
+    match command_line::words(rest){
+        Ok(paths) if paths.is_empty()=>command(""),
+        Ok(paths) if multiple||paths.len()==1=>{for path in paths{command(&path);}},
+        Ok(_)=>out("dsh: expected one path\n"),
+        Err(error)=>out(&format!("dsh: {}\n",error)),
     }
-    if let Some(idx) = rest.find('>') {
-        let text = rest[..idx].trim_end();
-        let path = rest[idx + 1..].trim();
-        if path.is_empty() {
-            out("echo: missing output file\n");
-            return;
-        }
-        let data = format!("{}\n", text);
-        if libdunit::write_string(path, &data).is_err() {
-            out(&format!("echo: {}: write error\n", path));
-        }
-        return;
-    }
-    out(rest);
-    out("\n");
+}
+fn cmd_echo(rest:&str){
+    let (arguments,destination)=match dunit_shell::echo_arguments(rest){Ok(value)=>value,Err(error)=>{out(&format!("echo: {}\n",error));return;}};
+    let data=format!("{}\n",arguments.join(" "));
+    if let Some((path,append))=destination{
+        let result=if append{libdunit::append_string(&path,&data)}else{libdunit::write_string(&path,&data)};
+        if result.is_err(){out(&format!("echo: {}: write error\n",path));}
+    }else{out(&data);}
 }
 
 fn cmd_ls(rest: &str) {
@@ -455,10 +441,9 @@ fn spawn_external(path: &str, argv: &[&str]) -> bool {
     let child = child as u32;
     let mut out_buf = [0u8; 512];
     let mut in_buf = [0u8; 256];
-    // Cooked line buffer: accumulates one input line; the last slot is reserved
-    // for the '\n' appended on Enter, so printables fill at most line.len()-1.
-    let mut line = [0u8; 256];
-    let mut llen = 0usize;
+    let mut line = dunit_shell::CookedLine::new(4096);
+    let mut pending = Vec::new();
+    let mut written = 0;
     // ESC-sequence state: 0 = normal, 1 = saw ESC (0x1B), 2 = inside CSI (ESC [).
     let mut esc = 0u8;
     loop {
@@ -472,61 +457,38 @@ fn spawn_external(path: &str, argv: &[&str]) -> bool {
         } else if n == libdunit::EPIPE {
             break;
         }
-        // Our stdin (terminal keystrokes) -> cooked line discipline -> child.
-        let m = libdunit::read(0, &mut in_buf);
-        if m > 0 {
-            for &b in &in_buf[..m as usize] {
+        // Retain short writes/EAGAIN and keep draining child output. Never
+        // drop the suffix of a pasted line when the PTY's bounded queue fills.
+        if written < pending.len() {
+            let n = libdunit::pty_write(inner, &pending[written..]);
+            if n > 0 { written += n as usize; progressed = true; }
+            else if n != libdunit::EAGAIN { break; }
+        }
+        if written == pending.len() {
+            pending.clear(); written = 0;
+            let m = libdunit::read(0, &mut in_buf[..1]);
+            if m > 0 {
+                let b = in_buf[0];
                 match esc {
-                    1 => {
-                        esc = if b == b'[' { 2 } else { 0 };
-                        continue;
-                    }
-                    2 => {
-                        // A CSI final byte (0x40..=0x7E) ends the sequence.
-                        if (0x40..=0x7e).contains(&b) {
-                            esc = 0;
-                        }
-                        continue;
-                    }
+                    1 => { esc = if b == b'[' { 2 } else { 0 }; continue; }
+                    2 => { if (0x40..=0x7e).contains(&b) { esc = 0; } continue; }
                     _ => {}
                 }
-                match b {
-                    0x1B => esc = 1, // begin an escape sequence (arrows etc.)
-                    0x03 => {
-                        // Ctrl-C: interrupt the child, discard the pending line.
-                        libdunit::kill(child);
-                        llen = 0;
-                    }
-                    b'\n' => {
-                        out("\n"); // echo the newline the way Terminal Mode does
-                        if llen < line.len() {
-                            line[llen] = b'\n';
-                            llen += 1;
+                if b == 0x1b { esc = 1; }
+                else {
+                    match line.feed(b) {
+                        dunit_shell::CookedEvent::Echo(ch) => {
+                            let mut bytes = [0;4]; out(ch.encode_utf8(&mut bytes));
                         }
-                        libdunit::pty_write(inner, &line[..llen]);
-                        llen = 0;
+                        dunit_shell::CookedEvent::Erase => out("\x08 \x08"),
+                        dunit_shell::CookedEvent::Submit(bytes) => { out("\n"); pending = bytes; }
+                        dunit_shell::CookedEvent::Rejected => out("\ninput line too long; discarded\n"),
+                        dunit_shell::CookedEvent::Interrupt => { libdunit::kill(child); }
+                        dunit_shell::CookedEvent::None => {}
                     }
-                    b'\r' => {}  // Enter arrives as '\n'; ignore bare CR
-                    b'\t' => {}  // ignore Tab (matches Terminal Mode)
-                    0x08 | 0x7F => {
-                        if llen > 0 {
-                            llen -= 1;
-                            // Destructive erase (the Term treats 0x08 as a plain
-                            // non-destructive cursor-left), so blank + back up.
-                            out("\x08 \x08");
-                        }
-                    }
-                    0x20..=0x7E => {
-                        if llen < line.len() - 1 {
-                            line[llen] = b;
-                            llen += 1;
-                            libdunit::write(1, &[b]); // echo the typed character
-                        }
-                    }
-                    _ => {}
                 }
+                progressed = true;
             }
-            progressed = true;
         }
         if !progressed {
             libdunit::sleep_ms(5);
@@ -558,6 +520,7 @@ struct Ed {
     hist_pos: usize,
     esc: EscState,
     csi_param: usize,
+    utf8: dunit_shell::Utf8Decoder,
 }
 
 impl Ed {
@@ -570,6 +533,7 @@ impl Ed {
             hist_pos: 0,
             esc: EscState::Normal,
             csi_param: 0,
+            utf8: dunit_shell::Utf8Decoder::default(),
         }
     }
 
@@ -592,7 +556,13 @@ impl Ed {
         }
     }
 
-    fn feed_normal(&mut self, b: u8) {
+    fn feed_normal(&mut self, byte: u8) {
+        let Some(ch) = self.utf8.push(byte) else { return };
+        if !ch.is_ascii() {
+            if !ch.is_control() { self.insert(ch); }
+            return;
+        }
+        let b = ch as u8;
         match b {
             0x1B => self.esc = EscState::Esc,
             b'\r' | b'\n' => self.submit(),
@@ -643,7 +613,7 @@ impl Ed {
 
     fn backspace(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            self.cursor = dunit_shell::previous_boundary(&self.line, self.cursor);
             self.line.remove(self.cursor);
             self.redraw();
         }
@@ -658,14 +628,14 @@ impl Ed {
 
     fn move_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            self.cursor = dunit_shell::previous_boundary(&self.line, self.cursor);
             self.redraw();
         }
     }
 
     fn move_right(&mut self) {
         if self.cursor < self.line.len() {
-            self.cursor += 1;
+            self.cursor = dunit_shell::next_boundary(&self.line, self.cursor);
             self.redraw();
         }
     }
@@ -735,7 +705,7 @@ impl Ed {
         out(&self.prompt);
         out(&self.line);
         out("\x1b[K");
-        let back = self.line.len() - self.cursor;
+        let back = self.line[self.cursor..].chars().count();
         if back > 0 {
             out(&format!("\x1b[{}D", back));
         }
@@ -755,7 +725,9 @@ pub extern "C" fn _start(
     let mut ed = Ed::new(prompt_word);
     ed.start();
 
-    let mut buf = [0u8; 128];
+    // Submission can hand stdin to a synchronous child. Do not prefetch the
+    // next command/child input into an editor-private buffer before that handoff.
+    let mut buf = [0u8; 1];
     loop {
         let n = libdunit::read(0, &mut buf);
         if n > 0 {

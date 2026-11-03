@@ -215,6 +215,7 @@ name  = "System Monitor"
 label = "STAT"
 
 [application.gui_files]
+open_formats = ["application/x-dunit-file-list"]
 name  = "Files"
 label = "FILE"
 
@@ -223,6 +224,7 @@ name  = "Terminal"
 label = "TERM"
 
 [application.gui_settings]
+open_formats = ["application/x-dunit-file-list"]
 name  = "Settings"
 label = "SET"
 
@@ -259,3 +261,8 @@ enabled = false
 runner = "/app/dwm_lua"
 layout = "/assets/dwm/scripts/columns.lua"
 timeout_ms = 500
+
+# Deadline for clipboard materialization, accepted drops and recipient completion.
+[transfers]
+timeout_ms = 5000
+drag_threshold_px = 6

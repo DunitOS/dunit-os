@@ -1,0 +1,4 @@
+[package]
+name = "dunit_file_cap_abi"
+version = "0.1.0"
+edition = "2021"

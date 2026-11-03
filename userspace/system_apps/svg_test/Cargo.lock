@@ -47,6 +47,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunit_file_cap_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_icons"
 version = "0.1.0"
 dependencies = [
@@ -85,6 +89,7 @@ name = "dwm_settings"
 version = "0.1.0"
 dependencies = [
  "dunit_app_manifest",
+ "gui_protocol_v1",
  "libdunit",
  "term_theme",
 ]
@@ -97,6 +102,10 @@ checksum = "f1a05365e3b1c6d1650318537c7460c6923f1abdd272ad6842baa2b509957a06"
 dependencies = [
  "num-traits",
 ]
+
+[[package]]
+name = "gui_protocol_v1"
+version = "0.1.0"
 
 [[package]]
 name = "kurbo"
@@ -115,6 +124,7 @@ dependencies = [
 name = "libdunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_file_cap_abi",
  "dunit_pointer_abi",
  "dunit_wait_abi",
 ]

@@ -29,6 +29,7 @@ fn main() -> dunit::Result<()> {
             Some(WindowEvent::Resized { .. }) => w.draw(|f| f.pixels_mut().fill(0xff203040))?,
             Some(WindowEvent::CloseRequested) => break,
             Some(WindowEvent::Protocol(_)) => {}
+            Some(WindowEvent::Transfer(_))=>panic!("legacy client received transfer data"),
             None => {}
         }
     }
