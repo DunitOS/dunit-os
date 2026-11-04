@@ -1,3 +1,5 @@
+#[path = "ps2_wheel.rs"]
+mod ps2_wheel;
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -116,15 +118,9 @@ fn push_packet_byte_locked(byte: u8) {
         if packet.index == packet_size {
             let dx = packet.bytes[1] as i8 as i32;
             let dy = -(packet.bytes[2] as i8 as i32);
-            let mut wheel = 0;
-            if packet_size == 4 {
-                let raw = packet.bytes[3] & 0x0F;
-                wheel = if (raw & 0x08) != 0 {
-                    (raw | 0xF0) as i8 as i32
-                } else {
-                    raw as i32
-                };
-            }
+            let wheel = if packet_size == 4 {
+                ps2_wheel::intellimouse_wheel(packet.bytes[3])
+            } else { 0 };
             crate::input::push_mouse_relative(dx, dy, packet.bytes[0] & 0x07, wheel);
             packet.index = 0;
         }

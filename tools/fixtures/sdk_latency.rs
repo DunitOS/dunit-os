@@ -198,6 +198,7 @@ fn main() -> dunit::Result<()> {
     let mut count = 0;
     let mut base_len = 0;
     let mut probed = false;
+    let mut aggregated_wheel = false;
     loop {
         let event = ui.next_event(Duration::from_secs(30))?;
         assert!(!matches!(event, Some(WindowEvent::CloseRequested)));
@@ -217,6 +218,7 @@ fn main() -> dunit::Result<()> {
             count = 0;
             base_len = ui.component().value.len();
             probed = false;
+            aggregated_wheel = false;
             if matches!(ui.component().mode, Mode::Short | Mode::Long) {
                 assert!(
                     ui.view().children()[1].interaction().focused,
@@ -258,10 +260,15 @@ fn main() -> dunit::Result<()> {
                         // delta units, retaining the exact 24-detent model check.
                         assert!(i.x > 0, "wheel-down benchmark received the wrong direction");
                         count += i.x.unsigned_abs() as usize;
+                        aggregated_wheel |= i.x >= 8;
+                        if i.x > 1 {
+                            dunit::println!("{}", format!("[PERF-WHEEL] {label} delta={} accepted={count}",i.x))?;
+                        }
                         assert!(count <= 24, "wheel stream duplicated detents");
                     }
                 }
                 if count == 24 {
+                    if label == "wheel-4" { assert!(aggregated_wheel, "burst must exercise an ID3 delta beyond signed four bits"); }
                     assert!((ui.scroll_offset(&field).unwrap() - step * 24.).abs() < 0.01);
                     true
                 } else {

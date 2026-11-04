@@ -25,7 +25,8 @@ stage totals are in [continuous-input-results.json](continuous-input-results.jso
 | 24 characters, 400-line field | 5768.8 | 5373.2 | 4863.8 | 1372.7 | 4.2× |
 | Drag selection, 20 motions | 661.6 | 617.7 | 454.3 | 253.1 | 2.6× |
 
-The fixture asserts exactly 24 wheel events and the exact resulting offset;
+The historical fixture asserted exactly 24 wheel messages and the exact resulting offset;
+current checks count detent units and also cover aggregated packets (see below);
 typing asserts all 24 characters and their value. Drag asserts an unchanged
 value, a nontrivial selection, and unchanged undo state. Requests, wheel records,
 key makes and button edges are not silently dropped or merged to obtain a gain.
@@ -131,3 +132,34 @@ Both are off by default. No per-event profiling logs are added. The latency
 fixture and lifecycle/legacy fixture require actual state assertions, successful
 client exits, boot markers and no GUI faults. Resize and theme regressions cover
 concurrent configure/recovery and exact themed pixels respectively.
+
+## IntelliMouse ID 3 correction — 4 November 2026
+
+A later native latency run exposed an additional kernel-side problem. The
+mouse driver negotiates device ID 3 (200/100/80 sample-rate sequence), whose
+fourth packet byte is a signed **eight-bit** delta. It was applying the signed
+four-bit Explorer ID 4 interpretation. A positive packet of 18 detents became 2;
+24 became -8. This loses scroll distance or reverses it even before the kernel
+pointer queue. The driver now preserves the complete signed byte.
+
+Two production-decoder host tests cover both directions across the nibble
+boundary and equivalent aggregated/individual detent totals. Both fail when the
+old decoder is substituted. QEMU's original three wheel rounds are unchanged.
+An additional `wheel-4` regression injects 24 down detents in one QMP sync and
+asserts an actual packet >=8, total exactly 24 and the exact scroll displacement:
+
+```text
+[PERF-WHEEL] wheel-2 delta=18 accepted=22
+[PERF-WHEEL] wheel-4 delta=24 accepted=24
+[PERF] wheel-4 done
+```
+
+The burst completed with one render/commit and a client input queue high-water
+mark of 1. Its host completion time was 67.7 ms in this run, including injection
+and marker polling. This is a separate regression workload, not a speedup over
+24 individually delivered events. `sdk_latency_report.py` keeps it separate
+from the original three-trial wheel median and still reads historical twelve-
+phase logs. The original model checks remain; the native budget now has 46
+required markers and 6 forbidden markers, all passing. This correction explains
+corruption for large wheel packets; it does not establish the cause of every
+previous intermittent stall or imply that the synchronous render loop is fixed.

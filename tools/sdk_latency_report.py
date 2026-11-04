@@ -13,8 +13,9 @@ def summarize(timing, serial):
         if raw.startswith('[INPUT-TIMING] '):
             item = json.loads(raw.split(' ', 1)[1])
             phases[item['phase']] = {'wall_ms': item['wall_ns'] / 1_000_000}
-    if len(phases) != 12:
-        raise ValueError(f'{timing}: expected all twelve input phases, got {len(phases)}')
+    expected = {f'{case}-{n}' for case in ('wheel', 'short', 'long', 'drag') for n in range(1, 4)}
+    if set(phases) not in (expected, expected | {'wheel-burst'}):
+        raise ValueError(f'{timing}: expected all twelve input phases and only the optional wheel burst')
     if 'Result    : OK (completed)' not in Path(timing).read_text():
         raise ValueError(f'{timing}: QEMU scenario did not complete successfully')
     def field(text, name):
@@ -32,6 +33,8 @@ def summarize(timing, serial):
         if not match:
             continue
         label, accepted, text = match.groups()
+        if label == 'wheel-4' and 'wheel-burst' in phases:
+            label = 'wheel-burst'
         if label not in phases:
             raise ValueError(f'unmeasured phase {label}')
         if not label.startswith('drag-') and int(accepted) != 24:
@@ -42,8 +45,12 @@ def summarize(timing, serial):
             retire_ms=duration(text, 'retire'), redraws=field(text, 'redraw_calls'),
             commits=field(text, 'commits'), input_qmax=field(text, 'input_queue_high_water'))
     result = {}
-    for case in ('wheel', 'short', 'long', 'drag'):
-        trials = [phases[f'{case}-{n}'] for n in range(1, 4)]
+    cases = [(case, [f'{case}-{n}' for n in range(1, 4)])
+             for case in ('wheel', 'short', 'long', 'drag')]
+    if 'wheel-burst' in phases:
+        cases.append(('wheel_burst', ['wheel-burst']))
+    for case, labels in cases:
+        trials = [phases[label] for label in labels]
         if any('render_ms' not in t for t in trials):
             raise ValueError(f'{case}: missing client metrics')
         result[case] = {'trials': trials, 'median': {
