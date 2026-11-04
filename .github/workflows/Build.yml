@@ -58,6 +58,8 @@ jobs:
       - name: Native ABI and protocol contracts
         run: |
           python3 tools/gen_abi.py --check
+          python3 tools/check_gui_protocol.py
+          python3 tools/test_gui_protocol_source.py
           rustc --edition=2021 --test kernel/src/drivers/keyboard_queue.rs -o /tmp/dunit-keyboard-queue-test
           /tmp/dunit-keyboard-queue-test
           rustc --edition=2021 --test userspace/system_apps/gui_server/src/damage_plan.rs -o /tmp/dunit-damage-plan-test

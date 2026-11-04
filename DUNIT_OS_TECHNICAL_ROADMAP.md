@@ -799,13 +799,15 @@ DSS отвечает ТОЛЬКО за внешний вид и обязан а�
 
 #### M7.8. Протокол и магические числа — централизация/генерация
 
-Живой control-канал `CAP1/INP1/RLD1/NOT1` теперь описан в `gui_protocol_v1::control`; `gui_server` и все 7 клиентов используют общий codec без изменения wire-байтов. `GUIC` остаётся централизован в `libdunit`. Формальный `DGUI`-роутер ввода используется лишь в self-тестах.
+Живой control-канал `CAP1/INP1/RLD1/NOT1` описан в `gui_protocol_v1::control`; `gui_server`, SDK и клиенты используют общий codec. `GUIC` остаётся централизован в `libdunit`. SDK использует DGUI в живом пути surface/configure/attach/commit/FrameDone. XFR1 и генерируемые transfer-значения добавлены в M7.7.
 
 - [x] Раскладки сообщений и магические числа (`CAP1/INP1/RLD1/NOT1`, input/notify/reload) вынесены в `gui_protocol_v1::control`; дубли из `gui_server` и клиентов удалены. Общий Rust codec — единственный источник формата; отдельный генератор для этих фиксированных Rust-сообщений не нужен. 68 host-тестов протокола, QEMU `gui_smoke`, `settings_ui` на DWM ISO и `dwm_engine_v2` прошли 26 октября 2026.
 - [x] Сохранён существующий control-канал из одного источника: `gui_protocol_v1::control`. Изменения версии/формата протокола и ABI не потребовались.
-- [ ] Задействовать damage протокола в live-цикле (`present_damaged_frame` в self-тесте уже умеет partial `fb_present`) — префикс к DnD-курсору и декларативному diff (M7.4).
+- [x] Damage протокола используется в live-цикле: committed buffer damage → CPU texture → `damage_runtime` → частичный `fb_present`. Стабильная opaque/unscaled/unobscured сцена обновляет только dirty pixels; небезопасные для этого пути сцены сохраняют полный painter. Новая CI-проверка запрещает прямые копии control-литералов и локальные определения magic-констант в production Rust.
 
 **Цель:** один источник правды для протокольных констант, без дублей. **Зависимости:** M7.4 (event loop поверх протокола). **Результат:** клиенты и `gui_server` импортируют раскладки из крейта/генерации. **Критерии приёмки:** грэп по дереву — определения `CAP1/INP1/RLD1/NOT1` остаются в ОДНОМ месте (0 дублей в клиентах); регрессия gui_smoke зелёная; damage в live-цикле уменьшает перекрашенную площадь (маркер/счётчик). **Риски:** смена формата ввода ломает все клиенты — менять за один заход с регрессией gui_smoke. **DoD:** дубли констант удалены, не «добавлен крейт, а дубли остались».
+
+**Приёмка M7.8, 4 ноября 2026:** проверены 335 production Rust-файлов — 4 control-тега определены в одном codec, прямых копий нет. 6 Python mutation-проверок gate, 100 protocol-тестов и 5 planner/cursor-тестов прошли. QEMU TCG: component — 13 required markers, GUI smoke — 30; запрещённых маркеров нет. Два реальных partial-обновления дали `composed=15360 presented=15360 texture=15360 screen=2073600` (0,74% экрана); unchanged update не презентуется, maximize/restore сохраняют модель. Runtime damage был реализован ранее; здесь закреплены CI-защита и итоговая приёмка. [Источники и границы fast path](docs/sdk/protocol-source.md).
 
 #### M7.9. Решение по `gui_server` (принято)
 

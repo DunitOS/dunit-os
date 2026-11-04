@@ -132,6 +132,8 @@ cargo test --manifest-path runtime/dunit-component/Cargo.toml
 cargo test --manifest-path runtime/dunit-render/Cargo.toml
 cargo test --manifest-path runtime/dunit-style/Cargo.toml
 cargo test --manifest-path runtime/dunit-widgets/Cargo.toml
+python3 tools/check_gui_protocol.py
+python3 tools/test_gui_protocol_source.py
 python3 tools/test_sdk_gui_fixture.py component --accel tcg
 python3 tools/test_sdk_catalog.py --accel tcg
 ```
@@ -161,3 +163,9 @@ The KVM desktop smoke satisfied all 30 required markers, with no forbidden
 markers, including the first-frame ordering regression for legacy clients.
 The existing Lua/Genie engine contract also passed all 20 required markers.
 Compiler warnings stayed at 13 within the existing budget of 99.
+
+
+M7.8 was revalidated on 4 November 2026 in QEMU TCG: exactly two partial
+updates each copied, composed and presented 15,360 pixels on a 2,073,600-pixel
+screen. The component contract passed all 13 required markers and GUI smoke
+passed all 30. The [protocol source gate](protocol-source.md) now runs in CI.
