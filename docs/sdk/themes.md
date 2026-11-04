@@ -41,10 +41,13 @@ cursor resources. Explicit numeric `[layout]`/`[effects]` fields become DSS
 overrides just like legacy colors. SDK clients and the compositor call
 `Theme::parse_shell`, which always validates the complete shell schema.
 
+[Scalar saves now preserve inheritance](settings-save.md): snapshot edits write
+changed fields only; explicit setters and partial imports retain supplied fields,
+including values equal to defaults. Complete document replacement is separate.
+
 M7.9 is still in progress: window-control offsets and other paint/layout
-literals remain, and shell extraction has not been benchmarked. Saving scalar
-Settings still explicitly serializes inherited legacy values, so inheritance
-through that editor needs further work. The shell stays in `gui_server`.
+literals remain, and shell extraction has not been benchmarked. The shell stays
+in `gui_server`.
 
 ## Token contract
 

@@ -31,7 +31,9 @@ pub mod policy;
 pub use validation::{validate, ConfigError};
 pub mod appearance;
 mod overlay;
-pub use overlay::{apply_overlay, edit, load_overlay, value};
+pub use overlay::{apply_overlay, edit, load_overlay, load_overlay_patch, normalize_overlay, value};
+mod scalar_save;
+pub use scalar_save::{apply_scalar_overlay, scalar_changes, save_changes, save_overlay};
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -993,30 +995,15 @@ impl Config {
     }
 }
 
-/// Serialize `settings` to the TOML dialect and write it back to `CONFIG_PATH`
-/// (slice C: the write half of the GUI<->TOML round-trip). Returns whether the
-/// write succeeded. The file is an `Owned` MemFS node so this persists for the
-/// session (RAM only until DunitFS v2). The caller then signals the compositor
-/// to reload. Never panics: a write error just returns `false`.
+/// Save differences against the current stored scalar values. For a staged
+/// draft use `save_changes`; explicit assignments/imports use `save_overlay`.
+/// Complete replacement remains `save_document`. Unchanged inherited appearance
+/// values are never materialized by this compatibility helper.
 pub fn save(settings: &Settings) -> bool {
-    if !version_supported(settings.meta.schema_version) || !roundtrip_ok(settings) {
-        return false;
-    }
-    let mut text = to_toml(settings);
-    // Preserve everything the settings app does not own — the `[application.*]`,
-    // `[dock]`, `[launcher]`, `[startup]` and `[workspaces]` tables live only in
-    // the file, so a settings-only rewrite must carry them over verbatim or a
-    // save would silently wipe the app registry. `to_toml` re-emits the core
-    // theme/layout/effects/desktop tables; merge unowned keys into them and
-    // retain independent tables verbatim.
-    let existing = match read_active_config() {
-        Ok(text) => text,
-        Err(libdunit::ENOENT) => String::new(),
-        Err(_) => return false, // never replace data we could not preserve
-    };
-    text = preserve::merge(&text, &existing);
-    if text.len() > 64 * 1024 { return false; }
-    write_active_config(&text).is_ok()
+    let Ok(source) = load_document() else { return false; };
+    let Ok(current) = validate_installed_document(&source) else { return false; };
+    let Ok(patch) = scalar_changes(&current.settings, settings) else { return false; };
+    scalar_save::save_to(&source, &patch)
 }
 
 /// Read + parse the system DWM config, overlaying it on the baseline. Never

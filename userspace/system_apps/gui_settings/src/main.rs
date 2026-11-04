@@ -1219,7 +1219,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
             app.apply(Action::ResNext);
             guard += 1;
         }
-        if dwm_settings::save(&app.s) {
+        if dwm_settings::save_changes(&previous, &app.s) {
             checked(window.reload_desktop(),"reload desktop");
             spots = paint(&mut window, &font, &mut app);
             let (tw, th) = RES_PRESETS[app.res_idx];
@@ -1365,12 +1365,13 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                 let previous = app.s;
                 let previous_colors = app.color_idx;
                 let previous_resolution = app.res_idx;
+                let mut explicit_overlay = None;
                 if let Action::ImportTheme(index) = a {
                     let candidate = app.themes.get(index)
                         .ok_or("Theme selection is no longer available.")
-                        .and_then(|path| dwm_settings::load_overlay(&app.s, path));
+                        .and_then(|path| dwm_settings::load_overlay_patch(&app.s,path));
                     match candidate {
-                        Ok(candidate) => app.s = candidate,
+                        Ok((candidate,source)) => { app.s = candidate; explicit_overlay = Some(source); },
                         Err(error) => {
                             app.status = error;
                             app.error = true;
@@ -1384,7 +1385,12 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                 }
                 // Persist to the live config and ask the compositor to reload,
                 // so the desktop reflects the new theme/geometry immediately.
-                if !dwm_settings::save(&app.s) {
+                let saved = if let Some(source) = &explicit_overlay {
+                    dwm_settings::save_overlay(source)
+                } else {
+                    dwm_settings::save_changes(&previous, &app.s)
+                };
+                if !saved {
                     app.s = previous;
                     app.color_idx = previous_colors;
                     app.res_idx = previous_resolution;

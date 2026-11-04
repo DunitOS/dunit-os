@@ -33,14 +33,14 @@ Saved settings apply on the next desktop session.\n",
     );
 }
 
-fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool, &'static str> {
+fn command(line: &str, settings: &mut Settings, dirty: &mut bool, pending: &mut String) -> Result<bool, &'static str> {
     let (cmd, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
     let rest = rest.trim();
     match cmd {
         "" => {}
         "help" => help(),
         "menu" => {
-            return menu(settings, dirty).map_err(|_| "menu input failed");
+            return menu(settings, dirty, pending).map_err(|_| "menu input failed");
         }
         "show" => {
             let text = dwm_settings::to_toml(settings);
@@ -73,7 +73,12 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
             let (field, input) = rest
                 .split_once(char::is_whitespace)
                 .ok_or("usage: set section.key TOML_VALUE")?;
-            *settings = edit(settings, field, input.trim())?;
+            let candidate = edit(settings, field, input.trim())?;
+            let (section,key) = field.split_once('.').ok_or("expected section.key")?;
+            let patch = format!("[{}]\n{} = {}\n",section,key,input.trim());
+            let staged = dwm_settings::apply_scalar_overlay(pending, &patch)?;
+            *settings = candidate;
+            *pending = staged;
             *dirty = true;
             libdunit::println("setup: staged; use save to write");
         }
@@ -82,11 +87,14 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
             let config=dwm_settings::validate_installed_document(&source).map_err(|_|"invalid full desktop configuration")?;
             if cmd=="import-user"{dwm_settings::save_user_document(&source).map_err(|_|"user profile could not be saved")?;}
             else{dwm_settings::save_document(&source).map_err(|_|"desktop document could not be saved")?;}
-            *settings=config.settings;*dirty=false;
+            *settings=config.settings;*dirty=false;pending.clear();
             libdunit::println("setup: full desktop applied");
         }
         "import" => {
-            *settings = dwm_settings::load_overlay(settings, rest)?;
+            let (candidate,patch) = dwm_settings::load_overlay_patch(settings, rest)?;
+            let staged = dwm_settings::apply_scalar_overlay(pending, &patch)?;
+            *settings = candidate;
+            *pending = staged;
             *dirty = true;
             libdunit::println("setup: overlay staged; use show to review and save to write");
         }
@@ -106,15 +114,18 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
             if !dwm_settings::roundtrip_ok(settings) {
                 return Err("staged settings fail validation");
             }
-            if !dwm_settings::save(settings) {
+            if !pending.is_empty() && !dwm_settings::save_overlay(pending) {
                 return Err("could not save settings");
             }
             let saved = dwm_settings::load_config();
             if !saved.valid
-                || dwm_settings::to_toml(&saved.settings) != dwm_settings::to_toml(settings)
+                || (!pending.is_empty() && dwm_settings::apply_overlay(&saved.settings, pending)
+                    .map(|expected|dwm_settings::to_toml(&expected)==dwm_settings::to_toml(&saved.settings)) != Ok(true))
             {
                 return Err("saved settings failed read-back verification");
             }
+            *settings = saved.settings;
+            pending.clear();
             *dirty = false;
             libdunit::println("setup: saved; applies on next desktop session");
         }
@@ -124,6 +135,7 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
                 return Err("saved config is invalid; staged settings retained");
             }
             *settings = config.settings;
+            pending.clear();
             *dirty = false;
             libdunit::println("setup: reloaded");
         }
@@ -137,7 +149,7 @@ fn command(line: &str, settings: &mut Settings, dirty: &mut bool) -> Result<bool
 
 /// Section and field choices come from the shared serializer, so new supported
 /// scalar settings appear here without a parallel menu schema.
-fn menu(settings: &mut Settings, dirty: &mut bool) -> Result<bool, isize> {
+fn menu(settings: &mut Settings, dirty: &mut bool, pending: &mut String) -> Result<bool, isize> {
     loop {
         let text = dwm_settings::to_toml(settings);
         let sections: Vec<&str> = text
@@ -157,7 +169,7 @@ fn menu(settings: &mut Settings, dirty: &mut bool) -> Result<bool, isize> {
             "q" | "quit" => return Ok(false),
             "c" | "commands" => return Ok(true),
             "s" | "save" => {
-                if let Err(error) = command("save", settings, dirty) {
+                if let Err(error) = command("save", settings, dirty, pending) {
                     libdunit::println(&format!("setup: error: {}", error));
                 }
                 continue;
@@ -221,13 +233,9 @@ fn menu(settings: &mut Settings, dirty: &mut bool) -> Result<bool, isize> {
             if input.trim().is_empty() {
                 continue;
             }
-            match edit(settings, field, input.trim()) {
-                Ok(candidate) => {
-                    *settings = candidate;
-                    *dirty = true;
-                    libdunit::println("setup: staged");
-                }
-                Err(error) => libdunit::println(&format!("setup: error: {}", error)),
+            let update = format!("set {} {}",field,input.trim());
+            if let Err(error) = command(&update, settings, dirty, pending) {
+                libdunit::println(&format!("setup: error: {}",error));
             }
         }
     }
@@ -285,6 +293,7 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
     let config = dwm_settings::load_config();
     let mut settings = config.settings;
     let mut dirty = false;
+    let mut pending = String::new();
     if !config.valid {
         libdunit::println("setup: warning: saved config is invalid; save is disabled");
     }
@@ -296,10 +305,10 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
             }
             line.push_str(libdunit::arg(i).unwrap_or(""));
         }
-        match command(&line, &mut settings, &mut dirty) {
+        match command(&line, &mut settings, &mut dirty, &mut pending) {
             Ok(_) => {
                 if dirty {
-                    if let Err(error) = command("save", &mut settings, &mut dirty) {
+                    if let Err(error) = command("save", &mut settings, &mut dirty, &mut pending) {
                         libdunit::println(&format!("setup: error: {}", error));
                         libdunit::exit(1);
                     }
@@ -312,7 +321,7 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
             }
         }
     }
-    match menu(&mut settings, &mut dirty) {
+    match menu(&mut settings, &mut dirty, &mut pending) {
         Ok(true) => help(),
         Ok(false) => {
             if dirty {
@@ -328,7 +337,7 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
     loop {
         libdunit::print(if dirty { "setup* > " } else { "setup > " });
         match read_command() {
-            Ok(Some(line)) => match command(line.trim(), &mut settings, &mut dirty) {
+            Ok(Some(line)) => match command(line.trim(), &mut settings, &mut dirty, &mut pending) {
                 Ok(true) => {}
                 Ok(false) => {
                     if dirty {

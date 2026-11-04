@@ -36,10 +36,14 @@ mod preserve;
 #[test]
 fn settings_save_preserves_independent_cadence_table() {
     let source = "[render]\nframe_interval_ms=33\n";
-    let merged = preserve::merge(
-        &dwm_settings::to_toml(&dwm_settings::Settings::defaults()),
-        source,
+    let before = dwm_settings::Settings::defaults();
+    let mut after = before;
+    after.widgets.enabled = !before.widgets.enabled;
+    let updates = preserve::changes(
+        &dwm_settings::to_toml(&before),
+        &dwm_settings::to_toml(&after),
     );
+    let merged = preserve::patch(source, &updates);
     assert_eq!(
         validate_document(&merged).unwrap().render.frame_interval_ms,
         33

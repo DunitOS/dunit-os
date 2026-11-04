@@ -168,3 +168,34 @@ fn removing_shell_schema_tokens_does_not_disable_candidate_validation() {
         .is_err());
     }
 }
+
+#[test]
+fn sparse_settings_save_retains_dss_inheritance_but_explicit_default_overrides_it() {
+    let source = "[desktop]\nsdk_theme=\"/theme.dss\"\n[widgets]\nenabled=false\n";
+    let profile = format!("{DARK}\n$shell-layout-title-h:40; $shell-panel-text:#123456;");
+    let before = settings::validate_document(source).unwrap().settings;
+    let mut after = before;
+    after.display.width = 1280;
+    after.display.height = 720;
+    let patch = settings::scalar_changes(&before, &after).unwrap();
+    let saved = settings::apply_scalar_overlay(source, &patch).unwrap();
+    assert_eq!(visuals(&profile, &saved).layout_title_h, 40);
+    assert_eq!(
+        shell_palette::palette(&resolve(&profile, &saved).tokens)
+            .unwrap()
+            .panel_text,
+        0xff123456
+    );
+    let pinned = settings::apply_scalar_overlay(
+        &saved,
+        "[layout]\ntitle_h=26\n[theme]\npanel_text=\"#CDD6F4\"",
+    )
+    .unwrap();
+    assert_eq!(visuals(&profile, &pinned).layout_title_h, 26);
+    assert_eq!(
+        shell_palette::palette(&resolve(&profile, &pinned).tokens)
+            .unwrap()
+            .panel_text,
+        0xffcdd6f4
+    );
+}

@@ -1,6 +1,6 @@
 //! Checked settings edits shared by terminal setup and graphical theme import.
-use alloc::format;
 use crate::Settings;
+use alloc::{format, string::String};
 
 /// Enumerate the serializer's actual fields, avoiding a second settings schema.
 pub fn value<'a>(document: &'a str, field: &str) -> Option<&'a str> {
@@ -66,10 +66,19 @@ pub fn edit(current: &Settings, field: &str, input: &str) -> Result<Settings, &'
     Ok(candidate)
 }
 
-
 /// Validate every supplied setting before returning a candidate. Unknown,
 /// malformed and clamped values reject the entire overlay.
 pub fn apply_overlay(current: &Settings, text: &str) -> Result<Settings, &'static str> {
+    parse_overlay(current, text).map(|(candidate, _)| candidate)
+}
+
+/// Canonical explicit fields, including assignments equal to inherited values.
+pub fn normalize_overlay(current: &Settings, text: &str) -> Result<String, &'static str> {
+    parse_overlay(current, text).map(|(_, patch)| patch)
+}
+
+fn parse_overlay(current: &Settings, text: &str) -> Result<(Settings, String), &'static str> {
+    let mut fields = alloc::vec::Vec::new();
     let mut candidate = *current;
     let mut section = "";
     let mut count = 0usize;
@@ -82,9 +91,7 @@ pub fn apply_overlay(current: &Settings, text: &str) -> Result<Settings, &'stati
             if *byte == b'"' {
                 quoted = !quoted;
             }
-            if !quoted
-                && (*byte == b'#' || (*byte == b'/' && bytes.get(i + 1) == Some(&b'/')))
-            {
+            if !quoted && (*byte == b'#' || (*byte == b'/' && bytes.get(i + 1) == Some(&b'/'))) {
                 end = i;
                 break;
             }
@@ -115,19 +122,31 @@ pub fn apply_overlay(current: &Settings, text: &str) -> Result<Settings, &'stati
             continue; // overlays cannot replace the running schema metadata
         }
         candidate = edit(&candidate, &field, input.trim())?;
+        fields.push(field);
         count += 1;
     }
     if count == 0 {
         return Err("overlay contains no supported settings");
     }
-    Ok(candidate)
+    let patch = crate::preserve::select(&crate::to_toml(&candidate), &fields);
+    Ok((candidate, patch))
 }
 
 /// Bounded, checked I/O through the same reader as the desktop config.
 pub fn load_overlay(current: &Settings, path: &str) -> Result<Settings, &'static str> {
+    load_overlay_patch(current, path).map(|(candidate, _)| candidate)
+}
+
+/// Read a partial settings/theme import and retain its explicit declarations.
+/// Unlike load_document_from, an overlay does not require an app registry.
+pub fn load_overlay_patch(
+    current: &Settings,
+    path: &str,
+) -> Result<(Settings, String), &'static str> {
     if !path.starts_with('/') || path.split('/').any(|p| p == "..") {
         return Err("overlay path must be absolute without parent traversal");
     }
-    let text = crate::read_file_checked(path).map_err(|_| "could not read complete UTF-8 overlay (64 KiB maximum)")?;
-    apply_overlay(current, &text)
+    let text = crate::read_file_checked(path)
+        .map_err(|_| "could not read complete UTF-8 overlay (64 KiB maximum)")?;
+    parse_overlay(current, &text)
 }

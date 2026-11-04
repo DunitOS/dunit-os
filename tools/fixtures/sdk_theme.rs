@@ -36,9 +36,47 @@ fn background(profile: &str) -> u32 {
 #[dunit::main]
 fn main() -> dunit::Result<()> {
     let dark = dunit::fs::read_to_string("/assets/dwm/sdk/dark.dss")?;
-    let light = alloc::format!("{}\n$shell-cursor-fill: #ff00ff;\n", dunit::fs::read_to_string("/assets/dwm/sdk/light.dss")?);
+    let light = alloc::format!(
+        "{}\n$shell-cursor-fill: #ff00ff;\n",
+        dunit::fs::read_to_string("/assets/dwm/sdk/light.dss")?
+    );
     let config_path = "/system/share/dwm/default.toml";
+    // Setup's scalar setter and explicit partial import ran before this app.
+    let saved = dunit::fs::read_to_string(config_path)?;
+    assert_eq!(
+        dwm_settings::value(&saved, "notifications.timeout_ms"),
+        Some("4000")
+    );
+    assert_eq!(dwm_settings::value(&saved, "effects.blur_iters"), Some("2"));
+    let before = dwm_settings::load();
+    let mut edited = before;
+    edited.notifications.timeout_ms = 4500;
+    assert!(dwm_settings::save_changes(&before, &edited));
+    let untouched = dunit::fs::read_to_string(config_path)?;
+    assert!(dwm_settings::save_changes(&edited, &edited));
+    assert_eq!(dunit::fs::read_to_string(config_path)?, untouched);
+    let mut invalid = edited;
+    invalid.layout.dock_w = 99999;
+    assert!(!dwm_settings::save_changes(&edited, &invalid));
+    assert_eq!(dunit::fs::read_to_string(config_path)?, untouched);
+    edited.effects.anim_ms += 1;
+    assert!(dwm_settings::save(&edited));
     let original = dunit::fs::read_to_string(config_path)?;
+    for field in ["theme.panel", "layout.title_h", "effects.shadow_alpha"] {
+        assert!(
+            dwm_settings::value(&original, field).is_none(),
+            "implicit {field} was pinned"
+        );
+    }
+    assert_eq!(
+        dwm_settings::value(&original, "notifications.timeout_ms"),
+        Some("4500")
+    );
+    assert_eq!(
+        dwm_settings::value(&original, "effects.blur_iters"),
+        Some("2")
+    );
+    dunit::println!("[SDKTHEME] sparse scalar save retained inheritance OK")?;
     assert!(original.contains("\"/sdk-theme.dss\""));
     let switched = original.replacen("\"/sdk-theme.dss\"", "\"/sdk-theme-next.dss\"", 1);
     let mut ui = ComponentWindow::open_themed(480, 240, Counter(0))?;

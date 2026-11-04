@@ -50,7 +50,7 @@ def main(fixture=None):
                 fixture_cache = ROOT / 'build/sdk-fixture-target'
                 fixture_cache.mkdir(exist_ok=True)
                 (app_folder / 'target').symlink_to(fixture_cache, target_is_directory=True)
-                if fixture in ('component', 'resize', 'transfer'):
+                if fixture in ('component', 'resize', 'transfer', 'theme'):
                     with (app_folder / 'Cargo.toml').open('a') as manifest_file:
                         manifest_file.write('dwm_settings = { path = '
                             + json.dumps(str(ROOT / 'userspace/dwm_settings')) + ' }\n')
@@ -92,6 +92,8 @@ def main(fixture=None):
                 if fixture == 'motion':
                     profile += (ROOT / 'tools/fixtures/sdk_motion_profile.dss').read_text()
                 (overlay / 'sdk-theme.dss').write_text(profile)
+                if fixture == 'theme':
+                    (overlay / 'sdk-save-overlay.toml').write_text('[effects]\nblur_iters = 2\n')
             # DF/IRQ contracts also need the kernel's boot-smoke checks and
             # their full application composition. Other fixtures use DWM.
             kernel_features=['--features','boot-smoke-tests'] if image_profile=='full' else []

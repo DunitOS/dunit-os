@@ -4,6 +4,8 @@
     "config": "limine_test_terminal.conf",
     "cmd": [
       "exec /app/setup import-desktop /sdk-theme.toml",
+      "exec /app/setup set notifications.timeout_ms 4000",
+      "exec /app/setup import /sdk-save-overlay.toml",
       "exec /app/gui_server"
     ],
     "command_actions": {
@@ -114,12 +116,16 @@
     "[SDKTHEME] invalid retained OK",
     "[SDKTHEME] ok",
     "[GUI-EXIT] app=sdk_theme_fixture kind=0 code=0",
-    "gui_server: shell reload rejected invalid shared theme:"
+    "gui_server: shell reload rejected invalid shared theme:",
+    "setup: saved; applies on next desktop session",
+    "[SDKTHEME] sparse scalar save retained inheritance OK"
   ],
   "forbidden": [
     "[PANIC]",
     "[SDK] PANIC",
     "gui_server: FAIL",
-    "FAIL no frame done"
+    "FAIL no frame done",
+    "setup: error:",
+    "setup: fatal error"
   ]
 }

@@ -56,8 +56,8 @@ hashes. Host checks cover custom popup cells, clipped layouts, numeric precedenc
 invalid metrics, missing schema fields, cursor data and colored partial repair.
 
 This checkpoint does not complete M7.9. Private window-control offsets and other
-shell/window paint literals remain. Scalar Settings saves still serialize all
-legacy appearance fields, which can pin previously inherited values. Extraction
+shell/window paint literals remain. [Scalar settings saves](settings-save.md)
+now preserve omitted inherited fields and explicit import intent. Extraction
 has not been prototyped or measured; no new compositor protocol is introduced.
 
 ## Measurement checkpoint, 4 November 2026
