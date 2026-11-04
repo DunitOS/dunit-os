@@ -27,6 +27,8 @@ from image_profile import load_profile
 import os
 from pathlib import Path
 import struct
+import subprocess
+import tempfile
 import sys
 
 
@@ -49,7 +51,16 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
     profile = load_profile(getattr(args, "profile", "full"))
 
     def add(vfs_path: str, host_path: Path) -> None:
-        entries[vfs_path] = host_path.read_bytes()
+        payload = host_path.read_bytes()
+        # Symbols are host debugging data, not executable payload. Strip only
+        # ELF executables (never SDK archives/relocatable objects); keep the
+        # original build artifact intact for symbolication.
+        if payload[:4] == b"\x7fELF" and len(payload) >= 18 and payload[16:18] == b"\x02\x00":
+            with tempfile.TemporaryDirectory(prefix="dunit-strip-") as folder:
+                output = Path(folder) / "executable"
+                subprocess.run(["strip", "--strip-all", "-o", str(output), str(host_path)], check=True)
+                payload = output.read_bytes()
+        entries[vfs_path] = payload
 
     userspace = Path(args.userspace_dir)
     sources = (sorted(userspace.iterdir()) if profile["apps"] is None else

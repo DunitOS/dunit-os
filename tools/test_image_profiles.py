@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from image_profile import load_profile
 from pack_initrd import collect, pack
@@ -104,6 +105,28 @@ class ImageProfiles(unittest.TestCase):
         (overlay / "escape").symlink_to(self.args.assets_dir, target_is_directory=True)
         with self.assertRaisesRegex(RuntimeError, "symlinks"):
             collect(self.args)
+
+    def test_packaged_executables_run_and_sources_and_sdk_objects_remain_intact(self):
+        self.write("program.c", b'#include <stdio.h>\nint main(void) {puts("packed ELF works"); return 7;}\n')
+        source = self.root / "program.c"
+        executable = self.args.userspace_dir / "dsh"
+        subprocess.run(["cc", "-g", "-no-pie", str(source), "-o", str(executable)], check=True)
+        original = executable.read_bytes()
+        self.args.profile = "full"
+        obj = self.root / "sysroot/lib/crt1.o"
+        obj.parent.mkdir(parents=True)
+        subprocess.run(["cc", "-c", "-g", str(source), "-o", str(obj)], check=True)
+        object_bytes = obj.read_bytes()
+        entries = dict(collect(self.args))
+        self.assertLess(len(entries["/app/dsh"]), len(original))
+        self.assertEqual(executable.read_bytes(), original)
+        self.assertEqual(entries["/system/lib/crt1.o"], object_bytes)
+        self.assertEqual(entries["/system/tcc/crt1.o"], object_bytes)
+        packaged = self.root / "packaged"
+        packaged.write_bytes(read_archive(pack(sorted(entries.items())))["/app/dsh"])
+        packaged.chmod(0o700)
+        result = subprocess.run([str(packaged)], capture_output=True)
+        self.assertEqual((result.returncode, result.stdout), (7, b"packed ELF works\n"))
 
     def test_archive_rejects_corruption_and_duplicate_paths(self):
         valid = pack([("/app/a", b"a")])

@@ -24,6 +24,11 @@ def main(fixture=None):
     source_name = "sdk_window_resize" if fixture == "resize" else f"sdk_{fixture}"
     app_id = f'sdk_{fixture}_fixture'
     config_name = f'sdk-{fixture.replace("_", "-")}.toml'
+    contract = json.loads((ROOT / f'tools/{source_name}_markers.json').read_text()) if fixture!='matrix' else {}
+    image_profile = contract.get('run', {}).get('image_profile', 'dwm')
+    if image_profile not in ('dwm', 'full'):
+        raise ValueError('SDK fixtures require dwm or full image composition')
+    boot_config = ('limine_test_terminal.conf' if image_profile=='full' else 'limine_sdk_terminal.conf')
 
     os.environ['RUSTUP_TOOLCHAIN'] = 'nightly'
     os.environ['PATH'] = str(Path(cargo()).parent) + os.pathsep + os.environ['PATH']
@@ -87,14 +92,14 @@ def main(fixture=None):
                 if fixture == 'motion':
                     profile += (ROOT / 'tools/fixtures/sdk_motion_profile.dss').read_text()
                 (overlay / 'sdk-theme.dss').write_text(profile)
-            # GUI contracts need the desktop composition, not every unrelated
-            # CLI/libc test ELF in the fixed-size installer ESP.
-            kernel_features=[]
+            # DF/IRQ contracts also need the kernel's boot-smoke checks and
+            # their full application composition. Other fixtures use DWM.
+            kernel_features=['--features','boot-smoke-tests'] if image_profile=='full' else []
             subprocess.run([cargo(), 'build', '--release', *kernel_features,
                 '-Z', 'build-std=core,alloc,compiler_builtins', '-Z', 'build-std-features=compiler-builtins-mem',
                 '-Z', 'json-target-spec'], cwd=ROOT / 'kernel', check=True)
             command += ['--build', '--initrd-overlay', str(overlay)]
-            command+=['--image-profile','dwm','--config','limine_sdk_terminal.conf']
+            command+=['--image-profile',image_profile,'--config',boot_config]
         if args.reuse_image and fixture=='matrix':
             from dnd_matrix import prepare
             overlay=Path(folder)/'overlay';overlay.mkdir()

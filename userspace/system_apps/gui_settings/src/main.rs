@@ -1173,14 +1173,23 @@ fn render(pixels: &mut[u32], font: &Font, app: &App) -> Vec<Hotspot> {
 }
 
 fn checked<T>(result:dunit::Result<T>,operation:&str)->T{result.unwrap_or_else(|error|{libdunit::println(&alloc::format!("gui_settings: {} failed {}",operation,error.0));libdunit::exit(1)})}
-fn paint(window:&mut Window,font:&Font,app:&App)->Vec<Hotspot>{
-    let mut spots=Vec::new();checked(window.draw(|frame|{spots=render(frame.pixels_mut(),font,app);}),"present frame");spots
+fn paint(window: &mut Window, font: &Font, app: &mut App) -> Vec<Hotspot> {
+    let mut spots = Vec::new();
+    checked(window.draw(|frame| {
+        // Window::draw can accept CONFIGURE before invoking this callback.
+        // Queued Resized events need not have reached the application's loop.
+        let (width, height) = frame.size();
+        app.width = width;
+        app.height = height;
+        spots = render(frame.pixels_mut(), font, app);
+    }), "present frame");
+    spots
 }
 
 #[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
     libdunit::println("gui_settings: PANIC");
-    libdunit::exit(101)
+    dunit::__private::panic(info)
 }
 
 #[no_mangle]
@@ -1189,7 +1198,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
     let font=load_font().unwrap_or_else(|_|{libdunit::println("gui_settings: FAIL font parse");libdunit::exit(7)});
     let mut window=checked(Window::open(W,H),"window handshake");
     let mut app=App::new();let (width,height)=window.size();app.width=width;app.height=height;
-    let mut spots=paint(&mut window,&font,&app);
+    let mut spots=paint(&mut window,&font,&mut app);
     libdunit::println("gui_settings: surface presented OK");
     // 8.5) Headless resolution-picker proof (config-gated `[startup] self_test`,
     //      true only in test.toml — NEVER on the real desktop). The automated
@@ -1212,7 +1221,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
         }
         if dwm_settings::save(&app.s) {
             checked(window.reload_desktop(),"reload desktop");
-            spots = paint(&mut window, &font, &app);
+            spots = paint(&mut window, &font, &mut app);
             let (tw, th) = RES_PRESETS[app.res_idx];
             let mut msg = String::from("gui_settings: res picker self-test picked ");
             push_int(&mut msg, tw as i32);
@@ -1225,7 +1234,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
             app.res_idx = previous_resolution;
             app.status = "Save failed. Previous settings restored.";
             app.error = true;
-            spots = paint(&mut window, &font, &app);
+            spots = paint(&mut window, &font, &mut app);
             libdunit::println("gui_settings: FAIL resolution picker save");
         }
     }
@@ -1241,13 +1250,13 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
         checked(transfers.sync(&mut window,&app),"text target registration");
         let event=checked(window.next_event(dunit::time::Duration::from_millis(if draft_repaint{0}else{40})),"window event");
         let input=match event{
-            None=>{if draft_repaint{spots=paint(&mut window,&font,&app);draft_repaint=false;}continue;},
+            None=>{if draft_repaint{spots=paint(&mut window,&font,&mut app);draft_repaint=false;}continue;},
             Some(WindowEvent::CloseRequested)=>break,
             Some(WindowEvent::Resized{width,height})=>{
                 app.width=width;app.height=height;
                 app.scroll_x=app.scroll_x.min((if app.editor_section().is_some(){1200u32}else{W}).saturating_sub(width)as i32);
                 app.scroll_y=app.scroll_y.min(app.content_height().saturating_sub(height.saturating_sub(FOOTER_H))as i32);
-                spots=paint(&mut window,&font,&app);draft_repaint=false;transfers.invalidate();
+                spots=paint(&mut window,&font,&mut app);draft_repaint=false;transfers.invalidate();
                 libdunit::println("gui_settings: reconfigured OK");continue;
             },
             Some(WindowEvent::Transfer(event))=>{draft_repaint|=checked(transfers.event(&mut window,&mut app,&spots,&font,event),"transfer event");continue;},
@@ -1258,13 +1267,13 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
         if matches!(kind,IN_FOCUS_IN|IN_FOCUS_OUT){transfers.focus(kind==IN_FOCUS_IN);continue;}
         if kind==IN_KEY&&checked(transfers.key(&mut window,&app,&input),"clipboard command"){continue;}
         if let Some(repaint)=checked(transfers.pointer(&mut window,&mut app,&spots,&font,&input),"text drag"){
-            if repaint{spots=paint(&mut window,&font,&app);}continue;
+            if repaint{spots=paint(&mut window,&font,&mut app);}continue;
         }
         if kind==IN_KEY||kind==IN_DOWN{transfers.invalidate();}
         if kind == IN_SCROLL {
             let delta = input.x;
             app.apply(Action::Scroll(0, delta.saturating_mul(-32)));
-            spots = paint(&mut window, &font, &app);
+            spots = paint(&mut window, &font, &mut app);
         }
         if kind == IN_KEY && app.page == 12 && app.profile_focused {
             app.profile_path.input(&input);
@@ -1338,14 +1347,14 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                             }
                         },
                     }
-                    spots = paint(&mut window, &font, &app);
+                    spots = paint(&mut window, &font, &mut app);
                     continue;
                 }
                 if matches!(a, Action::SelectPage(_) | Action::Scroll(_, _) | Action::EditLine(_)
                     | Action::InsertLine | Action::NewTable | Action::DeleteLine | Action::EditorPage(_)
                     | Action::RevertDocument | Action::SelectProfile(_) | Action::FocusProfilePath) {
                     app.apply(a);
-                    spots = paint(&mut window, &font, &app);
+                    spots = paint(&mut window, &font, &mut app);
                     match a {
                         Action::SelectPage(page) => libdunit::println(&alloc::format!("gui_settings: page {}", page)),
                         Action::Scroll(_, _) => libdunit::println(&alloc::format!("gui_settings: scroll {},{}", app.scroll_x, app.scroll_y)),
@@ -1366,7 +1375,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                             app.status = error;
                             app.error = true;
                             libdunit::println(&alloc::format!("gui_settings: theme rejected; previous settings retained: {}",error));
-                            spots = paint(&mut window, &font, &app);
+                            spots = paint(&mut window, &font, &mut app);
                             continue;
                         }
                     }
@@ -1382,7 +1391,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                     app.status = "Save failed. Previous settings restored.";
                     app.error = true;
                     libdunit::println("gui_settings: save failed; previous settings retained");
-                    spots = paint(&mut window, &font, &app);
+                    spots = paint(&mut window, &font, &mut app);
                     continue;
                 }
                 if app.editor.as_ref().map(|e| !e.dirty).unwrap_or(false) { app.refresh_document(); }
@@ -1397,7 +1406,7 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                     app.status = "Saved and desktop reload requested (session RAM).";
                     app.error = false;
                 }
-                spots = paint(&mut window, &font, &app);
+                spots = paint(&mut window, &font, &mut app);
             }
         }
     }

@@ -1,5 +1,6 @@
 {
   "run": {
+    "image_profile": "full",
     "config": "limine_test_terminal.conf",
     "cmd": [
       "exec /app/setup import-desktop /sdk-list.toml",

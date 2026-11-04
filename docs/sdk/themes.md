@@ -18,8 +18,27 @@ The packaged dark profile is the default. macOS Light selects the light profile;
 Mojave Dark, Nord and Green Tea select dark. Custom profiles can live under
 `/persist`; paths must be absolute without `..`. The common structural rules are
 in `/assets/dwm/sdk/base.dss`. The SDK reads these as ordinary VFS files, not
-embedded kernel assets. Desktop chrome still uses its existing TOML theme;
-this step does not unify compositor decoration and SDK token registries.
+embedded kernel assets. SDK clients and compositor chrome now share the profile,
+`/assets/dwm/sdk/shell.dss` token defaults and the same pure theme validator.
+Shell stylesheets can reference both core SDK tokens and `shell-*` colors.
+
+Explicit legacy `[theme]` fields are converted to `shell-*` overrides at the
+configuration boundary (TOML ARGB is converted to DSS RGBA). Omitted fields
+inherit the selected profile; a profile may override individual `shell-*` values.
+These defaults never replace an explicit value. App colors keep their normal
+core tokens, while the complete registry exposes intentional chrome variations.
+Existing legacy presets therefore retain their colors.
+
+The compositor prepares the palette and stylesheet before accepting a desktop
+configuration. Invalid candidates retain the previous shell. Native SDK clients
+poll their theme resources; after saving a desktop/profile change, call
+`ComponentWindow::reload_desktop()` to request the compositor's existing atomic
+reload. In-place file edits alone do not notify the compositor.
+
+M7.9 is still in progress: geometry, remaining cursor/switch colors and some
+paint literals have not yet migrated to shared tokens. Saving scalar Settings
+still serializes the legacy palette explicitly. Shell extraction has not been
+benchmarked or approved for implementation; the shell stays in `gui_server`.
 
 ## Token contract
 
@@ -52,6 +71,8 @@ A complete SDK profile defines:
 | `motion-fast` | Duration, 0–60,000 ms |
 
 `Theme::parse(profile, base, overlay)` is pure and shared by host and guest.
+`Theme::parse_with_defaults(profile, defaults, base, overlay)` additionally loads
+a token-only defaults layer; it rejects rules there and invalid color overrides.
 It validates tokens and the supported color, font-size, padding, border-width,
 radius, background-gradient, shadow, backdrop-blur and clip declarations before
 constructing the cascade. Optional application rules use
@@ -249,3 +270,61 @@ retry; two control runs with the production renderer/filter restored to
 `fc5eda9` also passed. The failure was not reproduced consistently, and neither
 its cause nor a fix was established. This remains an unresolved stability
 finding; successful SDK pixel tests do not resolve it or prove the 16 ms budget.
+
+## M7.9 validation checkpoint — 4 November 2026
+
+One vCPU, QEMU TCG, 1920×1080, software rendering; three rounds per input type.
+Before: production source at `8d4c79b`; after: shared shell palette preparation.
+Both runs passed the exact 24-detent/text/selection model assertions. The
+benchmark now counts wheel delta units, since PS/2 can represent several detents
+in one message; direction, total delta and final scroll displacement remain
+checked. Two earlier after-runs stalled on the old message-count assertion.
+Their complete wheel deltas were not instrumented, so aggregation has not been
+proven to explain those stalls. The final successful run received individual
+wheel messages; repeatability under bursts still needs investigation.
+
+| Host injection → completion median (ms) | Before | After |
+| --- | ---: | ---: |
+| wheel | 623 | 580 |
+| short | 570 | 586 |
+| long | 1537 | 1501 |
+| drag | 275 | 275 |
+
+The whole-loop frame marker was ~20 ms before and ~21 ms after. These are
+single-run observations with a 10 ms guest clock and host scheduling noise;
+no speedup or completed frame-time acceptance is claimed. Host measurements
+include injection and waiting, not physical-device latency.
+
+The native theme fixture captures dark → light → restored. All three client
+canvases match the existing pixel hashes exactly; an independent sample in the
+opaque full-width panel matches the selected `$surface`. Legacy presets remain
+explicit overrides and do not inherit these defaults. Pure tests cover both
+profiles, partial legacy overrides including alpha, profile precedence,
+invalid token types and use of SDK tokens in shell DSS.
+
+The fixture harness selects the full boot-smoke image for contracts requiring
+DF/IRQ checks, instead of silently omitting the kernel check. Packaged ET_EXEC
+ELFs are stripped in temporary copies so full SDK fixtures fit the existing
+128 MiB ESP; original symbol-bearing artifacts and SDK relocatable objects are
+preserved. Host tests execute a packed ELF and check the untouched sources and
+CRT objects; the native latency run also executes the real DF/IRQ check.
+
+The full GUI smoke exposed an unrelated Settings resize race: `Window::draw`
+can process CONFIGURE before calling the painter while the app still has an old
+queued Resized event. Settings now takes dimensions from the borrowed Frame
+before painting; panic diagnostics use the SDK's bounded report. The smoke's
+forbidden budget now also covers Settings/SDK panics. Its maximize/restore proof
+refreshes an already maximized session window instead of leaving phase zero
+stuck, preserving the actual CONFIGURE/restore path and all required markers.
+
+Final checks: 55 host tests (40 settings, 4 shared shell theme, 2 existing SDK
+pixel/theme tests, 9 image profile/packing tests). Native QEMU TCG: latency
+42 required/6 forbidden, theme 7/4 plus three exact client/panel pixel checks,
+GUI smoke 30/13. All final budgets passed. Representative serial evidence:
+
+```text
+[SDKTHEME] shell panel light: shared token pixels OK
+gui_server: recycle self-test closing 7 windows (clients=7)
+gui_server: recycle self-test reaped_to=4 reopened=4 ok (ceiling lifted)
+gui_settings: reconfigured OK
+```

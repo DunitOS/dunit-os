@@ -60,4 +60,10 @@ def verify(root: Path, fixture="theme"):
                 break
         if matched is None:
             raise RuntimeError(f'{label}: actual framebuffer differs from the native rendered canvas')
+        if fixture == "theme":
+            panel_color = re.search(r'\$surface:\s*#([0-9a-f]{6});', source).group(1)
+            offset = (14 * width + width - 32) * 3
+            if data[offset:offset + 3] != bytes.fromhex(panel_color):
+                raise RuntimeError(f'{label}: compositor panel does not match shared $surface')
+            print(f'[{marker}] shell panel {label}: shared token pixels OK')
         print(f'[{marker}] framebuffer {label} {cw}x{ch} at {matched}: exact pixels OK')

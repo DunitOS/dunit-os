@@ -7,7 +7,6 @@ use crate::{
 };
 use alloc::{string::String, vec};
 
-const BASE: &str = "/assets/dwm/sdk/base.dss";
 pub(crate) const POLL: crate::time::Duration = crate::time::Duration::from_millis(500);
 pub(crate) struct Failure {
     pub error: Error,
@@ -35,6 +34,7 @@ struct Source {
     font: String,
     profile: String,
     base: String,
+    defaults: String,
     animations: bool,
 }
 impl Source {
@@ -48,16 +48,19 @@ impl Source {
         let desktop = config.settings.desktop;
         Ok(Self {
             font: desktop.font.as_str().into(),
-            profile: text(desktop.sdk_theme.as_str())?,
-            base: text(BASE)?,
+            profile: dwm_settings::appearance::profile(&text(desktop.sdk_theme.as_str())?, &config),
+            base: text(dwm_settings::appearance::SDK_BASE)?,
+            defaults: text(dwm_settings::appearance::SHELL_TOKENS)?,
             animations: config.settings.effects.anim,
         })
     }
     fn theme(&self, overlay: &str) -> core::result::Result<Theme, Failure> {
-        Theme::parse(&self.profile, &self.base, overlay).map_err(|error| Failure {
-            error: Error(libdunit::EINVAL),
-            detail: alloc::format!("{:?}", error),
-        })
+        Theme::parse_with_defaults(&self.profile, &self.defaults, &self.base, overlay).map_err(
+            |error| Failure {
+                error: Error(libdunit::EINVAL),
+                detail: alloc::format!("{:?}", error),
+            },
+        )
     }
     fn font(&self) -> Result<Font> {
         Font::parse(bytes(&self.font, 4 * 1024 * 1024)?).map_err(|_| Error(libdunit::EINVAL))

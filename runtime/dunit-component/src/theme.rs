@@ -9,7 +9,38 @@ pub struct Theme {
 }
 impl Theme {
     pub fn parse(profile: &str, base: &str, overlay: &str) -> style::Result<Self> {
-        let profile = style::parse_with_tokens(profile, &style::Tokens::default())?;
+        Self::parse_with_defaults(profile, "", base, overlay)
+    }
+    /// Resolve optional shared defaults against the selected profile. Explicit
+    /// profile tokens win; base and application rules see the complete registry.
+    pub fn parse_with_defaults(
+        profile: &str,
+        defaults: &str,
+        base: &str,
+        overlay: &str,
+    ) -> style::Result<Self> {
+        let mut profile = style::parse_with_tokens(profile, &style::Tokens::default())?;
+        let defaults = style::parse_with_tokens(defaults, &profile.tokens)?;
+        if !defaults.rules.is_empty() {
+            return Err(style::StyleError::Unexpected {
+                line: 1,
+                what: alloc::string::String::from("token defaults cannot contain rules"),
+            });
+        }
+        for (name, default) in defaults.tokens.iter() {
+            if default.as_color().is_some()
+                && profile
+                    .tokens
+                    .get(name)
+                    .is_some_and(|value| value.as_color().is_none())
+            {
+                return Err(style::StyleError::Unexpected {
+                    line: 1,
+                    what: alloc::format!("color required for ${}", name),
+                });
+            }
+        }
+        profile.tokens.extend_missing(defaults.tokens);
         let bad = |name: &str| style::StyleError::Unexpected {
             line: 1,
             what: alloc::format!("invalid SDK theme token ${}", name),

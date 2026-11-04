@@ -58,6 +58,7 @@ fn main() -> dunit::Result<()> {
             (0, 1) => {
                 dunit::fs::write("/sdk-theme-next.dss", light.as_bytes())?;
                 dunit::fs::write(config_path, switched.as_bytes())?;
+                ui.reload_desktop()?;
                 stage = 1;
             }
             (1, 1) if ui.pixels()[0] == background(&light) => {
@@ -88,6 +89,7 @@ fn main() -> dunit::Result<()> {
             }
             (2, 2) => {
                 dunit::fs::write(config_path, original.as_bytes())?;
+                ui.reload_desktop()?;
                 stage = 3;
             }
             (3, 2) if ui.pixels()[0] == background(&dark) => {

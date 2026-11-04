@@ -2,18 +2,21 @@
 use super::*;
 impl Shell {
     pub fn prepare(
-        config: ShellConfig,
-        apps: &Applications,
+        desktop: &settings::Config,
         bw: usize,
         bh: usize,
     ) -> Result<Self, String> {
+        let config = desktop.shell.clone();
+        let apps = &desktop.apps;
+        let shared = crate::shell_theme::prepare(desktop)?;
+        let palette = crate::shell_theme::palette(&shared.tokens)?;
         let mut cascade = Cascade::new();
         if !config.stylesheet.is_empty() {
             let source = libdunit::read_binary(&config.stylesheet, 64 * 1024)
                 .ok_or_else(|| alloc::format!("{}: cannot read stylesheet", config.stylesheet))?;
             let source =
                 core::str::from_utf8(&source).map_err(|_| String::from("DSS must be UTF-8"))?;
-            let sheet = dunit_style::parse(source)
+            let sheet = dunit_style::parse_with_tokens(source, &shared.tokens)
                 .map_err(|e| alloc::format!("{}: {:?}", config.stylesheet, e))?;
             cascade.push(sheet);
         }
@@ -81,6 +84,7 @@ impl Shell {
             .unwrap_or(1000);
         let count = config.components.len();
         Ok(Self {
+            palette,
             revision:0,
             config,
             panels,

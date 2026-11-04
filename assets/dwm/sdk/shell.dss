@@ -1,0 +1,18 @@
+// Shared shell tokens. Legacy [theme] fields become explicit overrides.
+$shell-desktop: $window-bg;
+$shell-title-focused: $surface;
+$shell-title-unfocused: $window-bg;
+$shell-border-focused: $accent;
+$shell-border-unfocused: $line;
+$shell-close: $accent;
+$shell-minimize: $muted;
+$shell-maximize: $accent;
+$shell-panel: $surface;
+$shell-panel-text: $text;
+$shell-launcher: $accent;
+$shell-taskbtn: $surface;
+$shell-taskbtn-focused: $line;
+$shell-menu: $surface;
+$shell-menu-hover: $line;
+$shell-title-text-focused: $text;
+$shell-title-text-unfocused: $muted;

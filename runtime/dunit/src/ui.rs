@@ -122,6 +122,10 @@ impl<C: Component> ComponentWindow<C> {
         ui.redraw()?;
         Ok(ui)
     }
+    /// Ask the compositor to atomically reload saved desktop/theme resources.
+    pub fn reload_desktop(&mut self) -> NativeResult<()> {
+        self.window.reload_desktop()
+    }
     /// Open with the configured font and SDK profile, without application DSS.
     pub fn open_themed(width: u32, height: u32, component: C) -> NativeResult<Self> {
         Self::open_themed_with_style(width, height, component, "")

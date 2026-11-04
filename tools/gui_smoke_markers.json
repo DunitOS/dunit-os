@@ -166,6 +166,8 @@
     }
   ],
   "forbidden": [
+    "[SDK] PANIC",
+    "gui_settings: PANIC",
     {
       "marker": "FAIL no frame done",
       "why": "a legacy client received policy traffic before its initial composed-frame notification",

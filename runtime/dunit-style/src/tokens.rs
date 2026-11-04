@@ -7,6 +7,13 @@ pub struct Tokens {
     pub(crate) words: BTreeMap<String, Vec<String>>,
 }
 impl Tokens {
+    /// Add fallback definitions without replacing explicitly selected values.
+    pub fn extend_missing(&mut self, defaults: Tokens) {
+        for (name, value) in defaults.words {
+            self.words.entry(name).or_insert(value);
+        }
+    }
+
     /// Names exclude the leading `$`; missing names are never defaulted.
     pub fn get(&self, name: &str) -> Option<Value> {
         self.words

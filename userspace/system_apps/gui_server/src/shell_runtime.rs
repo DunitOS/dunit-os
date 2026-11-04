@@ -51,6 +51,7 @@ struct Panel {
     style: Style,
 }
 pub struct Shell {
+    pub palette: Theme,
     pub revision:u64,
     pub config: ShellConfig,
     panels: Vec<Panel>,

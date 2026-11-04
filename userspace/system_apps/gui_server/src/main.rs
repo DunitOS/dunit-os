@@ -41,6 +41,7 @@ mod desktop_actions;
 
 use dwm_settings as settings;
 use settings::{Applications, Edge, Effects, Layout, Theme};
+mod shell_theme;
 
 use dunit_text::Font;
 
@@ -1233,15 +1234,15 @@ fn run_desktop_session(
     // launcher menu, taskbar, workspace switcher and window titles all render off
     // one live model. A malformed config never lands: `load_config` keeps the
     // last-known-good baseline (an invalid file yields the baseline registry).
-    let mut shell = match shell_runtime::Shell::prepare(cfg.shell.clone(), &cfg.apps, bw, bh) {
+    let mut shell = match shell_runtime::Shell::prepare(&cfg, bw, bh) {
         Ok(shell) => shell,
         Err(error)=>{
             libdunit::println(&alloc::format!("gui_server: boot shell rejected {}; recovering packaged desktop",error));
             cfg=settings::load_document_from("/assets/dwm/default.toml").and_then(|text|settings::validate_document(&text)).unwrap_or_else(|_|settings::Config::defaults());
-            match shell_runtime::Shell::prepare(cfg.shell.clone(),&cfg.apps,bw,bh){Ok(shell)=>shell,Err(error)=>{libdunit::println(&alloc::format!("gui_server: packaged shell unavailable {}",error));return false;}}
+            match shell_runtime::Shell::prepare(&cfg,bw,bh){Ok(shell)=>shell,Err(error)=>{libdunit::println(&alloc::format!("gui_server: packaged shell unavailable {}",error));return false;}}
         }
     };
-    let mut theme=cfg.settings.theme;let mut ly=cfg.settings.layout;
+    let mut theme=shell.palette;let mut ly=cfg.settings.layout;
     let mut policy = cfg.policy;
     let mut apps: Applications = cfg.apps;
     if cfg.settings.from_file {
@@ -1742,7 +1743,7 @@ fn run_desktop_session(
         if let Some(ncfg)=ready_reload {
             let next_font=load_font_path(ncfg.settings.desktop.font.as_str());
             let next_shell=if ncfg.valid {
-                shell_runtime::Shell::prepare(ncfg.shell.clone(),&ncfg.apps,bw,bh).and_then(|mut shell|{
+                shell_runtime::Shell::prepare(&ncfg,bw,bh).and_then(|mut shell|{
                     shell.prepare_text(next_font.as_ref(),&ncfg.apps,&ncfg.settings.layout)?;Ok(shell)})
             }else{Err(alloc::string::String::from("invalid config"))};
             if let Err(error) = &next_shell { libdunit::println(&alloc::format!("gui_server: shell reload rejected {}",error)); }
@@ -1809,7 +1810,7 @@ fn run_desktop_session(
                         );
                     }
                 }
-                theme = ncfg.settings.theme;
+                theme = next_shell.as_ref().unwrap().palette;
                 ly = ncfg.settings.layout;
                 fx = ncfg.settings.effects;
                 shortcuts = ncfg.settings.shortcuts;
@@ -2083,7 +2084,10 @@ fn run_desktop_session(
                 if !wins[wi].alive {
                     continue;
                 }
-                if wins[wi].st_step == 0 && wins[wi].state == WinState::Floating {
+                // A session restore can already have maximized the window
+                // before this proof starts. Refresh that CONFIGURE as well,
+                // then verify its restore leg instead of leaving phase zero stuck.
+                if wins[wi].st_step == 0 && matches!(wins[wi].state, WinState::Floating | WinState::Maximized) {
                     set_window_state(server, clients, &mut wins[wi], WinState::Maximized, bw, bh, &ly, &ins);
                     wins[wi].st_step = 1;
                     wins[wi].st_since = ticks;

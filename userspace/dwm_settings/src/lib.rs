@@ -29,6 +29,7 @@ pub use diagnostics::Diagnostics;
 pub mod shell;
 pub mod policy;
 pub use validation::{validate, ConfigError};
+pub mod appearance;
 mod overlay;
 pub use overlay::{apply_overlay, edit, load_overlay, value};
 
@@ -965,6 +966,8 @@ pub fn save_user_document(text:&str)->Result<(),ConfigError>{
 /// `!valid` (garbage/empty file), so a bad edit never wipes a working desktop.
 #[derive(Clone)]
 pub struct Config {
+    /// Explicit legacy appearance converted to shared DSS tokens.
+    pub appearance: String,
     pub render: Render,
     pub diagnostics: Diagnostics,
     pub settings: Settings,
@@ -978,6 +981,7 @@ impl Config {
     /// The pure built-in default (no config file): baselines, marked valid.
     pub fn defaults() -> Config {
         Config {
+            appearance: String::new(),
             diagnostics: Diagnostics {performance:false},
             render: Render::default(),
             settings: Settings::defaults(),
@@ -1225,7 +1229,7 @@ fn resolve_config(text: &str, mut settings: Settings, mut apps: Applications, sa
         && (settings.applied > 0 || saw_apps || shell.explicit);
     let diagnostics = Diagnostics::resolve(text)?;
     let render=Render::resolve(text)?;
-    Ok(Config { settings, apps, shell, policy, diagnostics, render, valid })
+    Ok(Config { appearance: appearance::overrides(text, &settings.theme), settings, apps, shell, policy, diagnostics, render, valid })
 }
 
 /// Forward-migrate a parsed document from an older schema `from` to

@@ -252,8 +252,14 @@ fn main() -> dunit::Result<()> {
         }
         let done = match mode {
             Mode::Wheel => {
-                if matches!(event,Some(WindowEvent::Input(i))if i.kind==IN_SCROLL) {
-                    count += 1;
+                if let Some(WindowEvent::Input(i)) = event {
+                    if i.kind == IN_SCROLL {
+                        // PS/2/QEMU can put several detents in one packet. Count
+                        // delta units, retaining the exact 24-detent model check.
+                        assert!(i.x > 0, "wheel-down benchmark received the wrong direction");
+                        count += i.x.unsigned_abs() as usize;
+                        assert!(count <= 24, "wheel stream duplicated detents");
+                    }
                 }
                 if count == 24 {
                     assert!((ui.scroll_offset(&field).unwrap() - step * 24.).abs() < 0.01);

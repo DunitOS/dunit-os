@@ -12,6 +12,16 @@ enabled = false
 [panels.header]
 edge = "top"
 size = 28
+length = 16384
 children = ["caption"]
 [components.caption]
 kind = "title"
+
+# Flat opaque shell makes the real panel color independently observable.
+[effects]
+blur = false
+gradient = false
+corner_radius = 0
+shadow = 0
+panel_alpha = 255
+anim = false

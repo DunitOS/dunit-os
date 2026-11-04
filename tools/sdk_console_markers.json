@@ -1,6 +1,7 @@
 {
   "description": "Manifest CLI/TUI entries run in visible terminal PTYs through startup and launcher; legacy shell still works.",
   "run": {
+    "image_profile": "full",
     "config": "limine_test_terminal.conf",
     "cmd": ["exec /app/setup import-desktop /sdk-console.toml", "exec /app/gui_server"],
     "command_actions": {
