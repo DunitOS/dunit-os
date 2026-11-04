@@ -699,8 +699,10 @@ def run(args: argparse.Namespace) -> RunResult:
                 timed_out=(dur >= cmd_budget - 0.05),
             ))
 
+        # Boot-scene actions have their own step deadlines and the run budget.
+        # The per-command budget applies only to command_actions above.
         run_command_actions(qmp, serial, run_defaults.get("actions", []),
-                            len(serial.text), min(hard_deadline, time.monotonic() + args.cmd_timeout))
+                            len(serial.text), hard_deadline)
 
         if args.screenshot:
             shot = Path(args.screenshot)

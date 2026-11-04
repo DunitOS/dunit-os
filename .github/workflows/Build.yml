@@ -87,6 +87,7 @@ jobs:
           python3 tools/test_dnd_matrix.py
           python3 tools/test_transfer_generation.py
           python3 tools/test_qemu_actions.py
+          python3 tools/test_qemu_boot_actions.py
           python3 tools/test_image_profiles.py
           python3 tools/test_dunit_cli.py
 
