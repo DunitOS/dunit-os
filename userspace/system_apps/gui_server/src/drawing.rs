@@ -140,14 +140,14 @@ pub(super) fn fill_rrect_grad(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: 
 /// Offset down-right a touch for a light-from-above look. The opaque window
 /// interior [x,y,w,h] is skipped — it gets overdrawn, so shadowing it is wasted
 /// work (this is the bulk of the pixels, so skipping keeps the effect cheap).
-pub(super) fn draw_soft_shadow(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, r: i32, spread: i32, alpha: i32) {
+pub(super) fn draw_soft_shadow(skin: &dunit_style::shell::Visuals, buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, r: i32, spread: i32, alpha: i32) {
     if spread <= 0 || alpha <= 0 {
         return;
     }
     let per = ((alpha / spread).max(1)) as u32;
     let mut s = spread;
     while s >= 1 {
-        let off = s / 2 + 2;
+        let off = s / 2 + skin.shadow_offset;
         let (lx, ly2, lw, lh, lr) = (x - s, y - s + off, w + 2 * s, h + 2 * s, r + s);
         let x0 = lx.max(0);
         let y0 = ly2.max(0);
@@ -164,7 +164,7 @@ pub(super) fn draw_soft_shadow(buf: &mut [u32], bw: usize, bh: usize, x: i32, y:
                 }
                 let cov = rr_cov(px, py, lx, ly2, lw, lh, lr, RR_ALL);
                 if cov > 0 {
-                    blend_pixel(buf, bw, bh, px, py, (per * cov / 255) << 24);
+                    blend_pixel(buf, bw, bh, px, py, ((per * cov / 255) << 24) | (skin.shadow_color & 0x00ff_ffff));
                 }
                 px += 1;
             }

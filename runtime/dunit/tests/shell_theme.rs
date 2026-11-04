@@ -199,3 +199,46 @@ fn sparse_settings_save_retains_dss_inheritance_but_explicit_default_overrides_i
         0xffcdd6f4
     );
 }
+
+#[test]
+fn window_controls_share_default_custom_and_clipped_geometry() {
+    let normal = visuals(DARK, "[widgets]\nenabled=false");
+    let rect = (100, 100, 480, 240);
+    assert_eq!(normal.control_rect(rect, 26, false, 0), (560, 80, 14, 14));
+    assert_eq!(normal.control_rect(rect, 26, true, 2), (148, 80, 14, 14));
+    let custom = visuals(
+        &format!("{DARK}\n$shell-control-right-inset:18; $shell-control-size-inset:8;"),
+        "[widgets]\nenabled=false",
+    );
+    assert_eq!(custom.control_rect(rect, 26, false, 0), (544, 78, 18, 18));
+    for width in [1, 4, 12, 480] {
+        for title in [0, 1, 4, 26] {
+            for role in 0..3 {
+                let (x, y, w, h) = custom.control_rect((100, 100, width, 240), title, true, role);
+                assert!(x >= 100 && x + w <= 100 + width && w >= 0);
+                assert!(y >= 100 - title && y + h <= 100 && h >= 0);
+            }
+        }
+    }
+}
+#[test]
+fn all_new_paint_details_are_overridable_and_rejected_atomically() {
+    let selected=visuals(&format!("{LIGHT}\n$shell-panel-gradient-top:30; $shell-shadow-color:#123456; $shell-component-title-width:300; $shell-clock-tick-size:4;"), "[widgets]\nenabled=false");
+    assert_eq!(selected.panel_gradient_top, 30);
+    assert_eq!(selected.shadow_color, 0xff123456);
+    assert_eq!(selected.component_title_width, 300);
+    assert_eq!(selected.clock_tick_size, 4);
+    for invalid in [
+        "$shell-control-glyph-stroke:4;",
+        "$shell-control-size-inset:-1;",
+        "$shell-placement-columns:0;",
+        "$shell-shadow-color:#80112233;",
+        "$shell-clock-hour-percent:101;",
+    ] {
+        let source = format!("{DARK}\n{invalid}");
+        assert!(
+            dunit_component::Theme::parse_shell(&source, DEFAULTS, BASE, "").is_err(),
+            "{invalid}"
+        );
+    }
+}

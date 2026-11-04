@@ -41,7 +41,7 @@ impl Shell {
                 c.entries.clear();
             }
         }
-        let (panels, insets) = layout_panels(&initial, apps, bw, bh, &cascade)?;
+        let (panels, insets) = layout_panels(&initial, apps, bw, bh, &cascade, &visuals)?;
         let mut icon_bytes = 0usize;
         let component_icons = config
             .components
@@ -55,7 +55,7 @@ impl Shell {
                 {
                     return Ok(None);
                 }
-                let size = c.size.max(c.width).max(c.height).clamp(16, 256) as u32;
+                let size = c.size.max(c.width).max(c.height).clamp(visuals.component_raster_min, 256) as u32;
                 let icon = dunit_image::load(&c.icon, size, size)
                     .map_err(|e| alloc::format!("component {} icon {}: {:?}", c.id, c.icon, e))?;
                 icon_bytes += icon.pixels.len() * 4;
@@ -116,7 +116,7 @@ impl Shell {
             text_sampled_at,
             widget_sampled_at,
             stats_interval,
-            glyphs: GlyphAtlas::default(),
+            glyphs: GlyphAtlas::new(&visuals),
             workspace_labels: (1..=apps.workspaces)
                 .map(|i| alloc::format!("{}", i))
                 .collect(),
@@ -139,7 +139,7 @@ impl Shell {
         apps: &Applications,
         ly: &Layout,
     ) -> Result<(), String> {
-        self.glyphs = prepare_atlas(&self.config, &self.panels, font, apps, ly)?;
+        self.glyphs = prepare_atlas(&self.config, &self.panels, font, apps, ly, &self.visuals)?;
         Ok(())
     }
     pub fn apply_widget_updates(
@@ -175,6 +175,7 @@ impl Shell {
             self.viewport.0,
             self.viewport.1,
             &self.cascade,
+            &self.visuals,
         )?;
         let mut atlas = self.glyphs.clone();
         if let Some(font) = font {

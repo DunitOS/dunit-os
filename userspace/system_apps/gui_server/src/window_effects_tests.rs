@@ -26,7 +26,7 @@ fn blend_pixel(back:&mut[u32],bw:usize,bh:usize,x:i32,y:i32,pixel:u32){
 mod window_painter {
     use super::*;
     pub fn paint(back:&mut[u32],_bw:usize,_bh:usize,w:&Win,_focused:bool,alpha:i32,
-        _theme:&Theme,_layout:&Layout,_fx:&Effects,_font:Option<&Font>,_apps:&Applications,
+        _theme:&Theme,_layout:&Layout,_skin:&dunit_style::shell::Visuals,_fx:&Effects,_font:Option<&Font>,_apps:&Applications,
         _mx:i32,_my:i32,_backing:&mut Vec<u32>,_logged:&mut bool,_a:&mut Vec<u32>,_b:&mut Vec<u32>){
         let count=(w.surface_w*w.surface_h)as usize;
         assert!(count*4<=w.buf_size);
@@ -75,7 +75,7 @@ fn snapshots_survive_client_buffer_retirement_and_reverse(){
     let mut client=alloc::vec![0xff123456u32;4];let mut w=window();
     w.buf_ptr=client.as_ptr()as *const u8;w.buf_size=16;
     let theme=Theme::default();let fx=Effects::default();
-    let style=window_effects::PaintStyle{theme:&theme,layout:&Layout,effects:&fx,font:None,apps:&Applications};
+    let style=window_effects::PaintStyle{visuals:&skin(),theme:&theme,layout:&Layout,effects:&fx,font:None,apps:&Applications};
     let mut f=window_effects::Effects::new();
     assert!(!f.configure(1,animation::Effect::Fade,100,animation::Easing::linear(),0));
     f.start(&w,&[],0,0,(10,10,1,1),0,100,animation::Effect::Fade,animation::Easing::linear(),true,&style);
@@ -100,7 +100,7 @@ fn snapshots_survive_client_buffer_retirement_and_reverse(){
 fn completed_minimize_retained_only_for_live_minimized_window(){
     let pixels=alloc::vec![0xff123456u32;4];let mut w=window();w.buf_ptr=pixels.as_ptr()as *const u8;w.buf_size=16;
     let theme=Theme::default();let fx=Effects::default();
-    let style=window_effects::PaintStyle{theme:&theme,layout:&Layout,effects:&fx,font:None,apps:&Applications};
+    let style=window_effects::PaintStyle{visuals:&skin(),theme:&theme,layout:&Layout,effects:&fx,font:None,apps:&Applications};
     let mut f=window_effects::Effects::new();
     f.minimize(&w,&[],0,0,(10,10,1,1),0,100,&style);
     w.minimized=true;f.prune(&[w.clone()],1000);
@@ -120,3 +120,9 @@ fn directional_targets_use_wide_arithmetic(){
 }
 fn window()->Win {Win{pid:1,cx:0,cy:0,sw:2,sh:2,border:0,title_h:0,opacity:255,alive:true,minimized:false,ws:0,
     buf_ptr:core::ptr::null(),buf_size:0,surface_w:2,surface_h:2}}
+
+fn skin() -> dunit_style::shell::Visuals {
+    let base=dunit_style::parse(include_str!("../../../../assets/dwm/sdk/dark.dss")).unwrap();
+    let sheet=dunit_style::parse_with_tokens(include_str!("../../../../assets/dwm/sdk/shell.dss"),&base.tokens).unwrap();
+    dunit_style::shell::Visuals::from_tokens(&sheet.tokens).unwrap()
+}

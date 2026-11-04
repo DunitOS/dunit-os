@@ -66,6 +66,14 @@ def verify(root: Path, fixture="theme"):
             if data[offset:offset + 3] != bytes.fromhex(panel_color):
                 raise RuntimeError(f'{label}: compositor panel does not match shared $surface')
             print(f'[{marker}] shell panel {label}: shared token pixels OK')
+            # Window close chip moves with the same DSS rect used by hit testing.
+            inset = 18 if label == 'light' else 6
+            chip_x, chip_y = matched[0] + cw - inset - 7, matched[1] - 13
+            chip_offset = (chip_y * width + chip_x) * 3
+            chip_color = re.search(r'\$accent:\s*#([0-9a-f]{6});', source).group(1)
+            if data[chip_offset:chip_offset+3] != bytes.fromhex(chip_color):
+                raise RuntimeError(f'{label}: window control does not follow shared DSS geometry')
+            print(f'[{marker}] window control {label}: shared geometry pixels OK')
             cursor = (3 * width + 1) * 3  # fill in the packaged arrow at hotspot 0,0
             cursor_fill = bytes.fromhex('ff00ff' if label == 'light' else 'ffffff')
             if data[cursor:cursor + 3] != cursor_fill:

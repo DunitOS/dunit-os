@@ -9,6 +9,7 @@ pub fn paint(
     a: i32,
     theme: &Theme,
     ly: &Layout,
+    skin: &dunit_style::shell::Visuals,
     fx: &Effects,
     font: Option<&Font>,
     apps: &Applications,
@@ -31,7 +32,7 @@ pub fn paint(
         theme.title_unfocused
     };
     if fx.shadow > 0 {
-        draw_soft_shadow(
+        draw_soft_shadow(skin,
             back,
             bw,
             bh,
@@ -75,8 +76,8 @@ pub fn paint(
         oh,
         fx.corner_radius,
         RR_TOP,
-        shade(bcol, 18),
-        shade(bcol, -12),
+        shade(bcol, skin.border_gradient_top),
+        shade(bcol, skin.border_gradient_bottom),
         a,
     );
     fill_rrect_grad(
@@ -89,12 +90,12 @@ pub fn paint(
         w.title_h,
         fx.corner_radius,
         RR_TOP,
-        shade(tcol, 16),
-        shade(tcol, -10),
+        shade(tcol, skin.title_gradient_top),
+        shade(tcol, skin.title_gradient_bottom),
         a,
     );
     for (role, color) in [(0, theme.close), (1, theme.minimize), (2, theme.maximize)] {
-        let (x, y, size, _) = w.control_rect(role);
+        let (x, y, size, _) = w.control_rect(role, skin);
         let radius = if w.traffic_lights {
             size / 2
         } else {
@@ -113,25 +114,25 @@ pub fn paint(
             ((a as u32) << 24) | (color & 0x00FF_FFFF),
         );
         // Traffic lights reveal action glyphs on hover, like desktop controls.
-        if !w.traffic_lights || in_rect(w.control_rect(role), mx, my) {
+        if !w.traffic_lights || in_rect(w.control_rect(role, skin), mx, my) {
             let glyph = if is_focused {
                 theme.title_text_focused
             } else {
                 theme.title_text_unfocused
             };
             let col = ((a as u32) << 24) | (glyph & 0x00FF_FFFF);
-            let half = (size / 2).max(3);
+            let half = (size / 2).max(skin.control_glyph_min).min(size);
             let gx = x + (size - half) / 2;
             let gy = y + size / 2;
             if role == 1 {
-                fill_rect_alpha(back, bw, bh, gx, gy, half, 1, col);
+                fill_rect_alpha(back, bw, bh, gx, gy, half, skin.control_glyph_stroke, col);
             }
             if role == 2 {
                 let top = y + (size - half) / 2;
-                fill_rect_alpha(back, bw, bh, gx, top, half, 1, col);
-                fill_rect_alpha(back, bw, bh, gx, top + half - 1, half, 1, col);
-                fill_rect_alpha(back, bw, bh, gx, top, 1, half, col);
-                fill_rect_alpha(back, bw, bh, gx + half - 1, top, 1, half, col);
+                fill_rect_alpha(back, bw, bh, gx, top, half, skin.control_glyph_stroke, col);
+                fill_rect_alpha(back, bw, bh, gx, top + half - skin.control_glyph_stroke, half, skin.control_glyph_stroke, col);
+                fill_rect_alpha(back, bw, bh, gx, top, skin.control_glyph_stroke, half, col);
+                fill_rect_alpha(back, bw, bh, gx + half - skin.control_glyph_stroke, top, skin.control_glyph_stroke, half, col);
             }
             if role == 0 && w.traffic_lights {
                 for j in 0..half {
@@ -156,7 +157,7 @@ pub fn paint(
     if a > 0 {
         if let Some(f) = font {
             let px = ly.title_font_px as f32;
-            let baseline = w.cy - w.title_h / 2 + 5;
+            let baseline = w.cy - w.title_h / 2 + skin.title_baseline_offset;
             let txtcol = if is_focused {
                 theme.title_text_focused & 0x00FF_FFFF
             } else {
@@ -166,7 +167,7 @@ pub fn paint(
             let tx = if w.traffic_lights {
                 w.cx + (w.sw - text_width_ttf(f, title, px)) / 2
             } else {
-                w.cx + 12
+                w.cx + skin.title_text_inset
             };
             draw_text_ttf_alpha(back, bw, bh, f, tx, baseline, px, title, txtcol, a as u32);
         }

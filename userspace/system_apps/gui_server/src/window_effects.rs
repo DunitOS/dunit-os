@@ -79,6 +79,7 @@ fn valid_endpoints(property: &lua_policy::Property, from: i64, to: i64) -> bool 
 }
 
 pub struct PaintStyle<'a> {
+    pub visuals: &'a dunit_style::shell::Visuals,
     pub theme: &'a Theme,
     pub layout: &'a Layout,
     pub effects: &'a super::Effects,
@@ -395,6 +396,7 @@ impl Effects {
             alpha,
             style.theme,
             style.layout,
+            style.visuals,
             &snapshot_effects,
             style.font,
             style.apps,

@@ -125,8 +125,9 @@ fn prepare_atlas(
     font: Option<&Font>,
     apps: &Applications,
     ly: &Layout,
+    skin: &dunit_style::shell::Visuals,
 ) -> Result<GlyphAtlas, String> {
-    let mut atlas = GlyphAtlas::default();
+    let mut atlas = GlyphAtlas::new(skin);
     let Some(font) = font else {
         return Ok(atlas);
     };
@@ -204,6 +205,7 @@ impl Shell {
             self.viewport.0,
             self.viewport.1,
             &self.cascade,
+            &self.visuals,
         ) {
             Ok((panels, insets)) => {
                 self.panels = panels;
@@ -579,8 +581,8 @@ impl Shell {
                 if self.motion.has(1024+panel.index as u32,lua_policy::Property::Blur){effects.blur=panel_visual.blur>0;effects.blur_radius=panel_visual.blur;}
                 if self.motion.has(1024+panel.index as u32,lua_policy::Property::Shadow){effects.shadow=panel_visual.shadow;}
                 let bg=panel_visual.color.unwrap_or_else(||color(&panel.style,"background",theme.panel));
-                let gradient=(color(&panel.style,"gradient-top",0xff000000|shade(bg,12)),color(&panel.style,"gradient-bottom",0xff000000|shade(bg,-10)));
-                if effects.shadow>0{draw_soft_shadow(back,bw,bh,r.0,r.1,r.2,r.3,effects.corner_radius,effects.shadow,effects.shadow_alpha);}
+                let gradient=(color(&panel.style,"gradient-top",0xff000000|shade(bg,self.visuals.panel_gradient_top)),color(&panel.style,"gradient-bottom",0xff000000|shade(bg,self.visuals.panel_gradient_bottom)));
+                if effects.shadow>0{draw_soft_shadow(&self.visuals,back,bw,bh,r.0,r.1,r.2,r.3,effects.corner_radius,effects.shadow,effects.shadow_alpha);}
                 let need = (r.2 * r.3).max(1) as usize;
                 if a.len() < need {
                     a.resize(need, 0);
@@ -618,7 +620,7 @@ impl Shell {
                     if !self.motion.has((cell.component+1)as u32,lua_policy::Property::Blur){visual.blur=number(style,"blur-radius",0).clamp(0,32);}
                     if !self.motion.has((cell.component+1)as u32,lua_policy::Property::Shadow){visual.shadow=number(style,"shadow",0).clamp(0,64);}
                     if visual.blur>0{let need=(r.2*r.3).max(1)as usize;if a.len()<need{a.resize(need,0);b.resize(need,0);}blur_region(back,bw,bh,r.0,r.1,r.2,r.3,visual.blur,1,a,b);}
-                    if visual.shadow>0{draw_soft_shadow(back,bw,bh,r.0,r.1,r.2,r.3,visual.radius.unwrap_or(fx.corner_radius),visual.shadow,fx.shadow_alpha);}
+                    if visual.shadow>0{draw_soft_shadow(&self.visuals,back,bw,bh,r.0,r.1,r.2,r.3,visual.radius.unwrap_or(fx.corner_radius),visual.shadow,fx.shadow_alpha);}
                     let background=visual.background.or_else(||style.color("background").map(|c|(c.a as u32)<<24|(c.r as u32)<<16|(c.g as u32)<<8|c.b as u32));
                     if let Some(col)=background {
                         fill_rrect(
@@ -646,13 +648,14 @@ impl Shell {
                     )
                     .clamp(6, 128);
                     if let Some(icon) = &self.component_icons[cell.component] {
-                        paint_image(back,bw,bh,r,icon);
+                        paint_image(&self.visuals,back,bw,bh,r,icon);
                     }else{match c.kind {
                         Kind::Apps => {
                             let ids = &self.app_indices[cell.component];
                             for (i, &app) in ids.iter().enumerate() {
                                 let ir = item_rect(r, cell.horizontal, i, ids.len(), cell.gap);
                                 paint_app(
+                                    &self.visuals,
                                     &self.glyphs,
                                     back,
                                     bw,
@@ -671,11 +674,11 @@ impl Shell {
                                         back,
                                         bw,
                                         bh,
-                                        ir.0 + ir.2 / 2 - 3,
-                                        ir.1 + ir.3 - 3,
-                                        6,
-                                        3,
-                                        1,
+                                        ir.0 + (ir.2-self.visuals.running_width) / 2,
+                                        ir.1 + ir.3 - self.visuals.running_height,
+                                        self.visuals.running_width,
+                                        self.visuals.running_height,
+                                        self.visuals.running_radius,
                                         RR_ALL,
                                         if active { theme.launcher } else { fg },
                                     );
@@ -729,23 +732,27 @@ impl Shell {
                         ),
                         Kind::Launcher=>{
                             let mut label_rect=r;
-                            if let Some(logo)=logo{let size=r.3.min(r.2).saturating_sub(8).clamp(0,24);paint_image(back,bw,bh,(r.0+4,r.1+(r.3-size)/2,size,size),logo);label_rect.0+=size+4;label_rect.2=(label_rect.2-size-4).max(0);}
+                            if let Some(logo)=logo{let size=r.3.min(r.2).saturating_sub(self.visuals.logo_padding).clamp(0,self.visuals.logo_max_size);paint_image(&self.visuals,back,bw,bh,(r.0+self.visuals.logo_gap,r.1+(r.3-size)/2,size,size),logo);label_rect.0+=size+self.visuals.logo_gap;label_rect.2=(label_rect.2-size-self.visuals.logo_gap).max(0);}
                             text(&self.glyphs,back,bw,bh,font,label_rect,if c.label.is_empty(){"Dunit"}else{&c.label},px,fg);
                         },
                         Kind::AppGroup => {
                             let ids = &self.app_indices[cell.component];
-                            for (i, &app) in ids.iter().take(4).enumerate() {
-                                let half = r.2.min(r.3) / 2;
+                            for (i, &app) in ids.iter().take((self.visuals.group_preview_columns*self.visuals.group_preview_rows)as usize).enumerate() {
+                                let columns=self.visuals.group_preview_columns;
+                                let rows=self.visuals.group_preview_rows;
+                                let width=r.2.min(r.3)/columns;
+                                let height=r.2.min(r.3)/rows;
                                 paint_app(
+                                    &self.visuals,
                                     &self.glyphs,
                                     back,
                                     bw,
                                     bh,
                                     (
-                                        r.0 + (i as i32 % 2) * half,
-                                        r.1 + (i as i32 / 2) * half,
-                                        half,
-                                        half,
+                                        r.0 + (i as i32 % columns) * width,
+                                        r.1 + (i as i32 / columns) * height,
+                                        width,
+                                        height,
                                     ),
                                     app,
                                     font,
@@ -768,7 +775,7 @@ impl Shell {
                             fg,
                         ),
                         Kind::AnalogClock => {
-                            analog_millis(back, bw, bh, r, clock_ms, fg, theme.launcher)
+                            analog_millis(&self.visuals,back, bw, bh, r, clock_ms, fg, theme.launcher)
                         }
                         Kind::Title => {
                             if let Some(i) = focused {
@@ -843,6 +850,7 @@ impl Shell {
                     );
                 }
                 paint_app(
+                    &self.visuals,
                     &self.glyphs,
                     back,
                     bw,
@@ -920,11 +928,11 @@ fn panel_background(
     }
 }
 
-fn paint_image(back: &mut [u32], bw: usize, bh: usize, r: Rect, icon: &dunit_image::Image) {
+fn paint_image(skin: &dunit_style::shell::Visuals, back: &mut [u32], bw: usize, bh: usize, r: Rect, icon: &dunit_image::Image) {
     if r.2 <= 0 || r.3 <= 0 {
         return;
     }
-    let size = (r.2.min(r.3) - 6).max(1);
+    let size = (r.2.min(r.3) - skin.icon_padding).max(1);
     blit_icon(
         back,
         bw,
@@ -940,6 +948,7 @@ fn paint_image(back: &mut [u32], bw: usize, bh: usize, r: Rect, icon: &dunit_ima
 }
 
 fn paint_app(
+    skin: &dunit_style::shell::Visuals,
     glyphs: &GlyphAtlas,
     back: &mut [u32],
     bw: usize,
@@ -956,7 +965,7 @@ fn paint_app(
         return;
     }
     if let Some(icon) = icons.get(app).and_then(Option::as_ref) {
-        paint_image(back, bw, bh, r, icon);
+        paint_image(skin,back, bw, bh, r, icon);
     } else {
         text(
             glyphs,
@@ -1037,10 +1046,11 @@ fn line(
         }
     }
 }
-pub fn analog(back: &mut [u32], bw: usize, bh: usize, r: Rect, secs: u64, fg: u32, accent: u32) {
-    analog_millis(back, bw, bh, r, secs.saturating_mul(1000), fg, accent);
+pub fn analog(skin: &dunit_style::shell::Visuals, back: &mut [u32], bw: usize, bh: usize, r: Rect, secs: u64, fg: u32, accent: u32) {
+    analog_millis(skin,back, bw, bh, r, secs.saturating_mul(1000), fg, accent);
 }
 pub fn analog_millis(
+    skin: &dunit_style::shell::Visuals,
     back: &mut [u32],
     bw: usize,
     bh: usize,
@@ -1049,7 +1059,7 @@ pub fn analog_millis(
     fg: u32,
     accent: u32,
 ) {
-    let radius = (r.2.min(r.3) / 2 - 3).max(1);
+    let radius = (r.2.min(r.3) / 2 - skin.clock_padding).max(1);
     let cx = r.0 + r.2 / 2;
     let cy = r.1 + r.3 / 2;
     for &(x, y) in &CIRCLE {
@@ -1057,14 +1067,14 @@ pub fn analog_millis(
             back,
             bw,
             bh,
-            cx + x * radius / 1024 - 1,
-            cy + y * radius / 1024 - 1,
-            2,
-            2,
+            cx + x * radius / 1024 - skin.clock_tick_size / 2,
+            cy + y * radius / 1024 - skin.clock_tick_size / 2,
+            skin.clock_tick_size,
+            skin.clock_tick_size,
             fg,
         );
     }
-    hand(back, bw, bh, cx, cy, radius * 5 / 10, millis, 43200000, fg);
-    hand(back, bw, bh, cx, cy, radius * 8 / 10, millis, 3600000, fg);
-    hand(back, bw, bh, cx, cy, radius * 9 / 10, millis, 60000, accent);
+    hand(back, bw, bh, cx, cy, radius * skin.clock_hour_percent / 100, millis, 43200000, fg);
+    hand(back, bw, bh, cx, cy, radius * skin.clock_minute_percent / 100, millis, 3600000, fg);
+    hand(back, bw, bh, cx, cy, radius * skin.clock_second_percent / 100, millis, 60000, accent);
 }

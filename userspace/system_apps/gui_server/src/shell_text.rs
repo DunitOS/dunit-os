@@ -2,8 +2,10 @@
 use super::{blend_pixel, round_i32, Font, Rect};
 use alloc::{string::String, vec::Vec};
 
-#[derive(Clone,Default)]
+#[derive(Clone)]
 pub(super) struct GlyphAtlas {
+    padding: i32,
+    baseline_inset: i32,
     items: Vec<CachedGlyph>,
     bytes: usize,
 }
@@ -15,6 +17,9 @@ struct CachedGlyph {
     bitmap: Option<dunit_text::GlyphBitmap>,
 }
 impl GlyphAtlas {
+    pub(super) fn new(skin: &dunit_style::shell::Visuals) -> Self {
+        Self { padding:skin.component_text_padding, baseline_inset:skin.component_baseline_inset, items:Vec::new(),bytes:0 }
+    }
     pub(super) fn finish(&mut self) {
         self.items.sort_unstable_by_key(|g| (g.px, g.ch));
     }
@@ -64,7 +69,7 @@ pub(super) fn text(
     px: i32,
     color: u32,
 ) {
-    let max = (r.2 - 8).max(0) as f32;
+    let max = (r.2 - glyphs.padding).max(0) as f32;
     let mut width = 0.0;
     let mut end = 0;
     for (i, ch) in s.char_indices() {
@@ -76,7 +81,7 @@ pub(super) fn text(
         end = i + ch.len_utf8();
     }
     let mut pen = r.0 + (r.2 - round_i32(width)) / 2;
-    let baseline = r.1 + (r.3 + px) / 2 - 2;
+    let baseline = r.1 + (r.3 + px) / 2 - glyphs.baseline_inset;
     let mut fractional = 0.0;
     for ch in s[..end].chars() {
         if let Some(glyph) = glyphs.get(px, ch) {

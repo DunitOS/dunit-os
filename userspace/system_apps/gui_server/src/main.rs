@@ -53,566 +53,15 @@ fn panic(_: &PanicInfo) -> ! {
     libdunit::exit(101)
 }
 
+mod bringup;
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
-    libdunit::println("gui_server: start");
+pub extern "C" fn _start() -> ! { bringup::start() }
 
-    // 1) The M2 protocol reference server links and runs here (allocator from
-    //    libdunit, no_std+alloc core). Instantiate it and admit one client so a
-    //    genuine object is allocated — this exercises the crate end to end.
-    let mut server = Server::new();
-    let conn = match server.connect() {
-        Some(conn) => {
-            libdunit::println("gui_server: protocol server up (client admitted)");
-            conn
-        }
-        None => {
-            libdunit::println("gui_server: FAIL protocol server rejected first client");
-            libdunit::exit(1);
-        }
-    };
+mod window_model;
+use window_model::*;
 
-    // 2) Acquire the exclusive display-master capability (kernel syscall 53).
-    //    A single GUI server owns the display; a second acquire would fail.
-    let display = libdunit::handle_display_acquire();
-    if display > 0 {
-        libdunit::println("gui_server: display master acquired");
-    } else {
-        libdunit::println("gui_server: display master unavailable");
-    }
-
-    // 3) Acquire the exclusive input-master capability (kernel syscall 55).
-    //    The compositor is the sole reader of keyboard/mouse input; it fans
-    //    events out to clients over the protocol. A second acquire would fail.
-    let input = libdunit::handle_input_acquire();
-    if input > 0 {
-        libdunit::println("gui_server: input master acquired");
-    } else {
-        libdunit::println("gui_server: input master unavailable");
-    }
-
-    // 4) Shared-buffer capability smoke (M3 item 1): allocate a zero-copy shared
-    //    frame buffer, map it writable via the handle's WRITE right, round-trip a
-    //    byte pattern through the aliased physical frames, then release. This
-    //    exercises the syscall path that clients will use to hand pixel buffers
-    //    to the compositor.
-    let buf = libdunit::handle_create_shared(4096);
-    if buf > 0 {
-        let mapped = libdunit::handle_map(buf as u32, 0, 4096);
-        if mapped > 0 {
-            let ptr = mapped as usize as *mut u8;
-            let mut ok = true;
-            unsafe {
-                for i in 0..4096usize {
-                    core::ptr::write_volatile(ptr.add(i), (i & 0xff) as u8);
-                }
-                for i in 0..4096usize {
-                    if core::ptr::read_volatile(ptr.add(i)) != (i & 0xff) as u8 {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if ok {
-                libdunit::println("gui_server: shared buffer round-trip OK");
-            } else {
-                libdunit::println("gui_server: FAIL shared buffer mismatch");
-            }
-        } else {
-            libdunit::println("gui_server: FAIL shared buffer map");
-        }
-        libdunit::shared_buffer::release(buf as u32, if mapped > 0 { mapped as usize } else { 0 }, 4096);
-    } else {
-        libdunit::println("gui_server: FAIL shared buffer create");
-    }
-
-    // 5) Cross-process capability transfer (M3 item 1; groundwork for item 4's
-    //    untrusted clients): create a shared buffer, write a marker, spawn an
-    //    untrusted child, transfer a handle to it, and prove both sides see the
-    //    same physical frames (bidirectional zero-copy across a process bound).
-    let xbuf = libdunit::handle_create_shared(4096);
-    if xbuf > 0 {
-        let mapped = libdunit::handle_map(xbuf as u32, 0, 4096);
-        if mapped > 0 {
-            let ptr = mapped as usize as *mut u8;
-            unsafe {
-                core::ptr::write_volatile(ptr, 0xA5);
-                core::ptr::write_volatile(ptr.add(1), 0x5A);
-            }
-            let peer = libdunit::spawn("gui_shbuf_peer");
-            if peer > 0 {
-                // Transfer a duplicate so we keep our own handle + mapping.
-                let dup = libdunit::handle_dup(
-                    xbuf as u32,
-                    libdunit::RIGHT_READ
-                        | libdunit::RIGHT_WRITE
-                        | libdunit::RIGHT_MAP
-                        | libdunit::RIGHT_TRANSFER,
-                );
-                let child_handle = if dup > 0 {
-                    libdunit::handle_transfer(dup as u32, peer as u32)
-                } else {
-                    -1
-                };
-                if child_handle > 0 {
-                    let mut msg = [0u8; 8];
-                    msg[..4].copy_from_slice(&libdunit::get_pid().to_le_bytes());
-                    msg[4..].copy_from_slice(&(child_handle as u32).to_le_bytes());
-                    libdunit::ipc_send(peer as u32, &msg);
-                    let mut ack = [0u8; 4];
-                    if libdunit::ipc_recv_blocking(&mut ack, 0) == 4 && &ack == b"done" {
-                        let seen = unsafe {
-                            core::ptr::read_volatile(ptr.add(2)) == 0xC3
-                                && core::ptr::read_volatile(ptr.add(3)) == 0x3C
-                        };
-                        if seen {
-                            libdunit::println("gui_server: cross-process shared buffer OK");
-                        } else {
-                            libdunit::println("gui_server: FAIL child writes not visible");
-                        }
-                    } else {
-                        libdunit::println("gui_server: FAIL child ack");
-                    }
-                } else {
-                    libdunit::println("gui_server: FAIL capability transfer");
-                }
-                // Reap the child so it does not linger as a zombie.
-                let mut status = libdunit::WaitStatus::empty();
-                for _ in 0..50 {
-                    if libdunit::wait(peer as u32, &mut status) == peer as isize {
-                        break;
-                    }
-                    libdunit::sleep_ms(10);
-                }
-            } else {
-                libdunit::println("gui_server: FAIL peer spawn");
-            }
-        }
-        libdunit::shared_buffer::release(xbuf as u32, if mapped > 0 { mapped as usize } else { 0 }, 4096);
-    }
-
-    // 6) Framebuffer output path (M3 item 3, first slice): as the display master,
-    //    blit a small pixel block into the system framebuffer via syscall 57. The
-    //    kernel gates fb_present on the display-master owner, so a non-compositor
-    //    process is denied (see gui_shbuf_peer). This is the mechanism the software
-    //    compositor will drive to present composited surfaces.
-    let mut block = [0u8; 16 * 16 * 4];
-    for px in block.chunks_exact_mut(4) {
-        // Solid opaque blue (little-endian XRGB/BGRA: B,G,R,A).
-        px[0] = 0xC0;
-        px[1] = 0x40;
-        px[2] = 0x20;
-        px[3] = 0xff;
-    }
-    if libdunit::fb_present(&block, 16, 16, 0, 0) == 0 {
-        libdunit::println("gui_server: framebuffer present OK");
-    } else {
-        libdunit::println("gui_server: FAIL framebuffer present");
-    }
-
-    // 7) Software compositor cycle (M3 item 3): drive the gui_protocol_v1
-    //    reference server with REAL wire packets through one client's full
-    //    map-and-present lifecycle, back the surface with a REAL kernel shared
-    //    buffer, and composite its pixels to the framebuffer.
-    //
-    //    `Server` is a pure protocol state machine — it never touches pixels and
-    //    exposes no surface geometry — so the compositor keeps its own
-    //    buffer-id -> shared-frame mapping and its own placement policy, feeds
-    //    the client's requests through `deliver`, and on the committed frame
-    //    blits the mapped pixels to the framebuffer via `fb_present`. This is the
-    //    exact mechanism the untrusted cross-process clients (item 4) will drive;
-    //    here the request stream is synthesized in-process to keep it serially
-    //    verifiable without a second protocol-speaking process.
-    if run_compositor_cycle(&mut server, conn) {
-        libdunit::println("gui_server: compositor cycle OK");
-    } else {
-        libdunit::println("gui_server: FAIL compositor cycle");
-    }
-
-    // 8) Cross-process compositing (M3 item 4): serve TWO real, untrusted
-    //    client ELFs concurrently over IPC. Each renders into its own shared
-    //    buffer, transfers the buffer capability to us, and drives its surface
-    //    through the gui-v1 wire protocol (client→compositor messages carry a
-    //    4-byte client-id envelope so we route them to the right connection).
-    //    We map each transferred buffer read-only, run its requests through a
-    //    per-client Server connection, and composite both surfaces to the
-    //    framebuffer at separate slots. Neither client holds display/input.
-    // serve_two_clients() emits "served two untrusted clients OK" itself (right
-    // before it holds the composited frame on screen); only report failure here.
-    if !serve_two_clients(input as u32) {
-        libdunit::println("gui_server: FAIL serving clients");
-    }
-
-    libdunit::println("gui_server: OK");
-    libdunit::exit(0)
-}
-
-/// Opcode of an outbound protocol packet (offset 8, little-endian u16).
-/// Reserved screen margins (px) that the shell strips subtract from the usable
-/// desktop, one accumulator per edge. `reserved_insets` fills it from the
-/// configured panel/tray/dock edges, and every geometry
-/// computation (work area, spawn/drag clamps, dock strip origin) reads from here
-/// so "what real estate is free" has a single source of truth.
-#[derive(Clone, Copy)]
-struct Insets {
-    top: i32,
-    bottom: i32,
-    left: i32,
-    right: i32,
-}
-
-/// Add `size` px to the margin on `edge`.
-fn add_edge(ins: &mut Insets, edge: Edge, size: i32) {
-    match edge {
-        Edge::Top => ins.top += size,
-        Edge::Bottom => ins.bottom += size,
-        Edge::Left => ins.left += size,
-        Edge::Right => ins.right += size,
-    }
-}
-
-/// Resolve the configured shell layout into reserved per-edge margins:
-/// - the panel reserves `ly.panel_h` on `panel_edge`;
-/// - the dock reserves its thickness and outer margin on `ly.dock_edge`;
-/// - the tray reserves `tray_size` on `tray_edge`, but ONLY when it does not
-///   share the panel's edge — a same-edge tray rides *inside* the panel strip
-///   (the classic top-panel readout) and reserves nothing extra.
-///
-/// Margins accumulate, so the default (panel=top, tray=top, dock=left) yields
-/// `{top: panel_h, left: dock_w, bottom: 0, right: 0}` — byte-identical to the
-/// pre-Phase-5 fixed layout.
-
-
-/// The screen rect `(x, y, w, h)` of a shell strip `thickness` px thick on `edge`,
-/// offset `off` px inward from that edge. Horizontal strips (top/bottom) span the
-/// full width and own the corners; vertical strips (left/right) span only the gap
-/// *between* the top/bottom insets, so a left/right strip never overlaps a
-/// top/bottom one at a corner. `off` lets several strips stack on one edge (e.g.
-/// panel outermost at `off=0`, dock innermost at `off = ins.left - dock_w`).
-fn strip_rect(edge: Edge, thickness: i32, off: i32, ins: &Insets, bw: usize, bh: usize) -> (i32, i32, i32, i32) {
-    let bw = bw as i32;
-    let bh = bh as i32;
-    match edge {
-        Edge::Top => (0, off, bw, thickness),
-        Edge::Bottom => (0, bh - off - thickness, bw, thickness),
-        Edge::Left => (off, ins.top, thickness, (bh - ins.top - ins.bottom).max(1)),
-        Edge::Right => (bw - off - thickness, ins.top, thickness, (bh - ins.top - ins.bottom).max(1)),
-    }
-}
-
-/// The maximize target rect `(cx, cy, w, h)` = the framebuffer minus the reserved
-/// shell margins (`reserved_insets`) and the window's own title bar + border. One
-/// helper so the interactive chip, the drag-restore path and the headless
-/// self-test all compute the same geometry, and so it honours whatever edges the
-/// panel/tray are configured on.
-fn work_area(bw: usize, bh: usize, ly: &Layout, ins: &Insets) -> (i32, i32, i32, i32) {
-    let x = ins.left + ly.border;
-    let y = ins.top + ly.title_h + ly.border;
-    let w = (bw as i32 - ins.left - ins.right - 2 * ly.border).max(1);
-    let h = (bh as i32 - ins.top - ins.bottom - ly.title_h - 2 * ly.border).max(1);
-    (x, y, w, h)
-}
-
-/// Move `win` into `new_state`, driving the client re-import needed for the new
-/// size. This is the single window-state transition used by the title-bar chip,
-/// the macOS-style drag-to-restore, and the headless self-test. Leaving `Floating`
-/// snapshots the current `(cx,cy,sw,sh)` into `restore`; returning to `Floating`
-/// replays that snapshot. The *position* is applied here immediately (so the
-/// decoration follows at once); the *size* only actually changes once the owning
-/// client re-imports at the CONFIGURE'd geometry (mirrored back by the per-frame
-/// Win<->ClientState sync), so a client that ignores CONFIGURE keeps its size while
-/// its position still updates — harmless. Reapplying Maximized refreshes the
-/// work area after a display change; other unchanged states are a no-op.
-fn set_window_state(
-    server: &mut Server,
-    clients: &mut [ClientState],
-    win: &mut Win,
-    new_state: WinState,
-    bw: usize,
-    bh: usize,
-    ly: &Layout,
-    ins: &Insets,
-) {
-    // STATE_ACTIVATED — the surface stays focused across the reconfigure.
-    const STATE_ACTIVATED: u32 = 1;
-    if win.state == new_state && new_state != WinState::Maximized {
-        return;
-    }
-    // Snapshot floating geometry once, when first leaving the floating state.
-    if win.state == WinState::Floating {
-        win.restore = Some((win.cx, win.cy, win.sw, win.sh));
-    }
-    let target = match new_state {
-        WinState::Tiled => None,
-        WinState::Maximized => Some(work_area(bw, bh, ly, ins)),
-        WinState::Floating => win.restore.take(),
-    };
-    win.motion = None;
-    win.desired_size=None;
-    win.state = new_state;
-    if let Some((tx, ty, tw, th)) = target {
-        win.cx = tx;
-        win.cy = ty;
-        reconfigure_client(server, clients, win.pid, tw as u32, th as u32, STATE_ACTIVATED);
-    }
-}
-
-/// Toggle the title-bar maximize chip: `Maximized` <-> `Floating`.
-fn toggle_maximize(
-    server: &mut Server,
-    clients: &mut [ClientState],
-    win: &mut Win,
-    bw: usize,
-    bh: usize,
-    ly: &Layout,
-    ins: &Insets,
-) {
-    let next = if win.state == WinState::Maximized {
-        WinState::Floating
-    } else {
-        WinState::Maximized
-    };
-    set_window_state(server, clients, win, next, bw, bh, ly, ins);
-}
-
-// ---------------------------------------------------------------------------
-// Window/session persistence (M4). Geometry is remembered per APP id (not per
-// pid, which is ephemeral), so reopening an app restores where its window last
-// sat. The store is `settings::SESSION_PATH`, pre-created writable in the kernel
-// VFS; it is RAM-only until DunitFS v2, then the same path survives reboots.
-// ---------------------------------------------------------------------------
-
-/// The registered app id for a window (its join key into the session store), or
-/// `None` when the window's app is unregistered / id-less (nothing to remember).
-fn win_app_id<'a>(apps: &'a Applications, app: u8) -> Option<&'a str> {
-    let id = apps.apps.get(app as usize)?.id.as_str();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id)
-    }
-}
-
-/// Upsert a window's FLOATING geometry into the in-RAM session mirror, keyed by
-/// its app id. A maximized window records its pre-maximize floating rect (from
-/// `restore`) plus the `maximized` flag, so a later restore reopens it maximized
-/// yet with a sane un-maximize size. No-op for id-less windows.
-fn session_remember(session: &mut Vec<settings::WinGeom>, apps: &Applications, w: &Win) {
-    let Some(id) = win_app_id(apps, w.app) else {
-        return;
-    };
-    let (gx, gy, gw, gh) = match w.restore {
-        Some((rx, ry, rw, rh)) if w.state != WinState::Floating => (rx, ry, rw, rh),
-        _ => (w.cx, w.cy, w.sw, w.sh),
-    };
-    let maximized = w.state == WinState::Maximized;
-    let ge = settings::WinGeom::new(id, gx, gy, gw, gh, maximized);
-    if let Some(e) = session.iter_mut().find(|e| e.id.as_str() == id) {
-        *e = ge;
-    } else if session.len() < settings::MAX_SESSION {
-        session.push(ge);
-    }
-}
-
-/// Find a remembered geometry for the app `app` (registry index) in the mirror.
-fn session_lookup(session: &[settings::WinGeom], apps: &Applications, app: u8) -> Option<settings::WinGeom> {
-    let id = win_app_id(apps, app)?;
-    session.iter().find(|e| e.id.as_str() == id).copied()
-}
-
-// Hardware make-codes the switcher watches. The trigger key (Tab) and the cancel
-// key (Esc) are keyboard-protocol invariants, not desktop policy — only which
-// MODIFIER arms the switcher is config (`[shortcuts] switch_mod`).
-const SC_TAB: u8 = 0x0F;
-const SC_ESC: u8 = 0x01;
-// Make-codes the global desktop shortcuts watch. Like Tab/Esc above these are
-// keyboard-protocol invariants (the physical key positions), NOT desktop policy —
-// only WHICH MODIFIER arms them and WHETHER each action is enabled is config
-// (`[shortcuts] cmd_mod` + the per-action bools). The digit row 1..9/0 is the
-// PC set-1 make sequence 0x02..0x0B.
-const SC_SPACE: u8 = 0x39;
-const SC_Q: u8 = 0x10;
-const SC_M: u8 = 0x32;
-const SC_UP: u8 = 0x48;
-const SC_DOWN: u8 = 0x50;
-const SC_ENTER: u8 = 0x1C;
-
-/// Map a top-row digit make-code to its value 1..=9 (0 maps to 10, so it can
-/// index workspace 10 when there are that many). Non-digit scancodes yield None.
-fn digit_from_scancode(sc: u8) -> Option<u32> {
-    match sc {
-        0x02..=0x0A => Some((sc - 0x01) as u32), // '1'..'9'
-        0x0B => Some(10),                        // '0' → the 10th workspace
-        _ => None,
-    }
-}
-
-/// A global desktop shortcut resolved from a key event. The DECISION (key+mods →
-/// action, gated by `[shortcuts]`) is pure and lives here so it can be unit-proven
-/// headless; the EFFECT (mutating compositor state) stays in the key-drain loop,
-/// reusing the exact same paths the mouse chips drive (single source of truth).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ShortcutAction {
-    None,
-    /// Jump to this 0-based virtual workspace.
-    Workspace(usize),
-    /// Open the application launcher menu.
-    Launcher,
-    /// Close the focused window.
-    CloseWindow,
-    /// Toggle maximize on the focused window.
-    MaximizeWindow,
-}
-
-/// Resolve a key press against the config-driven global-shortcut policy. Returns
-/// the action a matching `cmd_mod`+key chord maps to, or `None`. A bare key (no
-/// `cmd_mod` held) never fires a global action — it falls through to the focused
-/// client — so app typing is never stolen. Pure: no compositor state touched,
-/// which is exactly what lets the self-test prove the mapping without a keyboard.
-fn match_shortcut(scancode: u8, mods: u8, pressed: bool, sc: &settings::Shortcuts, ws_count: usize) -> ShortcutAction {
-    if !pressed || (mods & sc.cmd_mod.mask()) == 0 {
-        return ShortcutAction::None;
-    }
-    if sc.ws_switch {
-        if let Some(n) = digit_from_scancode(scancode) {
-            if n >= 1 && (n as usize) <= ws_count {
-                return ShortcutAction::Workspace(n as usize - 1);
-            }
-        }
-    }
-    if sc.launcher && scancode == SC_SPACE {
-        return ShortcutAction::Launcher;
-    }
-    if sc.win_close && scancode == SC_Q {
-        return ShortcutAction::CloseWindow;
-    }
-    if sc.win_max && scancode == SC_M {
-        return ShortcutAction::MaximizeWindow;
-    }
-    ShortcutAction::None
-}
-
-/// Alt/Super-Tab window switcher (M4, gated by `[shortcuts]`). While armed it
-/// holds a frozen most-recently-used snapshot of the candidate windows and the
-/// highlighted index; releasing the arming modifier commits the highlight (the
-/// compositor then raises + un-minimizes that window). Tab advances, Shift-Tab
-/// steps back, Esc cancels — all UI invariants.
-struct Switcher {
-    active: bool,
-    order: Vec<usize>,
-    idx: usize,
-}
-
-impl Switcher {
-    fn new() -> Self {
-        Switcher { active: false, order: Vec::new(), idx: 0 }
-    }
-
-    /// Arm over a fresh MRU snapshot. The current front window is index 0, so the
-    /// first Tab moves to the next candidate (classic Alt-Tab "previous window").
-    fn begin(&mut self, mru: &[usize], backward: bool) {
-        self.order.clear();
-        self.order.extend_from_slice(mru);
-        self.active = !self.order.is_empty();
-        self.idx = 0;
-        if self.order.len() >= 2 {
-            self.advance(backward);
-        }
-    }
-
-    fn advance(&mut self, backward: bool) {
-        let n = self.order.len();
-        if n == 0 {
-            return;
-        }
-        self.idx = if backward { (self.idx + n - 1) % n } else { (self.idx + 1) % n };
-    }
-
-    fn selected(&self) -> Option<usize> {
-        self.order.get(self.idx).copied()
-    }
-
-    fn cancel(&mut self) {
-        self.active = false;
-    }
-
-    /// Close the overlay and yield the highlighted window index to raise.
-    fn commit(&mut self) -> Option<usize> {
-        let sel = self.selected();
-        self.active = false;
-        sel
-    }
-}
-
-/// Candidate windows for the switcher in most-recently-used order (topmost of the
-/// z-order first). Only live windows on the active workspace are offered; a
-/// minimized one is still listed — committing to it un-minimizes it.
-fn switcher_mru(z: &[usize], wins: &[Win], ws: usize) -> Vec<usize> {
-    let mut out = Vec::new();
-    for &i in z.iter().rev() {
-        if wins.get(i).map_or(false, |w| w.alive && w.ws == ws) {
-            out.push(i);
-        }
-    }
-    out
-}
-
-/// Move `wi` to the top of the z-order (mirrors the click-to-raise path).
-fn raise_window(z: &mut Vec<usize>, wi: usize) {
-    z.retain(|&i| i != wi);
-    z.push(wi);
-}
-
-/// Repair the three `Option<wins index>` cursors after the `Win` at `wi` was
-/// removed from `wins`. An index equal to the removed slot is cleared; any index
-/// above it shifts down by one to track the `Vec::remove` compaction. `drag`
-/// carries a `(win, off_x, off_y)` tuple; the other two are bare indices.
-fn adjust_indices_after_removal(
-    drag: &mut Option<(usize, i32, i32)>,
-    pressed_win: &mut Option<usize>,
-    input_focus: &mut Option<usize>,
-    wi: usize,
-) {
-    match *drag {
-        Some((i, ..)) if i == wi => *drag = None,
-        Some((i, ox, oy)) if i > wi => *drag = Some((i - 1, ox, oy)),
-        _ => {}
-    }
-    for opt in [pressed_win, input_focus] {
-        match *opt {
-            Some(i) if i == wi => *opt = None,
-            Some(i) if i > wi => *opt = Some(i - 1),
-            _ => {}
-        }
-    }
-}
-
-/// Remove every `Win` owned by `pid` and repair ALL stored `wins` indices — the
-/// z-order (`z`), the drag capture, and the pressed/hover cursors. Iterates the
-/// victims high→low so an earlier `Vec::remove` never shifts an index still to be
-/// visited. Called once a client process has been reaped, so leaving its window
-/// model behind (as the old close path did) would both leak and desync indices.
-fn reap_windows_of(
-    pid: u32,
-    wins: &mut Vec<Win>,
-    z: &mut Vec<usize>,
-    drag: &mut Option<(usize, i32, i32)>,
-    pressed_win: &mut Option<usize>,
-    input_focus: &mut Option<usize>,
-) {
-    let mut victims: Vec<usize> = (0..wins.len()).filter(|&i| wins[i].pid == pid).collect();
-    victims.sort_unstable();
-    for &wi in victims.iter().rev() {
-        wins.remove(wi);
-        z.retain(|&i| i != wi);
-        for i in z.iter_mut() {
-            if *i > wi {
-                *i -= 1;
-            }
-        }
-        adjust_indices_after_removal(drag, pressed_win, input_focus, wi);
-    }
-}
+mod desktop_navigation;
+use desktop_navigation::*;
 
 /// A transient desktop notification (M4, `[notifications]`). `born`/`expire` are
 /// monotonic milliseconds; the compositor prunes a toast once `expire` passes.
@@ -658,145 +107,6 @@ fn notify_post(q: &mut Vec<Toast>, cfg: &settings::Notifications, now: u64, text
 // Each `Win` carries its own `title_h`/`border` so its methods stay parameter-free.
 
 /// Fill an axis-aligned rectangle in the back buffer, clipped to its bounds.
-/// Human-readable window title for a window's registry index (`Win.app`), looked
-/// up in the live application registry. An unknown index (0xFF, e.g. a client
-/// spawned for an app not in the registry) falls back to a generic "Window".
-fn win_title<'a>(apps: &'a Applications, app: u8) -> &'a str {
-    apps.apps.get(app as usize).map(|a| a.name.as_str()).unwrap_or("Window")
-}
-
-
-/// Layout state of a top-level window. `Floating` is the free-form default every
-/// client is created in; `Maximized` fills the work area (screen minus the
-/// reserved panel + dock). Modelled as an enum, not a `maximized: bool`, so the
-/// same state machine (`set_window_state`) extends to `Fullscreen` / tiled layouts
-/// later without touching every call site — a window is always in exactly one
-/// state, and `Win::restore` holds the floating geometry to return to. This also
-/// keeps "maximize" (a window *state*) cleanly separate from "resize" (the
-/// protocol CONFIGURE mechanism that *any* state change drives).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WinState {
-    Tiled,
-    Floating,
-    Maximized,
-}
-
-/// Window policy retained across display-session re-entry. Client buffers stay
-/// owned by ClientState; this records only the compositor's placement decisions.
-#[derive(Clone, Copy)]
-struct Placement {
-    cx: i32,
-    cy: i32,
-    state: WinState,
-    restore: Option<(i32, i32, i32, i32)>,
-    lua_floating: bool,
-    st_step: u8,
-    minimized: bool,
-    ws: usize,
-}
-
-/// Per-window compositor state, derived from a `ClientState` but with a live
-/// content origin the user can drag around.
-#[derive(Clone, Copy)]
-struct Motion { from: (i32, i32), to: (i32, i32), start: u64, duration_ms: u32, ease_out: bool }
-
-#[derive(Clone)]
-struct Win {
-    motion: Option<Motion>,
-    pid: u32,
-    lua_floating: bool,
-    cx: i32,
-    cy: i32,
-    sw: i32,
-    sh: i32,
-    surface_w: i32,
-    surface_h: i32,
-    desired_size: Option<(i32,i32)>,
-    buf_ptr: *const u8,
-    buf_size: usize,
-    alive: bool,
-    /// Decoration geometry copied from the resolved `[layout]` config so each
-    /// window's hit-tests and framing stay self-contained.
-    title_h: i32,
-    border: i32,
-    traffic_lights: bool,
-    /// Index into the live application registry (0xFF = unknown) — drives the
-    /// dock running marker and the window title (see `win_title`).
-    app: u8,
-    opacity: u8,
-    rule_applied: bool,
-    /// Workspace (0-based) this window belongs to; only the active workspace's
-    /// windows are drawn and receive input.
-    ws: usize,
-    /// Monotonic milliseconds when this window appeared — drives its open fade.
-    born: u64,
-    /// Minimized windows are not composited and receive no input; a click on the
-    /// app's dock icon (task switcher) restores and raises them.
-    minimized: bool,
-    /// Current layout state (see `WinState`). Driven by the title-bar maximize
-    /// chip and by dragging a tiled window's title bar (macOS-style restore).
-    state: WinState,
-    /// Floating geometry `(cx, cy, sw, sh)` snapshotted when the window leaves the
-    /// floating state, so returning to `Floating` restores the exact pre-maximize
-    /// position and size. `None` while the window is floating.
-    restore: Option<(i32, i32, i32, i32)>,
-    /// Self-test choreography step (config-gated `[startup] self_test`, test.toml
-    /// only): 0 = not yet maximized, 1 = maximized (awaiting restore), 2 = restored.
-    /// Lets the headless harness drive a full maximize->restore round trip without a
-    /// mouse. Always 0 on the real desktop (`self_test` is false in `default.toml`).
-    st_step: u8,
-    /// Absolute deadline for the resize self-test's existing four-second grace.
-    /// A resumed probe receives a fresh deadline after display-session re-entry.
-    st_deadline: Option<frame_pacing::FrameDeadline>,
-    /// Pixel format the owning client imported its buffer with (mirrored from
-    /// `ClientState.format` in the per-frame sync). `FORMAT_ARGB8888` selects the
-    /// per-pixel src-over blit in `blit_surface` so a translucent client (e.g. a
-    /// terminal with `bg_alpha < 255`) shows the desktop through its background;
-    /// `FORMAT_XRGB8888` keeps the opaque fast-path copy.
-    format: u32,
-}
-
-impl Win {
-    /// Full outer rect (border + title bar + content) in screen space.
-    fn outer(&self) -> (i32, i32, i32, i32) {
-        let x = self.cx - self.border;
-        let y = self.cy - self.title_h - self.border;
-        let w = self.sw + 2 * self.border;
-        let h = self.sh + self.title_h + 2 * self.border;
-        (x, y, w, h)
-    }
-    fn contains(&self, mx: i32, my: i32) -> bool {
-        let (x, y, w, h) = self.outer();
-        mx >= x && mx < x + w && my >= y && my < y + h
-    }
-    fn content_position(&self,x:i32,y:i32)->(i32,i32){
-        (((x-self.cx)as i64*self.surface_w as i64/self.sw.max(1)as i64)as i32,
-         ((y-self.cy)as i64*self.surface_h as i64/self.sh.max(1)as i64)as i32)
-    }
-    /// The client content region (below the title bar).
-    fn in_content(&self, mx: i32, my: i32) -> bool {
-        mx >= self.cx && mx < self.cx + self.sw && my >= self.cy && my < self.cy + self.sh
-    }
-    fn in_title(&self, mx: i32, my: i32) -> bool {
-        mx >= self.cx && mx < self.cx + self.sw && my >= self.cy - self.title_h && my < self.cy
-    }
-    /// Role 0=close, 1=minimize, 2=maximize; one rect for paint and input.
-    fn control_rect(&self, role: i32) -> (i32, i32, i32, i32) {
-        let sz = (self.title_h - 12).max(4);
-        let x = if self.traffic_lights { self.cx + 8 + role * (sz + 6) }
-            else { self.cx + self.sw - (role + 1) * sz - 6 - role * 4 };
-        (x, self.cy - self.title_h + (self.title_h - sz) / 2, sz, sz)
-    }
-    fn in_close(&self, mx: i32, my: i32) -> bool { in_rect(self.control_rect(0), mx, my) }
-    fn in_min(&self, mx: i32, my: i32) -> bool { in_rect(self.control_rect(1), mx, my) }
-    fn in_max(&self, mx: i32, my: i32) -> bool { in_rect(self.control_rect(2), mx, my) }
-    /// True when the window is not in its free-form floating state (currently only
-    /// `Maximized`): it occupies a compositor-computed region, so a title-bar drag
-    /// restores it to `restore` before following the pointer (macOS-style).
-    fn is_tiled(&self) -> bool {
-        self.state != WinState::Floating
-    }
-}
 /// Persistent interactive compositor. Owns a full-screen back buffer, decorates
 /// each client surface, and lets the real mouse focus/raise/drag/close windows.
 /// Drain any queued client protocol messages (non-blocking) and advance each
@@ -836,310 +146,8 @@ fn pump_clients(
     Ok(())
 }
 
-// --- Desktop wallpaper (ported from the legacy Stack A renderer) ---------
-// The backdrop image lives in the (read-only) asset VFS as a 1600x900 24-bit
-// BMP. It is loaded and pre-scaled to the framebuffer once at session start
-// into an XRGB8888 buffer the size of `back`, so compositing the desktop each
-// frame is a single `copy_from_slice` (no per-pixel BMP sampling in the hot
-// loop). A missing/garbage file yields `None` and the gradient fallback stays.
-// The path is no longer hardcoded here: it comes from `[desktop] wallpaper` in
-// the config (baseline `/assets/wallpapers/wallpaper.bmp`).
-const WALLPAPER_WIDTH: usize = 1920;
-const WALLPAPER_HEIGHT: usize = 1080;
-const WALLPAPER_OFFSET: usize = 54;
-const WALLPAPER_STRIDE: usize = WALLPAPER_WIDTH * 3;
-
-/// Slurp a whole (binary) VFS file into a byte vector. Unlike
-/// `settings::read_file` this imposes no UTF-8 requirement and a larger cap, so
-/// it can carry the multi-megabyte wallpaper. `None` on open error.
-fn read_binary(path: &str, cap: usize) -> Option<Vec<u8>> {
-    let fd = libdunit::open(path, libdunit::OPEN_READ);
-    if fd < 0 {
-        return None;
-    }
-    let fd = fd as usize;
-    let mut data: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = libdunit::read(fd, &mut chunk);
-        if n <= 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..n as usize]);
-        if data.len() > cap {
-            break;
-        }
-    }
-    libdunit::close(fd);
-    Some(data)
-}
-
-/// A 1600x900 24-bit BMP: "BM" magic, 54-byte pixel offset, matching
-/// dimensions and 24 bpp. Mirrors the legacy `validate_wallpaper_bmp`.
-fn validate_wallpaper_bmp(data: &[u8]) -> bool {
-    data.len() >= WALLPAPER_OFFSET + WALLPAPER_STRIDE * WALLPAPER_HEIGHT
-        && data[0] == b'B'
-        && data[1] == b'M'
-        && data.get(10).copied() == Some(WALLPAPER_OFFSET as u8)
-        && data.get(18).copied() == Some((WALLPAPER_WIDTH & 0xff) as u8)
-        && data.get(19).copied() == Some(((WALLPAPER_WIDTH >> 8) & 0xff) as u8)
-        && data.get(22).copied() == Some((WALLPAPER_HEIGHT & 0xff) as u8)
-        && data.get(23).copied() == Some(((WALLPAPER_HEIGHT >> 8) & 0xff) as u8)
-        && data.get(28).copied() == Some(24)
-}
-
-/// Rasterize SVG at the framebuffer size, or scale the legacy wallpaper BMP.
-/// Invalid/missing assets leave the configured fallback backdrop in place.
-fn load_wallpaper(path: &str, bw: usize, bh: usize, background: u32) -> Option<Vec<u32>> {
-    if path.ends_with(".svg") {
-        let mut image = image_result(path, dunit_image::load(path, bw as u32, bh as u32))?;
-        for pixel in &mut image.pixels { *pixel = blend(background, *pixel); }
-        libdunit::println(&alloc::format!("gui_server: SVG wallpaper rendered {}x{}", bw, bh));
-        return Some(image.pixels);
-    }
-    let data = read_binary(path, 8 * 1024 * 1024)?;
-    if !validate_wallpaper_bmp(&data) {
-        return None;
-    }
-    let mut out: Vec<u32> = Vec::new();
-    out.resize(bw * bh, 0xFF00_0000);
-    for y in 0..bh {
-        let src_y = y.saturating_mul(WALLPAPER_HEIGHT) / bh.max(1);
-        let bmp_y = WALLPAPER_HEIGHT
-            .saturating_sub(1)
-            .saturating_sub(src_y.min(WALLPAPER_HEIGHT - 1));
-        let row_off = WALLPAPER_OFFSET + bmp_y * WALLPAPER_STRIDE;
-        let dst_base = y * bw;
-        for x in 0..bw {
-            let src_x = x.saturating_mul(WALLPAPER_WIDTH) / bw.max(1);
-            let off = row_off + src_x.min(WALLPAPER_WIDTH - 1) * 3;
-            let b = data[off] as u32;
-            let g = data[off + 1] as u32;
-            let r = data[off + 2] as u32;
-            out[dst_base + x] = 0xFF00_0000 | (r << 16) | (g << 8) | b;
-        }
-    }
-    Some(out)
-}
-
-/// Resolve SVG at the configured dock size; bitmap fallback retains its own size.
-fn resolve_app_icon(icon: &str, theme: &mut Option<dunit_image::IconTheme>, side: u32) -> Option<dunit_image::Image> {
-    if icon.is_empty() { return None; }
-    let result = if icon.starts_with('/') { dunit_image::load(icon, side, side) }
-        else { theme.as_mut()?.icon(icon, side) };
-    image_result(icon, result)
-}
-
-fn load_icon_theme(name: &str) -> Option<dunit_image::IconTheme> {
-    match dunit_image::IconTheme::open(name) {
-        Ok(theme) => Some(theme),
-        Err(error) => {
-            libdunit::println(&alloc::format!("gui_server: icon theme rejected {} {:?}", name, error));
-            None
-        }
-    }
-}
-
-fn image_result(path: &str, result: Result<dunit_image::Image, dunit_image::Error>) -> Option<dunit_image::Image> {
-    match result {
-        Ok(image) => Some(image),
-        Err(dunit_image::Error::Missing) => None,
-        Err(error) => {
-            libdunit::println(&alloc::format!("gui_server: image rejected {} {:?}", path, error));
-            None
-        }
-    }
-}
-
-/// Alpha-blend a packed-ARGB icon (`src`, `sw`×`sh`) into the back buffer,
-/// resampled to `dw`×`dh` at `(dx,dy)`. SVG caches carry their render dimensions;
-/// legacy Breeze sources are 32×32. Dock and launcher cells use different sizes,
-/// so a nearest-neighbor pick visibly aliases. Instead we resample with alpha in
-/// mind: bilinear when enlarging (both axes ≥ source), box-average when shrinking.
-/// Both paths interpolate in PREMULTIPLIED alpha — RGB is weighted by each texel's
-/// alpha before averaging and un-premultiplied at the end — so the black of the
-/// fully-transparent texels around a non-square silhouette never bleeds a dark
-/// fringe into the edges. A resolved alpha of 0 is skipped, so silhouettes still
-/// composite cleanly over the dock buttons / menu rows.
-fn blit_icon(
-    buf: &mut [u32],
-    bw: usize,
-    bh: usize,
-    src: &[u32],
-    sw: usize,
-    sh: usize,
-    dx: i32,
-    dy: i32,
-    dw: i32,
-    dh: i32,
-) {
-    if dw <= 0 || dh <= 0 || sw == 0 || sh == 0 || src.len() < sw * sh {
-        return;
-    }
-    let (dw, dh) = (dw as usize, dh as usize);
-    // Enlarging (or 1:1) on both axes → bilinear; otherwise → area/box average.
-    let upscale = dw >= sw && dh >= sh;
-    for ry in 0..dh {
-        for rx in 0..dw {
-            let px = if upscale {
-                sample_bilinear(src, sw, sh, rx, ry, dw, dh)
-            } else {
-                sample_area(src, sw, sh, rx, ry, dw, dh)
-            };
-            if (px >> 24) & 0xFF == 0 {
-                continue;
-            }
-            blend_pixel(buf, bw, bh, dx + rx as i32, dy + ry as i32, px);
-        }
-    }
-}
-
-/// Un-premultiply an accumulated (Σα, Σr·α, Σg·α, Σb·α) into a straight-alpha ARGB
-/// pixel. `weight` is the total filter weight (Σ of the per-texel weights) used to
-/// normalise alpha; RGB is normalised by `asum` (the alpha-weighted mass) so the
-/// colour of transparent texels contributes nothing. `weight == 0` yields fully
-/// transparent. Integer-only (no soft-float in the no_std ELF).
-#[inline]
-fn unpremul(asum: u64, rsum: u64, gsum: u64, bsum: u64, weight: u64) -> u32 {
-    if weight == 0 {
-        return 0;
-    }
-    let a = (asum / weight).min(255) as u32;
-    if asum == 0 {
-        return 0; // every covered texel was transparent
-    }
-    let r = (rsum / asum).min(255) as u32;
-    let g = (gsum / asum).min(255) as u32;
-    let b = (bsum / asum).min(255) as u32;
-    (a << 24) | (r << 16) | (g << 8) | b
-}
-
-/// Bilinear sample of the four texels around the source point that maps to dest
-/// `(rx,ry)`, using centre-aligned mapping so a 1:1 scale reproduces the source
-/// exactly. Fixed-point (1/256) weights, premultiplied by alpha.
-#[inline]
-fn sample_bilinear(src: &[u32], sw: usize, sh: usize, rx: usize, ry: usize, dw: usize, dh: usize) -> u32 {
-    // fx = (rx + 0.5) * sw/dw - 0.5, in 1/256 units, clamped to ≥ 0.
-    let fx = (((2 * rx + 1) * sw * 128) / dw).saturating_sub(128);
-    let fy = (((2 * ry + 1) * sh * 128) / dh).saturating_sub(128);
-    let x0 = (fx >> 8).min(sw - 1);
-    let y0 = (fy >> 8).min(sh - 1);
-    let x1 = (x0 + 1).min(sw - 1);
-    let y1 = (y0 + 1).min(sh - 1);
-    let tx = (fx & 0xFF) as u64; // 0..255 fractional weight toward x1
-    let ty = (fy & 0xFF) as u64;
-    let wx0 = 256 - tx;
-    let wy0 = 256 - ty;
-    let w = [wx0 * wy0, tx * wy0, wx0 * ty, tx * ty]; // 00,10,01,11 — Σ = 65536
-    let p = [
-        src[y0 * sw + x0],
-        src[y0 * sw + x1],
-        src[y1 * sw + x0],
-        src[y1 * sw + x1],
-    ];
-    let (mut asum, mut rsum, mut gsum, mut bsum) = (0u64, 0u64, 0u64, 0u64);
-    for i in 0..4 {
-        let a = ((p[i] >> 24) & 0xFF) as u64;
-        let aw = a * w[i];
-        asum += aw;
-        rsum += ((p[i] >> 16) & 0xFF) as u64 * aw;
-        gsum += ((p[i] >> 8) & 0xFF) as u64 * aw;
-        bsum += (p[i] & 0xFF) as u64 * aw;
-    }
-    unpremul(asum, rsum, gsum, bsum, 65536)
-}
-
-/// Box/area sample: average every source texel covered by dest `(rx,ry)` (at least
-/// one), premultiplied by alpha. Correct downscale filter for shrinking 32×32 icons.
-#[inline]
-fn sample_area(src: &[u32], sw: usize, sh: usize, rx: usize, ry: usize, dw: usize, dh: usize) -> u32 {
-    let sx0 = (rx * sw) / dw;
-    let sy0 = (ry * sh) / dh;
-    let sx1 = (((rx + 1) * sw + dw - 1) / dw).max(sx0 + 1).min(sw);
-    let sy1 = (((ry + 1) * sh + dh - 1) / dh).max(sy0 + 1).min(sh);
-    let (mut asum, mut rsum, mut gsum, mut bsum, mut count) = (0u64, 0u64, 0u64, 0u64, 0u64);
-    for sy in sy0..sy1 {
-        for sx in sx0..sx1 {
-            let px = src[sy * sw + sx];
-            let a = ((px >> 24) & 0xFF) as u64;
-            asum += a;
-            rsum += ((px >> 16) & 0xFF) as u64 * a;
-            gsum += ((px >> 8) & 0xFF) as u64 * a;
-            bsum += (px & 0xFF) as u64 * a;
-            count += 1;
-        }
-    }
-    unpremul(asum, rsum, gsum, bsum, count)
-}
-
-/// A desktop widget kind the compositor knows how to draw. The renderer owns the
-/// per-kind drawing code (a clock formats time, a monitor reads system stats);
-/// the CONFIG owns which kinds are shown and where (per-widget `widgets/*.toml`).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WidgetKind {
-    Clock,
-    Monitor,
-}
-
-/// One resolved desktop widget: its kind plus the placement/accent resolved from
-/// its per-widget file (falling back to the `[widgets] corner` default / theme).
-#[derive(Clone, Copy)]
-struct DeskWidget {
-    kind: WidgetKind,
-    corner: i32,
-    accent: u32,
-    clock: settings::WidgetCfg,
-}
-
-/// Resolve the config-driven desktop-widget set. Each widget kind the compositor
-/// implements is included ONLY when its `widgets/<name>.toml` exists AND is
-/// enabled — so a widget is removed by deleting its file or setting
-/// `enabled = false` (the Phase 8 removal switch; single source of truth, no
-/// `[widgets] clock/monitor` bool). Per-widget `corner < 0` inherits
-/// `default_corner` (`[widgets] corner`); `accent == 0` inherits the theme accent
-/// at draw time. Called once at bring-up and again on each live config reload —
-/// never per frame, so the per-widget files are not re-read every tick.
-fn resolve_desk_widgets(default_corner: i32) -> Vec<DeskWidget> {
-    // The compositor's registry of IMPLEMENTED widget kinds. This is renderer
-    // implementation (each kind has bespoke draw code below), not desktop policy:
-    // policy — which of these are actually shown — lives in the per-widget files.
-    let known: [(&str, WidgetKind); 2] =
-        [("clock", WidgetKind::Clock), ("monitor", WidgetKind::Monitor)];
-    let mut v: Vec<DeskWidget> = Vec::new();
-    for (name, kind) in known {
-        let wc = settings::WidgetCfg::load(name);
-        if wc.from_file && wc.enabled {
-            let corner = if wc.corner >= 0 { wc.corner.min(3) } else { default_corner };
-            v.push(DeskWidget { kind, corner, accent: wc.accent, clock: wc });
-        }
-    }
-    v
-}
-
-/// Apply the configured `[display]` resolution via the kernel display backend.
-/// `0/0` (baseline) keeps the current/boot resolution. A fixed backend (Limine/
-/// GOP) reports EOPNOTSUPP (-95) — the desktop simply stays at the boot mode.
-/// This is the compositor's mechanism→policy seam: the KERNEL owns the mode-set,
-/// the CONFIG owns which mode (CLAUDE.md §6-10).
-fn apply_display_mode(d: &settings::Display) {
-    if d.width == 0 || d.height == 0 {
-        return;
-    }
-    let r = libdunit::set_video_mode(d.width, d.height);
-    if r == 0 {
-        libdunit::println(&alloc::format!(
-            "gui_server: [display] resolution set to {}x{}",
-            d.width, d.height
-        ));
-    } else if r == -95 {
-        libdunit::println("gui_server: [display] fixed backend — boot resolution kept");
-    } else {
-        libdunit::println(&alloc::format!(
-            "gui_server: [display] set_video_mode {}x{} rejected ({})",
-            d.width, d.height, r
-        ));
-    }
-}
+mod desktop_resources;
+use desktop_resources::*;
 
 /// Input ownership survives framebuffer/session recreation.
 #[derive(Default)]
@@ -1239,7 +247,7 @@ fn run_desktop_session(
             match shell_runtime::Shell::prepare(&cfg,bw,bh){Ok(shell)=>shell,Err(error)=>{libdunit::println(&alloc::format!("gui_server: packaged shell unavailable {}",error));return false;}}
         }
     };
-    let mut theme=shell.palette;let mut ly=shell.layout;
+    let mut theme=shell.palette;let mut ly=shell.layout;let mut skin=shell.visuals;
     let mut policy = cfg.policy;
     let mut apps: Applications = cfg.apps;
     if cfg.settings.from_file {
@@ -1341,7 +349,7 @@ fn run_desktop_session(
     {
         let mut icon_theme = load_icon_theme(cfg.settings.desktop.icon_theme.as_str());
         for entry in apps.apps.iter() {
-            let icon = resolve_app_icon(entry.icon.as_str(), &mut icon_theme, (ly.dock_w + 6).max(32) as u32);
+            let icon = resolve_app_icon(entry.icon.as_str(), &mut icon_theme, (ly.dock_w + skin.icon_raster_padding).max(skin.icon_raster_min) as u32);
             if icon.is_some() {
                 icon_count += 1;
             }
@@ -1350,7 +358,7 @@ fn run_desktop_session(
     }
     if icon_count > 0 {
         libdunit::println(&alloc::format!("gui_server: icon assets loaded theme={} count={} raster={}px",
-            cfg.settings.desktop.icon_theme.as_str(), icon_count, (ly.dock_w + 6).max(32)));
+            cfg.settings.desktop.icon_theme.as_str(), icon_count, (ly.dock_w + skin.icon_raster_padding).max(skin.icon_raster_min)));
     } else {
         libdunit::println("gui_server: launcher icons absent — initials fallback");
     }
@@ -1359,7 +367,7 @@ fn run_desktop_session(
     // circular mask baked in (path from `[desktop] logo`). `None` when the asset
     // is missing/mis-sized → the wordmark draws its flat accent mark instead.
     let mut logo = image_result(cfg.settings.desktop.logo.as_str(),
-        dunit_image::load(cfg.settings.desktop.logo.as_str(), 32, 32));
+        dunit_image::load(cfg.settings.desktop.logo.as_str(), skin.logo_raster_size as u32, skin.logo_raster_size as u32));
     if logo.is_some() {
         libdunit::println("gui_server: wordmark logo loaded (circular)");
     } else {
@@ -1497,7 +505,7 @@ fn run_desktop_session(
         if let Some(app) = apps.apps.get(clients[i].app as usize) {
             libdunit::println(&alloc::format!("[GUI-PRESENT] app={}", app.id));
         }
-        offset += 32;
+        offset += skin.placement_startup_step;
     }
 
     // Config-gated session round-trip proof (`test.toml` `[startup] self_test`).
@@ -1824,6 +832,7 @@ fn run_desktop_session(
                 // removes a widgets/<name>.toml (or flips its `enabled`) takes effect.
                 desk_widgets = resolve_desk_widgets(ncfg.settings.widgets.corner);
                 shell = next_shell.unwrap();
+                skin=shell.visuals;
                 scene_epoch=scene_epoch.wrapping_add(1);
                 shell.describe();
                 effects.clear();
@@ -1832,8 +841,8 @@ fn run_desktop_session(
                 hovered_component=None;
                 font = next_font;
                 policy = ncfg.policy;
-                for win in &mut wins {win.app=apps.apps.get(win.app as usize).and_then(|old|ncfg.apps.apps.iter().position(|new|new.id==old.id)).map(|index|index as u8).unwrap_or(255);}
-                for client in clients.iter_mut(){client.app=apps.apps.get(client.app as usize).and_then(|old|ncfg.apps.apps.iter().position(|new|new.id==old.id)).map(|index|index as u8).unwrap_or(255);}
+                for win in &mut wins {win.app=apps.apps.get(win.app as usize).and_then(|old|ncfg.apps.apps.iter().position(|new|new.id==old.id)).map(|index|index as u8).unwrap_or(u8::MAX);}
+                for client in clients.iter_mut(){client.app=apps.apps.get(client.app as usize).and_then(|old|ncfg.apps.apps.iter().position(|new|new.id==old.id)).map(|index|index as u8).unwrap_or(u8::MAX);}
                 apps = ncfg.apps;
                 event_engine.set_context(&shell.config,&apps);
                 menu_entries = apps.launcher.clone();
@@ -1867,10 +876,10 @@ fn run_desktop_session(
                 // registry-derived state (icons per entry, dock hover slots).
                 wallpaper = load_wallpaper(ncfg.settings.desktop.wallpaper.as_str(), bw, bh, theme.desktop);
 
-                logo=image_result(ncfg.settings.desktop.logo.as_str(),dunit_image::load(ncfg.settings.desktop.logo.as_str(),32,32));
+                logo=image_result(ncfg.settings.desktop.logo.as_str(),dunit_image::load(ncfg.settings.desktop.logo.as_str(),skin.logo_raster_size as u32,skin.logo_raster_size as u32));
                 app_icons.clear();
                 for entry in apps.apps.iter() {
-                    app_icons.push(resolve_app_icon(entry.icon.as_str(), &mut next_icon_theme, (ly.dock_w + 6).max(32) as u32));
+                    app_icons.push(resolve_app_icon(entry.icon.as_str(), &mut next_icon_theme, (ly.dock_w + skin.icon_raster_padding).max(skin.icon_raster_min) as u32));
                 }
 
                 if current_ws >= apps.workspaces {
@@ -1883,7 +892,6 @@ fn run_desktop_session(
             }
         }
 
-        let skin = shell.visuals;
 
         // Turn this tick's client-posted notification requests (NOTIFY_MAGIC) into
         // toasts. Policy stays the compositor's: `notify_post` is a no-op when
@@ -1991,8 +999,8 @@ fn run_desktop_session(
             }
             let sw = clients[i].surf_w as i32;
             let sh = clients[i].surf_h as i32;
-            let step = (wins.len() as i32 % 6) * 40;
-            let mut cx = 90 + step + ly.border;
+            let step = (wins.len() as i32 % skin.placement_columns) * skin.placement_step;
+            let mut cx = skin.placement_origin_x + step + ly.border;
             let mut cy = ins.top + ly.title_h + ly.border + step;
             if cx < ins.left + ly.border {
                 cx = ins.left + ly.border;
@@ -2300,7 +1308,7 @@ fn run_desktop_session(
                         for &wi in &live {
                             effects.start(&wins[wi],&back,bw,bh,wins[wi].outer(),animation_now,anim_duration_ms,
                         animation::Effect::Fade,animation::Easing::ease_out(),true,
-                        &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                        &window_effects::PaintStyle{visuals:&skin,theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                     wins[wi].alive = false;
                             send_input(clients, wins[wi].pid, IN_QUIT, 0, 0, 0);
                         }
@@ -2543,10 +1551,10 @@ fn run_desktop_session(
                 // Raise: move wi to the top of the z-order.
                 z.retain(|&i| i != wi);
                 z.push(wi);
-                if wins[wi].in_close(wx, wy) {
+                if wins[wi].in_close(wx, wy, &skin) {
                     effects.start(&wins[wi],&back,bw,bh,wins[wi].outer(),animation_now,anim_duration_ms,
                         animation::Effect::Fade,animation::Easing::ease_out(),true,
-                        &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                        &window_effects::PaintStyle{visuals:&skin,theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                     wins[wi].alive = false;
                     send_input(clients, wins[wi].pid, IN_QUIT, 0, 0, 0);
                     drag = None;
@@ -2554,18 +1562,18 @@ fn run_desktop_session(
                     // app restores its last geometry.
                     session_remember(&mut session, &apps, &wins[wi]);
                     settings::save_session(&session);
-                } else if wins[wi].in_min(wx, wy) {
+                } else if wins[wi].in_min(wx, wy, &skin) {
                     // Minimize: drop it from compositing/input; the dock task
                     // switcher restores it on click.
                     let target=shell.app_target(wins[wi].app as usize,&apps).unwrap_or((bw as i32/2,bh as i32-1,1,1));
                     effects.minimize(&wins[wi],&back,bw,bh,target,animation_now,anim_duration_ms,
-                        &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                        &window_effects::PaintStyle{visuals:&skin,theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                     if let Some(name)=policy.for_app(apps.apps.get(wins[wi].app as usize).map(|a|a.id.as_str()).unwrap_or("")).animation {
                         let (effect,easing)=window_effects::preset(&name,wins[wi].outer(),target);effects.configure(wins[wi].pid,effect,anim_duration_ms,easing,animation_now);
                     }
                     wins[wi].minimized = true;
                     drag = None;
-                } else if wins[wi].in_max(wx, wy) {
+                } else if wins[wi].in_max(wx, wy, &skin) {
                     // Maximize/restore: toggle the window between the work area
                     // and its saved floating geometry via a server-push CONFIGURE
                     // (Phase 3). The owning client re-imports at the new size and
@@ -2882,7 +1890,7 @@ fn run_desktop_session(
             if let Some(name)=rule.animation.as_deref().filter(|_|animation_clock.is_some()){let target=shell.app_target(win.app as usize,&apps).unwrap_or((bw as i32/2,bh as i32-1,1,1));
                 let (effect,easing)=window_effects::preset(name,win.outer(),target);
                 effects.start(win,&back,bw,bh,target,animation_now,anim_duration_ms,effect,easing,false,
-                    &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});}
+                    &window_effects::PaintStyle{visuals:&skin,theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});}
             win.rule_applied=true;
         }
         if scripts.enabled && !scripts.events.as_str().is_empty() {
@@ -2943,7 +1951,7 @@ fn run_desktop_session(
                             lua_policy::Effect::Genie=>animation::Effect::Genie(window_effects::target_edge(win.outer(),target))};
                         if !effects.configure(win.pid,effect,action.duration_ms,easing,animation_now) {
                             effects.start(win,&back,bw,bh,target,animation_now,action.duration_ms,effect,easing,false,
-                                &window_effects::PaintStyle{theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
+                                &window_effects::PaintStyle{visuals:&skin,theme:&theme,layout:&ly,effects:&fx,font:font.as_ref(),apps:&apps});
                         }
                     }
                     libdunit::println(&alloc::format!("gui_server: Lua animation committed pid={} duration={}",win.pid,action.duration_ms));
@@ -3172,7 +2180,7 @@ fn run_desktop_session(
                     let mut ty = cy + pad;
                     if let Some(clock)=clock_w {
                         if clock.clock.style==settings::ClockStyle::Analog {
-                            shell_runtime::analog(&mut back,bw,bh,(cx+pad,ty,card_w-2*pad,clock_h),secs,theme.panel_text,theme.launcher);
+                            shell_runtime::analog(&skin,&mut back,bw,bh,(cx+pad,ty,card_w-2*pad,clock_h),secs,theme.panel_text,theme.launcher);
                         } else {
                         let clk = alloc::format!("{:02}:{:02}:{:02}", (secs / 3600) % 100, (secs / 60) % 60, secs % 60);
                         let tw = text_width_ttf(f, &clk, clock_px);
@@ -3225,12 +2233,12 @@ fn run_desktop_session(
                 continue;
             }
             let (visual,visual_theme,visual_fx)=effects.visual(w,animation_now,&theme,&fx);
-            window_painter::paint(&mut back,bw,bh,&visual,is_focused,a,&visual_theme,&ly,&visual_fx,font.as_ref(),&apps,wx,wy,&mut win_backing,&mut argb_blit_logged,&mut blur_a,&mut blur_b);
+            window_painter::paint(&mut back,bw,bh,&visual,is_focused,a,&visual_theme,&ly,&skin,&visual_fx,font.as_ref(),&apps,wx,wy,&mut win_backing,&mut argb_blit_logged,&mut blur_a,&mut blur_b);
         }
 
         effects.prune(&wins,animation_now);
         effects.paint(&mut back,bw,bh,animation_now,current_ws);
-        if workspace_transform{workspace_layer.finish(&mut back,bw,bh,&workspace_view,&mut blur_a,&mut blur_b);}
+        if workspace_transform{workspace_layer.finish(&mut back,bw,bh,&workspace_view,&skin,&mut blur_a,&mut blur_b);}
         let frame_fx=Effects{anim:fx.anim&&animation_clock.is_some(),..fx};
         shell.paint(&mut back,bw,bh,font.as_ref(),&app_icons,logo.as_ref(),&apps,&wins,focused,current_ws,mx,my,
             animation_now,&theme,&ly,&frame_fx,&mut blur_a,&mut blur_b);
@@ -3252,7 +2260,7 @@ fn run_desktop_session(
                 if fx.blur||menu_view.blur>0 {
                     blur_region(&mut back, bw, bh, mx0, my0, mw0, reveal_h, if menu_view.blur>0{menu_view.blur}else{fx.blur_radius}, fx.blur_iters, &mut blur_a, &mut blur_b);
                 }
-                if menu_view.shadow>0{draw_soft_shadow(&mut back,bw,bh,mx0,my0,mw0,reveal_h,menu_view.radius.unwrap_or(fx.corner_radius),menu_view.shadow,fx.shadow_alpha);}
+                if menu_view.shadow>0{draw_soft_shadow(&skin,&mut back,bw,bh,mx0,my0,mw0,reveal_h,menu_view.radius.unwrap_or(fx.corner_radius),menu_view.shadow,fx.shadow_alpha);}
                 fill_rrect_grad(&mut back, bw, bh, mx0, my0, mw0, reveal_h, menu_view.radius.unwrap_or(fx.corner_radius), RR_ALL, shade(theme.menu, skin.overlay_gradient_top), theme.menu, fx.menu_alpha);
             }
             for i in 0..menu_entries.len() {
@@ -3278,7 +2286,7 @@ fn run_desktop_session(
                 let label = apps.apps.get(ri).map(|a| a.label.as_str()).unwrap_or("");
                 draw_shell_text(&mut back, bw, bh, font.as_ref(), text_x, iy + (ih - ly.panel_font_px) / 2, ly.panel_font_px, 0xff000000|(menu_view.color.unwrap_or(theme.panel_text)&0x00ff_ffff), label.as_bytes());
             }
-            if menu_blend{let mut opacity=desktop_tracks.sample(0,(0,0,bw as i32,bh as i32),animation_now);opacity.opacity=menu_opacity;workspace_layer.finish(&mut back,bw,bh,&opacity,&mut blur_a,&mut blur_b);}
+            if menu_blend{let mut opacity=desktop_tracks.sample(0,(0,0,bw as i32,bh as i32),animation_now);opacity.opacity=menu_opacity;workspace_layer.finish(&mut back,bw,bh,&opacity,&skin,&mut blur_a,&mut blur_b);}
         }
 
         // --- Window switcher overlay (M4) ------------------------------------
@@ -3296,7 +2304,7 @@ fn run_desktop_session(
             let panh = tile + label_h + 2 * pad;
             let px0 = (bw as i32 - panw) / 2;
             let py0 = (bh as i32 - panh) / 2;
-            draw_soft_shadow(&mut back, bw, bh, px0, py0, panw, panh, skin.switcher_radius, skin.switcher_shadow, skin.switcher_shadow_alpha);
+            draw_soft_shadow(&skin,&mut back, bw, bh, px0, py0, panw, panh, skin.switcher_radius, skin.switcher_shadow, skin.switcher_shadow_alpha);
             fill_rrect(&mut back, bw, bh, px0, py0, panw, panh, skin.switcher_radius, RR_ALL, ((skin.switcher_alpha as u32)<<24) | (theme.menu & 0x00FF_FFFF));
             for (k, &wi) in switcher.order.iter().enumerate() {
                 let tx = px0 + pad + k as i32 * (tile + gap);
@@ -3337,7 +2345,7 @@ fn run_desktop_session(
             if fx.blur {
                 blur_region(&mut back, bw, bh, fx0, fy0, fw0, fh0, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b);
             }
-            draw_soft_shadow(&mut back, bw, bh, fx0, fy0, fw0, fh0, skin.qs_radius, skin.qs_shadow, skin.qs_shadow_alpha);
+            draw_soft_shadow(&skin,&mut back, bw, bh, fx0, fy0, fw0, fh0, skin.qs_radius, skin.qs_shadow, skin.qs_shadow_alpha);
             fill_rrect_grad(&mut back, bw, bh, fx0, fy0, fw0, fh0, fx.corner_radius, RR_ALL, shade(theme.menu, skin.overlay_gradient_top), theme.menu, fx.menu_alpha);
             let rows = [("Blur", fx.blur), ("Widgets", wg.enabled)];
             for (i, (lbl, on)) in rows.iter().enumerate() {
@@ -3385,7 +2393,7 @@ fn run_desktop_session(
                 let tw = font
                     .as_ref()
                     .map(|f| text_width_ttf(f, &t.text, px))
-                    .unwrap_or(t.text.len() as i32 * 8);
+                    .unwrap_or(t.text.len() as i32 * ly.title_font_px / 2);
                 let max_width = (bw as i32 - 2 * margin).max(1);
                 let cardw = (tw + 2*skin.notification_padding).clamp(skin.notification_min_width.min(max_width), max_width);
                 // Slide-in follows the same monotonic transition duration.
@@ -3401,7 +2409,7 @@ fn run_desktop_session(
                 let view=desktop_tracks.sample(desktop_motion::NOTIFICATIONS,(cx,cy,cardw,cardh),animation_now);
                 let (cx,cy,cardw,cardh)=view.rect;let radius=view.radius.unwrap_or(skin.notification_radius);
                 if view.blur>0{let need=(cardw.max(0)as usize).saturating_mul(cardh.max(0)as usize).min(bw*bh);if blur_a.len()<need{blur_a.resize(need,0);blur_b.resize(need,0);}blur_region(&mut back,bw,bh,cx,cy,cardw,cardh,view.blur,1,&mut blur_a,&mut blur_b);}
-                draw_soft_shadow(&mut back,bw,bh,cx,cy,cardw,cardh,radius,if view.shadow>0{view.shadow}else{skin.notification_shadow},skin.notification_shadow_alpha*view.opacity as i32/255);
+                draw_soft_shadow(&skin,&mut back,bw,bh,cx,cy,cardw,cardh,radius,if view.shadow>0{view.shadow}else{skin.notification_shadow},skin.notification_shadow_alpha*view.opacity as i32/255);
                 fill_rrect_grad(&mut back, bw, bh, cx, cy, cardw, cardh, radius, RR_ALL, shade(theme.menu, skin.overlay_gradient_top), theme.menu, fx.menu_alpha*view.opacity as i32/255);
                 // Accent bar on the leading edge marks it as a toast.
                 fill_rrect(&mut back, bw, bh, cx, cy + skin.notification_accent_inset, skin.notification_accent_width, cardh - 2*skin.notification_accent_inset, skin.notification_accent_radius, RR_ALL, (view.opacity<<24)|(theme.launcher&0x00ffffff));

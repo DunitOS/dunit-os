@@ -121,3 +121,61 @@ $shell-effects-menu-alpha: 225;
 $shell-effects-anim-ms: 140;
 
 $shell-cursor-source: /assets/dwm/cursor.txt;
+
+// Window controls and retained shell details share the same registry.
+$shell-control-size-inset: 12;
+$shell-control-min-size: 4;
+$shell-control-left-inset: 8;
+$shell-control-left-gap: 6;
+$shell-control-right-inset: 6;
+$shell-control-right-gap: 4;
+$shell-control-glyph-min: 3;
+$shell-control-glyph-stroke: 1;
+$shell-title-baseline-offset: 5;
+$shell-title-text-inset: 12;
+$shell-border-gradient-top: 18;
+$shell-border-gradient-bottom: -12;
+$shell-title-gradient-top: 16;
+$shell-title-gradient-bottom: -10;
+$shell-panel-gradient-top: 12;
+$shell-panel-gradient-bottom: -10;
+$shell-running-width: 6;
+$shell-running-height: 3;
+$shell-running-radius: 1;
+$shell-icon-padding: 6;
+$shell-logo-padding: 8;
+$shell-logo-max-size: 24;
+$shell-logo-gap: 4;
+$shell-logo-raster-size: 32;
+$shell-icon-raster-padding: 6;
+$shell-icon-raster-min: 32;
+$shell-component-clock-padding: 16;
+$shell-component-label-padding: 24;
+$shell-component-monitor-width: 160;
+$shell-component-tray-width: 210;
+$shell-component-title-width: 160;
+$shell-component-text-padding: 8;
+$shell-component-baseline-inset: 2;
+$shell-clock-padding: 3;
+$shell-clock-tick-size: 2;
+$shell-clock-hour-percent: 50;
+$shell-clock-minute-percent: 80;
+$shell-clock-second-percent: 90;
+$shell-placement-origin-x: 90;
+$shell-placement-step: 40;
+$shell-placement-columns: 6;
+$shell-placement-startup-step: 32;
+
+$shell-shadow-color: #000000;
+$shell-shadow-offset: 2;
+$shell-layer-shadow-alpha: 80;
+
+$shell-group-preview-columns: 2;
+$shell-group-preview-rows: 2;
+$shell-component-raster-min: 16;
+
+// Initial client slots are also appearance/placement data, before desktop entry.
+$shell-startup-origin-x: 300;
+$shell-startup-origin-y: 100;
+$shell-startup-step-x: 70;
+$shell-startup-step-y: 90;

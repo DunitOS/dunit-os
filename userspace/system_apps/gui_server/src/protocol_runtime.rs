@@ -721,6 +721,13 @@ pub(super) fn try_launch(
 /// two clients present at once (the baseline config autostarts three).
 pub(super) fn serve_two_clients(input: u32) -> bool {
     let cfg = settings::load_config();
+    // Startup slots appear before desktop entry, so resolve the same shared
+    // registry here as well. No private placement defaults in the transport.
+    let skin = match crate::shell_theme::prepare(&cfg).and_then(|theme|
+        dunit_style::shell::Visuals::from_tokens(&theme.tokens).map_err(|e|alloc::format!("{:?}",e))) {
+        Ok(skin)=>skin,
+        Err(error)=>{libdunit::println(&alloc::format!("gui_server: shell rejected {}",error));return false;}
+    };
     // The display mode as configured at boot, captured BEFORE any client is spawned
     // — so a settings client that rewrites `[display]` during bring-up cannot move
     // this baseline. Threaded into the first `run_desktop_session` so a bring-up
@@ -751,8 +758,8 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         let Some(entry) = cfg.apps.apps.get(ri) else {
             continue;
         };
-        let sx = 300 + (k as u32) * 70;
-        let sy = 100 + (k as u32) * 90;
+        let sx = (skin.startup_origin_x + k as i32 * skin.startup_step_x) as u32;
+        let sy = (skin.startup_origin_y + k as i32 * skin.startup_step_y) as u32;
         if let Some(c) = spawn_client(&mut server, next_id, sx, sy, ri as u8, entry, cfg.apps.terminal.as_deref()) {
             clients.push(c);
             next_id += 1;
@@ -870,7 +877,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         // the maximize/fullscreen mechanism across a REAL process boundary (the
         // client re-allocates its buffer and re-imports it with a fresh object
         // id), which the in-process compositor self-test cannot cover.
-        resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload, &mut transfers);
+        crate::bringup::resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload, &mut transfers);
     }
     // Loop so a live `[display]` change re-enters the session at the new
     // resolution (rebuilding all buffers); unprocessed notifications survive.
@@ -900,99 +907,6 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         }
     }
     both
-}
-
-/// Push a server-initiated CONFIGURE to one already-presented client and pump its
-/// re-negotiation until it re-imports a fresh buffer at the new geometry and
-/// re-presents. This drives the exact maximize/fullscreen mechanism across a real
-/// process boundary: `Server::reconfigure` emits the CONFIGURE, the client backs
-/// a new buffer and replays IMPORT/ATTACH/COMMIT with a FRESH object id, and the
-/// compositor picks up the new size from the client's IMPORT_BUFFER. Verifiable
-/// headlessly (the in-process self-test cannot cross an address-space boundary).
-pub(super) fn resize_one_client(
-    server: &mut Server,
-    clients: &mut [ClientState],
-    pending_notifies: &mut Vec<alloc::string::String>,
-    reload_seen: &mut bool,
-    transfers: &mut transfer_runtime::Runtime,
-) {
-    const NEWW: u32 = 320;
-    const NEWH: u32 = 160;
-    const STATE_ACTIVATED: u32 = 1;
-    // First presented client that announced a surface object (a gui_client).
-    let target = match clients.iter().position(|c| c.presented && c.surface != 0) {
-        Some(i) => i,
-        None => return,
-    };
-    let (conn, surface, pid) = (clients[target].conn, clients[target].surface, clients[target].pid);
-
-    // Emit CONFIGURE(NEWW, NEWH) and forward it to the owning client.
-    for (fc, fp) in &server.reconfigure(conn, surface, NEWW, NEWH, 1, STATE_ACTIVATED) {
-        if *fc == conn {
-            libdunit::ipc_send(pid, fp);
-        }
-    }
-
-    let mut rx = [0u8; 256];
-    for _ in 0..256 {
-        let mut sender: u32 = 0;
-        let mut attached=0;
-        let n = libdunit::ipc_recv_handle_blocking(&mut rx,&mut sender,&mut attached,3000);
-        if n <= 0 {
-            break;
-        }
-        let n = n as usize;
-        let attachment=if attached!=0{Some(unsafe{dunit_transfer::OwnedHandle::adopt(attached)})}else{None};
-        let idx = match clients.iter().position(|c| c.pid == sender) {
-            Some(i) => i,
-            None => continue,
-        };
-        // A settings client's resolution self-test can present during this resize
-        // proof: capture its reload ping into `reload_seen` so the first interactive
-        // session re-applies the edited `[display]` rather than dropping the signal.
-        // A NOTIFY posted mid-resize is still preserved (bring-up race safety).
-        dispatch_client_payload(server,&mut clients[idx],&rx[..n],attachment,reload_seen,pending_notifies,transfers);
-        transfers.flush();
-        // Route every frame callback to its owner (keeps the other clients live).
-        // Mirror `pump_clients`: a client that completes its handshake here (a
-        // slower startup app such as the terminal or file manager, which finishes
-        // committing while we drive the target's resize) MUST be latched `ready`,
-        // exactly as the desktop pump would. Otherwise it is orphaned — presented
-        // client-side but never adopted as a runtime window — because it then goes
-        // idle in `run_desktop_session` and sends nothing further to re-trigger a
-        // composite. This keeps the documented "slower startup app becomes a
-        // runtime-pumped window" invariant true even across this resize proof.
-        for (fc, fp) in &server.composite() {
-            let status = if fp.len() >= 52 {
-                u32::from_le_bytes([fp[48], fp[49], fp[50], fp[51]])
-            } else {
-                0
-            };
-            for c in clients.iter_mut() {
-                if c.conn != *fc {
-                    continue;
-                }
-                libdunit::ipc_send(c.pid, fp);
-                if status == 0 && !c.buf_ptr.is_null() && c.surf_w > 0 && c.surf_h > 0 {
-                    c.ready = true;
-                }
-            }
-        }
-        // Done once the target reports the new geometry (via its IMPORT_BUFFER)
-        // with a fresh backing buffer that we can blit within bounds.
-        let c = &clients[target];
-        if c.surf_w == NEWW && c.surf_h == NEWH && !c.buf_ptr.is_null() {
-            let want = c.surf_w as u64 * c.surf_h as u64 * 4;
-            if want <= c.buf_size as u64 {
-                let data = unsafe { core::slice::from_raw_parts(c.buf_ptr, want as usize) };
-                if libdunit::fb_present(data, c.surf_w, c.surf_h, c.slot_x, c.slot_y) == 0 {
-                    libdunit::println("gui_server: live client resized to 320x160 OK");
-                    return;
-                }
-            }
-        }
-    }
-    libdunit::println("gui_server: FAIL live client resize");
 }
 
 /// Push a server-initiated CONFIGURE to the client that owns `pid` and forward it

@@ -94,6 +94,7 @@ pub fn run(action: settings::policy::Action, c: &mut Context) {
                     1,
                 ));
                 let style = window_effects::PaintStyle {
+                    visuals: &c.shell.visuals,
                     theme: c.theme,
                     layout: c.ly,
                     effects: c.fx,

@@ -37,7 +37,7 @@ fn background(profile: &str) -> u32 {
 fn main() -> dunit::Result<()> {
     let dark = dunit::fs::read_to_string("/assets/dwm/sdk/dark.dss")?;
     let light = alloc::format!(
-        "{}\n$shell-cursor-fill: #ff00ff;\n",
+        "{}\n$shell-cursor-fill: #ff00ff;\n$shell-control-right-inset: 18;\n",
         dunit::fs::read_to_string("/assets/dwm/sdk/light.dss")?
     );
     let config_path = "/system/share/dwm/default.toml";

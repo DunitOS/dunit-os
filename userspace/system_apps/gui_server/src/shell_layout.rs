@@ -4,6 +4,7 @@ fn intrinsic(
     c: &settings::shell::ComponentConfig,
     horizontal: bool,
     apps: &Applications,
+    skin: &dunit_style::shell::Visuals,
 ) -> (i32, i32) {
     let count = match c.kind {
         Kind::Workspaces => apps.workspaces,
@@ -11,13 +12,13 @@ fn intrinsic(
         _ => 1,
     }
     .max(1) as i32;
-    let font_px = if c.font_px == 0 { 14 } else { c.font_px as i32 };
+    let font_px = if c.font_px == 0 { skin.layout_panel_font_px } else { c.font_px as i32 };
     let main = match c.kind {
         Kind::Workspaces | Kind::Apps => count * c.size + (count - 1) * c.gap,
-        Kind::Clock => (c.format.len() as i32 * font_px * 3 / 5 + 16).max(c.size),
-        Kind::SystemMonitor => c.size.max(160),
-        Kind::Tray => c.size.max(210),
-        Kind::Title => c.size.max(160),
+        Kind::Clock => (c.format.len() as i32 * font_px * 3 / 5 + skin.component_clock_padding).max(c.size),
+        Kind::SystemMonitor => c.size.max(skin.component_monitor_width),
+        Kind::Tray => c.size.max(skin.component_tray_width),
+        Kind::Title => c.size.max(skin.component_title_width),
         Kind::Launcher | Kind::Button | Kind::Indicator | Kind::QuickSettings => {
             let label = if !c.label.is_empty() {
                 c.label.as_str()
@@ -29,7 +30,7 @@ fn intrinsic(
                 ""
             };
             if c.icon.is_empty() {
-                (label.chars().count() as i32 * font_px * 3 / 5 + 24).max(c.size)
+                (label.chars().count() as i32 * font_px * 3 / 5 + skin.component_label_padding).max(c.size)
             } else {
                 c.size
             }
@@ -51,16 +52,17 @@ fn natural(
     id: &str,
     horizontal: bool,
     apps: &Applications,
+    skin: &dunit_style::shell::Visuals,
 ) -> Option<(i32, i32)> {
     let c = config.component(id).filter(|c| c.enabled)?;
     if c.kind != Kind::Container {
-        return Some(intrinsic(c, horizontal, apps));
+        return Some(intrinsic(c, horizontal, apps, skin));
     }
     let row = c.direction == Direction::Horizontal;
     let sizes: Vec<_> = c
         .children
         .iter()
-        .filter_map(|id| natural(config, id, row, apps))
+        .filter_map(|id| natural(config, id, row, apps, skin))
         .collect();
     let main = sizes
         .iter()
@@ -86,6 +88,7 @@ fn append(
     parent: NodeId,
     horizontal: bool,
     apps: &Applications,
+    skin: &dunit_style::shell::Visuals,
     mapping: &mut Vec<(NodeId, usize, bool)>,
 ) {
     let Some(index) = config
@@ -96,7 +99,7 @@ fn append(
         return;
     };
     let c = &config.components[index];
-    let (w, h) = intrinsic(c, horizontal, apps);
+    let (w, h) = intrinsic(c, horizontal, apps, skin);
     let container = c.kind == Kind::Container;
     let mut a = Attrs::default();
     a.width = if container && c.width == 0 {
@@ -140,6 +143,7 @@ fn append(
             node,
             child_horizontal,
             apps,
+            skin,
             mapping,
         );
     }
@@ -151,11 +155,12 @@ pub(super) fn layout_panels(
     bw: usize,
     bh: usize,
     cascade: &Cascade,
+    skin: &dunit_style::shell::Visuals,
 ) -> Result<(Vec<Panel>, Insets), String> {
     let mut effective = config.clone();
     for panel in &mut effective.panels {
         let s = style(cascade, "Panel", &panel.id, &panel.class, None);
-        panel.size = number(&s, "size", panel.size).max(8);
+        panel.size = number(&s, "size", panel.size).max(1);
         panel.length = number(&s, "length", panel.length);
         panel.margin = number(&s, "margin", panel.margin);
         panel.padding = number(&s, "padding", panel.padding);
@@ -212,6 +217,7 @@ pub(super) fn layout_panels(
                 root,
                 horizontal,
                 apps,
+                skin,
                 &mut mapping,
             );
         }
@@ -219,7 +225,7 @@ pub(super) fn layout_panels(
         let sizes: Vec<_> = p
             .children
             .iter()
-            .filter_map(|id| natural(&config, id, horizontal, apps))
+            .filter_map(|id| natural(&config, id, horizontal, apps, skin))
             .collect();
         let natural = sizes
             .iter()

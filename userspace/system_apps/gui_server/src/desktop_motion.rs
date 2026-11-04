@@ -38,6 +38,7 @@ impl Layer {
         bw: usize,
         bh: usize,
         visual: &shell_motion::Visual,
+        skin: &dunit_style::shell::Visuals,
         a: &mut Vec<u32>,
         b: &mut Vec<u32>,
     ) {
@@ -68,7 +69,7 @@ impl Layer {
             return;
         }
         if visual.shadow > 0 {
-            draw_soft_shadow(
+            draw_soft_shadow(skin,
                 back,
                 bw,
                 bh,
@@ -78,7 +79,7 @@ impl Layer {
                 h,
                 visual.radius.unwrap_or(0),
                 visual.shadow,
-                80,
+                skin.layer_shadow_alpha,
             );
         }
         for dy in y.max(0)..(y + h).min(bh as i32) {

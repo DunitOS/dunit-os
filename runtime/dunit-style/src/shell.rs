@@ -31,6 +31,7 @@ macro_rules! visuals {
             pub cursor_outline: u32,
             pub cursor_fill: u32,
             pub toggle_knob: u32,
+            pub shadow_color: u32,
         }
         impl Visuals {
             pub fn from_tokens(tokens: &Tokens) -> Result<Self> {
@@ -39,6 +40,7 @@ macro_rules! visuals {
                     cursor_outline: color(tokens, "shell-cursor-outline")?,
                     cursor_fill: color(tokens, "shell-cursor-fill")?,
                     toggle_knob: color(tokens, "shell-toggle-knob")?,
+                    shadow_color: color(tokens, "shell-shadow-color")?,
                 };
                 value.validate()?;
                 cursor_source(tokens)?;
@@ -48,6 +50,57 @@ macro_rules! visuals {
     };
 }
 visuals! {
+    startup_origin_x: "shell-startup-origin-x", 0, 16384;
+    startup_origin_y: "shell-startup-origin-y", 0, 16384;
+    startup_step_x: "shell-startup-step-x", 0, 1024;
+    startup_step_y: "shell-startup-step-y", 0, 1024;
+    group_preview_columns: "shell-group-preview-columns", 1, 8;
+    group_preview_rows: "shell-group-preview-rows", 1, 8;
+    component_raster_min: "shell-component-raster-min", 1, 256;
+    shadow_offset: "shell-shadow-offset", 0, 1024;
+    layer_shadow_alpha: "shell-layer-shadow-alpha", 0, 255;
+    control_size_inset: "shell-control-size-inset", 0, 1024;
+    control_min_size: "shell-control-min-size", 1, 1024;
+    control_left_inset: "shell-control-left-inset", 0, 1024;
+    control_left_gap: "shell-control-left-gap", 0, 1024;
+    control_right_inset: "shell-control-right-inset", 0, 1024;
+    control_right_gap: "shell-control-right-gap", 0, 1024;
+    control_glyph_min: "shell-control-glyph-min", 1, 1024;
+    control_glyph_stroke: "shell-control-glyph-stroke", 1, 1024;
+    title_baseline_offset: "shell-title-baseline-offset", 0, 1024;
+    title_text_inset: "shell-title-text-inset", 0, 1024;
+    border_gradient_top: "shell-border-gradient-top", -255, 255;
+    border_gradient_bottom: "shell-border-gradient-bottom", -255, 255;
+    title_gradient_top: "shell-title-gradient-top", -255, 255;
+    title_gradient_bottom: "shell-title-gradient-bottom", -255, 255;
+    panel_gradient_top: "shell-panel-gradient-top", -255, 255;
+    panel_gradient_bottom: "shell-panel-gradient-bottom", -255, 255;
+    running_width: "shell-running-width", 0, 1024;
+    running_height: "shell-running-height", 0, 1024;
+    running_radius: "shell-running-radius", 0, 1024;
+    icon_padding: "shell-icon-padding", 0, 1024;
+    logo_padding: "shell-logo-padding", 0, 1024;
+    logo_max_size: "shell-logo-max-size", 0, 1024;
+    logo_gap: "shell-logo-gap", 0, 1024;
+    logo_raster_size: "shell-logo-raster-size", 1, 1024;
+    icon_raster_padding: "shell-icon-raster-padding", 0, 1024;
+    icon_raster_min: "shell-icon-raster-min", 1, 1024;
+    component_clock_padding: "shell-component-clock-padding", 0, 1024;
+    component_label_padding: "shell-component-label-padding", 0, 1024;
+    component_monitor_width: "shell-component-monitor-width", 0, 1024;
+    component_tray_width: "shell-component-tray-width", 0, 1024;
+    component_title_width: "shell-component-title-width", 0, 1024;
+    component_text_padding: "shell-component-text-padding", 0, 1024;
+    component_baseline_inset: "shell-component-baseline-inset", 0, 1024;
+    clock_padding: "shell-clock-padding", 0, 1024;
+    clock_tick_size: "shell-clock-tick-size", 0, 1024;
+    clock_hour_percent: "shell-clock-hour-percent", 0, 100;
+    clock_minute_percent: "shell-clock-minute-percent", 0, 100;
+    clock_second_percent: "shell-clock-second-percent", 0, 100;
+    placement_origin_x: "shell-placement-origin-x", 0, 1024;
+    placement_step: "shell-placement-step", 0, 1024;
+    placement_columns: "shell-placement-columns", 1, 1024;
+    placement_startup_step: "shell-placement-startup-step", 0, 1024;
     layout_title_h: "shell-layout-title-h", 0, 16384;
     layout_border: "shell-layout-border", 0, 16384;
     layout_panel_h: "shell-layout-panel-h", 0, 16384;
@@ -147,6 +200,12 @@ visuals! {
 }
 impl Visuals {
     fn validate(&self) -> Result<()> {
+        if self.control_glyph_stroke > self.control_glyph_min
+            || self.control_glyph_min > self.control_min_size
+        {
+            return Err(invalid("shell-control-glyph-stroke"));
+        }
+
         if self.qs_toggle_width < self.qs_toggle_height
             || self.qs_toggle_height <= 2 * self.qs_knob_inset
         {
@@ -168,6 +227,39 @@ impl Visuals {
             return Err(invalid("shell-menu-icon-min"));
         }
         Ok(())
+    }
+    /// The same clipped button rectangle is used by painter and pointer routing.
+    pub fn control_rect(
+        &self,
+        content: (i32, i32, i32, i32),
+        title_h: i32,
+        traffic: bool,
+        role: i32,
+    ) -> (i32, i32, i32, i32) {
+        let (cx, cy, width, _) = content;
+        if !(0..3).contains(&role) || title_h <= 0 || width <= 0 {
+            return (cx, cy, 0, 0);
+        }
+        let size = (title_h - self.control_size_inset)
+            .max(self.control_min_size)
+            .min(title_h)
+            .min(width);
+        let x = if traffic {
+            cx + self.control_left_inset + role * (size + self.control_left_gap)
+        } else {
+            cx + width
+                - (role + 1) * size
+                - self.control_right_inset
+                - role * self.control_right_gap
+        };
+        let left = x.clamp(cx, cx + width);
+        let right = (x + size).min(cx + width).max(left);
+        (
+            left,
+            cy - title_h + (title_h - size) / 2,
+            right - left,
+            size,
+        )
     }
     pub fn cursor_colors(&self) -> [u32; 2] {
         [self.cursor_outline, self.cursor_fill]
