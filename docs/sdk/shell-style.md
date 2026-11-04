@@ -1,7 +1,7 @@
 # Shared shell metrics and cursor
 
 The shell's appearance data is in `/assets/dwm/sdk/shell.dss`, shared with native
-SDK theme loading. The registry now adds 96 numeric metrics, three opaque paint
+SDK theme loading. The registry now adds 147 numeric metrics, four opaque paint
 colors and a cursor asset path to the existing shell palette. Rust stores types,
 validation bounds and geometry algorithms; it provides no fallback metric values.
 
@@ -55,12 +55,14 @@ panel and cursor pixels while the SDK client canvas retains its existing pixel
 hashes. Host checks cover custom popup cells, clipped layouts, numeric precedence,
 invalid metrics, missing schema fields, cursor data and colored partial repair.
 
-This checkpoint does not complete M7.9. Private window-control offsets and other
-shell/window paint literals remain. [Scalar settings saves](settings-save.md)
-now preserve omitted inherited fields and explicit import intent. Extraction
-has not been prototyped or measured; no new compositor protocol is introduced.
+Window controls, title/gradient placement, component intrinsic geometry,
+icon/text spacing, clock/running markers and shadow paint now use the same
+registry. [Scalar saves](settings-save.md) preserve inherited fields and explicit
+import intent. The [completed M7.9 decision](gui-server-decision.md) retains the
+shell in-process after a bounded SDK publication/isolation experiment.
+[Final measurements](../performance/gui-server-acceptance.md) retain all trials.
 
-## Measurement checkpoint, 4 November 2026
+## Earlier measurement checkpoint — `89eb36f`, 4 November 2026
 
 QEMU TCG, one vCPU, 512 MiB, 1920×1080 software framebuffer. Native budgets:
 theme 8 required/4 forbidden plus exact dark/light/restored panel, cursor and

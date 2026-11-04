@@ -80,6 +80,5 @@ all reach the same four-second deadline. Maximize/restore calls, actual resize
 markers and client-recycle assertions are retained; this is self-test timing,
 not a rendering speedup.
 
-M7.9 remains open for remaining paint/layout literals, controlled performance
-acceptance and shell extraction evaluation. This increment adds no input/render
-throughput claim.
+This scalar-save checkpoint preceded [final M7.9 acceptance](gui-server-decision.md).
+The saving change itself adds no input/render throughput claim.

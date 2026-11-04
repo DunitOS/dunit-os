@@ -1,0 +1,851 @@
+{
+  "run": {
+    "image_profile": "full",
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/setup import-desktop /sdk-shellprobe.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "measure_start": "external-shell-boot"
+        },
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[SHELLPROBE] ready pid=",
+          "timeout": 60
+        },
+        {
+          "measure_end": "external-shell-boot"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "g"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "g"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SHELLPROBE] armed",
+          "timeout": 30
+        },
+        {
+          "measure_start": "external-shell-input"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "spc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 5
+        },
+        {
+          "wait_marker": "[SHELLPROBE] published 24; faulting without close",
+          "timeout": 30
+        },
+        {
+          "measure_end": "external-shell-input"
+        },
+        {
+          "measure_start": "shell-fault-recovery"
+        },
+        {
+          "wait_marker": "[GUI-EXIT] app=sdk_shellprobe_fixture kind=3 code=-4",
+          "timeout": 30
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "g"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "g"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[SHELLPROBE] survivor 24 commits after peer loss OK",
+          "timeout": 30
+        },
+        {
+          "measure_end": "shell-fault-recovery"
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "gui_server: desktop ready",
+    "[SHELLPROBE] survivor ready",
+    "[SHELLPROBE] ready pid=",
+    "[SHELLPROBE] published 24; faulting without close",
+    "[SHELLPROBE] metrics",
+    "[SHELLPROBE] survivor 24 commits after peer loss OK",
+    "[GUI-EXIT] app=sdk_shell_survivor kind=0 code=0",
+    "[GUI-EXIT] app=sdk_shellprobe_fixture kind=3",
+    "[USER-FAULT]",
+    "[SHELLPROBE] armed",
+    "[SHELLPROBE] survivor armed after reap"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "gui_server: PANIC",
+    "gui_server: FAIL",
+    "FAIL no frame done"
+  ]
+}

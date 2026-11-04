@@ -1,0 +1,20 @@
+{
+  "commits": 24,
+  "completed_frames": 24,
+  "input_qmax": 35,
+  "stages": {
+    "render_ms": 0.0,
+    "redraw_total_ms": 470.0,
+    "import_attach_ms": 0.0,
+    "commit_result_ms": 0.0,
+    "frame_done_ms": 470.0,
+    "retire_ms": 0.0
+  },
+  "isolated_fault": true,
+  "survivor_commits_after_fault": 24,
+  "host_wall_ms": {
+    "external-shell-boot": 1399.649138,
+    "external-shell-input": 502.04033,
+    "shell-fault-recovery": 525.575955
+  }
+}

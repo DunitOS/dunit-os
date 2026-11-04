@@ -59,6 +59,9 @@ jobs:
         run: |
           python3 tools/gen_abi.py --check
           python3 tools/check_gui_protocol.py
+          python3 tools/check_shell_style.py
+          python3 tools/test_shell_style_source.py
+          python3 tools/test_shellprobe_report.py
           python3 tools/test_gui_protocol_source.py
           rustc --edition=2021 --test kernel/src/drivers/keyboard_queue.rs -o /tmp/dunit-keyboard-queue-test
           /tmp/dunit-keyboard-queue-test
@@ -102,6 +105,9 @@ jobs:
 
       - name: Native SDK theme reload and framebuffer golden
         run: python3 tools/test_sdk_gui_fixture.py theme --accel tcg
+
+      - name: Native shell publication and client crash isolation
+        run: python3 tools/test_sdk_gui_fixture.py shellprobe --accel tcg
 
       - name: Native SDK effects and framebuffer goldens
         run: python3 tools/test_sdk_gui_fixture.py effects --accel tcg

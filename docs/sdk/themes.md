@@ -45,9 +45,10 @@ overrides just like legacy colors. SDK clients and the compositor call
 changed fields only; explicit setters and partial imports retain supplied fields,
 including values equal to defaults. Complete document replacement is separate.
 
-M7.9 is still in progress: window-control offsets and other paint/layout
-literals remain, and shell extraction has not been benchmarked. The shell stays
-in `gui_server`.
+M7.9 is complete on the retained-shell branch: window controls and remaining
+paint/layout details use shared DSS. The [architecture decision](gui-server-decision.md)
+and [acceptance measurements](../performance/gui-server-acceptance.md) document
+why the shell stays in `gui_server`; external extraction and ≤16 ms are not claimed.
 
 ## Token contract
 

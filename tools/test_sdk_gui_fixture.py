@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers', 'transfer', 'matrix', 'clipboard'))
+        parser.add_argument('fixture', choices=('resize', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers', 'transfer', 'matrix', 'clipboard', 'shellprobe'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument('--reuse-image', action='store_true')
     args = parser.parse_args()
@@ -77,6 +77,8 @@ def main(fixture=None):
                 metadata.write_text(document.replace(f'id = "{app_id}"',f'id = "{target_id}"'))
             else:
                 install_fixture(source_name, app_id, f'SDK {fixture} fixture')
+            if fixture == 'shellprobe':
+                install_fixture('sdk_shell_survivor', 'sdk_shell_survivor', 'Shell isolation survivor')
             if fixture == 'lifecycle':
                 install_fixture('sdk_lifecycle_peer', 'sdk_lifecycle_peer', 'Legacy input peer')
             if fixture=='matrix':
@@ -122,6 +124,9 @@ def main(fixture=None):
             ):
                 print(f'Unexpected component presentation counts: {frames}')
                 status=1
+        if not status and fixture == 'shellprobe':
+            from sdk_shellprobe_report import verify
+            verify((ROOT/'build/qemu-serial.full.log').read_text(errors='replace'))
         if status:
             print((ROOT / 'build/qemu-serial.log').read_text(errors='replace')[-16000:])
         if not status and fixture in ('theme', 'effects', 'backdrop', 'motion'):
