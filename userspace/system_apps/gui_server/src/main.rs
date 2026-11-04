@@ -745,13 +745,9 @@ struct Win {
     /// Lets the headless harness drive a full maximize->restore round trip without a
     /// mouse. Always 0 on the real desktop (`self_test` is false in `default.toml`).
     st_step: u8,
-    /// Desktop tick when this window entered `st_step == 1` (maximize pushed).
-    /// The restore leg normally waits for the client to re-import the work-area
-    /// buffer (`sw >= ww`); a client that DECLINES the server-pushed resize (a
-    /// fixed-size dialog like gui_settings never grows) would otherwise stall the
-    /// self-test forever, so after `ST_SETTLE_TICKS` we advance anyway — the
-    /// compositor must never deadlock on a client's right to keep its own size.
-    st_since: u32,
+    /// Absolute deadline for the resize self-test's existing four-second grace.
+    /// A resumed probe receives a fresh deadline after display-session re-entry.
+    st_deadline: Option<frame_pacing::FrameDeadline>,
     /// Pixel format the owning client imported its buffer with (mirrored from
     /// `ClientState.format` in the per-frame sync). `FORMAT_ARGB8888` selects the
     /// per-pixel src-over blit in `blit_surface` so a translucent client (e.g. a
@@ -1471,7 +1467,7 @@ fn run_desktop_session(
             lua_floating: false,
             restore: None,
             st_step: 0,
-            st_since: 0,
+            st_deadline: None,
             format: clients[i].format,
         });
         if let Some(p) = clients[i].placement {
@@ -1484,7 +1480,7 @@ fn run_desktop_session(
             win.restore = p.restore;
             win.lua_floating = p.lua_floating;
             win.st_step = p.st_step;
-            win.st_since = 0;
+            win.st_deadline = None;
             win.minimized = p.minimized;
             win.ws = p.ws.min(apps.workspaces.saturating_sub(1));
             if !cfg.settings.scripts.enabled && win.state == WinState::Tiled {
@@ -2049,7 +2045,7 @@ fn run_desktop_session(
             lua_floating: false,
                 restore: None,
                 st_step: 0,
-                st_since: 0,
+                st_deadline: None,
                 format: clients[i].format,
             });
             clients[i].win_created = true;
@@ -2087,20 +2083,23 @@ fn run_desktop_session(
                 if !wins[wi].alive {
                     continue;
                 }
+                if wins[wi].st_step==1 && wins[wi].st_deadline.is_none() {
+                    wins[wi].st_deadline=Some(frame_pacing::FrameDeadline::resize_probe(frame_start));
+                }
                 // A session restore can already have maximized the window
                 // before this proof starts. Refresh that CONFIGURE as well,
                 // then verify its restore leg instead of leaving phase zero stuck.
                 if wins[wi].st_step == 0 && matches!(wins[wi].state, WinState::Floating | WinState::Maximized) {
                     set_window_state(server, clients, &mut wins[wi], WinState::Maximized, bw, bh, &ly, &ins);
                     wins[wi].st_step = 1;
-                    wins[wi].st_since = ticks;
+                    wins[wi].st_deadline = Some(frame_pacing::FrameDeadline::resize_probe(frame_start));
                     libdunit::println(&alloc::format!(
                         "gui_server: reconfigure w={} h={} acked (self-test)",
                         ww, wh
                     ));
                 } else if wins[wi].st_step == 1
                     && (wins[wi].sw >= ww
-                        || ticks.saturating_sub(wins[wi].st_since) >= ST_SETTLE_TICKS)
+                        || wins[wi].st_deadline.is_some_and(|deadline|deadline.due(frame_start)))
                 {
                     // The client has observably re-imported the work-area-sized
                     // buffer (its synced surface reached the maximize width), so the
@@ -2108,7 +2107,7 @@ fn run_desktop_session(
                     // the user-visible un-maximize — via the SAME
                     // `set_window_state(Floating)` the chip and drag-to-restore call.
                     // A fixed-size client that never grew (declined the resize) falls
-                    // through here on the ST_SETTLE_TICKS timeout so the self-test
+                    // through here on the elapsed-time deadline so the self-test
                     // (and the recycle proof gated on it) can't stall on it.
                     let grew = wins[wi].sw >= ww;
                     let (rw, rh) = wins[wi]

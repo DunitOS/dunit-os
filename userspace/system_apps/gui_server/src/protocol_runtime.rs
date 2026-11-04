@@ -418,14 +418,6 @@ pub(super) fn drive_reconfigure(
 
 pub(super) use gui_protocol_v1::control::{IN_MOVE, IN_DOWN, IN_UP, IN_LEAVE, IN_KEY, IN_KEY_UP, IN_FOCUS_IN, IN_FOCUS_OUT, IN_SCROLL, IN_QUIT};
 
-/// How long the maximize/restore self-test waits for a client to re-import the
-/// work-area-sized buffer before advancing anyway (in desktop ticks; ~60/s, so
-/// ~4s). A resizable client grows well within this; a fixed-size client that
-/// declines the server-pushed resize is force-settled here so the self-test —
-/// and the recycle proof gated on every window reaching `st_step == 2` — never
-/// stalls on a client exercising its right to keep its own size.
-pub(super) const ST_SETTLE_TICKS: u32 = 240;
-
 /// Pack the immutable device snapshot; feature projection below strips modifiers
 /// for legacy clients. Keyboard-drain order must never supply pointer modifiers.
 pub(super) fn send_pointer(clients: &mut [ClientState], pid: u32, kind: u8,

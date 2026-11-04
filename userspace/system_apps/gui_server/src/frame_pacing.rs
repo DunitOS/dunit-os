@@ -10,6 +10,11 @@ impl FrameDeadline {
             ns: start_ns.saturating_add(interval_ms as u64 * 1_000_000),
         }
     }
+    /// Existing self-test grace for clients allowed to keep their size. Its
+    /// duration is elapsed time, not a count assuming 60 rendered frames/s.
+    pub fn resize_probe(start_ns: u64) -> Self {
+        Self::new(start_ns, 4_000)
+    }
     pub fn due(self, now_ns: u64) -> bool {
         now_ns >= self.ns
     }
@@ -53,6 +58,24 @@ impl InputBatch {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resize_probe_grace_does_not_expand_when_rendering_is_slow() {
+        let start = 1_000_000_000u64;
+        let deadline = super::FrameDeadline::resize_probe(start);
+        for period_ms in [16u64, 500, 2000] {
+            let sample = (0..=500)
+                .find(|n| deadline.due(start + n * period_ms * 1_000_000))
+                .unwrap();
+            let elapsed = sample * period_ms;
+            assert!(elapsed >= 4_000 && elapsed < 4_000 + period_ms);
+            if period_ms == 500 {
+                assert_eq!(sample, 8);
+            }
+        }
+        assert!(!deadline.due(start + 3_999_000_000));
+        assert!(deadline.due(start + 4_000_000_000));
+    }
+
     use super::*;
     use std::collections::VecDeque;
     #[test]
