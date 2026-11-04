@@ -6,10 +6,25 @@ impl Shell {
         bw: usize,
         bh: usize,
     ) -> Result<Self, String> {
-        let config = desktop.shell.clone();
+        let mut config = desktop.shell.clone();
         let apps = &desktop.apps;
         let shared = crate::shell_theme::prepare(desktop)?;
         let palette = crate::shell_theme::palette(&shared.tokens)?;
+        let visuals = dunit_style::shell::Visuals::from_tokens(&shared.tokens).map_err(|e| alloc::format!("{:?}",e))?;
+        let cursor_path = dunit_style::shell::cursor_source(&shared.tokens).map_err(|e|alloc::format!("{:?}",e))?;
+        let cursor_bytes = libdunit::read_binary(&cursor_path, 32*1024).ok_or_else(||alloc::format!("{}: cannot read cursor", cursor_path))?;
+        let cursor_source = core::str::from_utf8(&cursor_bytes).map_err(|_|String::from("cursor must be UTF-8"))?;
+        let cursor = crate::cursor::Cursor::parse(cursor_source).map_err(String::from)?;
+        let layout = crate::shell_metrics::layout(&desktop.settings.layout, &visuals);
+        let effects = crate::shell_metrics::effects(&desktop.settings.effects, &visuals);
+        if !config.explicit {
+            let mut settings = desktop.settings;
+            settings.layout = layout;
+            settings.effects = effects;
+            let mut inherited = settings::shell::from_legacy(&settings, apps);
+            inherited.stylesheet = config.stylesheet;
+            config = inherited;
+        }
         let mut cascade = Cascade::new();
         if !config.stylesheet.is_empty() {
             let source = libdunit::read_binary(&config.stylesheet, 64 * 1024)
@@ -85,6 +100,10 @@ impl Shell {
         let count = config.components.len();
         Ok(Self {
             palette,
+            cursor,
+            layout,
+            effects,
+            visuals,
             revision:0,
             config,
             panels,

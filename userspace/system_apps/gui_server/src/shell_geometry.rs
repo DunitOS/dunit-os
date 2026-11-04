@@ -1,4 +1,6 @@
 //! Pure shell geometry shared by hit testing and painting.
+use dunit_style::shell::Visuals;
+
 pub type Rect = (i32, i32, i32, i32);
 pub fn intersect(a: Rect, b: Rect) -> Rect {
     let x = a.0.max(b.0);
@@ -32,12 +34,29 @@ pub fn item_rect(r: Rect, horizontal: bool, index: usize, count: usize, gap: i32
         (r.0, r.1 + start, r.2.max(0), end - start)
     }
 }
-pub fn popup(anchor: Rect, width: i32, height: i32, count: usize, presentation: &str) -> Rect {
+pub fn popup(
+    anchor: Rect,
+    width: i32,
+    height: i32,
+    count: usize,
+    presentation: &str,
+    skin: &Visuals,
+) -> Rect {
     let n = count.max(1) as i32;
     let (w, h) = match presentation {
-        "list" => (220, n * 40 + 16),
-        "fan" => (80 + (n - 1) * 20 + 16, 80 + (n - 1) * 28 + 16),
-        _ => (n.min(4) * 64 + 16, ((n + 3) / 4) * 64 + 16),
+        "list" => (
+            skin.group_list_width,
+            n * skin.group_row_height + 2 * skin.group_padding,
+        ),
+        "fan" => (
+            skin.group_fan_size + (n - 1) * skin.group_fan_step_x + 2 * skin.group_padding,
+            skin.group_fan_size + (n - 1) * skin.group_fan_step_y + 2 * skin.group_padding,
+        ),
+        _ => (
+            n.min(skin.group_columns) * skin.group_grid_cell + 2 * skin.group_padding,
+            ((n + skin.group_columns - 1) / skin.group_columns) * skin.group_grid_cell
+                + 2 * skin.group_padding,
+        ),
     };
     let w = w.min(width.max(1));
     let h = h.min(height.max(1));
@@ -50,11 +69,11 @@ pub fn popup(anchor: Rect, width: i32, height: i32, count: usize, presentation: 
     .clamp(0, (height - h).max(0));
     (x, y, w, h)
 }
-pub fn group_cell(r: Rect, index: usize, count: usize, presentation: &str) -> Rect {
+pub fn group_cell(r: Rect, index: usize, count: usize, presentation: &str, skin: &Visuals) -> Rect {
     if count == 0 || index >= count {
         return (r.0, r.1, 0, 0);
     }
-    let pad = 8.min(r.2.min(r.3).max(0) / 2);
+    let pad = skin.group_padding.min(r.2.min(r.3).max(0) / 2);
     let inner = (
         r.0 + pad,
         r.1 + pad,
@@ -65,7 +84,7 @@ pub fn group_cell(r: Rect, index: usize, count: usize, presentation: &str) -> Re
         return item_rect(inner, false, index, count, 0);
     }
     if presentation == "fan" {
-        let size = 80.min(inner.2).min(inner.3).max(0);
+        let size = skin.group_fan_size.min(inner.2).min(inner.3).max(0);
         let steps = count.saturating_sub(1).max(1) as i32;
         return (
             inner.0 + (inner.2 - size) * index as i32 / steps,
@@ -74,7 +93,7 @@ pub fn group_cell(r: Rect, index: usize, count: usize, presentation: &str) -> Re
             size,
         );
     }
-    let columns = count.min(4).max(1);
+    let columns = count.min(skin.group_columns as usize).max(1);
     let rows = count.div_ceil(columns);
     let row = item_rect(inner, false, index / columns, rows, 0);
     item_rect(row, true, index % columns, columns, 0)
@@ -104,6 +123,15 @@ pub fn hand_endpoint(radius: i32, phase: u64, period: u64) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn metrics() -> Visuals {
+        let base = dunit_style::parse(include_str!("../../../../assets/dwm/sdk/dark.dss")).unwrap();
+        let sheet = dunit_style::parse_with_tokens(
+            include_str!("../../../../assets/dwm/sdk/shell.dss"),
+            &base.tokens,
+        )
+        .unwrap();
+        Visuals::from_tokens(&sheet.tokens).unwrap()
+    }
     fn inside(a: Rect, b: Rect) -> bool {
         a.0 >= b.0 && a.1 >= b.1 && a.0 + a.2 <= b.0 + b.2 && a.1 + a.3 <= b.1 + b.3
     }
@@ -123,19 +151,35 @@ mod tests {
     fn popup_cells_fit_small_displays_for_every_presentation() {
         for presentation in ["grid", "list", "fan"] {
             for n in [1, 4, 5, 32] {
-                let r = popup((300, 220, 20, 20), 320, 240, n, presentation);
+                let r = popup((300, 220, 20, 20), 320, 240, n, presentation, &metrics());
                 assert!(inside(r, (0, 0, 320, 240)));
                 for i in 0..n {
-                    assert!(inside(group_cell(r, i, n, presentation), r));
+                    assert!(inside(group_cell(r, i, n, presentation, &metrics()), r));
                 }
             }
         }
     }
     #[test]
+    fn selected_group_metrics_change_popup_and_hit_cells_together() {
+        let base = dunit_style::parse(include_str!("../../../../assets/dwm/sdk/dark.dss")).unwrap();
+        let source = format!(
+            "{}\n$shell-group-columns:2; $shell-group-grid-cell:48; $shell-group-padding:10;",
+            include_str!("../../../../assets/dwm/sdk/shell.dss")
+        );
+        let sheet = dunit_style::parse_with_tokens(&source, &base.tokens).unwrap();
+        let skin = Visuals::from_tokens(&sheet.tokens).unwrap();
+        let r = popup((100, 300, 40, 40), 800, 600, 5, "grid", &skin);
+        assert_eq!((r.2, r.3), (116, 164));
+        let cell = group_cell(r, 2, 5, "grid", &skin);
+        assert_eq!((cell.0, cell.1), (r.0 + 10, r.1 + 58));
+        assert!(inside(cell, r));
+        assert_ne!(cell, group_cell(r, 2, 5, "grid", &metrics()));
+    }
+    #[test]
     fn fan_has_distinct_overlapping_cards() {
-        let r = popup((100, 100, 40, 40), 800, 600, 5, "fan");
-        let a = group_cell(r, 0, 5, "fan");
-        let b = group_cell(r, 1, 5, "fan");
+        let r = popup((100, 100, 40, 40), 800, 600, 5, "fan", &metrics());
+        let a = group_cell(r, 0, 5, "fan", &metrics());
+        let b = group_cell(r, 1, 5, "fan", &metrics());
         assert!(b.0 > a.0 && b.1 > a.1);
         assert!(intersect(a, b).2 > 0);
     }

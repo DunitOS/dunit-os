@@ -36,7 +36,7 @@ fn background(profile: &str) -> u32 {
 #[dunit::main]
 fn main() -> dunit::Result<()> {
     let dark = dunit::fs::read_to_string("/assets/dwm/sdk/dark.dss")?;
-    let light = dunit::fs::read_to_string("/assets/dwm/sdk/light.dss")?;
+    let light = alloc::format!("{}\n$shell-cursor-fill: #ff00ff;\n", dunit::fs::read_to_string("/assets/dwm/sdk/light.dss")?);
     let config_path = "/system/share/dwm/default.toml";
     let original = dunit::fs::read_to_string(config_path)?;
     assert!(original.contains("\"/sdk-theme.dss\""));
@@ -79,6 +79,16 @@ fn main() -> dunit::Result<()> {
                 assert!(ui.reload_theme().is_err());
                 assert!(ui.theme_error_detail().unwrap().contains("padding"));
                 assert_eq!(hash(ui.pixels()), before);
+                // A valid SDK profile with invalid shell geometry must be
+                // rejected by both native consumers, retaining the light scene.
+                dunit::fs::write(
+                    "/sdk-theme-next.dss",
+                    alloc::format!("{}\n$shell-qs-width: 1;", light).as_bytes(),
+                )?;
+                assert!(ui.reload_theme().is_err());
+                assert!(ui.theme_error_detail().unwrap().contains("shell-qs-width"));
+                assert_eq!(hash(ui.pixels()), before);
+                ui.reload_desktop()?;
                 rejected = true;
                 dunit::println!("[SDKTHEME] invalid retained OK")?;
                 dunit::println!(

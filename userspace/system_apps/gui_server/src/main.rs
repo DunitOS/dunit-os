@@ -42,6 +42,7 @@ mod desktop_actions;
 use dwm_settings as settings;
 use settings::{Applications, Edge, Effects, Layout, Theme};
 mod shell_theme;
+mod shell_metrics;
 
 use dunit_text::Font;
 
@@ -1242,7 +1243,7 @@ fn run_desktop_session(
             match shell_runtime::Shell::prepare(&cfg,bw,bh){Ok(shell)=>shell,Err(error)=>{libdunit::println(&alloc::format!("gui_server: packaged shell unavailable {}",error));return false;}}
         }
     };
-    let mut theme=shell.palette;let mut ly=cfg.settings.layout;
+    let mut theme=shell.palette;let mut ly=shell.layout;
     let mut policy = cfg.policy;
     let mut apps: Applications = cfg.apps;
     if cfg.settings.from_file {
@@ -1572,7 +1573,7 @@ fn run_desktop_session(
     // marker — proof the desktop reached an interactive, presenting state.
     let mut desktop_ready_announced = false;
     // --- Visual-effects state (concept §5) -------------------------------
-    let mut fx = cfg.settings.effects;
+    let mut fx = shell.effects;
     // Keyboard-shortcut policy (`[shortcuts]`): whether the Alt/Super-Tab window
     // switcher is offered and which modifier arms it. `mut` so a live reload can
     // flip the switcher on/off or swap Alt<->Super without a restart (re-seeded in
@@ -1744,7 +1745,7 @@ fn run_desktop_session(
             let next_font=load_font_path(ncfg.settings.desktop.font.as_str());
             let next_shell=if ncfg.valid {
                 shell_runtime::Shell::prepare(&ncfg,bw,bh).and_then(|mut shell|{
-                    shell.prepare_text(next_font.as_ref(),&ncfg.apps,&ncfg.settings.layout)?;Ok(shell)})
+                    let layout=shell.layout;shell.prepare_text(next_font.as_ref(),&ncfg.apps,&layout)?;Ok(shell)})
             }else{Err(alloc::string::String::from("invalid config"))};
             if let Err(error) = &next_shell { libdunit::println(&alloc::format!("gui_server: shell reload rejected {}",error)); }
             let mut next_icon_theme = if ncfg.valid {
@@ -1811,8 +1812,8 @@ fn run_desktop_session(
                     }
                 }
                 theme = next_shell.as_ref().unwrap().palette;
-                ly = ncfg.settings.layout;
-                fx = ncfg.settings.effects;
+                ly = next_shell.as_ref().unwrap().layout;
+                fx = next_shell.as_ref().unwrap().effects;
                 shortcuts = ncfg.settings.shortcuts;
                 wg = ncfg.settings.widgets;
                 // Quick-settings + notification policy travel through the same
@@ -1885,6 +1886,8 @@ fn run_desktop_session(
                 libdunit::println("gui_server: settings reloaded (config changed)");
             }
         }
+
+        let skin = shell.visuals;
 
         // Turn this tick's client-posted notification requests (NOTIFY_MAGIC) into
         // toasts. Policy stays the compositor's: `notify_post` is a no-op when
@@ -2483,11 +2486,11 @@ fn run_desktop_session(
             // are exactly the fields the renderer reads); any other click just
             // dismisses the flyout. Either way the click is consumed and the flyout
             // closes, mirroring the launcher-dropdown model.
-            let flyout = qs_flyout_rect(&ly, qs_edge, qs_applet, 2);
-            if in_rect(qs_row_rect(&ly, flyout, 0), mx, my) {
+            let flyout = qs_flyout_rect(&ly, &skin, qs_edge, qs_applet, 2);
+            if in_rect(qs_row_rect(&ly, &skin, flyout, 0), mx, my) {
                 fx.blur = !fx.blur;
                 libdunit::println(&alloc::format!("gui_server: quicksettings blur={}", fx.blur as u32));
-            } else if in_rect(qs_row_rect(&ly, flyout, 1), mx, my) {
+            } else if in_rect(qs_row_rect(&ly, &skin, flyout, 1), mx, my) {
                 wg.enabled = !wg.enabled;
                 libdunit::println(&alloc::format!("gui_server: quicksettings widgets={}", wg.enabled as u32));
             }
@@ -3106,8 +3109,8 @@ fn run_desktop_session(
         if let Some(wp) = &wallpaper {
             back.copy_from_slice(wp);
         } else if fx.gradient {
-            let top = shade(theme.desktop, 12);
-            let bot = shade(theme.desktop, -8);
+            let top = shade(theme.desktop, skin.desktop_gradient_top);
+            let bot = shade(theme.desktop, skin.desktop_gradient_bottom);
             let span = (bh as u32 - 1).max(1);
             for y in 0..bh {
                 let row = 0xFF00_0000 | lerp_color(top, bot, (y as u32 * 255) / span);
@@ -3145,13 +3148,13 @@ fn run_desktop_session(
                     if clock_w.is_none() && mon_w.is_none() {
                         continue;
                     }
-                    let card_w = 236i32;
-                    let pad = 16i32;
+                    let card_w = skin.widget_width;
+                    let pad = skin.widget_padding;
                     let clock_px=clock_w.map(|w|w.clock.font_px as f32).unwrap_or(ly.title_font_px as f32);
-                    let clock_h=clock_w.map(|w|if w.clock.style==settings::ClockStyle::Analog{w.clock.size as i32}else{clock_px as i32+10}).unwrap_or(0);
-                    let mon_h = if mon_w.is_some() { 58 } else { 0 };
+                    let clock_h=clock_w.map(|w|if w.clock.style==settings::ClockStyle::Analog{w.clock.size as i32}else{clock_px as i32+skin.widget_clock_gap}).unwrap_or(0);
+                    let mon_h = if mon_w.is_some() { skin.widget_monitor_height } else { 0 };
                     let card_h = pad * 2 + clock_h + mon_h;
-                    let margin = 24i32;
+                    let margin = skin.widget_margin;
                     let cx = if corner == 1 || corner == 3 {
                         bw as i32 - ins.right - card_w - margin
                     } else {
@@ -3165,7 +3168,7 @@ fn run_desktop_session(
                     if fx.blur {
                         blur_region(&mut back, bw, bh, cx, cy, card_w, card_h, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b);
                     }
-                    fill_rrect_grad(&mut back, bw, bh, cx, cy, card_w, card_h, fx.corner_radius, RR_ALL, shade(theme.menu, 16), shade(theme.menu, -8), fx.menu_alpha);
+                    fill_rrect_grad(&mut back, bw, bh, cx, cy, card_w, card_h, fx.corner_radius, RR_ALL, shade(theme.menu, skin.widget_gradient_top), shade(theme.menu, skin.widget_gradient_bottom), fx.menu_alpha);
                     let secs=if whave&&wst.uptime_hz>0{wst.uptime_ticks/wst.uptime_hz}else{0};
                     let mut ty = cy + pad;
                     if let Some(clock)=clock_w {
@@ -3174,7 +3177,7 @@ fn run_desktop_session(
                         } else {
                         let clk = alloc::format!("{:02}:{:02}:{:02}", (secs / 3600) % 100, (secs / 60) % 60, secs % 60);
                         let tw = text_width_ttf(f, &clk, clock_px);
-                        let baseline = ty + clock_px as i32 - 4;
+                        let baseline = ty + clock_px as i32 - skin.widget_clock_baseline_inset;
                         draw_text_ttf(&mut back, bw, bh, f, cx + (card_w - tw) / 2, baseline, clock_px, &clk, theme.panel_text & 0x00FF_FFFF);
                         }
                         ty += clock_h;
@@ -3189,15 +3192,15 @@ fn run_desktop_session(
                         let line = alloc::format!("RAM {}%    {} proc", ram_pct, wst.process_running);
                         draw_text_ttf(&mut back, bw, bh, f, cx + pad, ty + px as i32, px, &line, theme.panel_text & 0x00FF_FFFF);
                         // RAM usage bar under the text row.
-                        let bar_y = ty + px as i32 + 12;
+                        let bar_y = ty + px as i32 + skin.widget_bar_gap;
                         let bar_w = card_w - 2 * pad;
-                        fill_rrect(&mut back, bw, bh, cx + pad, bar_y, bar_w, 8, 4, RR_ALL, ((fx.menu_alpha.min(255) as u32) << 24) | (shade(theme.menu, -20) & 0x00FF_FFFF));
+                        fill_rrect(&mut back, bw, bh, cx + pad, bar_y, bar_w, skin.widget_bar_height, skin.widget_bar_radius, RR_ALL, ((fx.menu_alpha.min(255) as u32) << 24) | (shade(theme.menu, skin.widget_bar_shade) & 0x00FF_FFFF));
                         let fill_w = (bar_w * ram_pct.min(100) as i32) / 100;
                         if fill_w > 0 {
                             // Per-widget accent (widgets/monitor.toml `accent`) overrides
                             // the theme launcher color for the fill; 0 = inherit theme.
                             let bar_col = if mw.accent != 0 { mw.accent } else { theme.launcher };
-                            fill_rrect(&mut back, bw, bh, cx + pad, bar_y, fill_w, 8, 4, RR_ALL, 0xFF00_0000 | (bar_col & 0x00FF_FFFF));
+                            fill_rrect(&mut back, bw, bh, cx + pad, bar_y, fill_w, skin.widget_bar_height, skin.widget_bar_radius, RR_ALL, 0xFF00_0000 | (bar_col & 0x00FF_FFFF));
                         }
                     }
                 }
@@ -3251,7 +3254,7 @@ fn run_desktop_session(
                     blur_region(&mut back, bw, bh, mx0, my0, mw0, reveal_h, if menu_view.blur>0{menu_view.blur}else{fx.blur_radius}, fx.blur_iters, &mut blur_a, &mut blur_b);
                 }
                 if menu_view.shadow>0{draw_soft_shadow(&mut back,bw,bh,mx0,my0,mw0,reveal_h,menu_view.radius.unwrap_or(fx.corner_radius),menu_view.shadow,fx.shadow_alpha);}
-                fill_rrect_grad(&mut back, bw, bh, mx0, my0, mw0, reveal_h, menu_view.radius.unwrap_or(fx.corner_radius), RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha);
+                fill_rrect_grad(&mut back, bw, bh, mx0, my0, mw0, reveal_h, menu_view.radius.unwrap_or(fx.corner_radius), RR_ALL, shade(theme.menu, skin.overlay_gradient_top), theme.menu, fx.menu_alpha);
             }
             for i in 0..menu_entries.len() {
                 let ri = menu_entries[i];
@@ -3263,15 +3266,15 @@ fn run_desktop_session(
                 // so mouse and `cmd_mod`+Space→Up/Down navigation share one cue.
                 let hover = (mx >= ix && mx < ix + iw && my >= iy && my < iy + ih) || i == menu_sel;
                 if hover {
-                    fill_rrect(&mut back, bw, bh, ix + 3, iy + 2, iw - 6, ih - 4, 5, RR_ALL, 0xC000_0000 | (theme.menu_hover & 0x00FF_FFFF));
+                    fill_rrect(&mut back, bw, bh, ix + skin.hover_inset_x, iy + skin.hover_inset_y, iw - 2*skin.hover_inset_x, ih - 2*skin.hover_inset_y, skin.hover_radius, RR_ALL, ((skin.hover_alpha as u32)<<24) | (theme.menu_hover & 0x00FF_FFFF));
                 }
                 // Registry icon at the row's left, then the app label after it.
-                let mut text_x = ix + 8;
+                let mut text_x = ix + skin.menu_text_inset;
                 if let Some(icon) = app_icons.get(ri).and_then(|s| s.as_ref()) {
-                    let isz = (ih - 8).clamp(8, 22);
+                    let isz = (ih - skin.menu_icon_padding).clamp(skin.menu_icon_min, skin.menu_icon_max);
                     let icy = iy + (ih - isz) / 2;
-                    blit_icon(&mut back, bw, bh, &icon.pixels, icon.width, icon.height, ix + 6, icy, isz, isz);
-                    text_x = ix + 6 + isz + 6;
+                    blit_icon(&mut back, bw, bh, &icon.pixels, icon.width, icon.height, ix + skin.menu_icon_inset, icy, isz, isz);
+                    text_x = ix + skin.menu_icon_inset + isz + skin.menu_icon_inset;
                 }
                 let label = apps.apps.get(ri).map(|a| a.label.as_str()).unwrap_or("");
                 draw_shell_text(&mut back, bw, bh, font.as_ref(), text_x, iy + (ih - ly.panel_font_px) / 2, ly.panel_font_px, 0xff000000|(menu_view.color.unwrap_or(theme.panel_text)&0x00ff_ffff), label.as_bytes());
@@ -3286,39 +3289,39 @@ fn run_desktop_session(
         // theme, so it inherits the desktop palette rather than hardcoding one.
         if switcher.active && !switcher.order.is_empty() {
             let n = switcher.order.len() as i32;
-            let tile = 64i32;
-            let gap = 12i32;
-            let pad = 20i32;
-            let label_h = 24i32;
+            let tile = skin.switcher_tile;
+            let gap = skin.switcher_gap;
+            let pad = skin.switcher_padding;
+            let label_h = skin.switcher_label_height;
             let panw = n * tile + (n - 1) * gap + 2 * pad;
             let panh = tile + label_h + 2 * pad;
             let px0 = (bw as i32 - panw) / 2;
             let py0 = (bh as i32 - panh) / 2;
-            draw_soft_shadow(&mut back, bw, bh, px0, py0, panw, panh, 16, 10, 90);
-            fill_rrect(&mut back, bw, bh, px0, py0, panw, panh, 16, 0x0F, 0xF0000000 | (theme.menu & 0x00FF_FFFF));
+            draw_soft_shadow(&mut back, bw, bh, px0, py0, panw, panh, skin.switcher_radius, skin.switcher_shadow, skin.switcher_shadow_alpha);
+            fill_rrect(&mut back, bw, bh, px0, py0, panw, panh, skin.switcher_radius, RR_ALL, ((skin.switcher_alpha as u32)<<24) | (theme.menu & 0x00FF_FFFF));
             for (k, &wi) in switcher.order.iter().enumerate() {
                 let tx = px0 + pad + k as i32 * (tile + gap);
                 let ty = py0 + pad;
                 if k == switcher.idx {
-                    fill_rrect(&mut back, bw, bh, tx - 4, ty - 4, tile + 8, tile + 8, 10, 0x0F,
+                    fill_rrect(&mut back, bw, bh, tx - skin.switcher_highlight_inset, ty - skin.switcher_highlight_inset, tile + 2*skin.switcher_highlight_inset, tile + 2*skin.switcher_highlight_inset, skin.switcher_highlight_radius, RR_ALL,
                         0xFF00_0000 | (theme.menu_hover & 0x00FF_FFFF));
                 }
                 let app = wins[wi].app as usize;
-                let isz = tile - 12;
+                let isz = tile - 2*skin.switcher_icon_inset;
                 if let Some(ic) = app_icons.get(app).and_then(|s| s.as_ref()) {
-                    blit_icon(&mut back, bw, bh, &ic.pixels, ic.width, ic.height, tx + 6, ty + 6, isz, isz);
+                    blit_icon(&mut back, bw, bh, &ic.pixels, ic.width, ic.height, tx + skin.switcher_icon_inset, ty + skin.switcher_icon_inset, isz, isz);
                 } else {
                     let lbl = apps.apps.get(app).map(|a| a.label.as_str()).unwrap_or("?");
-                    draw_shell_text(&mut back, bw, bh, font.as_ref(), tx + 8, ty+(isz-ly.panel_font_px)/2,ly.panel_font_px,theme.panel_text, lbl.as_bytes());
+                    draw_shell_text(&mut back, bw, bh, font.as_ref(), tx + skin.switcher_text_inset, ty+(isz-ly.panel_font_px)/2,ly.panel_font_px,theme.panel_text, lbl.as_bytes());
                 }
             }
             if let Some(&wi) = switcher.order.get(switcher.idx) {
                 if let Some(f) = font.as_ref() {
                     let title = win_title(&apps, wins[wi].app);
-                    let fpx = 15.0f32;
+                    let fpx = skin.switcher_font_size as f32;
                     let tw = text_width_ttf(f, title, fpx);
                     let sx = px0 + (panw - tw) / 2;
-                    let baseline = py0 + pad + tile + label_h - 6;
+                    let baseline = py0 + pad + tile + label_h - skin.switcher_baseline_inset;
                     draw_text_ttf(&mut back, bw, bh, f, sx, baseline, fpx, title, theme.panel_text & 0x00FF_FFFF);
                 }
             }
@@ -3330,34 +3333,34 @@ fn run_desktop_session(
         // wg.enabled) with an on/off pill — no shadow state. Drawn above windows,
         // below the switcher overlay/cursor. Every colour comes from the theme.
         if quicksettings.enabled && qs_open {
-            let flyout = qs_flyout_rect(&ly, qs_edge, qs_applet, 2);
+            let flyout = qs_flyout_rect(&ly, &skin, qs_edge, qs_applet, 2);
             let (fx0, fy0, fw0, fh0) = flyout;
             if fx.blur {
                 blur_region(&mut back, bw, bh, fx0, fy0, fw0, fh0, fx.blur_radius, fx.blur_iters, &mut blur_a, &mut blur_b);
             }
-            draw_soft_shadow(&mut back, bw, bh, fx0, fy0, fw0, fh0, 10, 10, 90);
-            fill_rrect_grad(&mut back, bw, bh, fx0, fy0, fw0, fh0, fx.corner_radius, RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha);
+            draw_soft_shadow(&mut back, bw, bh, fx0, fy0, fw0, fh0, skin.qs_radius, skin.qs_shadow, skin.qs_shadow_alpha);
+            fill_rrect_grad(&mut back, bw, bh, fx0, fy0, fw0, fh0, fx.corner_radius, RR_ALL, shade(theme.menu, skin.overlay_gradient_top), theme.menu, fx.menu_alpha);
             let rows = [("Blur", fx.blur), ("Widgets", wg.enabled)];
             for (i, (lbl, on)) in rows.iter().enumerate() {
-                let (rx, ry, rw, rh) = qs_row_rect(&ly, flyout, i as i32);
+                let (rx, ry, rw, rh) = qs_row_rect(&ly, &skin, flyout, i as i32);
                 let hover = mx >= rx && mx < rx + rw && my >= ry && my < ry + rh;
                 if hover {
-                    fill_rrect(&mut back, bw, bh, rx + 2, ry + 2, rw - 4, rh - 4, 5, RR_ALL, 0xC000_0000 | (theme.menu_hover & 0x00FF_FFFF));
+                    fill_rrect(&mut back, bw, bh, rx + skin.qs_hover_inset, ry + skin.qs_hover_inset, rw - 2*skin.qs_hover_inset, rh - 2*skin.qs_hover_inset, skin.hover_radius, RR_ALL, ((skin.hover_alpha as u32)<<24) | (theme.menu_hover & 0x00FF_FFFF));
                 }
                 if let Some(f) = font.as_ref() {
                     let px = ly.panel_font_px as f32;
-                    let baseline = ry + rh / 2 + 5;
-                    draw_text_ttf(&mut back, bw, bh, f, rx + 10, baseline, px, lbl, theme.panel_text & 0x00FF_FFFF);
+                    let baseline = ry + rh / 2 + skin.qs_baseline_offset;
+                    draw_text_ttf(&mut back, bw, bh, f, rx + skin.qs_label_inset, baseline, px, lbl, theme.panel_text & 0x00FF_FFFF);
                 }
                 // On/off pill on the row's trailing edge, knob sliding to reflect state.
-                let (pw, ph) = (22i32, 12i32);
-                let px0 = rx + rw - pw - 8;
+                let (pw, ph) = (skin.qs_toggle_width, skin.qs_toggle_height);
+                let px0 = rx + rw - pw - skin.qs_toggle_margin;
                 let py0 = ry + (rh - ph) / 2;
                 let pill = if *on { theme.launcher } else { theme.taskbtn };
                 fill_rrect(&mut back, bw, bh, px0, py0, pw, ph, ph / 2, RR_ALL, 0xFF00_0000 | (pill & 0x00FF_FFFF));
-                let knob = ph - 4;
-                let kx = if *on { px0 + pw - knob - 2 } else { px0 + 2 };
-                fill_rrect(&mut back, bw, bh, kx, py0 + 2, knob, knob, knob / 2, RR_ALL, 0xFFFF_FFFF);
+                let knob = ph - 2*skin.qs_knob_inset;
+                let kx = if *on { px0 + pw - knob - skin.qs_knob_inset } else { px0 + skin.qs_knob_inset };
+                fill_rrect(&mut back, bw, bh, kx, py0 + skin.qs_knob_inset, knob, knob, knob / 2, RR_ALL, skin.toggle_knob);
             }
         }
 
@@ -3372,9 +3375,9 @@ fn run_desktop_session(
             notify_expired_logged = true;
         }
         if notifications.enabled && !notifs.is_empty() {
-            let margin = 16i32;
-            let cardh = 30i32;
-            let gap = 8i32;
+            let margin = skin.notification_margin;
+            let cardh = skin.notification_height;
+            let gap = skin.notification_gap;
             let corner = notifications.corner;
             let top = corner == 0 || corner == 1;
             let leftc = corner == 0 || corner == 2;
@@ -3384,10 +3387,11 @@ fn run_desktop_session(
                     .as_ref()
                     .map(|f| text_width_ttf(f, &t.text, px))
                     .unwrap_or(t.text.len() as i32 * 8);
-                let cardw = (tw + 30).clamp(96, bw as i32 - 2 * margin);
+                let max_width = (bw as i32 - 2 * margin).max(1);
+                let cardw = (tw + 2*skin.notification_padding).clamp(skin.notification_min_width.min(max_width), max_width);
                 // Slide-in follows the same monotonic transition duration.
                 let progress = animation::progress(animation_now, t.born, duration_ms, lua_ease_out);
-                let slide = 12 - (progress * 12 / 255) as i32;
+                let slide = skin.notification_slide - (progress * skin.notification_slide as u32 / 255) as i32;
                 let base_x = if leftc { margin } else { bw as i32 - margin - cardw };
                 let cx = if leftc { base_x - slide } else { base_x + slide };
                 let cy = if top {
@@ -3396,15 +3400,15 @@ fn run_desktop_session(
                     bh as i32 - margin - cardh - slot as i32 * (cardh + gap)
                 };
                 let view=desktop_tracks.sample(desktop_motion::NOTIFICATIONS,(cx,cy,cardw,cardh),animation_now);
-                let (cx,cy,cardw,cardh)=view.rect;let radius=view.radius.unwrap_or(10);
+                let (cx,cy,cardw,cardh)=view.rect;let radius=view.radius.unwrap_or(skin.notification_radius);
                 if view.blur>0{let need=(cardw.max(0)as usize).saturating_mul(cardh.max(0)as usize).min(bw*bh);if blur_a.len()<need{blur_a.resize(need,0);blur_b.resize(need,0);}blur_region(&mut back,bw,bh,cx,cy,cardw,cardh,view.blur,1,&mut blur_a,&mut blur_b);}
-                draw_soft_shadow(&mut back,bw,bh,cx,cy,cardw,cardh,radius,if view.shadow>0{view.shadow}else{8},80*view.opacity as i32/255);
-                fill_rrect_grad(&mut back, bw, bh, cx, cy, cardw, cardh, radius, RR_ALL, shade(theme.menu, 14), theme.menu, fx.menu_alpha*view.opacity as i32/255);
+                draw_soft_shadow(&mut back,bw,bh,cx,cy,cardw,cardh,radius,if view.shadow>0{view.shadow}else{skin.notification_shadow},skin.notification_shadow_alpha*view.opacity as i32/255);
+                fill_rrect_grad(&mut back, bw, bh, cx, cy, cardw, cardh, radius, RR_ALL, shade(theme.menu, skin.overlay_gradient_top), theme.menu, fx.menu_alpha*view.opacity as i32/255);
                 // Accent bar on the leading edge marks it as a toast.
-                fill_rrect(&mut back, bw, bh, cx, cy + 4, 4, cardh - 8, 2, RR_ALL, (view.opacity<<24)|(theme.launcher&0x00ffffff));
+                fill_rrect(&mut back, bw, bh, cx, cy + skin.notification_accent_inset, skin.notification_accent_width, cardh - 2*skin.notification_accent_inset, skin.notification_accent_radius, RR_ALL, (view.opacity<<24)|(theme.launcher&0x00ffffff));
                 if let Some(f) = font.as_ref() {
-                    let baseline = cy + cardh / 2 + 5;
-                    draw_text_ttf_alpha(&mut back,bw,bh,f,cx+14,baseline,px,&t.text,view.color.unwrap_or(theme.panel_text),view.opacity);
+                    let baseline = cy + cardh / 2 + skin.notification_baseline_offset;
+                    draw_text_ttf_alpha(&mut back,bw,bh,f,cx+skin.notification_text_inset,baseline,px,&t.text,view.color.unwrap_or(theme.panel_text),view.opacity);
                 }
             }
         }
@@ -3431,7 +3435,7 @@ fn run_desktop_session(
                 draw_shell_text(&mut back,bw,bh,font.as_ref(),x+side+gap,y,ly.panel_font_px,theme.panel_text,label.as_bytes());
             }
         }
-        draw_cursor(&mut back, bw, bh, mx, my);
+        draw_cursor(&mut back, bw, bh, mx, my, &shell.cursor, skin.cursor_colors());
 
 
         let bytes =

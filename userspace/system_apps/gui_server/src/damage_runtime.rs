@@ -216,7 +216,7 @@ impl Cache {
                 return false;
             }
         }
-        draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1);
+        draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1, &c.shell.cursor, c.shell.visuals.cursor_colors());
         for copy in &p.copies {
             let r = copy.destination;
             self.present.clear();

@@ -52,6 +52,10 @@ struct Panel {
 }
 pub struct Shell {
     pub palette: Theme,
+    pub cursor: crate::cursor::Cursor,
+    pub layout: Layout,
+    pub effects: Effects,
+    pub visuals: dunit_style::shell::Visuals,
     pub revision:u64,
     pub config: ShellConfig,
     panels: Vec<Panel>,
@@ -422,7 +426,7 @@ impl Shell {
             let c = &self.config.components[component];
             let ids = &self.app_indices[component];
             for (i, &app) in ids.iter().enumerate().rev() {
-                if in_rect(group_cell(r, i, ids.len(), &c.presentation), x, y) {
+                if in_rect(group_cell(r, i, ids.len(), &c.presentation, &self.visuals), x, y) {
                     return Some(Action::App(app));
                 }
             }
@@ -499,6 +503,7 @@ impl Shell {
                 bh as i32,
                 self.app_indices[index].len(),
                 &c.presentation,
+                &self.visuals,
             ),
         ));
     }
@@ -819,10 +824,10 @@ impl Shell {
                 .iter()
                 .enumerate()
                 .rev()
-                .find(|(i, _)| in_rect(group_cell(r, *i, ids.len(), &c.presentation), mx, my))
+                .find(|(i, _)| in_rect(group_cell(r, *i, ids.len(), &c.presentation, &self.visuals), mx, my))
                 .map(|(i, _)| i);
             for (i, &app) in ids.iter().enumerate() {
-                let ir = group_cell(r, i, ids.len(), &c.presentation);
+                let ir = group_cell(r, i, ids.len(), &c.presentation, &self.visuals);
                 if hovered == Some(i) {
                     fill_rrect(
                         back,

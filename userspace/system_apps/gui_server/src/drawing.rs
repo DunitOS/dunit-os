@@ -326,10 +326,9 @@ pub(super) fn menu_item_rect(ly: &Layout, origin: (i32, i32), i: i32) -> (i32, i
 
 /// Quick-settings flyout card: `rows` toggle rows flying out PERPENDICULAR to the
 /// panel edge from the applet cell (same convention as the launcher `menu_origin`).
-pub(super) fn qs_flyout_rect(ly: &Layout, edge: Edge, applet: (i32, i32, i32, i32), rows: i32) -> (i32, i32, i32, i32) {
+pub(super) fn qs_flyout_rect(ly: &Layout, skin: &dunit_style::shell::Visuals, edge: Edge, applet: (i32, i32, i32, i32), rows: i32) -> (i32, i32, i32, i32) {
     let (ax, ay, aw, _ah) = applet;
-    let w = 150i32;
-    let h = rows * ly.menu_item_h + 8;
+    let (w,h) = skin.qs_size(ly.menu_item_h, rows);
     match edge {
         Edge::Top => (ax, ay + applet.3, w, h),
         Edge::Bottom => (ax, ay - h, w, h),
@@ -339,8 +338,8 @@ pub(super) fn qs_flyout_rect(ly: &Layout, edge: Edge, applet: (i32, i32, i32, i3
 }
 
 /// Rect of the i-th quick-settings flyout row (a toggle line).
-pub(super) fn qs_row_rect(ly: &Layout, flyout: (i32, i32, i32, i32), i: i32) -> (i32, i32, i32, i32) {
-    (flyout.0 + 4, flyout.1 + 4 + i * ly.menu_item_h, flyout.2 - 8, ly.menu_item_h)
+pub(super) fn qs_row_rect(ly: &Layout, skin: &dunit_style::shell::Visuals, flyout: (i32, i32, i32, i32), i: i32) -> (i32, i32, i32, i32) {
+    skin.qs_row(flyout, ly.menu_item_h, i)
 }
 
 /// True when the point is inside `rect`.

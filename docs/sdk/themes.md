@@ -35,10 +35,16 @@ poll their theme resources; after saving a desktop/profile change, call
 `ComponentWindow::reload_desktop()` to request the compositor's existing atomic
 reload. In-place file edits alone do not notify the compositor.
 
-M7.9 is still in progress: geometry, remaining cursor/switch colors and some
-paint literals have not yet migrated to shared tokens. Saving scalar Settings
-still serializes the legacy palette explicitly. Shell extraction has not been
-benchmarked or approved for implementation; the shell stays in `gui_server`.
+[Shared shell metrics](shell-style.md) now cover decoration/strip geometry,
+popup hit cells, quick settings, switcher, desktop cards, notifications and
+cursor resources. Explicit numeric `[layout]`/`[effects]` fields become DSS
+overrides just like legacy colors. SDK clients and the compositor call
+`Theme::parse_shell`, which always validates the complete shell schema.
+
+M7.9 is still in progress: window-control offsets and other paint/layout
+literals remain, and shell extraction has not been benchmarked. Saving scalar
+Settings still explicitly serializes inherited legacy values, so inheritance
+through that editor needs further work. The shell stays in `gui_server`.
 
 ## Token contract
 

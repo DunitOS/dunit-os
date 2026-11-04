@@ -11,6 +11,18 @@ impl Theme {
     pub fn parse(profile: &str, base: &str, overlay: &str) -> style::Result<Self> {
         Self::parse_with_defaults(profile, "", base, overlay)
     }
+    /// Native SDK and compositor entry: the full shell schema is mandatory,
+    /// including when a malformed defaults document removes a discriminator.
+    pub fn parse_shell(
+        profile: &str,
+        defaults: &str,
+        base: &str,
+        overlay: &str,
+    ) -> style::Result<Self> {
+        let theme = Self::parse_with_defaults(profile, defaults, base, overlay)?;
+        style::shell::Visuals::from_tokens(&theme.tokens)?;
+        Ok(theme)
+    }
     /// Resolve optional shared defaults against the selected profile. Explicit
     /// profile tokens win; base and application rules see the complete registry.
     pub fn parse_with_defaults(

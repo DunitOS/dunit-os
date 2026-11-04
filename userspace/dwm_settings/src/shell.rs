@@ -453,7 +453,7 @@ pub fn resolve(
         result.map_err(|reason| error(field, reason))?;
     }
     if !shell.explicit {
-        let mut migrated = legacy(settings, apps);
+        let mut migrated = from_legacy(settings, apps);
         migrated.stylesheet = shell.stylesheet;
         return Ok(migrated);
     }
@@ -573,7 +573,8 @@ pub fn resolve(
     Ok(shell)
 }
 
-fn legacy(settings: &Settings, apps: &Applications) -> ShellConfig {
+/// Build the compatibility strip tree from resolved theme geometry.
+pub fn from_legacy(settings: &Settings, apps: &Applications) -> ShellConfig {
     let mut shell = ShellConfig::default();
     let mut add = |id: &str, kind| {
         shell.components.push(ComponentConfig {

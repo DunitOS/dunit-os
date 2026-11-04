@@ -1229,7 +1229,7 @@ fn resolve_config(text: &str, mut settings: Settings, mut apps: Applications, sa
         && (settings.applied > 0 || saw_apps || shell.explicit);
     let diagnostics = Diagnostics::resolve(text)?;
     let render=Render::resolve(text)?;
-    Ok(Config { appearance: appearance::overrides(text, &settings.theme), settings, apps, shell, policy, diagnostics, render, valid })
+    Ok(Config { appearance: appearance::overrides(text, &settings), settings, apps, shell, policy, diagnostics, render, valid })
 }
 
 /// Forward-migrate a parsed document from an older schema `from` to

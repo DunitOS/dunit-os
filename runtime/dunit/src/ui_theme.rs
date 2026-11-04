@@ -55,12 +55,12 @@ impl Source {
         })
     }
     fn theme(&self, overlay: &str) -> core::result::Result<Theme, Failure> {
-        Theme::parse_with_defaults(&self.profile, &self.defaults, &self.base, overlay).map_err(
-            |error| Failure {
+        Theme::parse_shell(&self.profile, &self.defaults, &self.base, overlay).map_err(|error| {
+            Failure {
                 error: Error(libdunit::EINVAL),
                 detail: alloc::format!("{:?}", error),
-            },
-        )
+            }
+        })
     }
     fn font(&self) -> Result<Font> {
         Font::parse(bytes(&self.font, 4 * 1024 * 1024)?).map_err(|_| Error(libdunit::EINVAL))

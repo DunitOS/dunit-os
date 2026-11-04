@@ -11,7 +11,7 @@ fn read(path: &str) -> Result<String, String> {
 pub fn prepare(config: &settings::Config) -> Result<dunit_component::Theme, String> {
     let profile =
         settings::appearance::profile(&read(config.settings.desktop.sdk_theme.as_str())?, config);
-    dunit_component::Theme::parse_with_defaults(
+    dunit_component::Theme::parse_shell(
         &profile,
         &read(settings::appearance::SHELL_TOKENS)?,
         &read(settings::appearance::SDK_BASE)?,

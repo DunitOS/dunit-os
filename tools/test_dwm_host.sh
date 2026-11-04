@@ -6,6 +6,7 @@ test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o "$test_dir/libdunit_pointer_abi.rlib"
 rustc --edition=2021 --crate-type rlib --crate-name dunit_file_cap_abi abi/file-cap/src/lib.rs -o "$test_dir/libdunit_file_cap_abi.rlib"
+rustc --edition=2021 --crate-type rlib --crate-name dunit_style runtime/dunit-style/src/lib.rs -o "$test_dir/libdunit_style.rlib"
 for source in tools/test_file_caps_host.rs kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     kernel/src/drivers/keyboard_queue.rs \
     kernel/src/drivers/ps2_wheel.rs \
@@ -26,7 +27,7 @@ do
         pointer_deps=(--extern "dunit_pointer_abi=$test_dir/libdunit_pointer_abi.rlib")
     fi
     if [ "$source" = tools/test_file_caps_host.rs ]; then pointer_deps=(--extern "dunit_file_cap_abi=$test_dir/libdunit_file_cap_abi.rlib"); fi
-    rustc --edition=2021 --test "$source" "${pointer_deps[@]}" -o "$test_dir/regression"
+    rustc --edition=2021 --test "$source" "${pointer_deps[@]}" --extern "dunit_style=$test_dir/libdunit_style.rlib" -o "$test_dir/regression"
     "$test_dir/regression"
 done
 
@@ -38,6 +39,5 @@ rustc --edition=2021 --crate-type rlib --crate-name term_theme runtime/term_them
 rustc --edition=2021 --test kernel/tests/terminal_display.rs --extern term_theme="$test_dir/libterm_theme.rlib" -o "$test_dir/terminal-display"
 "$test_dir/terminal-display"
 
-rustc --edition=2021 --crate-type rlib --crate-name dunit_style runtime/dunit-style/src/lib.rs -o "$test_dir/libdunit_style.rlib"
 rustc --edition=2021 --test userspace/system_apps/gui_server/src/shell_motion_tests.rs --extern dunit_style="$test_dir/libdunit_style.rlib" -o "$test_dir/scene-motion"
 "$test_dir/scene-motion"

@@ -56,3 +56,6 @@ pub mod effects;
 
 /// Shared geometry for checkable indicators and their labels.
 pub mod indicator;
+
+/// Shared compositor shell geometry and paint policy from DSS tokens.
+pub mod shell;

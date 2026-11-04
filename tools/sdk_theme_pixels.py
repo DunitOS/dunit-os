@@ -66,4 +66,9 @@ def verify(root: Path, fixture="theme"):
             if data[offset:offset + 3] != bytes.fromhex(panel_color):
                 raise RuntimeError(f'{label}: compositor panel does not match shared $surface')
             print(f'[{marker}] shell panel {label}: shared token pixels OK')
+            cursor = (3 * width + 1) * 3  # fill in the packaged arrow at hotspot 0,0
+            cursor_fill = bytes.fromhex('ff00ff' if label == 'light' else 'ffffff')
+            if data[cursor:cursor + 3] != cursor_fill:
+                raise RuntimeError(f'{label}: software cursor does not match the selected DSS fill')
+            print(f'[{marker}] cursor {label}: shared token pixels OK')
         print(f'[{marker}] framebuffer {label} {cw}x{ch} at {matched}: exact pixels OK')

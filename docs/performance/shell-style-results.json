@@ -1,0 +1,484 @@
+{
+  "before": {
+    "wheel": {
+      "trials": [
+        {
+          "wall_ms": 560.118815,
+          "accepted": 24,
+          "render_ms": 70.0,
+          "redraw_ms": 520.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 230.0,
+          "retire_ms": 180.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 642.948004,
+          "accepted": 24,
+          "render_ms": 90.0,
+          "redraw_ms": 590.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 270.0,
+          "retire_ms": 190.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 579.8158,
+          "accepted": 24,
+          "render_ms": 70.0,
+          "redraw_ms": 540.0,
+          "import_attach_ms": 20.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 250.0,
+          "retire_ms": 190.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        }
+      ],
+      "median": {
+        "wall_ms": 579.8158,
+        "render_ms": 70.0,
+        "redraw_ms": 540.0,
+        "import_attach_ms": 40.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 250.0,
+        "retire_ms": 190.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 23
+      },
+      "max_input_q": 23
+    },
+    "short": {
+      "trials": [
+        {
+          "wall_ms": 559.998001,
+          "accepted": 24,
+          "render_ms": 190.0,
+          "redraw_ms": 500.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 260.0,
+          "retire_ms": 40.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 37
+        },
+        {
+          "wall_ms": 586.391314,
+          "accepted": 24,
+          "render_ms": 170.0,
+          "redraw_ms": 520.0,
+          "import_attach_ms": 0.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 280.0,
+          "retire_ms": 70.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 39
+        },
+        {
+          "wall_ms": 617.810284,
+          "accepted": 24,
+          "render_ms": 170.0,
+          "redraw_ms": 520.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 270.0,
+          "retire_ms": 70.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 35
+        }
+      ],
+      "median": {
+        "wall_ms": 586.391314,
+        "render_ms": 170.0,
+        "redraw_ms": 520.0,
+        "import_attach_ms": 10.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 270.0,
+        "retire_ms": 70.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 37
+      },
+      "max_input_q": 39
+    },
+    "long": {
+      "trials": [
+        {
+          "wall_ms": 1469.920384,
+          "accepted": 24,
+          "render_ms": 720.0,
+          "redraw_ms": 1280.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 380.0,
+          "retire_ms": 130.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        },
+        {
+          "wall_ms": 1500.529184,
+          "accepted": 24,
+          "render_ms": 760.0,
+          "redraw_ms": 1410.0,
+          "import_attach_ms": 20.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 410.0,
+          "retire_ms": 220.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 43
+        },
+        {
+          "wall_ms": 1665.248358,
+          "accepted": 24,
+          "render_ms": 920.0,
+          "redraw_ms": 1510.0,
+          "import_attach_ms": 30.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 320.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        }
+      ],
+      "median": {
+        "wall_ms": 1500.529184,
+        "render_ms": 760.0,
+        "redraw_ms": 1410.0,
+        "import_attach_ms": 30.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 380.0,
+        "retire_ms": 220.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 45
+      },
+      "max_input_q": 45
+    },
+    "drag": {
+      "trials": [
+        {
+          "wall_ms": 275.463246,
+          "accepted": 0,
+          "render_ms": 30.0,
+          "redraw_ms": 220.0,
+          "import_attach_ms": 50.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 50.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 277.998433,
+          "accepted": 0,
+          "render_ms": 30.0,
+          "redraw_ms": 220.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 60.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 265.681488,
+          "accepted": 0,
+          "render_ms": 20.0,
+          "redraw_ms": 220.0,
+          "import_attach_ms": 60.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 80.0,
+          "retire_ms": 60.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        }
+      ],
+      "median": {
+        "wall_ms": 275.463246,
+        "render_ms": 30.0,
+        "redraw_ms": 220.0,
+        "import_attach_ms": 50.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 90.0,
+        "retire_ms": 60.0,
+        "redraws": 5,
+        "commits": 4,
+        "input_qmax": 4
+      },
+      "max_input_q": 4
+    }
+  },
+  "after": {
+    "wheel": {
+      "trials": [
+        {
+          "wall_ms": 888.048198,
+          "accepted": 24,
+          "render_ms": 150.0,
+          "redraw_ms": 840.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 390.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 197.204576,
+          "accepted": 24,
+          "render_ms": 0.0,
+          "redraw_ms": 140.0,
+          "import_attach_ms": 20.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 70.0,
+          "retire_ms": 40.0,
+          "redraws": 7,
+          "commits": 7,
+          "input_qmax": 6
+        },
+        {
+          "wall_ms": 674.141815,
+          "accepted": 24,
+          "render_ms": 60.0,
+          "redraw_ms": 640.0,
+          "import_attach_ms": 50.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 280.0,
+          "retire_ms": 220.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 22
+        }
+      ],
+      "median": {
+        "wall_ms": 674.141815,
+        "render_ms": 60.0,
+        "redraw_ms": 640.0,
+        "import_attach_ms": 40.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 280.0,
+        "retire_ms": 220.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 22
+      },
+      "max_input_q": 23
+    },
+    "short": {
+      "trials": [
+        {
+          "wall_ms": 776.561376,
+          "accepted": 24,
+          "render_ms": 140.0,
+          "redraw_ms": 720.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 10.0,
+          "frame_done_ms": 330.0,
+          "retire_ms": 200.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 39
+        },
+        {
+          "wall_ms": 796.017532,
+          "accepted": 24,
+          "render_ms": 150.0,
+          "redraw_ms": 740.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 320.0,
+          "retire_ms": 220.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 37
+        },
+        {
+          "wall_ms": 724.382309,
+          "accepted": 24,
+          "render_ms": 130.0,
+          "redraw_ms": 640.0,
+          "import_attach_ms": 50.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 280.0,
+          "retire_ms": 180.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 39
+        }
+      ],
+      "median": {
+        "wall_ms": 776.561376,
+        "render_ms": 140.0,
+        "redraw_ms": 720.0,
+        "import_attach_ms": 40.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 320.0,
+        "retire_ms": 200.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 39
+      },
+      "max_input_q": 39
+    },
+    "long": {
+      "trials": [
+        {
+          "wall_ms": 1676.892714,
+          "accepted": 24,
+          "render_ms": 950.0,
+          "redraw_ms": 1560.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 330.0,
+          "retire_ms": 230.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 43
+        },
+        {
+          "wall_ms": 1567.957155,
+          "accepted": 24,
+          "render_ms": 950.0,
+          "redraw_ms": 1450.0,
+          "import_attach_ms": 50.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 240.0,
+          "retire_ms": 210.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        },
+        {
+          "wall_ms": 1548.132989,
+          "accepted": 24,
+          "render_ms": 900.0,
+          "redraw_ms": 1470.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 320.0,
+          "retire_ms": 220.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 43
+        }
+      ],
+      "median": {
+        "wall_ms": 1567.957155,
+        "render_ms": 950.0,
+        "redraw_ms": 1470.0,
+        "import_attach_ms": 40.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 320.0,
+        "retire_ms": 220.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 43
+      },
+      "max_input_q": 45
+    },
+    "drag": {
+      "trials": [
+        {
+          "wall_ms": 296.776989,
+          "accepted": 0,
+          "render_ms": 20.0,
+          "redraw_ms": 240.0,
+          "import_attach_ms": 70.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 60.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 259.831028,
+          "accepted": 0,
+          "render_ms": 0.0,
+          "redraw_ms": 200.0,
+          "import_attach_ms": 60.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 50.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 282.048425,
+          "accepted": 0,
+          "render_ms": 20.0,
+          "redraw_ms": 230.0,
+          "import_attach_ms": 60.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 60.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        }
+      ],
+      "median": {
+        "wall_ms": 282.048425,
+        "render_ms": 20.0,
+        "redraw_ms": 230.0,
+        "import_attach_ms": 60.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 90.0,
+        "retire_ms": 60.0,
+        "redraws": 5,
+        "commits": 4,
+        "input_qmax": 4
+      },
+      "max_input_q": 4
+    },
+    "wheel_burst": {
+      "trials": [
+        {
+          "wall_ms": 67.749236,
+          "accepted": 24,
+          "render_ms": 0.0,
+          "redraw_ms": 30.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 10.0,
+          "retire_ms": 10.0,
+          "redraws": 1,
+          "commits": 1,
+          "input_qmax": 1
+        }
+      ],
+      "median": {
+        "wall_ms": 67.749236,
+        "render_ms": 0.0,
+        "redraw_ms": 30.0,
+        "import_attach_ms": 10.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 10.0,
+        "retire_ms": 10.0,
+        "redraws": 1,
+        "commits": 1,
+        "input_qmax": 1
+      },
+      "max_input_q": 1
+    }
+  }
+}
