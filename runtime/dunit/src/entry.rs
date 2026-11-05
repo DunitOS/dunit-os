@@ -32,6 +32,13 @@ fn report(arguments: core::fmt::Arguments<'_>) {
 }
 
 /// # Safety
+/// Same loader pointer/lifetime requirements as `start`; used by the synchronous
+/// C adapter after musl CRT has entered main, without replacing that CRT.
+pub unsafe fn init_c_runtime(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnvp){
+    libdunit::init_runtime(argc,argv,envp);
+}
+
+/// # Safety
 /// The pointers must be the process's valid loader-provided argv/envp arrays,
 /// remain mapped for the process lifetime and be initialized once before threads.
 pub unsafe fn start(

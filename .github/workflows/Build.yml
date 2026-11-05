@@ -93,10 +93,14 @@ jobs:
           python3 tools/test_qemu_boot_actions.py
           python3 tools/test_image_profiles.py
           python3 tools/test_c_sdk_headers.py
+          python3 tools/test_c_ui_archive.py
           python3 tools/test_dunit_cli.py
 
       - name: Native C SDK header, files and processes
         run: python3 tools/qemu_test.py --build --markers-file tools/c_sdk_core_markers.json --post-boot-delay 3 --settle 3 --cmd-timeout 90 --timeout 300 --boot-timeout 180
+
+      - name: Native C callbacks over Rust widgets and exact pixels
+        run: python3 tools/test_c_ui.py --accel tcg
 
       - name: Native SDK workflow and failure contracts
         run: python3 tools/test_dunit_workflow.py --accel tcg

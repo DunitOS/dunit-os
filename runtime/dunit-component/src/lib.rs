@@ -65,6 +65,10 @@ pub use renderer::{Damage, RenderStats, Renderer};
 pub use theme::Theme;
 pub use view::{Key, View};
 
+/// Shared retained-tree resource bounds, including native adapters.
+pub const MAX_VIEW_NODES: usize = 4096;
+pub const MAX_VIEW_DEPTH: usize = 64;
+
 /// Content axes enabled by a scroll container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollAxes {

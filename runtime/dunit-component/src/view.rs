@@ -478,7 +478,7 @@ impl<Msg> View<Msg> {
         {
             return Err(UiError::InvalidWorkspace);
         }
-        if depth >= 64 || names.len() >= 4096 {
+        if depth >= crate::MAX_VIEW_DEPTH || names.len() >= crate::MAX_VIEW_NODES {
             return Err(UiError::TreeLimit);
         }
         if self

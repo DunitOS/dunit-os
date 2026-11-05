@@ -1,8 +1,8 @@
-# Native C entry header — M7.10 first increment
+# Native C entry header
 
 `#include <dunit.h>` imports the existing native musl file/process interfaces and
-Dunit's generated syscall, errno, rights and transfer constants. This increment
-provides no GUI entry points and does not define a new C UI runtime ABI.
+Dunit's generated syscall, errno, rights and transfer constants. The first [C UI bridge](c-ui.md) now adds a versioned callback interface for
+Text/Button/Column/Row over the Rust component runtime.
 
 `tools/gen_abi.py` generates the umbrella header; its included Dunit headers
 continue to come from the existing ABI manifests. No syscall numbers or error,
@@ -44,6 +44,6 @@ QEMU TCG passed all five required/four forbidden markers on 5 November 2026:
 `[CSDK-CORE] ok`, and parent exit code 0. The child exit status is asserted by
 the parent, not inferred from a printed success line.
 
-M7.10 remains open for the callback C interface over the existing Rust UI
-runtime, generated GUI types, static-library packaging and native C GUI proof.
-No second widget implementation or placeholder GUI API is introduced here.
+The [first native C GUI proof](c-ui.md) now uses the Rust runtime static library.
+M7.10 remains open for the remaining widget/transfer types and full compatibility
+acceptance. No second widget implementation is introduced.

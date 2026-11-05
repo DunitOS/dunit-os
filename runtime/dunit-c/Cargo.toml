@@ -1,0 +1,16 @@
+[package]
+name = "dunit_c"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+dunit = { path = "../dunit", features = ["gui"] }
+
+# Native C linkers consume machine code; whole-runtime LTO keeps the SDK payload bounded.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

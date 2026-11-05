@@ -26,7 +26,7 @@ class ImageProfiles(unittest.TestCase):
             "assets/dwm/test.toml": b"test desktop", "assets/fonts/font.ttf": b"font",
             "assets/images/demo.gif": b"large demo",
             "services/gui-server.toml": b'exec = "/app/gui_server"\n',
-            "services/test/probe.toml": b"probe", "sysroot/include/header.h": b"header",
+            "services/test/probe.toml": b"probe", "sysroot/include/header.h": b"header", "sysroot/lib/libdunit_ui.a": b"Rust SDK archive",
         }.items():
             self.write(path, data)
         profile = load_profile("dwm")
@@ -44,6 +44,7 @@ class ImageProfiles(unittest.TestCase):
         self.assertEqual(entries, read_archive(pack(sorted(entries.items()))))
         self.assertNotIn("/app/gui_server", entries)
         self.assertNotIn("/system/include/header.h", entries)
+        self.assertNotIn("/system/lib/libdunit_ui.a", entries)
         self.assertNotIn("/assets/fonts/font.ttf", entries)
 
     def test_missing_required_app_fails_instead_of_shipping_partial_image(self):
@@ -55,8 +56,9 @@ class ImageProfiles(unittest.TestCase):
         self.args.profile = "dwm"
         self.args.config = "limine_dwm.conf"
         entries = dict(collect(self.args))
-        for path in ("/app/gui_server", "/app/dwm_lua", "/system/share/dwm/default.toml", "/system/include/header.h"):
+        for path in ("/app/gui_server", "/app/dwm_lua", "/system/share/dwm/default.toml", "/system/include/header.h", "/system/lib/libdunit_ui.a"):
             self.assertIn(path, entries)
+        self.assertNotIn("/system/tcc/libdunit_ui.a", entries)
         for path in ("/app/test_only", "/assets/images/demo.gif", "/system/services/probe.toml"):
             self.assertNotIn(path, entries)
 
@@ -114,7 +116,7 @@ class ImageProfiles(unittest.TestCase):
         original = executable.read_bytes()
         self.args.profile = "full"
         obj = self.root / "sysroot/lib/crt1.o"
-        obj.parent.mkdir(parents=True)
+        obj.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(["cc", "-c", "-g", str(source), "-o", str(obj)], check=True)
         object_bytes = obj.read_bytes()
         entries = dict(collect(self.args))

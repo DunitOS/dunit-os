@@ -176,6 +176,7 @@ ifneq ($(WITH_TOOLCHAIN),false)
 	fi
 	@if [ -f $(MUSL_DIR)/tools/dunit/build-libc.sh ]; then set -e; \
 		CC=$(CC) python3 tools/ensure_musl_sysroot.py; \
+		python3 tools/ensure_c_ui.py --sysroot $(abspath $(MUSL_SYSROOT)); \
 		for prog in $(MUSL_CTESTS); do \
 			echo "  [MUSL] $$prog"; \
 			CC=$(CC) $(abspath $(MUSL_SYSROOT))/bin/dunit-cc -O2 \
