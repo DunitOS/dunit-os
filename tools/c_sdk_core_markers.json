@@ -1,0 +1,15 @@
+{
+  "description": "M7.10 first slice: on-device TCC compiles an umbrella-header C program; actual file/errno/spawn/wait assertions must pass.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": ["exec /system/bin/tcc /assets/tcc/sdk_core.c -o /tmp/c-sdk-core", "exec /tmp/c-sdk-core"]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[CSDK-CORE] file and errno OK",
+    "[CSDK-CORE] spawn and wait OK",
+    "[CSDK-CORE] ok",
+    "c-sdk-core returned code=0"
+  ],
+  "forbidden": ["[PANIC]", "tcc: error", "[CSDK-CORE] FAIL", "c-sdk-core returned code=1"]
+}
