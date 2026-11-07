@@ -85,6 +85,8 @@ python3 tools/gen_abi.py --check
 cargo test --manifest-path runtime/dunit-c/Cargo.toml --lib
 python3 tools/test_c_ui_archive.py  # needs the normal build tools, including lld
 python3 tools/test_c_ui.py --accel tcg
+python3 tools/test_c_ui_compat_host.py
+python3 tools/test_c_ui_compat.py --accel tcg
 ```
 
 The wrapper generates direct-Rust reference canvases, performs the normal kernel
@@ -102,5 +104,17 @@ checks passed (30 total). Native GUI: ten required
 and six forbidden markers; both framebuffer comparisons passed. The prior C
 file/errno/spawn/wait contract is also rerun on the same final image.
 
-Cross-rebuild compatibility using a retained older C object and the remaining
-widget/transfer matrix are still separate acceptance work for all of M7.10.
+The compatibility runner freezes the original v1 source and UI header from
+`9df23f6` under `tools/fixtures/c_ui_v1/`, with SHA-256 pins. Host TCC compiles
+that client before a scoped clean and native Rust runtime rebuild. The retained
+x86_64 ELF object enters the initrd unchanged; on-device TCC only links it
+against the rebuilt archive. All ten required/six forbidden markers and both
+exact Rust framebuffer comparisons remain in force. The runner also verifies
+the object and library hashes in the actual initrd and writes its receipt to
+`build/c-ui-compat-result.json`. No compiled fixture is committed.
+
+On 7 November 2026, this proof passed under QEMU TCG, together with six fixture
+integrity/contract checks and eight Rust adapter tests. This covers the frozen
+four-kind v1 client with the current compiler and architecture; it does not
+establish compatibility for every historical compiler or the complete C SDK.
+The remaining widget/style/transfer matrix keeps M7.10 open.

@@ -30,15 +30,25 @@ def verify():
         print(f'[CGUI] {state}: exact Rust SDK pixels at {x},{y}')
 
 
+def prepare_reference():
+    (ROOT/'build/c-ui-reference').mkdir(parents=True,exist_ok=True)
+    env=dict(os.environ,DUNIT_C_GOLDEN_DIR=str(ROOT/'build/c-ui-reference'))
+    env.setdefault('CARGO_TARGET_DIR',str(ROOT/'runtime/dunit/target'))
+    subprocess.run([cargo(),'test','--manifest-path',str(ROOT/'runtime/dunit-c/Cargo.toml'),'--lib'],cwd=ROOT,env=env,check=True)
+
+
+def run_native(accel, markers=None, overlay=None):
+    subprocess.run([cargo(),'build','--release','--features','boot-smoke-tests','-Z','build-std=core,alloc,compiler_builtins','-Z','build-std-features=compiler-builtins-mem','-Z','json-target-spec'],cwd=ROOT/'kernel',check=True)
+    command=[sys.executable,str(ROOT/'tools/qemu_test.py'),'--build','--markers-file',str(markers or ROOT/'tools/c_ui_markers.json'),'--accel',accel,'--post-boot-delay','3','--settle','3','--cmd-timeout','180','--timeout','480','--boot-timeout','180']
+    if overlay is not None:command+=['--initrd-overlay',str(overlay)]
+    subprocess.run(command,cwd=ROOT,check=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--accel',choices=('tcg','kvm','auto'),default='tcg')
     parser.add_argument('--verify-only',action='store_true');args=parser.parse_args()
-    (ROOT/'build/c-ui-reference').mkdir(parents=True,exist_ok=True)
-    env=dict(os.environ,DUNIT_C_GOLDEN_DIR=str(ROOT/'build/c-ui-reference'))
-    subprocess.run([cargo(),'test','--manifest-path',str(ROOT/'runtime/dunit-c/Cargo.toml'),'--lib'],cwd=ROOT,env=env,check=True)
-    if not args.verify_only:
-        subprocess.run([cargo(),'build','--release','--features','boot-smoke-tests','-Z','build-std=core,alloc,compiler_builtins','-Z','build-std-features=compiler-builtins-mem','-Z','json-target-spec'],cwd=ROOT/'kernel',check=True)
-        subprocess.run([sys.executable,str(ROOT/'tools/qemu_test.py'),'--build','--markers-file',str(ROOT/'tools/c_ui_markers.json'),'--accel',args.accel,'--post-boot-delay','3','--settle','3','--cmd-timeout','180','--timeout','480','--boot-timeout','180'],cwd=ROOT,check=True)
+    prepare_reference()
+    if not args.verify_only:run_native(args.accel)
     verify()
 if __name__=='__main__':main()

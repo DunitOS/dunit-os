@@ -1,0 +1,7 @@
+{
+  "source_commit": "9df23f624c4bf805cca54653a1624d3e89488624",
+  "sha256": {
+    "gui.c": "8214d52beed2b13e6d767d246170e25546c79a1277fdab3674c599b9c2bf5ae9",
+    "include/dunit/ui.h": "aecc59125fec57f0c1edfb0932f2e15a311762b0ceb7dbba4c2a7cc926393cc0"
+  }
+}
