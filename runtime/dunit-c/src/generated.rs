@@ -6,6 +6,12 @@ pub const DUNIT_UI_TEXT:u32=1;
 pub const DUNIT_UI_BUTTON:u32=2;
 pub const DUNIT_UI_COLUMN:u32=3;
 pub const DUNIT_UI_ROW:u32=4;
+pub const DUNIT_UI_CHECKBOX:u32=5;
+pub const DUNIT_UI_CHECKBOX_CHECKED:u32=6;
+pub const DUNIT_UI_SWITCH:u32=7;
+pub const DUNIT_UI_SWITCH_CHECKED:u32=8;
+pub const DUNIT_UI_TOGGLE_BUTTON:u32=9;
+pub const DUNIT_UI_TOGGLE_BUTTON_CHECKED:u32=10;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
 pub type DunitUiUpdateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64)->i32;
 #[repr(C)]

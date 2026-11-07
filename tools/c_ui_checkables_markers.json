@@ -1,0 +1,462 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /system/bin/tcc /assets/tcc/checkables.c -o /tmp/c-gui -ldunit_ui",
+      "exec /app/setup import-desktop /assets/tcc/checkables.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[GUI-PRESENT] app=c_gui",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 1000
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-checkables-initial.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "spc"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "spc"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] change 1 bits 1",
+          "timeout": 30
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] change 2 bits 3",
+          "timeout": 30
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "spc"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "spc"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] change 3 bits 7",
+          "timeout": 30
+        },
+        {
+          "delay_ms": 1000
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-checkables-checked.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] change 4 bits 6",
+          "timeout": 30
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "spc"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "spc"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] change 5 bits 4",
+          "timeout": 30
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] change 6 bits 0",
+          "timeout": 30
+        },
+        {
+          "delay_ms": 1000
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-checkables-updated.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "tab"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {"type": "qcode", "data": "ret"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 150
+        },
+        {
+          "wait_marker": "[C-CHECKABLE] ok",
+          "timeout": 30
+        },
+        {
+          "wait_marker": "[GUI-EXIT] app=c_gui kind=0 code=0",
+          "timeout": 30
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "gui_server: desktop ready",
+    "[GUI-PRESENT] app=c_gui",
+    "[C-CHECKABLE] change 1 bits 1",
+    "[C-CHECKABLE] change 2 bits 3",
+    "[C-CHECKABLE] change 3 bits 7",
+    "[C-CHECKABLE] change 4 bits 6",
+    "[C-CHECKABLE] change 5 bits 4",
+    "[C-CHECKABLE] change 6 bits 0",
+    "[C-CHECKABLE] ok",
+    "[GUI-EXIT] app=c_gui kind=0 code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "tcc: error",
+    "gui_server: FAIL",
+    "setup: error:",
+    "setup: fatal error"
+  ]
+}

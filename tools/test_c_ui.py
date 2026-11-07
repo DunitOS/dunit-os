@@ -9,22 +9,22 @@ import sys
 from dunit_cli import ROOT,cargo
 
 
-def verify():
-    for state in ('initial','updated'):
-        expected=(ROOT/f'build/c-ui-reference/c-ui-{state}.rgb').read_bytes()
-        if len(expected)!=400*180*3:raise ValueError('invalid reference canvas')
-        capture=(ROOT/f'build/c-ui-{state}.ppm').read_bytes()
+def verify(canvas_width=400,canvas_height=180,prefix='c-ui',states=('initial','updated')):
+    for state in states:
+        expected=(ROOT/f'build/c-ui-reference/{prefix}-{state}.rgb').read_bytes()
+        if len(expected)!=canvas_width*canvas_height*3:raise ValueError('invalid reference canvas')
+        capture=(ROOT/f'build/{prefix}-{state}.ppm').read_bytes()
         header=re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s',capture)
         if not header:raise ValueError('invalid framebuffer header')
         width,height=map(int,header.groups());data=capture[header.end():]
         if len(data)!=width*height*3:raise ValueError('truncated framebuffer')
         start=0;matched=False
-        while (position:=data.find(expected[:400*3],start))>=0:
+        while (position:=data.find(expected[:canvas_width*3],start))>=0:
             start=position+3
             if position%3:continue
             x,y=(position//3)%width,position//(width*3)
-            if x+400>width or y+180>height:continue
-            pixels=b''.join(data[((y+r)*width+x)*3:((y+r)*width+x+400)*3]for r in range(180))
+            if x+canvas_width>width or y+canvas_height>height:continue
+            pixels=b''.join(data[((y+r)*width+x)*3:((y+r)*width+x+canvas_width)*3]for r in range(canvas_height))
             if pixels==expected:matched=True;break
         if not matched:raise ValueError(f'{state}: C client pixels differ from direct Rust widgets')
         print(f'[CGUI] {state}: exact Rust SDK pixels at {x},{y}')

@@ -36,6 +36,24 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
         let view = match node.kind {
             DUNIT_UI_TEXT => View::text(key, text(node.text, node.text_len)?),
             DUNIT_UI_BUTTON => View::button(key, text(node.text, node.text_len)?, node.message),
+            DUNIT_UI_CHECKBOX | DUNIT_UI_CHECKBOX_CHECKED => View::checkbox(
+                key,
+                text(node.text, node.text_len)?,
+                node.kind == DUNIT_UI_CHECKBOX_CHECKED,
+                node.message,
+            ),
+            DUNIT_UI_SWITCH | DUNIT_UI_SWITCH_CHECKED => View::switch(
+                key,
+                text(node.text, node.text_len)?,
+                node.kind == DUNIT_UI_SWITCH_CHECKED,
+                node.message,
+            ),
+            DUNIT_UI_TOGGLE_BUTTON | DUNIT_UI_TOGGLE_BUTTON_CHECKED => View::toggle_button(
+                key,
+                text(node.text, node.text_len)?,
+                node.kind == DUNIT_UI_TOGGLE_BUTTON_CHECKED,
+                node.message,
+            ),
             DUNIT_UI_COLUMN => View::column(key, nested),
             DUNIT_UI_ROW => View::row(key, nested),
             _ => return Err(invalid()),

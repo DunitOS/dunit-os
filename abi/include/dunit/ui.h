@@ -11,6 +11,12 @@
 #define DUNIT_UI_BUTTON 2u
 #define DUNIT_UI_COLUMN 3u
 #define DUNIT_UI_ROW 4u
+#define DUNIT_UI_CHECKBOX 5u
+#define DUNIT_UI_CHECKBOX_CHECKED 6u
+#define DUNIT_UI_SWITCH 7u
+#define DUNIT_UI_SWITCH_CHECKED 8u
+#define DUNIT_UI_TOGGLE_BUTTON 9u
+#define DUNIT_UI_TOGGLE_BUTTON_CHECKED 10u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);

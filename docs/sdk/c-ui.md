@@ -6,8 +6,9 @@ The static library is the existing Rust `ComponentWindow`, component model,
 DSS theme, renderer and window transport behind a synchronous C adapter.
 It implements no second layout engine, widget painter or GUI handshake.
 
-This first subset describes Text, Button, Column and Row nodes. It opens one
-native themed window and dispatches button messages back to the C-owned model.
+This subset describes Text, Button, Column, Row, Checkbox, Switch and ToggleButton
+nodes. It opens one native themed window and dispatches activation messages back
+to the C-owned model.
 Other widgets, application stylesheet parameters and C transfer/file-capability
 interfaces remain later M7.10 increments. This is not the complete C SDK.
 
@@ -49,6 +50,17 @@ callbacks. C owns `user` and its model; Rust owns the converted Views and window
   including after closure or an open failure. Invalid preflight/tree attempts
   do not consume the session. Multiwindow/reopen behavior is not fabricated.
 
+Checkbox, Switch and ToggleButton are controlled widgets. Build their unchecked
+state with `DUNIT_UI_CHECKBOX`, `DUNIT_UI_SWITCH` or `DUNIT_UI_TOGGLE_BUTTON`;
+use the corresponding `_CHECKED` kind for checked state. These are additive node
+kinds; no existing kind, field, layout or export changes. Both states use `text`
+as their accessible label and deliver the full `uint64_t message` on activation.
+The C update callback decides whether to change state, then build supplies the
+next kind. The adapter does not toggle state independently of that model.
+SDK focus, pointer release, Space/Enter handling, accessibility and theme styles
+apply unchanged. Checkables are leaves, so they cannot be used as parents.
+Radio needs a group binding and is not included in this subset.
+
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
 received by main and remain mapped. The adapter initializes the existing Rust
@@ -77,6 +89,8 @@ additional bitcode and are not shipped. The final machine-code archive is
 2,057,768 bytes in this checkpoint. The full initrd is about 123 MB and still
 fits the existing 128 MiB installer ESP; no partition size/format change was
 needed. Minimal images omit the library with the rest of the toolchain.
+The checkable-widget extension brings the archive to 2,059,096 bytes (+1,328);
+the existing installer ESP still fits without changes.
 
 ## Validation
 
@@ -85,6 +99,7 @@ python3 tools/gen_abi.py --check
 cargo test --manifest-path runtime/dunit-c/Cargo.toml --lib
 python3 tools/test_c_ui_archive.py  # needs the normal build tools, including lld
 python3 tools/test_c_ui.py --accel tcg
+python3 tools/test_c_ui_checkables.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -118,3 +133,14 @@ integrity/contract checks and eight Rust adapter tests. This covers the frozen
 four-kind v1 client with the current compiler and architecture; it does not
 establish compatibility for every historical compiler or the complete C SDK.
 The remaining widget/style/transfer matrix keeps M7.10 open.
+
+The checkables scenario compiles `/assets/tcc/checkables.c` inside Dunit, toggles
+each control on and off with Tab/Space/Enter and closes via Quit. On 7 November
+2026, QEMU TCG passed eleven required/six forbidden markers and exact 400×240
+Rust-reference comparisons for initial, all-checked and all-unchecked states.
+The original frozen-client compatibility scenario also passed against this
+extended library, including both original framebuffer comparisons. Host checks:
+eleven adapter tests, fifteen existing button/checkable regressions, six frozen
+fixture checks, five header/sysroot checks, nine image-profile checks and one
+archive-link test (47 total). Adapter tests cover pointer release, declined
+C-owned changes, full-width message IDs, accessibility and malformed leaves.
