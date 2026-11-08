@@ -1,0 +1,27 @@
+[meta]
+schema_version = 2
+[application.c_gui]
+name = "C SDK radio"
+exec = "/tmp/c-gui"
+[startup]
+entries = ["c_gui"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[effects]
+anim = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"
+[rules.radio]
+app = "c_gui"
+x = 100
+y = 100
+width = 400
+height = 240
+floating = true

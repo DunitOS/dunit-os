@@ -176,4 +176,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 #[cfg(test)]
 mod checkable_tests;
 #[cfg(test)]
+mod radio_tests;
+#[cfg(test)]
 mod tests;

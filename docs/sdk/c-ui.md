@@ -6,9 +6,9 @@ The static library is the existing Rust `ComponentWindow`, component model,
 DSS theme, renderer and window transport behind a synchronous C adapter.
 It implements no second layout engine, widget painter or GUI handshake.
 
-This subset describes Text, Button, Column, Row, Checkbox, Switch and ToggleButton
-nodes. It opens one native themed window and dispatches activation messages back
-to the C-owned model.
+This subset describes Text, Button, Column, Row, Checkbox, Switch, ToggleButton
+and grouped Radio nodes. It opens one native themed window and dispatches
+activation messages back to the C-owned model.
 Other widgets, application stylesheet parameters and C transfer/file-capability
 interfaces remain later M7.10 increments. This is not the complete C SDK.
 
@@ -31,8 +31,8 @@ callbacks. C owns `user` and its model; Rust owns the converted Views and window
   that positive count. Zero, over-capacity counts, unsupported kinds, malformed
   UTF-8 and invalid trees fail. A negative callback result propagates unchanged.
 - Node 0 has parent `DUNIT_UI_ROOT`. Every other parent index precedes the child
-  and identifies a Column/Row. Input order defines sibling order. The original
-  SDK validator checks keys and the shared tree/depth bounds.
+  and identifies a Column/Row or radio group container. Input order defines
+  sibling order. The original SDK validator checks keys and shared tree/depth bounds.
 - Key/text spans are UTF-8 bytes with explicit lengths. They need no terminator.
   Each span is bounded by `DUNIT_UI_MAX_TEXT_BYTES`. Rust copies them into owned
   strings before retaining the tree. Null spans are allowed only at length zero.
@@ -59,7 +59,20 @@ The C update callback decides whether to change state, then build supplies the
 next kind. The adapter does not toggle state independently of that model.
 SDK focus, pointer release, Space/Enter handling, accessibility and theme styles
 apply unchanged. Checkables are leaves, so they cannot be used as parents.
-Radio needs a group binding and is not included in this subset.
+
+Use `DUNIT_UI_RADIO_GROUP_COLUMN` or `DUNIT_UI_RADIO_GROUP_ROW` as a normal
+Column/Row container with its own unique key. Direct child `DUNIT_UI_RADIO` and
+`DUNIT_UI_RADIO_CHECKED` nodes use that key as their SDK radio-group identity.
+Group names, keys and labels are bounded UTF-8 copied into owned SDK data.
+A radio outside a direct group container is invalid. A group cannot have two
+checked radios; the ordinary SDK validator enforces selection validity.
+Group containers share Column/Row rendering; they add no new widget painter.
+
+Radio `text` is its accessible label and `message` retains all 64 bits. The
+C callback owns selection, including whether to accept activation. Each group
+has one tab stop; SDK arrows select/wrap within that group. Activating an
+already selected radio does not dispatch another message. Groups are independent.
+These additional kinds preserve every existing ABI v1 layout/value/export.
 
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
@@ -100,6 +113,7 @@ cargo test --manifest-path runtime/dunit-c/Cargo.toml --lib
 python3 tools/test_c_ui_archive.py  # needs the normal build tools, including lld
 python3 tools/test_c_ui.py --accel tcg
 python3 tools/test_c_ui_checkables.py --accel tcg
+python3 tools/test_c_ui_radio.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -144,3 +158,16 @@ eleven adapter tests, fifteen existing button/checkable regressions, six frozen
 fixture checks, five header/sysroot checks, nine image-profile checks and one
 archive-link test (47 total). Adapter tests cover pointer release, declined
 C-owned changes, full-width message IDs, accessibility and malformed leaves.
+
+The radio scenario compiles `/assets/tcc/radio.c` inside Dunit and verifies
+rejection of a doubly checked group before opening the window. It then exercises
+two independent groups (Column and Row), six arrow selections with wraparound,
+one tab stop per group, suppressed reactivation and a normal Quit exit. Three
+400×240 screenshots match direct Rust SDK pixels exactly. A message using
+`UINT64_MAX` crosses the native C callback unchanged. This adds four node kinds
+and 744 bytes to the shipped archive (2,059,840 bytes); the ESP size is unchanged.
+The radio gate keeps twelve required/six forbidden markers. Host checks total
+52: sixteen adapter, fifteen button/checkable, six fixture, five header/sysroot,
+nine image-profile and one archive-link test. The frozen v1 object also passes
+its separate native gate with both original pixel comparisons against this
+library. Other widget/style/transfer bindings remain outside this increment.

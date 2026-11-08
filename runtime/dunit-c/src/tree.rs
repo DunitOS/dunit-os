@@ -11,6 +11,9 @@ unsafe fn text(pointer: *const u8, length: usize) -> dunit::Result<String> {
         .map(String::from)
         .map_err(|_| invalid())
 }
+fn radio_group(kind: u32) -> bool {
+    matches!(kind, DUNIT_UI_RADIO_GROUP_COLUMN | DUNIT_UI_RADIO_GROUP_ROW)
+}
 pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>> {
     if nodes.is_empty() || nodes.len() > MAX_VIEW_NODES || nodes[0].parent != DUNIT_UI_ROOT {
         return Err(invalid());
@@ -19,7 +22,10 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
     let mut depths = vec![0; nodes.len()];
     for (index, node) in nodes.iter().enumerate().skip(1) {
         let parent = node.parent as usize;
-        if parent >= index || !matches!(nodes[parent].kind, DUNIT_UI_COLUMN | DUNIT_UI_ROW) {
+        if parent >= index
+            || !(matches!(nodes[parent].kind, DUNIT_UI_COLUMN | DUNIT_UI_ROW)
+                || radio_group(nodes[parent].kind))
+        {
             return Err(invalid());
         }
         depths[index] = depths[parent] + 1;
@@ -54,8 +60,21 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
                 node.kind == DUNIT_UI_TOGGLE_BUTTON_CHECKED,
                 node.message,
             ),
-            DUNIT_UI_COLUMN => View::column(key, nested),
-            DUNIT_UI_ROW => View::row(key, nested),
+            DUNIT_UI_RADIO | DUNIT_UI_RADIO_CHECKED => {
+                let parent = nodes.get(node.parent as usize).ok_or_else(invalid)?;
+                if !radio_group(parent.kind) {
+                    return Err(invalid());
+                }
+                View::radio(
+                    key,
+                    text(node.text, node.text_len)?,
+                    text(parent.key, parent.key_len)?,
+                    node.kind == DUNIT_UI_RADIO_CHECKED,
+                    node.message,
+                )
+            }
+            DUNIT_UI_COLUMN | DUNIT_UI_RADIO_GROUP_COLUMN => View::column(key, nested),
+            DUNIT_UI_ROW | DUNIT_UI_RADIO_GROUP_ROW => View::row(key, nested),
             _ => return Err(invalid()),
         };
         if index == 0 {

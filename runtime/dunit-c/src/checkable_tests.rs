@@ -139,7 +139,7 @@ impl Component for Reference {
         )
     }
 }
-fn renderer() -> Renderer {
+pub(super) fn renderer() -> Renderer {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let theme = Theme::parse_shell(
         &std::fs::read_to_string(root.join("assets/dwm/sdk/dark.dss")).unwrap(),

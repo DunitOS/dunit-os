@@ -106,6 +106,9 @@ jobs:
       - name: Native C controlled checkables and exact pixels
         run: python3 tools/test_c_ui_checkables.py --accel tcg
 
+      - name: Native C radio groups and exact pixels
+        run: python3 tools/test_c_ui_radio.py --accel tcg
+
       - name: Frozen C UI v1 object across a native runtime rebuild
         run: python3 tools/test_c_ui_compat.py --accel tcg
 

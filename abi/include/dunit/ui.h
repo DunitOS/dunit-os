@@ -17,6 +17,10 @@
 #define DUNIT_UI_SWITCH_CHECKED 8u
 #define DUNIT_UI_TOGGLE_BUTTON 9u
 #define DUNIT_UI_TOGGLE_BUTTON_CHECKED 10u
+#define DUNIT_UI_RADIO_GROUP_COLUMN 11u
+#define DUNIT_UI_RADIO_GROUP_ROW 12u
+#define DUNIT_UI_RADIO 13u
+#define DUNIT_UI_RADIO_CHECKED 14u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);
