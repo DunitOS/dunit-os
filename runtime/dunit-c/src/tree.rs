@@ -14,18 +14,45 @@ pub(super) unsafe fn text(pointer: *const u8, length: usize) -> dunit::Result<St
 fn radio_group(kind: u32) -> bool {
     matches!(kind, DUNIT_UI_RADIO_GROUP_COLUMN | DUNIT_UI_RADIO_GROUP_ROW)
 }
+#[cfg(test)]
 pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>> {
     convert_decorated(nodes, core::ptr::null_mut(), None)
 }
+#[cfg(test)]
 pub(super) unsafe fn convert_decorated(
     nodes: &[DunitUiNodeV1],
     user: *mut c_void,
     decorate: Option<DunitUiDecorateV1>,
 ) -> dunit::Result<View<u64>> {
+    convert_impl(nodes, user, decorate, None, |id| id, None)
+}
+pub(super) unsafe fn convert_runtime(
+    nodes: &[DunitUiNodeV1],
+    user: *mut c_void,
+    decorate: Option<DunitUiDecorateV1>,
+    text: Option<&DunitUiTextV1>,
+) -> dunit::Result<View<Message>> {
+    convert_impl(
+        nodes,
+        user,
+        decorate,
+        text,
+        Message::Action,
+        Some(Message::Edit),
+    )
+}
+unsafe fn convert_impl<M: Clone + 'static>(
+    nodes: &[DunitUiNodeV1],
+    user: *mut c_void,
+    decorate: Option<DunitUiDecorateV1>,
+    inputs: Option<&DunitUiTextV1>,
+    action: fn(u64) -> M,
+    edit: Option<fn(u64, String) -> M>,
+) -> dunit::Result<View<M>> {
     if nodes.is_empty() || nodes.len() > MAX_VIEW_NODES || nodes[0].parent != DUNIT_UI_ROOT {
         return Err(invalid());
     }
-    let mut children: Vec<Vec<View<u64>>> = vec![Vec::new(); nodes.len()];
+    let mut children: Vec<Vec<View<M>>> = vec![Vec::new(); nodes.len()];
     let mut depths = vec![0; nodes.len()];
     for (index, node) in nodes.iter().enumerate().skip(1) {
         let parent = node.parent as usize;
@@ -59,6 +86,8 @@ pub(super) unsafe fn convert_decorated(
                     | DUNIT_UI_TOGGLE_BUTTON_CHECKED
                     | DUNIT_UI_RADIO
                     | DUNIT_UI_RADIO_CHECKED
+                    | DUNIT_UI_INPUT
+                    | DUNIT_UI_TEXTAREA
             )
         {
             return Err(invalid());
@@ -68,24 +97,26 @@ pub(super) unsafe fn convert_decorated(
         nested.reverse();
         let mut view = match kind {
             DUNIT_UI_TEXT => View::text(key, text(node.text, node.text_len)?),
-            DUNIT_UI_BUTTON => View::button(key, text(node.text, node.text_len)?, node.message),
+            DUNIT_UI_BUTTON => {
+                View::button(key, text(node.text, node.text_len)?, action(node.message))
+            }
             DUNIT_UI_CHECKBOX | DUNIT_UI_CHECKBOX_CHECKED => View::checkbox(
                 key,
                 text(node.text, node.text_len)?,
                 kind == DUNIT_UI_CHECKBOX_CHECKED,
-                node.message,
+                action(node.message),
             ),
             DUNIT_UI_SWITCH | DUNIT_UI_SWITCH_CHECKED => View::switch(
                 key,
                 text(node.text, node.text_len)?,
                 kind == DUNIT_UI_SWITCH_CHECKED,
-                node.message,
+                action(node.message),
             ),
             DUNIT_UI_TOGGLE_BUTTON | DUNIT_UI_TOGGLE_BUTTON_CHECKED => View::toggle_button(
                 key,
                 text(node.text, node.text_len)?,
                 kind == DUNIT_UI_TOGGLE_BUTTON_CHECKED,
-                node.message,
+                action(node.message),
             ),
             DUNIT_UI_RADIO | DUNIT_UI_RADIO_CHECKED => {
                 let parent = nodes.get(node.parent as usize).ok_or_else(invalid)?;
@@ -97,13 +128,23 @@ pub(super) unsafe fn convert_decorated(
                     text(node.text, node.text_len)?,
                     text(parent.key, parent.key_len)?,
                     kind == DUNIT_UI_RADIO_CHECKED,
-                    node.message,
+                    action(node.message),
                 )
             }
             DUNIT_UI_COLUMN | DUNIT_UI_RADIO_GROUP_COLUMN => View::column(key, nested),
             DUNIT_UI_ROW | DUNIT_UI_RADIO_GROUP_ROW => View::row(key, nested),
             DUNIT_UI_STACK => View::stack(key, nested),
             DUNIT_UI_GRID => View::grid(key, nested),
+            DUNIT_UI_INPUT | DUNIT_UI_TEXTAREA => crate::text::view(
+                node,
+                index as u32,
+                key,
+                text(node.text, node.text_len)?,
+                user,
+                inputs.ok_or_else(invalid)?,
+                action,
+                edit.ok_or_else(invalid)?,
+            )?,
             _ => return Err(invalid()),
         }
         .disabled(disabled);

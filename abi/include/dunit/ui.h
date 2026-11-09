@@ -24,13 +24,23 @@
 #define DUNIT_UI_DISABLED 2147483648u
 #define DUNIT_UI_STACK 15u
 #define DUNIT_UI_GRID 16u
+#define DUNIT_UI_INPUT 17u
+#define DUNIT_UI_TEXTAREA 18u
+#define DUNIT_UI_INPUT_READ_ONLY 1u
+#define DUNIT_UI_INPUT_PASSWORD 2u
+#define DUNIT_UI_INPUT_SOFT_WRAP 4u
+#define DUNIT_UI_INPUT_SUBMIT 8u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 struct DunitUiAppearanceV1;
 struct DunitUiStyleV1;
+struct DunitUiInputV1;
+struct DunitUiTextV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);
 typedef int32_t (*DunitUiUpdateV1)(void * user, uint64_t message);
 typedef int32_t (*DunitUiDecorateV1)(void * user, uint32_t index, struct DunitUiAppearanceV1 * appearance);
+typedef int32_t (*DunitUiConfigureInputV1)(void * user, uint32_t index, struct DunitUiInputV1 * input);
+typedef int32_t (*DunitUiTextChangedV1)(void * user, uint64_t message, const uint8_t * value, size_t value_len);
 typedef struct DunitUiNodeV1 {
     uint32_t kind;
     uint32_t parent;
@@ -58,12 +68,29 @@ typedef struct DunitUiStyleV1 {
     size_t stylesheet_len;
     DunitUiDecorateV1 decorate;
 } DunitUiStyleV1;
+typedef struct DunitUiInputV1 {
+    const uint8_t * label;
+    size_t label_len;
+    const uint8_t * placeholder;
+    size_t placeholder_len;
+    size_t max_chars;
+    uint32_t flags;
+    uint32_t reserved;
+    uint64_t submit;
+} DunitUiInputV1;
+typedef struct DunitUiTextV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    DunitUiConfigureInputV1 configure;
+    DunitUiTextChangedV1 changed;
+} DunitUiTextV1;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 int32_t dunit_ui_run_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks);
 int32_t dunit_ui_run_styled_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style);
+int32_t dunit_ui_run_text_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style, const struct DunitUiTextV1 * text);
 #ifdef __cplusplus
 }
 #endif

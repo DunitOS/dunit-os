@@ -144,7 +144,7 @@ fn decoration_errors_keep_the_previous_valid_tree() {
     let mut m = unsafe { Model::new_decorated(cb, Some(decorate)) }.unwrap();
     for error in [-5, 1] {
         s.failure = error;
-        m.update(1);
+        m.update(1.into());
         assert_eq!(
             m.error.unwrap().0,
             if error < 0 { -5 } else { dunit::errno::EINVAL }
@@ -320,7 +320,10 @@ impl Component for Reference {
         root
     }
 }
-fn sequence<C: Component<Message = u64>>(app: &mut Application<C>, phase: usize) {
+fn sequence<C: Component>(app: &mut Application<C>, phase: usize)
+where
+    C::Message: Clone,
+{
     app.key(Key::plain('\t')).unwrap();
     app.key(Key::plain(' ')).unwrap();
     if phase == 2 {

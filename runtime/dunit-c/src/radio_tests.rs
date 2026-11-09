@@ -158,7 +158,7 @@ fn pointer_release_is_controlled_and_selected_radio_does_not_dispatch_twice() {
 fn invalid_rebuilt_selection_keeps_last_valid_tree() {
     let mut state = state();
     let mut model = model(&mut state);
-    model.update(0);
+    model.update(0.into());
     assert_eq!(model.error.unwrap().0, dunit::errno::EINVAL);
     assert!(model.tree.children()[1].children()[0].interaction().checked);
     assert!(!model.tree.children()[1].children()[1].interaction().checked);
@@ -194,7 +194,10 @@ impl Component for Reference {
         )
     }
 }
-fn sequence<C: Component<Message = u64>>(app: &mut Application<C>, phase: usize) {
+fn sequence<C: Component>(app: &mut Application<C>, phase: usize)
+where
+    C::Message: Clone,
+{
     if phase == 1 {
         app.key(Key::plain('\t')).unwrap();
         assert_eq!(app.focused_key(), Some("alpha"));

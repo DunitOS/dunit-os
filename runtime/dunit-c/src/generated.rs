@@ -19,9 +19,17 @@ pub const DUNIT_UI_RADIO_CHECKED:u32=14;
 pub const DUNIT_UI_DISABLED:u32=2147483648;
 pub const DUNIT_UI_STACK:u32=15;
 pub const DUNIT_UI_GRID:u32=16;
+pub const DUNIT_UI_INPUT:u32=17;
+pub const DUNIT_UI_TEXTAREA:u32=18;
+pub const DUNIT_UI_INPUT_READ_ONLY:u32=1;
+pub const DUNIT_UI_INPUT_PASSWORD:u32=2;
+pub const DUNIT_UI_INPUT_SOFT_WRAP:u32=4;
+pub const DUNIT_UI_INPUT_SUBMIT:u32=8;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
 pub type DunitUiUpdateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64)->i32;
 pub type DunitUiDecorateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiAppearanceV1)->i32;
+pub type DunitUiConfigureInputV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiInputV1)->i32;
+pub type DunitUiTextChangedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, *const u8, usize)->i32;
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct DunitUiNodeV1 {
@@ -65,5 +73,30 @@ pub struct DunitUiStyleV1 {
 }
 const _: [();32]=[();core::mem::size_of::<DunitUiStyleV1>()];
 const _: [();8]=[();core::mem::align_of::<DunitUiStyleV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiInputV1 {
+    pub label:*const u8,
+    pub label_len:usize,
+    pub placeholder:*const u8,
+    pub placeholder_len:usize,
+    pub max_chars:usize,
+    pub flags:u32,
+    pub reserved:u32,
+    pub submit:u64,
+}
+const _: [();56]=[();core::mem::size_of::<DunitUiInputV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiInputV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiTextV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub configure:Option<DunitUiConfigureInputV1>,
+    pub changed:Option<DunitUiTextChangedV1>,
+}
+const _: [();24]=[();core::mem::size_of::<DunitUiTextV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiTextV1>()];
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1)->i32=crate::dunit_ui_run_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1)->i32=crate::dunit_ui_run_styled_v1;
+const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1, *const DunitUiTextV1)->i32=crate::dunit_ui_run_text_v1;

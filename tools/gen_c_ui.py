@@ -10,6 +10,8 @@ TYPES={
     'callbacks_const':('const struct DunitUiCallbacksV1 *','*const DunitUiCallbacksV1'),
     'appearance_mut':('struct DunitUiAppearanceV1 *','*mut DunitUiAppearanceV1'),
     'style_const':('const struct DunitUiStyleV1 *','*const DunitUiStyleV1'),
+    'input_mut':('struct DunitUiInputV1 *','*mut DunitUiInputV1'),
+    'text_const':('const struct DunitUiTextV1 *','*const DunitUiTextV1'),
     'strings':('const char *const *','*const *const u8'),
 }
 

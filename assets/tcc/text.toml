@@ -1,0 +1,27 @@
+[meta]
+schema_version = 2
+[application.c_gui]
+name = "C SDK text editor"
+exec = "/tmp/c-gui"
+[startup]
+entries = ["c_gui"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[effects]
+anim = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"
+[rules.text]
+app = "c_gui"
+x = 100
+y = 100
+width = 560
+height = 460
+floating = true

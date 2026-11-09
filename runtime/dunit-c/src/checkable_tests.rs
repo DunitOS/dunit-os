@@ -157,7 +157,10 @@ pub(super) fn renderer_with_style(overlay: &str) -> Renderer {
     renderer.set_motion_enabled(false);
     renderer
 }
-fn activate_all<C: Component<Message = u64>>(app: &mut Application<C>, step: usize) {
+fn activate_all<C: Component>(app: &mut Application<C>, step: usize)
+where
+    C::Message: Clone,
+{
     if step == 2 {
         app.key(Key::plain('\t')).unwrap();
     }

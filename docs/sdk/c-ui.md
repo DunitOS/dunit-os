@@ -6,7 +6,7 @@ The static library is the existing Rust `ComponentWindow`, component model,
 DSS theme, renderer and window transport behind a synchronous C adapter.
 It implements no second layout engine, widget painter or GUI handshake.
 
-This subset describes Text, Button, Column, Row, Stack, Grid, Checkbox, Switch, ToggleButton
+This subset describes Text, Input, Textarea, Button, Column, Row, Stack, Grid, Checkbox, Switch, ToggleButton
 and grouped Radio nodes. It opens one native themed window and dispatches
 activation messages back to the C-owned model.
 Other widgets and C transfer/file-capability
@@ -74,9 +74,10 @@ has one tab stop; SDK arrows select/wrap within that group. Activating an
 already selected radio does not dispatch another message. Groups are independent.
 These additional kinds preserve every existing ABI v1 layout/value/export.
 
-OR `DUNIT_UI_DISABLED` into an activation node's `kind`, for example
+OR `DUNIT_UI_DISABLED` into an interactive leaf's `kind`, for example
 `DUNIT_UI_CHECKBOX_CHECKED | DUNIT_UI_DISABLED`. It applies to Button, Checkbox,
-Switch, ToggleButton and Radio, in either checked state. It maps directly to
+Switch, ToggleButton and Radio, in either checked state, plus Input/Textarea.
+It maps directly to
 the SDK's `View::disabled(true)`: disabled controls reject pointer activation,
 are skipped by focus navigation and retain their C-owned checked/selected state.
 Disabling a focused or pressed control clears that transient interaction;
@@ -128,6 +129,49 @@ or decoration errors fail before opening; failed update candidates keep the
 last valid tree and terminate with an error. DSS/theme failure during opening
 consumes the single window attempt, consistent with the original v1 contract.
 
+## Controlled text fields
+
+Use `DUNIT_UI_INPUT` or `DUNIT_UI_TEXTAREA` with `node.text` as the current UTF-8
+value and `node.message` as a full-width change ID. Open with
+`dunit_ui_run_text_v1(argc, argv, envp, width, height, callbacks, style, text)`.
+The style pointer is optional (NULL uses the installed theme); text points to
+`DunitUiTextV1` with the normal ABI version/size and a required `changed` callback.
+The original/styled entry points reject input nodes without this text contract.
+All three entries share the same busy and single-window session guards.
+
+An optional `configure(user, index, input)` callback runs for each input node
+on every description build. Its `DunitUiInputV1` starts with label = node key,
+empty placeholder, the SDK default `max_chars`, flags/reserved/submit = 0.
+Label and placeholder are bounded UTF-8 spans copied before the next callback.
+Invocation order is unspecified; pending build spans must stay readable while
+configuration callbacks run, just as with appearance callbacks.
+`max_chars` counts Unicode scalars; the SDK independently caps text at 64 KiB.
+Set `reserved` to zero. Return 0 or a negative error; positive results are invalid.
+
+Flags are `DUNIT_UI_INPUT_READ_ONLY`, `PASSWORD`, `SOFT_WRAP`, `SUBMIT`.
+Password and submit apply to single-line Input; soft-wrap applies to Textarea.
+With SUBMIT, Enter delivers the configured `submit` message through ordinary
+`callbacks.update`, including message zero. Enter in Textarea inserts LF.
+Unknown flag bits, invalid UTF-8/options/current values and unsupported
+combinations are rejected. `DUNIT_UI_DISABLED` in node kind disables either
+field using the SDK's normal focus/editing rules; read-only fields stay focusable
+and selectable. Password selections cannot be exported through SDK clipboard.
+
+`changed(user, message, value, value_len)` receives the entire proposed UTF-8
+value, borrowed only until callback return. Copy accepted bytes into the C model;
+return 0 to rebuild, 1 to close, or a negative error to terminate. To decline an
+edit, leave the C value unchanged and return 0: the ordinary SDK restores its
+editor/selection/history. Other positive results are invalid. Changing the model
+is not rolled back by Rust after a callback error. No global dispatch table or
+raw C pointer is stored in SDK editor callbacks: the SDK's existing typed message
+mapping carries each field ID and owned proposed text into the adapter model.
+
+Input/Textarea use the existing SDK editor, cursor, selection, scrolling,
+undo/redo, renderer and text-transfer handling. C adds no editor or rasterizer.
+On native x86_64, input configuration is 56 bytes and text callbacks are 24 bytes,
+both aligned to 8; their declarations and the new export come from the shared
+schema. All prior v1 structures and function signatures remain unchanged.
+
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
 received by main and remain mapped. The adapter initializes the existing Rust
@@ -170,6 +214,7 @@ python3 tools/test_c_ui_checkables.py --accel tcg
 python3 tools/test_c_ui_radio.py --accel tcg
 python3 tools/test_c_ui_disabled.py --accel tcg
 python3 tools/test_c_ui_style.py --accel tcg
+python3 tools/test_c_ui_text.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -248,6 +293,21 @@ configuration/classes before opening and proves that the styled and original
 entry points share the one-session guard. The frozen older C object passes
 its own QEMU TCG run after a forced rebuild, including both original pixel
 comparisons. Archive: 2,062,380 bytes (+2,012), still in the original ESP.
-Input widgets, other advanced widget bindings and transfer/file capabilities
-remain later M7.10 work; this completes the application DSS/classes and core
+Other advanced widget bindings and transfer/file capabilities
+remain later M7.10 work; the style block completes application DSS/classes and core
 Column/Row/Stack/Grid layout surface, not the full milestone.
+
+The text-input block passes 117 host/Rust checks: 37 adapter, 59 existing editor/
+input/soft-wrap/button/checkable, six fixture, five header/sysroot, nine image
+profile and one archive-link test (all three exports). The on-device TCC form
+passes twelve required/six forbidden markers and three exact 560×460 reference
+canvases: initial, edited and reset. Keyboard input exercises the eight-scalar
+name limit, submit, password editing, multiline LF, read-only suppression,
+disabled Tab skipping, model-declined edits and external reset. Test captures
+focus buttons to avoid relying on caret blink timing. Host checks additionally
+cover UTF-8 selection/history, password export, full `UINT64_MAX` field IDs,
+owned labels/placeholders, error/close returns and invalid configuration.
+The retained original v1 C object also passes after a forced runtime rebuild,
+including its two exact pixel comparisons. The archive is 2,096,708 bytes
+(+34,328); the existing installer ESP still fits. Other advanced widgets and
+explicit C transfer/file-capability bindings keep M7.10 open.

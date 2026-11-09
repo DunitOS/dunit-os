@@ -181,14 +181,14 @@ fn model(state: &mut State) -> Model {
 fn disabling_during_a_press_clears_focus_and_cancels_release_activation() {
     let mut state = State::default();
     let mut app = Application::new(model(&mut state)).unwrap();
-    app.update(3).unwrap();
+    app.update(3.into()).unwrap();
     app.pointer(PointerEvent::Down, Some("action")).unwrap();
     assert_eq!(app.focused_key(), Some("action"));
-    app.update(3).unwrap();
+    app.update(3.into()).unwrap();
     app.pointer(PointerEvent::Up, Some("action")).unwrap();
     assert_eq!(app.focused_key(), None);
     assert_eq!(state.count, 0);
-    app.update(3).unwrap();
+    app.update(3.into()).unwrap();
     app.pointer(PointerEvent::Down, Some("action")).unwrap();
     app.pointer(PointerEvent::Up, Some("action")).unwrap();
     assert_eq!(state.count, 1);
@@ -212,7 +212,10 @@ impl Component for Reference {
         )
     }
 }
-fn sequence<C: Component<Message = u64>>(app: &mut Application<C>, phase: usize) {
+fn sequence<C: Component>(app: &mut Application<C>, phase: usize)
+where
+    C::Message: Clone,
+{
     if phase == 1 {
         app.key(Key::plain('\t')).unwrap();
         assert_eq!(app.focused_key(), Some("enable"));

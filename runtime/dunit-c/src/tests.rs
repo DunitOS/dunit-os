@@ -132,19 +132,19 @@ fn callbacks_rebuild_the_model_and_retain_the_prior_tree_on_error() {
     let cb = callbacks(&mut state);
     let mut model = unsafe { Model::new(cb) }.unwrap();
     let buffer = model.nodes.as_ptr();
-    model.update(10);
+    model.update(10.into());
     assert_eq!(model.nodes.as_ptr(), buffer);
     assert_eq!(model.tree.children()[0].content(), Some("Count 1"));
-    model.update(99);
+    model.update(99.into());
     assert_eq!(model.error.unwrap().0, dunit::errno::EINVAL);
     model.error = None;
     state.fail = true;
-    model.update(10);
+    model.update(10.into());
     assert_eq!(model.error.unwrap().0, -5);
     assert_eq!(model.nodes.as_ptr(), buffer);
     assert_eq!(model.tree.children()[0].content(), Some("Count 1"));
     let before = state.builds;
-    model.update(20);
+    model.update(20.into());
     assert!(model.stop);
     assert_eq!(state.builds, before);
 }
@@ -228,8 +228,8 @@ fn adapted_widgets_match_direct_rust_pixels_before_and_after_update() {
             reference.update(10).unwrap();
             reference.update(10).unwrap();
             // The C callback owns the model; two activations can select any label.
-            adapter.update(10).unwrap();
-            adapter.update(10).unwrap();
+            adapter.update(10.into()).unwrap();
+            adapter.update(10.into()).unwrap();
         }
         let mut direct = renderer();
         let mut translated = renderer();
