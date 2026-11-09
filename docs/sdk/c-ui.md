@@ -9,6 +9,8 @@ It implements no second layout engine, widget painter or GUI handshake.
 This subset describes Text, Input, Textarea, Button, Column, Row, Stack, Grid, Checkbox, Switch, ToggleButton
 and grouped Radio nodes. It opens one native themed window and dispatches
 activation messages back to the C-owned model.
+Slider, VerticalSlider, Spinbox, Progress and Busy are available through the
+combined application entry described below.
 Other widgets and C transfer/file-capability
 interfaces remain later M7.10 increments. This is not the complete C SDK.
 
@@ -74,9 +76,10 @@ has one tab stop; SDK arrows select/wrap within that group. Activating an
 already selected radio does not dispatch another message. Groups are independent.
 These additional kinds preserve every existing ABI v1 layout/value/export.
 
-OR `DUNIT_UI_DISABLED` into an interactive leaf's `kind`, for example
+OR `DUNIT_UI_DISABLED` into a supported leaf's `kind`, for example
 `DUNIT_UI_CHECKBOX_CHECKED | DUNIT_UI_DISABLED`. It applies to Button, Checkbox,
-Switch, ToggleButton and Radio, in either checked state, plus Input/Textarea.
+Switch, ToggleButton and Radio, in either checked state, plus Input/Textarea
+and all five numeric/progress kinds.
 It maps directly to
 the SDK's `View::disabled(true)`: disabled controls reject pointer activation,
 are skipped by focus navigation and retain their C-owned checked/selected state.
@@ -172,6 +175,48 @@ On native x86_64, input configuration is 56 bytes and text callbacks are 24 byte
 both aligned to 8; their declarations and the new export come from the shared
 schema. All prior v1 structures and function signatures remain unchanged.
 
+## Numeric controls and combined applications
+
+`dunit_ui_run_app_v1` accepts the ordinary run arguments followed by
+`DunitUiAppV1`. Initialize its version/size; `style`, `text` and `numbers` are
+optional pointers to the corresponding configuration records. Non-null nested
+records are version/size checked and copied at entry. This combines application
+DSS, controlled text and numeric fields in a single SDK window. All old entry
+points retain their declarations and the same busy/single-session guard.
+
+Use `DUNIT_UI_SLIDER`, `VERTICAL_SLIDER`, `SPINBOX`, `PROGRESS` or `BUSY` as
+node kinds. Their `node.message` is the numeric change ID (all 64 bits); their
+`node.text` is unused. Supply `DunitUiNumbersV1` through `app.numbers`.
+Its optional `configure(user, index, number)` callback receives a
+`DunitUiNumberV1` initialized with label = key, min/max = 0/100, step/page_step
+= 1/10, value = 0, flags/reserved = 0. Override those fields from the C model
+on each build; label is a bounded UTF-8 span copied before the next callback.
+Return zero or a negative error. Reserved must remain zero.
+
+Ranges/values are signed `int64_t`. Slider/Spinbox use the original SDK range
+validation: min <= max, positive step, page_step >= step and divisible by step,
+and an in-range snapped value. No C-side snapping or arithmetic is added.
+Vertical sliders increase toward the top. Spinbox draft editing/commit, arrow
+steps and selection are supplied by the SDK. Only Spinbox accepts the
+`DUNIT_UI_NUMBER_READ_ONLY` flag. Progress validates min/max/value but ignores
+step/page_step. Busy ignores range/value and accepts only the
+`DUNIT_UI_NUMBER_RUNNING` flag. Unknown flags are rejected per kind.
+
+Interactive controls require `numbers.changed(user, message, int64_t value)`;
+Progress/Busy need no change callback and do not become Tab stops. Return 0 to
+rebuild, 1 to close, or a negative error; other positive returns are invalid.
+Keep the old model value and return 0 to decline. Failed candidates retain the
+last valid tree. `DUNIT_UI_DISABLED` applies to all five kinds using normal
+SDK interaction/paint behavior. Busy animation follows SDK motion settings,
+including deterministic reduced-motion rendering; no timer is implemented in C.
+
+On native x86_64, Number is 64 bytes, Numbers is 24 bytes and App is 32 bytes,
+all aligned to 8. They and the combined export are schema-generated; no prior
+record or function signature changes. Numeric kinds without a numeric binding
+are rejected. The example `/assets/tcc/numbers.c` combines every new kind with
+a controlled text field, application DSS, negative numeric drafts, model-declined
+proposals and external reset.
+
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
 received by main and remain mapped. The adapter initializes the existing Rust
@@ -215,6 +260,7 @@ python3 tools/test_c_ui_radio.py --accel tcg
 python3 tools/test_c_ui_disabled.py --accel tcg
 python3 tools/test_c_ui_style.py --accel tcg
 python3 tools/test_c_ui_text.py --accel tcg
+python3 tools/test_c_ui_numbers.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -311,3 +357,19 @@ The retained original v1 C object also passes after a forced runtime rebuild,
 including its two exact pixel comparisons. The archive is 2,096,708 bytes
 (+34,328); the existing installer ESP still fits. Other advanced widgets and
 explicit C transfer/file-capability bindings keep M7.10 open.
+
+The numeric-controls block passes 98 host/Rust checks: 46 adapter, 31 existing
+slider/vertical-slider/spinbox/progress, six fixture, five header/sysroot, nine
+image-profile and one archive-link test (all four public exports). Host tests
+include full `i64::MIN..=i64::MAX` and `UINT64_MAX` IDs, validation, read-only,
+passive Tab behavior, owned labels, error/close and declined candidates. The
+native mixed application passes thirteen required/six forbidden markers and
+three exact 560×520 reference canvases. It exercises six numeric changes,
+an explicit page step, signed draft commit, text coexistence, Busy state,
+model rejection, disabled/read-only suppression and external reset. Native
+captures disable motion and focus a button; timed Busy animation is covered
+by the existing SDK regression suite. The frozen original C object passes
+its separate forced-rebuild run with both original framebuffer comparisons.
+Archive: 2,123,556 bytes (+26,848), still in the existing installer ESP.
+Menus/popups, collections/workspace widgets and explicit C transfer/capability
+bindings remain outside this block; M7.10 is still open.

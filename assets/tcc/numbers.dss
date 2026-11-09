@@ -1,0 +1,11 @@
+Column#root { padding: 16; gap: 8; }
+Text#title { font-size: 22; padding: 0; }
+Slider, Input { height: 32; }
+Row#body { height: 160; padding: 0; gap: 16; }
+VerticalSlider { width: 52; height: 140; }
+Column#values { width: fill; padding: 0; gap: 8; }
+Spinbox { height: 32; }
+Progress, Busy { height: 24; }
+Row#actions { padding: 0; gap: 8; height: 34; }
+Button { width: 30%; }
+Text#status { padding: 0; color: $muted; }

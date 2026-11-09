@@ -9,6 +9,7 @@ use core::{
 use dunit::{time::Duration, ui::*, window::WindowEvent};
 mod generated;
 pub use generated::*;
+mod number;
 mod text;
 mod tree;
 
@@ -16,6 +17,7 @@ mod tree;
 enum Message {
     Action(u64),
     Edit(u64, String),
+    Number(u64, i64),
 }
 impl From<u64> for Message {
     fn from(value: u64) -> Self {
@@ -39,6 +41,7 @@ struct Model {
     error: Option<dunit::Error>,
     decorate: Option<DunitUiDecorateV1>,
     text: Option<DunitUiTextV1>,
+    numbers: Option<DunitUiNumbersV1>,
 }
 impl Component for Model {
     type Message = Message;
@@ -50,6 +53,12 @@ impl Component for Model {
                     Some(changed) => changed(self.callbacks.user, id, value.as_ptr(), value.len()),
                     None => dunit::errno::EINVAL as i32,
                 },
+                Message::Number(id, value) => {
+                    match self.numbers.and_then(|config| config.changed) {
+                        Some(changed) => changed(self.callbacks.user, id, value),
+                        None => dunit::errno::EINVAL as i32,
+                    }
+                }
             }
         };
         if result == 1 {
@@ -70,6 +79,7 @@ impl Component for Model {
                 &mut self.nodes,
                 self.decorate,
                 self.text.as_ref(),
+                self.numbers.as_ref(),
             )
         } {
             Ok(tree) => self.tree = tree,
@@ -110,8 +120,22 @@ impl Model {
         decorate: Option<DunitUiDecorateV1>,
         text: Option<DunitUiTextV1>,
     ) -> dunit::Result<Self> {
+        Self::new_app(callbacks, decorate, text, None)
+    }
+    unsafe fn new_app(
+        callbacks: DunitUiCallbacksV1,
+        decorate: Option<DunitUiDecorateV1>,
+        text: Option<DunitUiTextV1>,
+        numbers: Option<DunitUiNumbersV1>,
+    ) -> dunit::Result<Self> {
         let mut nodes = node_buffer();
-        let tree = build_configured(&callbacks, &mut nodes, decorate, text.as_ref())?;
+        let tree = build_configured(
+            &callbacks,
+            &mut nodes,
+            decorate,
+            text.as_ref(),
+            numbers.as_ref(),
+        )?;
         Ok(Self {
             callbacks,
             tree,
@@ -120,6 +144,7 @@ impl Model {
             error: None,
             decorate,
             text,
+            numbers,
         })
     }
 }
@@ -128,13 +153,14 @@ unsafe fn build(
     callbacks: &DunitUiCallbacksV1,
     nodes: &mut [DunitUiNodeV1],
 ) -> dunit::Result<View<Message>> {
-    build_configured(callbacks, nodes, None, None)
+    build_configured(callbacks, nodes, None, None, None)
 }
 unsafe fn build_configured(
     callbacks: &DunitUiCallbacksV1,
     nodes: &mut [DunitUiNodeV1],
     decorate: Option<DunitUiDecorateV1>,
     text: Option<&DunitUiTextV1>,
+    numbers: Option<&DunitUiNumbersV1>,
 ) -> dunit::Result<View<Message>> {
     let count = (callbacks.build.unwrap())(callbacks.user, nodes.as_mut_ptr(), nodes.len() as u32);
     if count <= 0 {
@@ -147,7 +173,13 @@ unsafe fn build_configured(
     if count as usize > nodes.len() {
         return Err(invalid());
     }
-    tree::convert_runtime(&nodes[..count as usize], callbacks.user, decorate, text)
+    tree::convert_app(
+        &nodes[..count as usize],
+        callbacks.user,
+        decorate,
+        text,
+        numbers,
+    )
 }
 
 /// Run one themed window per process. Foreign pointers/callbacks obey the
@@ -166,7 +198,7 @@ pub unsafe extern "C" fn dunit_ui_run_v1(
     height: u32,
     callbacks: *const DunitUiCallbacksV1,
 ) -> i32 {
-    run(argc, argv, envp, width, height, callbacks, None, None)
+    run(argc, argv, envp, width, height, callbacks, None, None, None)
 }
 
 /// Open using the SDK application DSS layer and optional per-node appearance callback.
@@ -194,6 +226,7 @@ pub unsafe extern "C" fn dunit_ui_run_styled_v1(
         height,
         callbacks,
         Some(style),
+        None,
         None,
     )
 }
@@ -225,16 +258,10 @@ pub unsafe extern "C" fn dunit_ui_run_text_v1(
     style: *const DunitUiStyleV1,
     text: *const DunitUiTextV1,
 ) -> i32 {
-    if text.is_null() {
-        return invalid().0 as i32;
-    }
-    let text = *text;
-    if text.abi_version != DUNIT_UI_ABI_VERSION
-        || text.struct_size as usize != core::mem::size_of::<DunitUiTextV1>()
-        || text.changed.is_none()
-    {
-        return invalid().0 as i32;
-    }
+    let text = match read_text(text) {
+        Ok(text) => text,
+        Err(error) => return error.0 as i32,
+    };
     let style = if style.is_null() {
         None
     } else {
@@ -252,6 +279,75 @@ pub unsafe extern "C" fn dunit_ui_run_text_v1(
         callbacks,
         style,
         Some(text),
+        None,
+    )
+}
+
+unsafe fn read_text(text: *const DunitUiTextV1) -> dunit::Result<DunitUiTextV1> {
+    if text.is_null() {
+        return Err(invalid());
+    }
+    let text = *text;
+    if text.abi_version != DUNIT_UI_ABI_VERSION
+        || text.struct_size as usize != core::mem::size_of::<DunitUiTextV1>()
+        || text.changed.is_none()
+    {
+        return Err(invalid());
+    }
+    Ok(text)
+}
+
+/// Open one SDK application with optional style, text and numeric bindings.
+/// # Safety
+/// The v1 run contract applies to the application record and all nested records.
+#[no_mangle]
+pub unsafe extern "C" fn dunit_ui_run_app_v1(
+    argc: i32,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    width: u32,
+    height: u32,
+    callbacks: *const DunitUiCallbacksV1,
+    app: *const DunitUiAppV1,
+) -> i32 {
+    if app.is_null() {
+        return invalid().0 as i32;
+    }
+    let app = *app;
+    if app.abi_version != DUNIT_UI_ABI_VERSION
+        || app.struct_size as usize != core::mem::size_of::<DunitUiAppV1>()
+    {
+        return invalid().0 as i32;
+    }
+    let style = if app.style.is_null() {
+        None
+    } else {
+        match read_style(app.style) {
+            Ok(style) => Some(style),
+            Err(error) => return error.0 as i32,
+        }
+    };
+    let text = if app.text.is_null() {
+        None
+    } else {
+        match read_text(app.text) {
+            Ok(text) => Some(text),
+            Err(error) => return error.0 as i32,
+        }
+    };
+    let numbers = if app.numbers.is_null() {
+        None
+    } else {
+        let numbers = *app.numbers;
+        if numbers.abi_version != DUNIT_UI_ABI_VERSION
+            || numbers.struct_size as usize != core::mem::size_of::<DunitUiNumbersV1>()
+        {
+            return invalid().0 as i32;
+        }
+        Some(numbers)
+    };
+    run(
+        argc, argv, envp, width, height, callbacks, style, text, numbers,
     )
 }
 
@@ -264,6 +360,7 @@ unsafe fn run(
     callbacks: *const DunitUiCallbacksV1,
     style: Option<DunitUiStyleV1>,
     text: Option<DunitUiTextV1>,
+    numbers: Option<DunitUiNumbersV1>,
 ) -> i32 {
     if callbacks.is_null()
         || argc < 0
@@ -300,7 +397,9 @@ unsafe fn run(
         return dunit::errno::EPIPE as i32;
     }
     let result = (|| {
-        let model = if text.is_some() {
+        let model = if numbers.is_some() {
+            Model::new_app(callbacks, decorate, text, numbers)?
+        } else if text.is_some() {
             Model::new_configured(callbacks, decorate, text)?
         } else if decorate.is_none() {
             Model::new(callbacks)?
@@ -342,6 +441,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 mod checkable_tests;
 #[cfg(test)]
 mod disabled_tests;
+#[cfg(test)]
+mod number_tests;
 #[cfg(test)]
 mod radio_tests;
 #[cfg(test)]

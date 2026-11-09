@@ -401,6 +401,7 @@ impl Component for Reference {
             Message::Edit(id, value) => {
                 self.0.edit(id, &value);
             }
+            Message::Number(_, _) => panic!("unexpected numeric event in text reference"),
         }
     }
     fn view(&self) -> View<Message> {

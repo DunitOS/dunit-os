@@ -3,7 +3,7 @@ import json
 import re
 
 TYPES={
-    'u32':('uint32_t','u32'), 'u64':('uint64_t','u64'), 'i32':('int32_t','i32'),
+    'u32':('uint32_t','u32'), 'u64':('uint64_t','u64'), 'i32':('int32_t','i32'), 'i64':('int64_t','i64'),
     'usize':('size_t','usize'), 'bytes':('const uint8_t *','*const u8'),
     'void_ptr':('void *','*mut core::ffi::c_void'),
     'nodes_mut':('struct DunitUiNodeV1 *','*mut DunitUiNodeV1'),
@@ -12,6 +12,9 @@ TYPES={
     'style_const':('const struct DunitUiStyleV1 *','*const DunitUiStyleV1'),
     'input_mut':('struct DunitUiInputV1 *','*mut DunitUiInputV1'),
     'text_const':('const struct DunitUiTextV1 *','*const DunitUiTextV1'),
+    'number_mut':('struct DunitUiNumberV1 *','*mut DunitUiNumberV1'),
+    'numbers_const':('const struct DunitUiNumbersV1 *','*const DunitUiNumbersV1'),
+    'app_const':('const struct DunitUiAppV1 *','*const DunitUiAppV1'),
     'strings':('const char *const *','*const *const u8'),
 }
 

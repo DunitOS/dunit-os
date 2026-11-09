@@ -24,21 +24,33 @@ pub(super) unsafe fn convert_decorated(
     user: *mut c_void,
     decorate: Option<DunitUiDecorateV1>,
 ) -> dunit::Result<View<u64>> {
-    convert_impl(nodes, user, decorate, None, |id| id, None)
+    convert_impl(nodes, user, decorate, None, None, |id| id, None, None)
 }
+#[cfg(test)]
 pub(super) unsafe fn convert_runtime(
     nodes: &[DunitUiNodeV1],
     user: *mut c_void,
     decorate: Option<DunitUiDecorateV1>,
     text: Option<&DunitUiTextV1>,
 ) -> dunit::Result<View<Message>> {
+    convert_app(nodes, user, decorate, text, None)
+}
+pub(super) unsafe fn convert_app(
+    nodes: &[DunitUiNodeV1],
+    user: *mut c_void,
+    decorate: Option<DunitUiDecorateV1>,
+    text: Option<&DunitUiTextV1>,
+    numbers: Option<&DunitUiNumbersV1>,
+) -> dunit::Result<View<Message>> {
     convert_impl(
         nodes,
         user,
         decorate,
         text,
+        numbers,
         Message::Action,
         Some(Message::Edit),
+        Some(Message::Number),
     )
 }
 unsafe fn convert_impl<M: Clone + 'static>(
@@ -46,8 +58,10 @@ unsafe fn convert_impl<M: Clone + 'static>(
     user: *mut c_void,
     decorate: Option<DunitUiDecorateV1>,
     inputs: Option<&DunitUiTextV1>,
+    numbers: Option<&DunitUiNumbersV1>,
     action: fn(u64) -> M,
     edit: Option<fn(u64, String) -> M>,
+    numeric: Option<fn(u64, i64) -> M>,
 ) -> dunit::Result<View<M>> {
     if nodes.is_empty() || nodes.len() > MAX_VIEW_NODES || nodes[0].parent != DUNIT_UI_ROOT {
         return Err(invalid());
@@ -88,6 +102,11 @@ unsafe fn convert_impl<M: Clone + 'static>(
                     | DUNIT_UI_RADIO_CHECKED
                     | DUNIT_UI_INPUT
                     | DUNIT_UI_TEXTAREA
+                    | DUNIT_UI_SLIDER
+                    | DUNIT_UI_VERTICAL_SLIDER
+                    | DUNIT_UI_SPINBOX
+                    | DUNIT_UI_PROGRESS
+                    | DUNIT_UI_BUSY
             )
         {
             return Err(invalid());
@@ -144,6 +163,18 @@ unsafe fn convert_impl<M: Clone + 'static>(
                 inputs.ok_or_else(invalid)?,
                 action,
                 edit.ok_or_else(invalid)?,
+            )?,
+            DUNIT_UI_SLIDER
+            | DUNIT_UI_VERTICAL_SLIDER
+            | DUNIT_UI_SPINBOX
+            | DUNIT_UI_PROGRESS
+            | DUNIT_UI_BUSY => crate::number::view(
+                node,
+                index as u32,
+                key,
+                user,
+                numbers.ok_or_else(invalid)?,
+                numeric.ok_or_else(invalid)?,
             )?,
             _ => return Err(invalid()),
         }

@@ -25,11 +25,20 @@ pub const DUNIT_UI_INPUT_READ_ONLY:u32=1;
 pub const DUNIT_UI_INPUT_PASSWORD:u32=2;
 pub const DUNIT_UI_INPUT_SOFT_WRAP:u32=4;
 pub const DUNIT_UI_INPUT_SUBMIT:u32=8;
+pub const DUNIT_UI_SLIDER:u32=19;
+pub const DUNIT_UI_VERTICAL_SLIDER:u32=20;
+pub const DUNIT_UI_SPINBOX:u32=21;
+pub const DUNIT_UI_PROGRESS:u32=22;
+pub const DUNIT_UI_BUSY:u32=23;
+pub const DUNIT_UI_NUMBER_READ_ONLY:u32=1;
+pub const DUNIT_UI_NUMBER_RUNNING:u32=2;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
 pub type DunitUiUpdateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64)->i32;
 pub type DunitUiDecorateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiAppearanceV1)->i32;
 pub type DunitUiConfigureInputV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiInputV1)->i32;
 pub type DunitUiTextChangedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, *const u8, usize)->i32;
+pub type DunitUiConfigureNumberV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiNumberV1)->i32;
+pub type DunitUiNumberChangedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, i64)->i32;
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct DunitUiNodeV1 {
@@ -97,6 +106,43 @@ pub struct DunitUiTextV1 {
 }
 const _: [();24]=[();core::mem::size_of::<DunitUiTextV1>()];
 const _: [();8]=[();core::mem::align_of::<DunitUiTextV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiNumberV1 {
+    pub label:*const u8,
+    pub label_len:usize,
+    pub min:i64,
+    pub max:i64,
+    pub step:i64,
+    pub page_step:i64,
+    pub value:i64,
+    pub flags:u32,
+    pub reserved:u32,
+}
+const _: [();64]=[();core::mem::size_of::<DunitUiNumberV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiNumberV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiNumbersV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub configure:Option<DunitUiConfigureNumberV1>,
+    pub changed:Option<DunitUiNumberChangedV1>,
+}
+const _: [();24]=[();core::mem::size_of::<DunitUiNumbersV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiNumbersV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiAppV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub style:*const DunitUiStyleV1,
+    pub text:*const DunitUiTextV1,
+    pub numbers:*const DunitUiNumbersV1,
+}
+const _: [();32]=[();core::mem::size_of::<DunitUiAppV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiAppV1>()];
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1)->i32=crate::dunit_ui_run_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1)->i32=crate::dunit_ui_run_styled_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1, *const DunitUiTextV1)->i32=crate::dunit_ui_run_text_v1;
+const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiAppV1)->i32=crate::dunit_ui_run_app_v1;

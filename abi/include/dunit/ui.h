@@ -30,17 +30,29 @@
 #define DUNIT_UI_INPUT_PASSWORD 2u
 #define DUNIT_UI_INPUT_SOFT_WRAP 4u
 #define DUNIT_UI_INPUT_SUBMIT 8u
+#define DUNIT_UI_SLIDER 19u
+#define DUNIT_UI_VERTICAL_SLIDER 20u
+#define DUNIT_UI_SPINBOX 21u
+#define DUNIT_UI_PROGRESS 22u
+#define DUNIT_UI_BUSY 23u
+#define DUNIT_UI_NUMBER_READ_ONLY 1u
+#define DUNIT_UI_NUMBER_RUNNING 2u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 struct DunitUiAppearanceV1;
 struct DunitUiStyleV1;
 struct DunitUiInputV1;
 struct DunitUiTextV1;
+struct DunitUiNumberV1;
+struct DunitUiNumbersV1;
+struct DunitUiAppV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);
 typedef int32_t (*DunitUiUpdateV1)(void * user, uint64_t message);
 typedef int32_t (*DunitUiDecorateV1)(void * user, uint32_t index, struct DunitUiAppearanceV1 * appearance);
 typedef int32_t (*DunitUiConfigureInputV1)(void * user, uint32_t index, struct DunitUiInputV1 * input);
 typedef int32_t (*DunitUiTextChangedV1)(void * user, uint64_t message, const uint8_t * value, size_t value_len);
+typedef int32_t (*DunitUiConfigureNumberV1)(void * user, uint32_t index, struct DunitUiNumberV1 * number);
+typedef int32_t (*DunitUiNumberChangedV1)(void * user, uint64_t message, int64_t value);
 typedef struct DunitUiNodeV1 {
     uint32_t kind;
     uint32_t parent;
@@ -84,6 +96,30 @@ typedef struct DunitUiTextV1 {
     DunitUiConfigureInputV1 configure;
     DunitUiTextChangedV1 changed;
 } DunitUiTextV1;
+typedef struct DunitUiNumberV1 {
+    const uint8_t * label;
+    size_t label_len;
+    int64_t min;
+    int64_t max;
+    int64_t step;
+    int64_t page_step;
+    int64_t value;
+    uint32_t flags;
+    uint32_t reserved;
+} DunitUiNumberV1;
+typedef struct DunitUiNumbersV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    DunitUiConfigureNumberV1 configure;
+    DunitUiNumberChangedV1 changed;
+} DunitUiNumbersV1;
+typedef struct DunitUiAppV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    const struct DunitUiStyleV1 * style;
+    const struct DunitUiTextV1 * text;
+    const struct DunitUiNumbersV1 * numbers;
+} DunitUiAppV1;
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,6 +127,7 @@ extern "C" {
 int32_t dunit_ui_run_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks);
 int32_t dunit_ui_run_styled_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style);
 int32_t dunit_ui_run_text_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style, const struct DunitUiTextV1 * text);
+int32_t dunit_ui_run_app_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiAppV1 * app);
 #ifdef __cplusplus
 }
 #endif

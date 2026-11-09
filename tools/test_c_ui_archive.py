@@ -15,7 +15,7 @@ class Archive(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);source=root/'runtime.c';obj=root/'runtime.o';raw=root/'raw.a'
             # This is a packaging fixture, not a substitute UI implementation.
-            source.write_text('#include <stdio.h>\nint unused(void){return 99;}\nint dunit_ui_run_v1(void){puts("archive callable");return 17;}\nint dunit_ui_run_styled_v1(void){puts("styled archive callable");return 23;}\nint dunit_ui_run_text_v1(void){puts("text archive callable");return 29;}\n')
+            source.write_text('#include <stdio.h>\nint unused(void){return 99;}\nint dunit_ui_run_v1(void){puts("archive callable");return 17;}\nint dunit_ui_run_styled_v1(void){puts("styled archive callable");return 23;}\nint dunit_ui_run_text_v1(void){puts("text archive callable");return 29;}\nint dunit_ui_run_app_v1(void){puts("app archive callable");return 31;}\n')
             subprocess.run(['cc','-ffunction-sections','-fdata-sections','-c',str(source),'-o',str(obj)],check=True)
             subprocess.run(['ar','rcs',str(raw),str(obj)],check=True)
             compiler=root/'cargo';compiler.write_text('#!/usr/bin/env python3\nprint('+repr(json.dumps({'reason':'compiler-artifact','target':{'name':'dunit_c'},'filenames':[str(raw)]}))+')\n');compiler.chmod(0o755)
@@ -27,11 +27,12 @@ class Archive(unittest.TestCase):
             self.assertIn(' dunit_ui_run_v1',symbols);self.assertNotIn(' unused',symbols)
             self.assertIn(' dunit_ui_run_styled_v1',symbols)
             self.assertIn(' dunit_ui_run_text_v1',symbols)
+            self.assertIn(' dunit_ui_run_app_v1',symbols)
             unresolved=subprocess.check_output(['nm','-u',str(archive)],text=True)
             self.assertIn(' puts',unresolved)
             client=root/'client.c';exe=root/'client'
-            client.write_text('extern int dunit_ui_run_v1(void); extern int dunit_ui_run_styled_v1(void); extern int dunit_ui_run_text_v1(void); int main(void){return dunit_ui_run_v1()!=17 || dunit_ui_run_styled_v1()!=23 || dunit_ui_run_text_v1()!=29;}\n')
+            client.write_text('extern int dunit_ui_run_v1(void); extern int dunit_ui_run_styled_v1(void); extern int dunit_ui_run_text_v1(void); extern int dunit_ui_run_app_v1(void); int main(void){return dunit_ui_run_v1()!=17 || dunit_ui_run_styled_v1()!=23 || dunit_ui_run_text_v1()!=29 || dunit_ui_run_app_v1()!=31;}\n')
             subprocess.run(['cc',str(client),str(archive),'-o',str(exe)],check=True)
             result=subprocess.run([str(exe)],capture_output=True,text=True)
-            self.assertEqual(result.returncode,0);self.assertEqual(result.stdout,'archive callable\nstyled archive callable\ntext archive callable\n')
+            self.assertEqual(result.returncode,0);self.assertEqual(result.stdout,'archive callable\nstyled archive callable\ntext archive callable\napp archive callable\n')
 if __name__=='__main__':unittest.main()
