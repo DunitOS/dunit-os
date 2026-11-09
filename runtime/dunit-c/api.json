@@ -1,14 +1,18 @@
 {
-  "constants": {"DUNIT_UI_ABI_VERSION": 1, "DUNIT_UI_ROOT": 4294967295, "DUNIT_UI_MAX_TEXT_BYTES": 65536, "DUNIT_UI_TEXT": 1, "DUNIT_UI_BUTTON": 2, "DUNIT_UI_COLUMN": 3, "DUNIT_UI_ROW": 4, "DUNIT_UI_CHECKBOX": 5, "DUNIT_UI_CHECKBOX_CHECKED": 6, "DUNIT_UI_SWITCH": 7, "DUNIT_UI_SWITCH_CHECKED": 8, "DUNIT_UI_TOGGLE_BUTTON": 9, "DUNIT_UI_TOGGLE_BUTTON_CHECKED": 10, "DUNIT_UI_RADIO_GROUP_COLUMN": 11, "DUNIT_UI_RADIO_GROUP_ROW": 12, "DUNIT_UI_RADIO": 13, "DUNIT_UI_RADIO_CHECKED": 14, "DUNIT_UI_DISABLED": 2147483648},
+  "constants": {"DUNIT_UI_ABI_VERSION": 1, "DUNIT_UI_ROOT": 4294967295, "DUNIT_UI_MAX_TEXT_BYTES": 65536, "DUNIT_UI_TEXT": 1, "DUNIT_UI_BUTTON": 2, "DUNIT_UI_COLUMN": 3, "DUNIT_UI_ROW": 4, "DUNIT_UI_CHECKBOX": 5, "DUNIT_UI_CHECKBOX_CHECKED": 6, "DUNIT_UI_SWITCH": 7, "DUNIT_UI_SWITCH_CHECKED": 8, "DUNIT_UI_TOGGLE_BUTTON": 9, "DUNIT_UI_TOGGLE_BUTTON_CHECKED": 10, "DUNIT_UI_RADIO_GROUP_COLUMN": 11, "DUNIT_UI_RADIO_GROUP_ROW": 12, "DUNIT_UI_RADIO": 13, "DUNIT_UI_RADIO_CHECKED": 14, "DUNIT_UI_DISABLED": 2147483648, "DUNIT_UI_STACK": 15, "DUNIT_UI_GRID": 16},
   "callbacks": {
     "DunitUiBuildV1": {"result": "i32", "args": [["user", "void_ptr"], ["nodes", "nodes_mut"], ["capacity", "u32"]]},
-    "DunitUiUpdateV1": {"result": "i32", "args": [["user", "void_ptr"], ["message", "u64"]]}
+    "DunitUiUpdateV1": {"result": "i32", "args": [["user", "void_ptr"], ["message", "u64"]]},
+    "DunitUiDecorateV1": {"result": "i32", "args": [["user", "void_ptr"], ["index", "u32"], ["appearance", "appearance_mut"]]}
   },
   "records": {
     "DunitUiNodeV1": {"size": 48, "align": 8, "fields": [["kind", "u32"], ["parent", "u32"], ["key", "bytes"], ["key_len", "usize"], ["text", "bytes"], ["text_len", "usize"], ["message", "u64"]]},
-    "DunitUiCallbacksV1": {"size": 32, "align": 8, "fields": [["abi_version", "u32"], ["struct_size", "u32"], ["user", "void_ptr"], ["build", "DunitUiBuildV1"], ["update", "DunitUiUpdateV1"]]}
+    "DunitUiCallbacksV1": {"size": 32, "align": 8, "fields": [["abi_version", "u32"], ["struct_size", "u32"], ["user", "void_ptr"], ["build", "DunitUiBuildV1"], ["update", "DunitUiUpdateV1"]]},
+    "DunitUiAppearanceV1": {"size": 16, "align": 8, "fields": [["classes", "bytes"], ["classes_len", "usize"]]},
+    "DunitUiStyleV1": {"size": 32, "align": 8, "fields": [["abi_version", "u32"], ["struct_size", "u32"], ["stylesheet", "bytes"], ["stylesheet_len", "usize"], ["decorate", "DunitUiDecorateV1"]]}
   },
   "functions": {
-    "dunit_ui_run_v1": {"result": "i32", "args": [["argc", "i32"], ["argv", "strings"], ["envp", "strings"], ["width", "u32"], ["height", "u32"], ["callbacks", "callbacks_const"]]}
+    "dunit_ui_run_v1": {"result": "i32", "args": [["argc", "i32"], ["argv", "strings"], ["envp", "strings"], ["width", "u32"], ["height", "u32"], ["callbacks", "callbacks_const"]]},
+    "dunit_ui_run_styled_v1": {"result": "i32", "args": [["argc", "i32"], ["argv", "strings"], ["envp", "strings"], ["width", "u32"], ["height", "u32"], ["callbacks", "callbacks_const"], ["style", "style_const"]]}
   }
 }

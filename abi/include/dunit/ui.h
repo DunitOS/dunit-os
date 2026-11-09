@@ -22,10 +22,15 @@
 #define DUNIT_UI_RADIO 13u
 #define DUNIT_UI_RADIO_CHECKED 14u
 #define DUNIT_UI_DISABLED 2147483648u
+#define DUNIT_UI_STACK 15u
+#define DUNIT_UI_GRID 16u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
+struct DunitUiAppearanceV1;
+struct DunitUiStyleV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);
 typedef int32_t (*DunitUiUpdateV1)(void * user, uint64_t message);
+typedef int32_t (*DunitUiDecorateV1)(void * user, uint32_t index, struct DunitUiAppearanceV1 * appearance);
 typedef struct DunitUiNodeV1 {
     uint32_t kind;
     uint32_t parent;
@@ -42,11 +47,23 @@ typedef struct DunitUiCallbacksV1 {
     DunitUiBuildV1 build;
     DunitUiUpdateV1 update;
 } DunitUiCallbacksV1;
+typedef struct DunitUiAppearanceV1 {
+    const uint8_t * classes;
+    size_t classes_len;
+} DunitUiAppearanceV1;
+typedef struct DunitUiStyleV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    const uint8_t * stylesheet;
+    size_t stylesheet_len;
+    DunitUiDecorateV1 decorate;
+} DunitUiStyleV1;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 int32_t dunit_ui_run_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks);
+int32_t dunit_ui_run_styled_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style);
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,16 @@
+// Application data; the SDK resolves this layer against the installed profile.
+Column.page { padding: 16; gap: 8; }
+Column.page.warm { background: #22202a; }
+Text#title.heading { font-size: 22; padding: 0; color: $accent; }
+Stack.hero { height: 64; padding: 0; }
+Column.backdrop { width: 100%; height: 100%; background: $surface; radius: 8; }
+Text.summary { padding: 18; font-size: 18; color: $text; }
+Row.controls { padding: 0; gap: 8; height: 36; justify-content: space-between; }
+Button.control { width: 30%; }
+Grid.cards { padding: 0; gap: 8; grid-columns: 2; height: 96; }
+Grid.cards.wide { grid-columns: 4; height: 44; }
+Button.card { height: 40; }
+Button.card.selected { background: $accent; color: $window-bg; }
+Button.card.selected.warm { background: #dd9c58; color: #161b22; }
+Button.card:focus { border-width: 2; border-color: $text; }
+Text.hint { padding: 0; color: $muted; }

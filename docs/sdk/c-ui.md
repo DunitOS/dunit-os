@@ -6,10 +6,10 @@ The static library is the existing Rust `ComponentWindow`, component model,
 DSS theme, renderer and window transport behind a synchronous C adapter.
 It implements no second layout engine, widget painter or GUI handshake.
 
-This subset describes Text, Button, Column, Row, Checkbox, Switch, ToggleButton
+This subset describes Text, Button, Column, Row, Stack, Grid, Checkbox, Switch, ToggleButton
 and grouped Radio nodes. It opens one native themed window and dispatches
 activation messages back to the C-owned model.
-Other widgets, application stylesheet parameters and C transfer/file-capability
+Other widgets and C transfer/file-capability
 interfaces remain later M7.10 increments. This is not the complete C SDK.
 
 ## Frozen v1 contract
@@ -31,7 +31,7 @@ callbacks. C owns `user` and its model; Rust owns the converted Views and window
   that positive count. Zero, over-capacity counts, unsupported kinds, malformed
   UTF-8 and invalid trees fail. A negative callback result propagates unchanged.
 - Node 0 has parent `DUNIT_UI_ROOT`. Every other parent index precedes the child
-  and identifies a Column/Row or radio group container. Input order defines
+  and identifies a Column/Row/Stack/Grid or radio group container. Input order defines
   sibling order. The original SDK validator checks keys and shared tree/depth bounds.
 - Key/text spans are UTF-8 bytes with explicit lengths. They need no terminator.
   Each span is bounded by `DUNIT_UI_MAX_TEXT_BYTES`. Rust copies them into owned
@@ -86,6 +86,48 @@ containers, including radio groups; it does not disable a subtree. Unsupported
 kind bits still return `-DUNIT_EINVAL`. No record field, existing kind value or
 export changes; unflagged v1 clients retain their behavior.
 
+## Application layout and styles
+
+`DUNIT_UI_STACK` and `DUNIT_UI_GRID` create ordinary SDK containers, with the
+same child ordering, unique-key and depth limits as Column/Row. All four use
+the Rust layout engine; the C adapter adds no layout algorithm.
+
+`dunit_ui_run_styled_v1` takes the same arguments as `dunit_ui_run_v1`, followed
+by a pointer to `DunitUiStyleV1`. Set its `abi_version` to `DUNIT_UI_ABI_VERSION`
+and `struct_size` to `sizeof style`. Its `stylesheet`/`stylesheet_len` describe
+bounded UTF-8 DSS (at most `DUNIT_UI_MAX_TEXT_BYTES`), copied at entry. Null at
+zero length is valid. The SDK's application layer resolves that sheet against
+the installed profile tokens and keeps it during ordinary theme reloads.
+Selectors, colors, state rules and layout properties use the exact same DSS
+parser, validation, cascade and renderer as Rust applications.
+
+The optional `decorate(user, index, appearance)` callback attaches classes to
+the node at that build's array index, using the same `user` as build/update.
+It runs once per node on every successful description build; invocation order
+is unspecified. `DunitUiAppearanceV1` starts as `{NULL,0}`. Return 0 with an
+optional ASCII-whitespace-separated UTF-8 `classes` span, or a negative error.
+Positive results are invalid. The same bounded-span checks and SDK identifier
+grammar apply. Classes are copied before the next callback; the returned span
+must remain readable until that copy. No Rust buffer or borrowed span may be
+retained or unwound across the FFI boundary. A null callback means no classes;
+id/element selectors in DSS still work.
+
+Width/height (pixels, percentages, fill/auto), min/max constraints, flex weights,
+gaps, padding, alignment and Grid column counts can be set through application
+DSS. Use classes from the C model to change layout or appearance on update;
+the stylesheet itself is fixed for the window session. The example
+`/assets/tcc/layout.c` loads `/assets/tcc/layout.dss`, stacks a caption over a
+panel and switches a card Grid between two/four columns and two palettes.
+Its stylesheet is application data, not a second widget painter.
+
+On native x86_64, appearance is 16 bytes and style is 32 bytes, both aligned to
+8. These new declarations and the styled export are generated from the common
+schema. Existing v1 structures, callbacks, values and export remain unchanged.
+Both run functions share the same busy/session guard. Invalid initial classes
+or decoration errors fail before opening; failed update candidates keep the
+last valid tree and terminate with an error. DSS/theme failure during opening
+consumes the single window attempt, consistent with the original v1 contract.
+
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
 received by main and remain mapped. The adapter initializes the existing Rust
@@ -127,6 +169,7 @@ python3 tools/test_c_ui.py --accel tcg
 python3 tools/test_c_ui_checkables.py --accel tcg
 python3 tools/test_c_ui_radio.py --accel tcg
 python3 tools/test_c_ui_disabled.py --accel tcg
+python3 tools/test_c_ui_style.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -194,3 +237,17 @@ rejection of invalid flag combinations and cancellation when a press is disabled
 before release. Checks total 56: twenty adapter, fifteen button/checkable, six
 fixture, five header/sysroot, nine image-profile and one archive-link test.
 The shipped archive is 2,060,368 bytes (+528); the installer ESP is unchanged.
+
+The layout/style block passes 64 host/Rust checks: 28 adapter, 15 existing
+button/checkable, six frozen fixture, five header/sysroot, nine image-profile
+and one archive-link test (both public entry points are retained and linked).
+The native layout lab passes ten required/six forbidden markers and three
+exact 560×360 Rust-reference comparisons. Hit rectangles independently confirm
+that the Grid reflows from two rows to one. The lab also rejects invalid style
+configuration/classes before opening and proves that the styled and original
+entry points share the one-session guard. The frozen older C object passes
+its own QEMU TCG run after a forced rebuild, including both original pixel
+comparisons. Archive: 2,062,380 bytes (+2,012), still in the original ESP.
+Input widgets, other advanced widget bindings and transfer/file capabilities
+remain later M7.10 work; this completes the application DSS/classes and core
+Column/Row/Stack/Grid layout surface, not the full milestone.

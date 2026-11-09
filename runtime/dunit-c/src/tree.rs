@@ -1,6 +1,6 @@
 //! Copy bounded foreign descriptions into real owned SDK Views.
 use super::*;
-unsafe fn text(pointer: *const u8, length: usize) -> dunit::Result<String> {
+pub(super) unsafe fn text(pointer: *const u8, length: usize) -> dunit::Result<String> {
     if length > DUNIT_UI_MAX_TEXT_BYTES as usize || (length > 0 && pointer.is_null()) {
         return Err(invalid());
     }
@@ -15,6 +15,13 @@ fn radio_group(kind: u32) -> bool {
     matches!(kind, DUNIT_UI_RADIO_GROUP_COLUMN | DUNIT_UI_RADIO_GROUP_ROW)
 }
 pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>> {
+    convert_decorated(nodes, core::ptr::null_mut(), None)
+}
+pub(super) unsafe fn convert_decorated(
+    nodes: &[DunitUiNodeV1],
+    user: *mut c_void,
+    decorate: Option<DunitUiDecorateV1>,
+) -> dunit::Result<View<u64>> {
     if nodes.is_empty() || nodes.len() > MAX_VIEW_NODES || nodes[0].parent != DUNIT_UI_ROOT {
         return Err(invalid());
     }
@@ -23,8 +30,10 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
     for (index, node) in nodes.iter().enumerate().skip(1) {
         let parent = node.parent as usize;
         if parent >= index
-            || !(matches!(nodes[parent].kind, DUNIT_UI_COLUMN | DUNIT_UI_ROW)
-                || radio_group(nodes[parent].kind))
+            || !(matches!(
+                nodes[parent].kind,
+                DUNIT_UI_COLUMN | DUNIT_UI_ROW | DUNIT_UI_STACK | DUNIT_UI_GRID
+            ) || radio_group(nodes[parent].kind))
         {
             return Err(invalid());
         }
@@ -57,7 +66,7 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
         let key = text(node.key, node.key_len)?;
         let mut nested = core::mem::take(&mut children[index]);
         nested.reverse();
-        let view = match kind {
+        let mut view = match kind {
             DUNIT_UI_TEXT => View::text(key, text(node.text, node.text_len)?),
             DUNIT_UI_BUTTON => View::button(key, text(node.text, node.text_len)?, node.message),
             DUNIT_UI_CHECKBOX | DUNIT_UI_CHECKBOX_CHECKED => View::checkbox(
@@ -93,9 +102,29 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
             }
             DUNIT_UI_COLUMN | DUNIT_UI_RADIO_GROUP_COLUMN => View::column(key, nested),
             DUNIT_UI_ROW | DUNIT_UI_RADIO_GROUP_ROW => View::row(key, nested),
+            DUNIT_UI_STACK => View::stack(key, nested),
+            DUNIT_UI_GRID => View::grid(key, nested),
             _ => return Err(invalid()),
         }
         .disabled(disabled);
+        if let Some(decorate) = decorate {
+            let mut appearance = DunitUiAppearanceV1 {
+                classes: core::ptr::null(),
+                classes_len: 0,
+            };
+            let result = decorate(user, index as u32, &mut appearance);
+            if result != 0 {
+                return Err(if result < 0 {
+                    dunit::Error(result as isize)
+                } else {
+                    invalid()
+                });
+            }
+            for class in text(appearance.classes, appearance.classes_len)?.split_ascii_whitespace()
+            {
+                view = view.class(class);
+            }
+        }
         if index == 0 {
             root = Some(view);
         } else {

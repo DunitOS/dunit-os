@@ -25,6 +25,7 @@ struct Model {
     nodes: Vec<DunitUiNodeV1>,
     stop: bool,
     error: Option<dunit::Error>,
+    decorate: Option<DunitUiDecorateV1>,
 }
 impl Component for Model {
     type Message = u64;
@@ -42,7 +43,7 @@ impl Component for Model {
             }));
             return;
         }
-        match unsafe { build(&self.callbacks, &mut self.nodes) } {
+        match unsafe { build_decorated(&self.callbacks, &mut self.nodes, self.decorate) } {
             Ok(tree) => self.tree = tree,
             Err(error) => self.error = Some(error),
         }
@@ -68,20 +69,35 @@ fn node_buffer() -> Vec<DunitUiNodeV1> {
 }
 impl Model {
     unsafe fn new(callbacks: DunitUiCallbacksV1) -> dunit::Result<Self> {
+        Self::new_decorated(callbacks, None)
+    }
+    unsafe fn new_decorated(
+        callbacks: DunitUiCallbacksV1,
+        decorate: Option<DunitUiDecorateV1>,
+    ) -> dunit::Result<Self> {
         let mut nodes = node_buffer();
-        let tree = build(&callbacks, &mut nodes)?;
+        let tree = build_decorated(&callbacks, &mut nodes, decorate)?;
         Ok(Self {
             callbacks,
             tree,
             nodes,
             stop: false,
             error: None,
+            decorate,
         })
     }
 }
+#[cfg(test)]
 unsafe fn build(
     callbacks: &DunitUiCallbacksV1,
     nodes: &mut [DunitUiNodeV1],
+) -> dunit::Result<View<u64>> {
+    build_decorated(callbacks, nodes, None)
+}
+unsafe fn build_decorated(
+    callbacks: &DunitUiCallbacksV1,
+    nodes: &mut [DunitUiNodeV1],
+    decorate: Option<DunitUiDecorateV1>,
 ) -> dunit::Result<View<u64>> {
     let count = (callbacks.build.unwrap())(callbacks.user, nodes.as_mut_ptr(), nodes.len() as u32);
     if count <= 0 {
@@ -94,7 +110,11 @@ unsafe fn build(
     if count as usize > nodes.len() {
         return Err(invalid());
     }
-    tree::convert(&nodes[..count as usize])
+    if decorate.is_some() {
+        tree::convert_decorated(&nodes[..count as usize], callbacks.user, decorate)
+    } else {
+        tree::convert(&nodes[..count as usize])
+    }
 }
 
 /// Run one themed window per process. Foreign pointers/callbacks obey the
@@ -113,6 +133,43 @@ pub unsafe extern "C" fn dunit_ui_run_v1(
     height: u32,
     callbacks: *const DunitUiCallbacksV1,
 ) -> i32 {
+    run(argc, argv, envp, width, height, callbacks, None)
+}
+
+/// Open using the SDK application DSS layer and optional per-node appearance callback.
+/// # Safety
+/// The v1 run contract applies; style spans must remain readable until copied.
+#[no_mangle]
+pub unsafe extern "C" fn dunit_ui_run_styled_v1(
+    argc: i32,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    width: u32,
+    height: u32,
+    callbacks: *const DunitUiCallbacksV1,
+    style: *const DunitUiStyleV1,
+) -> i32 {
+    if style.is_null() {
+        return invalid().0 as i32;
+    }
+    let style = *style;
+    if style.abi_version != DUNIT_UI_ABI_VERSION
+        || style.struct_size as usize != core::mem::size_of::<DunitUiStyleV1>()
+    {
+        return invalid().0 as i32;
+    }
+    run(argc, argv, envp, width, height, callbacks, Some(style))
+}
+
+unsafe fn run(
+    argc: i32,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    width: u32,
+    height: u32,
+    callbacks: *const DunitUiCallbacksV1,
+    style: Option<DunitUiStyleV1>,
+) -> i32 {
     if callbacks.is_null()
         || argc < 0
         || (argc > 0 && argv.is_null())
@@ -130,6 +187,13 @@ pub unsafe extern "C" fn dunit_ui_run_v1(
     {
         return invalid().0 as i32;
     }
+    let (overlay, decorate) = match style {
+        Some(style) => match tree::text(style.stylesheet, style.stylesheet_len) {
+            Ok(text) => (text, style.decorate),
+            Err(error) => return error.0 as i32,
+        },
+        None => (String::new(), None),
+    };
     if RUNNING
         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_err()
@@ -141,10 +205,14 @@ pub unsafe extern "C" fn dunit_ui_run_v1(
         return dunit::errno::EPIPE as i32;
     }
     let result = (|| {
-        let model = Model::new(callbacks)?;
+        let model = if decorate.is_none() {
+            Model::new(callbacks)?
+        } else {
+            Model::new_decorated(callbacks, decorate)?
+        };
         CONSUMED.store(true, Ordering::Release);
         dunit::__private::init_c_runtime(argc as usize, argv, envp);
-        let mut ui = ComponentWindow::open_themed(width, height, model)?;
+        let mut ui = ComponentWindow::open_themed_with_style(width, height, model, &overlay)?;
         let result = loop {
             match ui.next_event(Duration::from_secs(30)) {
                 Err(error) => break Err(error),
@@ -179,5 +247,7 @@ mod checkable_tests;
 mod disabled_tests;
 #[cfg(test)]
 mod radio_tests;
+#[cfg(test)]
+mod style_tests;
 #[cfg(test)]
 mod tests;

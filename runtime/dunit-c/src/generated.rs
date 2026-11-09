@@ -17,8 +17,11 @@ pub const DUNIT_UI_RADIO_GROUP_ROW:u32=12;
 pub const DUNIT_UI_RADIO:u32=13;
 pub const DUNIT_UI_RADIO_CHECKED:u32=14;
 pub const DUNIT_UI_DISABLED:u32=2147483648;
+pub const DUNIT_UI_STACK:u32=15;
+pub const DUNIT_UI_GRID:u32=16;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
 pub type DunitUiUpdateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64)->i32;
+pub type DunitUiDecorateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiAppearanceV1)->i32;
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct DunitUiNodeV1 {
@@ -43,4 +46,24 @@ pub struct DunitUiCallbacksV1 {
 }
 const _: [();32]=[();core::mem::size_of::<DunitUiCallbacksV1>()];
 const _: [();8]=[();core::mem::align_of::<DunitUiCallbacksV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiAppearanceV1 {
+    pub classes:*const u8,
+    pub classes_len:usize,
+}
+const _: [();16]=[();core::mem::size_of::<DunitUiAppearanceV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiAppearanceV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiStyleV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub stylesheet:*const u8,
+    pub stylesheet_len:usize,
+    pub decorate:Option<DunitUiDecorateV1>,
+}
+const _: [();32]=[();core::mem::size_of::<DunitUiStyleV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiStyleV1>()];
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1)->i32=crate::dunit_ui_run_v1;
+const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1)->i32=crate::dunit_ui_run_styled_v1;

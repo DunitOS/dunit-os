@@ -112,6 +112,9 @@ jobs:
       - name: Native C disabled controls and exact pixels
         run: python3 tools/test_c_ui_disabled.py --accel tcg
 
+      - name: Native C application styles and Grid Stack layout
+        run: python3 tools/test_c_ui_style.py --accel tcg
+
       - name: Frozen C UI v1 object across a native runtime rebuild
         run: python3 tools/test_c_ui_compat.py --accel tcg
 

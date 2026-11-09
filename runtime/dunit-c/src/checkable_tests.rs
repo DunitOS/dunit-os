@@ -140,12 +140,15 @@ impl Component for Reference {
     }
 }
 pub(super) fn renderer() -> Renderer {
+    renderer_with_style("")
+}
+pub(super) fn renderer_with_style(overlay: &str) -> Renderer {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let theme = Theme::parse_shell(
         &std::fs::read_to_string(root.join("assets/dwm/sdk/dark.dss")).unwrap(),
         &std::fs::read_to_string(root.join("assets/dwm/sdk/shell.dss")).unwrap(),
         &std::fs::read_to_string(root.join("assets/dwm/sdk/base.dss")).unwrap(),
-        "",
+        overlay,
     )
     .unwrap();
     let font =

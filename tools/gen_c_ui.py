@@ -8,6 +8,8 @@ TYPES={
     'void_ptr':('void *','*mut core::ffi::c_void'),
     'nodes_mut':('struct DunitUiNodeV1 *','*mut DunitUiNodeV1'),
     'callbacks_const':('const struct DunitUiCallbacksV1 *','*const DunitUiCallbacksV1'),
+    'appearance_mut':('struct DunitUiAppearanceV1 *','*mut DunitUiAppearanceV1'),
+    'style_const':('const struct DunitUiStyleV1 *','*const DunitUiStyleV1'),
     'strings':('const char *const *','*const *const u8'),
 }
 

@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""C application DSS, Grid/Stack layout and live classes through the Rust SDK."""
+import argparse
+from test_c_ui import ROOT, prepare_reference, run_native, verify
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--accel',choices=('tcg','kvm','auto'),default='tcg')
+    args=parser.parse_args()
+    prepare_reference()
+    run_native(args.accel,ROOT/'tools/c_ui_style_markers.json')
+    verify(560,360,'c-ui-style',('initial','wide','styled'))
+
+if __name__=='__main__':main()
