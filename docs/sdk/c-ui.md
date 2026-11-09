@@ -74,6 +74,18 @@ has one tab stop; SDK arrows select/wrap within that group. Activating an
 already selected radio does not dispatch another message. Groups are independent.
 These additional kinds preserve every existing ABI v1 layout/value/export.
 
+OR `DUNIT_UI_DISABLED` into an activation node's `kind`, for example
+`DUNIT_UI_CHECKBOX_CHECKED | DUNIT_UI_DISABLED`. It applies to Button, Checkbox,
+Switch, ToggleButton and Radio, in either checked state. It maps directly to
+the SDK's `View::disabled(true)`: disabled controls reject pointer activation,
+are skipped by focus navigation and retain their C-owned checked/selected state.
+Disabling a focused or pressed control clears that transient interaction;
+removing the flag in a subsequent build enables it again. Theme `:disabled`
+styles remain those of the Rust SDK. The flag cannot be used on Text or
+containers, including radio groups; it does not disable a subtree. Unsupported
+kind bits still return `-DUNIT_EINVAL`. No record field, existing kind value or
+export changes; unflagged v1 clients retain their behavior.
+
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
 received by main and remain mapped. The adapter initializes the existing Rust
@@ -114,6 +126,7 @@ python3 tools/test_c_ui_archive.py  # needs the normal build tools, including ll
 python3 tools/test_c_ui.py --accel tcg
 python3 tools/test_c_ui_checkables.py --accel tcg
 python3 tools/test_c_ui_radio.py --accel tcg
+python3 tools/test_c_ui_disabled.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -171,3 +184,13 @@ The radio gate keeps twelve required/six forbidden markers. Host checks total
 nine image-profile and one archive-link test. The frozen v1 object also passes
 its separate native gate with both original pixel comparisons against this
 library. Other widget/style/transfer bindings remain outside this increment.
+
+The disabled-controls scenario compiles `/assets/tcc/disabled.c` inside Dunit,
+tabs past disabled controls, enables them, activates a button and checkbox, then
+disables them again while retaining checked state. Its three 400×240 captures
+match direct Rust SDK pixels exactly (nine required/six forbidden markers).
+Host tests also exercise all nine activation kinds, disabled radio tab stops,
+rejection of invalid flag combinations and cancellation when a press is disabled
+before release. Checks total 56: twenty adapter, fifteen button/checkable, six
+fixture, five header/sysroot, nine image-profile and one archive-link test.
+The shipped archive is 2,060,368 bytes (+528); the installer ESP is unchanged.

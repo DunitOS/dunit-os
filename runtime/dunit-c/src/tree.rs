@@ -36,28 +36,46 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
     let mut root = None;
     for index in (0..nodes.len()).rev() {
         let node = &nodes[index];
+        let kind = node.kind & !DUNIT_UI_DISABLED;
+        let disabled = node.kind & DUNIT_UI_DISABLED != 0;
+        if disabled
+            && !matches!(
+                kind,
+                DUNIT_UI_BUTTON
+                    | DUNIT_UI_CHECKBOX
+                    | DUNIT_UI_CHECKBOX_CHECKED
+                    | DUNIT_UI_SWITCH
+                    | DUNIT_UI_SWITCH_CHECKED
+                    | DUNIT_UI_TOGGLE_BUTTON
+                    | DUNIT_UI_TOGGLE_BUTTON_CHECKED
+                    | DUNIT_UI_RADIO
+                    | DUNIT_UI_RADIO_CHECKED
+            )
+        {
+            return Err(invalid());
+        }
         let key = text(node.key, node.key_len)?;
         let mut nested = core::mem::take(&mut children[index]);
         nested.reverse();
-        let view = match node.kind {
+        let view = match kind {
             DUNIT_UI_TEXT => View::text(key, text(node.text, node.text_len)?),
             DUNIT_UI_BUTTON => View::button(key, text(node.text, node.text_len)?, node.message),
             DUNIT_UI_CHECKBOX | DUNIT_UI_CHECKBOX_CHECKED => View::checkbox(
                 key,
                 text(node.text, node.text_len)?,
-                node.kind == DUNIT_UI_CHECKBOX_CHECKED,
+                kind == DUNIT_UI_CHECKBOX_CHECKED,
                 node.message,
             ),
             DUNIT_UI_SWITCH | DUNIT_UI_SWITCH_CHECKED => View::switch(
                 key,
                 text(node.text, node.text_len)?,
-                node.kind == DUNIT_UI_SWITCH_CHECKED,
+                kind == DUNIT_UI_SWITCH_CHECKED,
                 node.message,
             ),
             DUNIT_UI_TOGGLE_BUTTON | DUNIT_UI_TOGGLE_BUTTON_CHECKED => View::toggle_button(
                 key,
                 text(node.text, node.text_len)?,
-                node.kind == DUNIT_UI_TOGGLE_BUTTON_CHECKED,
+                kind == DUNIT_UI_TOGGLE_BUTTON_CHECKED,
                 node.message,
             ),
             DUNIT_UI_RADIO | DUNIT_UI_RADIO_CHECKED => {
@@ -69,14 +87,15 @@ pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>
                     key,
                     text(node.text, node.text_len)?,
                     text(parent.key, parent.key_len)?,
-                    node.kind == DUNIT_UI_RADIO_CHECKED,
+                    kind == DUNIT_UI_RADIO_CHECKED,
                     node.message,
                 )
             }
             DUNIT_UI_COLUMN | DUNIT_UI_RADIO_GROUP_COLUMN => View::column(key, nested),
             DUNIT_UI_ROW | DUNIT_UI_RADIO_GROUP_ROW => View::row(key, nested),
             _ => return Err(invalid()),
-        };
+        }
+        .disabled(disabled);
         if index == 0 {
             root = Some(view);
         } else {

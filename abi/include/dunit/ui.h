@@ -21,6 +21,7 @@
 #define DUNIT_UI_RADIO_GROUP_ROW 12u
 #define DUNIT_UI_RADIO 13u
 #define DUNIT_UI_RADIO_CHECKED 14u
+#define DUNIT_UI_DISABLED 2147483648u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);

@@ -1,0 +1,69 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /system/bin/tcc /assets/tcc/disabled.c -o /tmp/c-gui -ldunit_ui",
+      "exec /app/setup import-desktop /assets/tcc/disabled.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {"wait_marker": "gui_server: desktop ready", "timeout": 60},
+        {"wait_marker": "[GUI-PRESENT] app=c_gui", "timeout": 60},
+        {"delay_ms": 1000},
+        {"execute": "screendump", "arguments": {"filename": "build/c-ui-disabled-initial.ppm"}},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "tab"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "tab"}}}]}},
+        {"delay_ms": 150},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "spc"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "spc"}}}]}},
+        {"delay_ms": 150},
+        {"wait_marker": "[C-DISABLED] enabled 1", "timeout": 30},
+        {"delay_ms": 1000},
+        {"execute": "screendump", "arguments": {"filename": "build/c-ui-disabled-enabled.ppm"}},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "tab"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "tab"}}}]}},
+        {"delay_ms": 150},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "tab"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "tab"}}}]}},
+        {"delay_ms": 150},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "spc"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "spc"}}}]}},
+        {"delay_ms": 150},
+        {"wait_marker": "[C-DISABLED] action", "timeout": 30},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "tab"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "tab"}}}]}},
+        {"delay_ms": 150},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "spc"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "spc"}}}]}},
+        {"delay_ms": 150},
+        {"wait_marker": "[C-DISABLED] checked", "timeout": 30},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "tab"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "tab"}}}]}},
+        {"delay_ms": 150},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "spc"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "spc"}}}]}},
+        {"delay_ms": 150},
+        {"wait_marker": "[C-DISABLED] enabled 0", "timeout": 30},
+        {"delay_ms": 1000},
+        {"execute": "screendump", "arguments": {"filename": "build/c-ui-disabled-updated.ppm"}},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "tab"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "tab"}}}]}},
+        {"delay_ms": 150},
+        {"execute": "input-send-event", "arguments": {"events": [{"type": "key", "data": {"down": true, "key": {"type": "qcode", "data": "ret"}}}, {"type": "key", "data": {"down": false, "key": {"type": "qcode", "data": "ret"}}}]}},
+        {"delay_ms": 150},
+        {"wait_marker": "[C-DISABLED] ok", "timeout": 30},
+        {"wait_marker": "[GUI-EXIT] app=c_gui kind=0 code=0", "timeout": 30}
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "gui_server: desktop ready",
+    "[GUI-PRESENT] app=c_gui",
+    "[C-DISABLED] enabled 1",
+    "[C-DISABLED] action",
+    "[C-DISABLED] checked",
+    "[C-DISABLED] enabled 0",
+    "[C-DISABLED] ok",
+    "[GUI-EXIT] app=c_gui kind=0 code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "tcc: error",
+    "gui_server: FAIL",
+    "setup: error:",
+    "setup: fatal error"
+  ]
+}

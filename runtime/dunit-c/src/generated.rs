@@ -16,6 +16,7 @@ pub const DUNIT_UI_RADIO_GROUP_COLUMN:u32=11;
 pub const DUNIT_UI_RADIO_GROUP_ROW:u32=12;
 pub const DUNIT_UI_RADIO:u32=13;
 pub const DUNIT_UI_RADIO_CHECKED:u32=14;
+pub const DUNIT_UI_DISABLED:u32=2147483648;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
 pub type DunitUiUpdateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64)->i32;
 #[repr(C)]
