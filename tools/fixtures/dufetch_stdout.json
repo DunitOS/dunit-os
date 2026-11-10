@@ -1,0 +1,135 @@
+{
+  "source_commit": "3afcd268610ba06471809bd9e6532f57a2d3b7b2",
+  "source_sha256": "c50dacff398b7edc37d0c27f232b862e1fb09a48ab25b49d03a7000bdb8af1c0",
+  "cases": [
+    {
+      "name": "unavailable",
+      "stats": {},
+      "display": null,
+      "pid": 1,
+      "cwd": "/",
+      "stdout": "\n\u001b[0m             \u001b[1;32m▓▓▓▓▓▓\u001b[0m                     \u001b[0m  \u001b[90m------------------------\u001b[0m\n\u001b[0m           \u001b[1;32m▓▓▓\u001b[0m   \u001b[1;32m▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒▒\u001b[0m        \u001b[0m  \u001b[1;36mMemory\u001b[0m: \u001b[97m0 KiB / 0 KiB (0%)\u001b[0m\n\u001b[0m            \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m       \u001b[0m  \u001b[1;36mHeap\u001b[0m: \u001b[97m0 KiB / 0 KiB\u001b[0m\n\u001b[0m             \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mProcesses\u001b[0m: \u001b[97m0 total, 0 running\u001b[0m\n\u001b[0m       \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mFS\u001b[0m: \u001b[97m0 files, 0 dirs, 0 KiB\u001b[0m\n\u001b[0m      \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m    \u001b[0m  \u001b[1;36mOpen FDs\u001b[0m: \u001b[97m0\u001b[0m\n\u001b[0m    \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒\u001b[0m           \u001b[1;36m▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m    \u001b[0m  \u001b[1;36mPID\u001b[0m: \u001b[97m1\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m             \u001b[1;36m▒▒▒▒\u001b[1;32m▓▓▓▓\u001b[0m     \u001b[0m  \u001b[1;36mCWD\u001b[0m: \u001b[97m/\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m               \u001b[1;36m▒▒\u001b[1;32m▓▓▓▓▓▓▓▓\u001b[0m  \u001b[0m  \n\u001b[0m  \u001b[1;36m▒▒▒▒▒▒▒▒▒▒\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[40m   \u001b[41m   \u001b[42m   \u001b[43m   \u001b[44m   \u001b[45m   \u001b[46m   \u001b[47m   \u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓\u001b[0m               \u001b[1;32m▓▓▓▓\u001b[0m    \u001b[1;32m▓▓\u001b[0m  \u001b[0m  \u001b[100m   \u001b[101m   \u001b[102m   \u001b[103m   \u001b[104m   \u001b[105m   \u001b[106m   \u001b[107m   \u001b[0m\n\u001b[0m      \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m             \u001b[1;32m▓▓▓\u001b[0m     \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \n\u001b[0m     \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓▓▓\u001b[0m           \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓\u001b[0m   \u001b[0m  \n\u001b[0m      \u001b[1;36m▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m    \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m     \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m           \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓▓\u001b[0m \u001b[1;32m▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m          \u001b[0m  \n\u001b[0m         \u001b[1;32m▓▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒\u001b[0m         \u001b[0m  \n\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;36m▒▒▒▒▒▒\u001b[0m           \u001b[0m  \n\n"
+    },
+    {
+      "name": "seconds",
+      "stats": {
+        "pmm_total_bytes": 16777216,
+        "pmm_used_bytes": 4194304,
+        "heap_total_bytes": 1048576,
+        "heap_used_bytes": 654321,
+        "process_total": 14,
+        "process_running": 2,
+        "fs_files": 47,
+        "fs_directories": 8,
+        "fs_bytes": 123456,
+        "fs_open_handles": 11,
+        "ipc_queue_count": 2,
+        "ipc_queued_messages": 3,
+        "ipc_shared_regions": 4,
+        "net_total_nics": 2,
+        "net_supported_nics": 1,
+        "uptime_available": 1,
+        "uptime_hz": 100,
+        "uptime_ticks": 5900
+      },
+      "display": {
+        "width": 1920,
+        "height": 1080,
+        "pitch": 7680
+      },
+      "pid": 42,
+      "cwd": "/persist",
+      "stdout": "\n\u001b[0m             \u001b[1;32m▓▓▓▓▓▓\u001b[0m                     \u001b[0m  \u001b[90m------------------------\u001b[0m\n\u001b[0m           \u001b[1;32m▓▓▓\u001b[0m   \u001b[1;32m▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒▒\u001b[0m        \u001b[0m  \u001b[1;36mUptime\u001b[0m: \u001b[97m59s\u001b[0m\n\u001b[0m            \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m       \u001b[0m  \u001b[1;36mDisplay\u001b[0m: \u001b[97m1920x1080\u001b[0m\n\u001b[0m             \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mMemory\u001b[0m: \u001b[97m4096 KiB / 16384 KiB (25%)\u001b[0m\n\u001b[0m       \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mHeap\u001b[0m: \u001b[97m638 KiB / 1024 KiB\u001b[0m\n\u001b[0m      \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m    \u001b[0m  \u001b[1;36mProcesses\u001b[0m: \u001b[97m14 total, 2 running\u001b[0m\n\u001b[0m    \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒\u001b[0m           \u001b[1;36m▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m    \u001b[0m  \u001b[1;36mFS\u001b[0m: \u001b[97m47 files, 8 dirs, 120 KiB\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m             \u001b[1;36m▒▒▒▒\u001b[1;32m▓▓▓▓\u001b[0m     \u001b[0m  \u001b[1;36mOpen FDs\u001b[0m: \u001b[97m11\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m               \u001b[1;36m▒▒\u001b[1;32m▓▓▓▓▓▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mIPC\u001b[0m: \u001b[97m2 queues, 3 msgs, 4 shm regions\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒▒▒▒▒▒▒▒\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mNICs\u001b[0m: \u001b[97m2 detected, 1 supported\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓\u001b[0m               \u001b[1;32m▓▓▓▓\u001b[0m    \u001b[1;32m▓▓\u001b[0m  \u001b[0m  \u001b[1;36mPID\u001b[0m: \u001b[97m42\u001b[0m\n\u001b[0m      \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m             \u001b[1;32m▓▓▓\u001b[0m     \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mCWD\u001b[0m: \u001b[97m/persist\u001b[0m\n\u001b[0m     \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓▓▓\u001b[0m           \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓\u001b[0m   \u001b[0m  \n\u001b[0m      \u001b[1;36m▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m    \u001b[0m  \u001b[40m   \u001b[41m   \u001b[42m   \u001b[43m   \u001b[44m   \u001b[45m   \u001b[46m   \u001b[47m   \u001b[0m\n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m     \u001b[0m  \u001b[100m   \u001b[101m   \u001b[102m   \u001b[103m   \u001b[104m   \u001b[105m   \u001b[106m   \u001b[107m   \u001b[0m\n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m           \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓▓\u001b[0m \u001b[1;32m▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m          \u001b[0m  \n\u001b[0m         \u001b[1;32m▓▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒\u001b[0m         \u001b[0m  \n\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;36m▒▒▒▒▒▒\u001b[0m           \u001b[0m  \n\n"
+    },
+    {
+      "name": "minutes",
+      "stats": {
+        "pmm_total_bytes": 16777216,
+        "pmm_used_bytes": 4194304,
+        "heap_total_bytes": 1048576,
+        "heap_used_bytes": 654321,
+        "process_total": 14,
+        "process_running": 2,
+        "fs_files": 47,
+        "fs_directories": 8,
+        "fs_bytes": 123456,
+        "fs_open_handles": 11,
+        "ipc_queue_count": 2,
+        "ipc_queued_messages": 3,
+        "ipc_shared_regions": 4,
+        "net_total_nics": 2,
+        "net_supported_nics": 1,
+        "uptime_available": 1,
+        "uptime_hz": 250,
+        "uptime_ticks": 77250
+      },
+      "display": null,
+      "pid": 123,
+      "cwd": "/tmp/with space",
+      "stdout": "\n\u001b[0m             \u001b[1;32m▓▓▓▓▓▓\u001b[0m                     \u001b[0m  \u001b[90m------------------------\u001b[0m\n\u001b[0m           \u001b[1;32m▓▓▓\u001b[0m   \u001b[1;32m▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒▒\u001b[0m        \u001b[0m  \u001b[1;36mUptime\u001b[0m: \u001b[97m5m 9s\u001b[0m\n\u001b[0m            \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m       \u001b[0m  \u001b[1;36mMemory\u001b[0m: \u001b[97m4096 KiB / 16384 KiB (25%)\u001b[0m\n\u001b[0m             \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mHeap\u001b[0m: \u001b[97m638 KiB / 1024 KiB\u001b[0m\n\u001b[0m       \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mProcesses\u001b[0m: \u001b[97m14 total, 2 running\u001b[0m\n\u001b[0m      \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m    \u001b[0m  \u001b[1;36mFS\u001b[0m: \u001b[97m47 files, 8 dirs, 120 KiB\u001b[0m\n\u001b[0m    \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒\u001b[0m           \u001b[1;36m▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m    \u001b[0m  \u001b[1;36mOpen FDs\u001b[0m: \u001b[97m11\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m             \u001b[1;36m▒▒▒▒\u001b[1;32m▓▓▓▓\u001b[0m     \u001b[0m  \u001b[1;36mIPC\u001b[0m: \u001b[97m2 queues, 3 msgs, 4 shm regions\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m               \u001b[1;36m▒▒\u001b[1;32m▓▓▓▓▓▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mNICs\u001b[0m: \u001b[97m2 detected, 1 supported\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒▒▒▒▒▒▒▒\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mPID\u001b[0m: \u001b[97m123\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓\u001b[0m               \u001b[1;32m▓▓▓▓\u001b[0m    \u001b[1;32m▓▓\u001b[0m  \u001b[0m  \u001b[1;36mCWD\u001b[0m: \u001b[97m/tmp/with space\u001b[0m\n\u001b[0m      \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m             \u001b[1;32m▓▓▓\u001b[0m     \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \n\u001b[0m     \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓▓▓\u001b[0m           \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓\u001b[0m   \u001b[0m  \u001b[40m   \u001b[41m   \u001b[42m   \u001b[43m   \u001b[44m   \u001b[45m   \u001b[46m   \u001b[47m   \u001b[0m\n\u001b[0m      \u001b[1;36m▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m    \u001b[0m  \u001b[100m   \u001b[101m   \u001b[102m   \u001b[103m   \u001b[104m   \u001b[105m   \u001b[106m   \u001b[107m   \u001b[0m\n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m     \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m           \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓▓\u001b[0m \u001b[1;32m▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m          \u001b[0m  \n\u001b[0m         \u001b[1;32m▓▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒\u001b[0m         \u001b[0m  \n\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;36m▒▒▒▒▒▒\u001b[0m           \u001b[0m  \n\n"
+    },
+    {
+      "name": "hours",
+      "stats": {
+        "pmm_total_bytes": 16777216,
+        "pmm_used_bytes": 18446744073709551615,
+        "heap_total_bytes": 1048576,
+        "heap_used_bytes": 654321,
+        "process_total": 14,
+        "process_running": 2,
+        "fs_files": 47,
+        "fs_directories": 8,
+        "fs_bytes": 123456,
+        "fs_open_handles": 11,
+        "ipc_queue_count": 2,
+        "ipc_queued_messages": 3,
+        "ipc_shared_regions": 4,
+        "net_total_nics": 2,
+        "net_supported_nics": 1,
+        "uptime_available": 1,
+        "uptime_hz": 100,
+        "uptime_ticks": 366100
+      },
+      "display": {
+        "width": 640,
+        "height": 480,
+        "pitch": 2560
+      },
+      "pid": 4294967295,
+      "cwd": "/home/тест",
+      "stdout": "\n\u001b[0m             \u001b[1;32m▓▓▓▓▓▓\u001b[0m                     \u001b[0m  \u001b[90m------------------------\u001b[0m\n\u001b[0m           \u001b[1;32m▓▓▓\u001b[0m   \u001b[1;32m▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒▒\u001b[0m        \u001b[0m  \u001b[1;36mUptime\u001b[0m: \u001b[97m1h 1m 1s\u001b[0m\n\u001b[0m            \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m       \u001b[0m  \u001b[1;36mDisplay\u001b[0m: \u001b[97m640x480\u001b[0m\n\u001b[0m             \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mMemory\u001b[0m: \u001b[97m18014398509481983 KiB / 16384 KiB (100%)\u001b[0m\n\u001b[0m       \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mHeap\u001b[0m: \u001b[97m638 KiB / 1024 KiB\u001b[0m\n\u001b[0m      \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m    \u001b[0m  \u001b[1;36mProcesses\u001b[0m: \u001b[97m14 total, 2 running\u001b[0m\n\u001b[0m    \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒\u001b[0m           \u001b[1;36m▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m    \u001b[0m  \u001b[1;36mFS\u001b[0m: \u001b[97m47 files, 8 dirs, 120 KiB\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m             \u001b[1;36m▒▒▒▒\u001b[1;32m▓▓▓▓\u001b[0m     \u001b[0m  \u001b[1;36mOpen FDs\u001b[0m: \u001b[97m11\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m               \u001b[1;36m▒▒\u001b[1;32m▓▓▓▓▓▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mIPC\u001b[0m: \u001b[97m2 queues, 3 msgs, 4 shm regions\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒▒▒▒▒▒▒▒\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mNICs\u001b[0m: \u001b[97m2 detected, 1 supported\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓\u001b[0m               \u001b[1;32m▓▓▓▓\u001b[0m    \u001b[1;32m▓▓\u001b[0m  \u001b[0m  \u001b[1;36mPID\u001b[0m: \u001b[97m4294967295\u001b[0m\n\u001b[0m      \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m             \u001b[1;32m▓▓▓\u001b[0m     \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mCWD\u001b[0m: \u001b[97m/home/тест\u001b[0m\n\u001b[0m     \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓▓▓\u001b[0m           \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓\u001b[0m   \u001b[0m  \n\u001b[0m      \u001b[1;36m▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m    \u001b[0m  \u001b[40m   \u001b[41m   \u001b[42m   \u001b[43m   \u001b[44m   \u001b[45m   \u001b[46m   \u001b[47m   \u001b[0m\n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m     \u001b[0m  \u001b[100m   \u001b[101m   \u001b[102m   \u001b[103m   \u001b[104m   \u001b[105m   \u001b[106m   \u001b[107m   \u001b[0m\n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m           \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓▓\u001b[0m \u001b[1;32m▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m          \u001b[0m  \n\u001b[0m         \u001b[1;32m▓▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒\u001b[0m         \u001b[0m  \n\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;36m▒▒▒▒▒▒\u001b[0m           \u001b[0m  \n\n"
+    },
+    {
+      "name": "unknown_hz",
+      "stats": {
+        "pmm_total_bytes": 16777216,
+        "pmm_used_bytes": 4194304,
+        "heap_total_bytes": 1048576,
+        "heap_used_bytes": 654321,
+        "process_total": 14,
+        "process_running": 2,
+        "fs_files": 47,
+        "fs_directories": 8,
+        "fs_bytes": 123456,
+        "fs_open_handles": 11,
+        "ipc_queue_count": 2,
+        "ipc_queued_messages": 3,
+        "ipc_shared_regions": 4,
+        "net_total_nics": 2,
+        "net_supported_nics": 1,
+        "uptime_available": 1,
+        "uptime_hz": 0,
+        "uptime_ticks": 5900
+      },
+      "display": {
+        "width": 0,
+        "height": 480,
+        "pitch": 2560
+      },
+      "pid": 7,
+      "cwd": "/",
+      "stdout": "\n\u001b[0m             \u001b[1;32m▓▓▓▓▓▓\u001b[0m                     \u001b[0m  \u001b[90m------------------------\u001b[0m\n\u001b[0m           \u001b[1;32m▓▓▓\u001b[0m   \u001b[1;32m▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒▒\u001b[0m        \u001b[0m  \u001b[1;36mUptime\u001b[0m: \u001b[97munknown\u001b[0m\n\u001b[0m            \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m       \u001b[0m  \u001b[1;36mMemory\u001b[0m: \u001b[97m4096 KiB / 16384 KiB (25%)\u001b[0m\n\u001b[0m             \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mHeap\u001b[0m: \u001b[97m638 KiB / 1024 KiB\u001b[0m\n\u001b[0m       \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mProcesses\u001b[0m: \u001b[97m14 total, 2 running\u001b[0m\n\u001b[0m      \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m    \u001b[0m  \u001b[1;36mFS\u001b[0m: \u001b[97m47 files, 8 dirs, 120 KiB\u001b[0m\n\u001b[0m    \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒\u001b[0m           \u001b[1;36m▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m    \u001b[0m  \u001b[1;36mOpen FDs\u001b[0m: \u001b[97m11\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m             \u001b[1;36m▒▒▒▒\u001b[1;32m▓▓▓▓\u001b[0m     \u001b[0m  \u001b[1;36mIPC\u001b[0m: \u001b[97m2 queues, 3 msgs, 4 shm regions\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m               \u001b[1;36m▒▒\u001b[1;32m▓▓▓▓▓▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mNICs\u001b[0m: \u001b[97m2 detected, 1 supported\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒▒▒▒▒▒▒▒\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mPID\u001b[0m: \u001b[97m7\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓\u001b[0m               \u001b[1;32m▓▓▓▓\u001b[0m    \u001b[1;32m▓▓\u001b[0m  \u001b[0m  \u001b[1;36mCWD\u001b[0m: \u001b[97m/\u001b[0m\n\u001b[0m      \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m             \u001b[1;32m▓▓▓\u001b[0m     \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \n\u001b[0m     \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓▓▓\u001b[0m           \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓\u001b[0m   \u001b[0m  \u001b[40m   \u001b[41m   \u001b[42m   \u001b[43m   \u001b[44m   \u001b[45m   \u001b[46m   \u001b[47m   \u001b[0m\n\u001b[0m      \u001b[1;36m▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m    \u001b[0m  \u001b[100m   \u001b[101m   \u001b[102m   \u001b[103m   \u001b[104m   \u001b[105m   \u001b[106m   \u001b[107m   \u001b[0m\n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m     \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m           \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓▓\u001b[0m \u001b[1;32m▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m          \u001b[0m  \n\u001b[0m         \u001b[1;32m▓▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒\u001b[0m         \u001b[0m  \n\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;36m▒▒▒▒▒▒\u001b[0m           \u001b[0m  \n\n"
+    }
+  ],
+  "native_format": "\n\u001b[0m             \u001b[1;32m▓▓▓▓▓▓\u001b[0m                     \u001b[0m  \u001b[90m------------------------\u001b[0m\n\u001b[0m           \u001b[1;32m▓▓▓\u001b[0m   \u001b[1;32m▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒▒\u001b[0m        \u001b[0m  \u001b[1;36mUptime\u001b[0m: \u001b[97m<uptime>\u001b[0m\n\u001b[0m            \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m       \u001b[0m  \u001b[1;36mMemory\u001b[0m: \u001b[97m# KiB / # KiB (#%)\u001b[0m\n\u001b[0m             \u001b[1;32m▓▓\u001b[0m     \u001b[1;32m▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mHeap\u001b[0m: \u001b[97m# KiB / # KiB\u001b[0m\n\u001b[0m       \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m      \u001b[0m  \u001b[1;36mProcesses\u001b[0m: \u001b[97m# total, # running\u001b[0m\n\u001b[0m      \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;36m▒▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m    \u001b[0m  \u001b[1;36mFS\u001b[0m: \u001b[97m# files, # dirs, # KiB\u001b[0m\n\u001b[0m    \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒\u001b[0m           \u001b[1;36m▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m    \u001b[0m  \u001b[1;36mOpen FDs\u001b[0m: \u001b[97m#\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m             \u001b[1;36m▒▒▒▒\u001b[1;32m▓▓▓▓\u001b[0m     \u001b[0m  \u001b[1;36mNICs\u001b[0m: \u001b[97m# detected, # supported\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒\u001b[0m    \u001b[1;36m▒▒▒▒\u001b[0m               \u001b[1;36m▒▒\u001b[1;32m▓▓▓▓▓▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mPID\u001b[0m: \u001b[97m#\u001b[0m\n\u001b[0m  \u001b[1;36m▒▒▒▒▒▒▒▒▒▒\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[1;36mCWD\u001b[0m: \u001b[97m/\u001b[0m\n\u001b[0m   \u001b[1;36m▒▒▒▒▒▒▒▒\u001b[0m \u001b[1;32m▓\u001b[0m               \u001b[1;32m▓▓▓▓\u001b[0m    \u001b[1;32m▓▓\u001b[0m  \u001b[0m  \n\u001b[0m      \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓\u001b[0m             \u001b[1;32m▓▓▓\u001b[0m     \u001b[1;32m▓▓▓\u001b[0m  \u001b[0m  \u001b[40m   \u001b[41m   \u001b[42m   \u001b[43m   \u001b[44m   \u001b[45m   \u001b[46m   \u001b[47m   \u001b[0m\n\u001b[0m     \u001b[1;36m▒▒▒▒\u001b[0m \u001b[1;32m▓▓▓▓▓\u001b[0m           \u001b[1;32m▓▓▓▓▓▓▓▓▓▓▓\u001b[0m   \u001b[0m  \u001b[100m   \u001b[101m   \u001b[102m   \u001b[103m   \u001b[104m   \u001b[105m   \u001b[106m   \u001b[107m   \u001b[0m\n\u001b[0m      \u001b[1;36m▒▒\u001b[0m \u001b[1;32m▓▓\u001b[0m \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m    \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒\u001b[0m     \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓\u001b[0m   \u001b[1;32m▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m           \u001b[0m  \n\u001b[0m        \u001b[1;32m▓▓▓\u001b[0m \u001b[1;32m▓▓▓▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒\u001b[0m     \u001b[1;36m▒▒\u001b[0m          \u001b[0m  \n\u001b[0m         \u001b[1;32m▓▓▓▓▓\u001b[0m  \u001b[1;32m▓▓▓▓\u001b[0m \u001b[1;36m▒▒▒▒\u001b[0m  \u001b[1;36m▒▒▒▒\u001b[0m         \u001b[0m  \n\u001b[0m                 \u001b[1;32m▓▓▓▓\u001b[0m  \u001b[1;36m▒▒▒▒▒▒\u001b[0m           \u001b[0m  \n\n"
+}

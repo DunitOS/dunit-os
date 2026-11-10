@@ -1,0 +1,9 @@
+{
+  "description": "M7.11: native file-action capture validates actual stdout/stderr and child exit status; dufetch bytes are exported as hex for the host parity check.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": ["exec /system/bin/tcc /assets/tcc/cli_migration.c -o /tmp/sdk-cli-migration", "exec /tmp/sdk-cli-migration"]
+  },
+  "required": ["[TERM-007] Starting main loop", "[CLI-REPORT] ", "[CLI-MIGRATION] wc default exact stdout", "[CLI-MIGRATION] wc explicit path exact stdout", "[CLI-MIGRATION] wc exact stderr and exit 1", "[CLI-MIGRATION] ok", "/tmp/sdk-cli-migration returned code=0", "[PROCESS-RUN] VFS handles clean"],
+  "forbidden": ["[PANIC]", "[SDK] PANIC", "dufetch: PANIC", "[CLI-MIGRATION] FAIL", "tcc: error"]
+}

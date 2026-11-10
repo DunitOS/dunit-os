@@ -131,6 +131,9 @@ jobs:
       - name: Frozen C UI v1 object across a native runtime rebuild
         run: python3 tools/test_c_ui_compat.py --accel tcg
 
+      - name: Native CLI SDK migration and exact stdout contracts
+        run: python3 tools/test_cli_sdk_migration.py --accel tcg
+
       - name: Native SDK workflow and failure contracts
         run: python3 tools/test_dunit_workflow.py --accel tcg
 

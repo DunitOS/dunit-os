@@ -3,15 +3,14 @@
 # terminal (`exec dufetch`) and the GUI terminal via dsh (`dufetch`, bridged on
 # an inner pty). It emits ANSI SGR color codes only — WHICH colors appear is the
 # terminal's active theme, so dufetch is drawn in each terminal's palette. All
-# facts come from libdunit syscalls (get_system_stats / get_pid / getcwd /
-# get_framebuffer); no kernel-internal APIs.
+# facts come from the native SDK system/process/fs APIs.
 [package]
 name = "dufetch"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-libdunit = { path = "../../libdunit" }
+dunit = { path = "../../../runtime/dunit" }
 
 [[bin]]
 name = "dufetch"

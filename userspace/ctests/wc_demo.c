@@ -1,9 +1,7 @@
 /* Portable POSIX C — compiles and runs identically on Linux and on Dunit OS.
  * Writes a text file, reads it back, and counts lines/words/bytes (a tiny `wc`).
  * Pass a path as argv[1] (defaults to demo.txt in the current directory). */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <dunit.h>
 
 int main(int argc, char **argv)
 {
