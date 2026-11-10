@@ -11,9 +11,6 @@ pub(super) unsafe fn text(pointer: *const u8, length: usize) -> dunit::Result<St
         .map(String::from)
         .map_err(|_| invalid())
 }
-fn radio_group(kind: u32) -> bool {
-    matches!(kind, DUNIT_UI_RADIO_GROUP_COLUMN | DUNIT_UI_RADIO_GROUP_ROW)
-}
 #[cfg(test)]
 pub(super) unsafe fn convert(nodes: &[DunitUiNodeV1]) -> dunit::Result<View<u64>> {
     convert_decorated(nodes, core::ptr::null_mut(), None)
@@ -67,14 +64,29 @@ unsafe fn convert_impl<M: Clone + 'static>(
         return Err(invalid());
     }
     let mut children: Vec<Vec<View<M>>> = vec![Vec::new(); nodes.len()];
+    let mut keys: Vec<Option<String>> = nodes
+        .iter()
+        .map(|node| text(node.key, node.key_len).map(Some))
+        .collect::<dunit::Result<_>>()?;
+    {
+        let mut names = alloc::collections::BTreeSet::new();
+        for key in &keys {
+            let key = key.as_deref().ok_or_else(invalid)?;
+            if key.is_empty() || !names.insert(key) {
+                return Err(invalid());
+            }
+        }
+    }
+    let mut extras: Vec<Option<alloc::boxed::Box<crate::popup::Extra<M>>>> =
+        (0..nodes.len()).map(|_| None).collect();
     let mut depths = vec![0; nodes.len()];
     for (index, node) in nodes.iter().enumerate().skip(1) {
         let parent = node.parent as usize;
         if parent >= index
-            || !(matches!(
-                nodes[parent].kind,
-                DUNIT_UI_COLUMN | DUNIT_UI_ROW | DUNIT_UI_STACK | DUNIT_UI_GRID
-            ) || radio_group(nodes[parent].kind))
+            || !crate::popup::parent_allowed(
+                node.kind & !DUNIT_UI_DISABLED,
+                nodes[parent].kind & !DUNIT_UI_DISABLED,
+            )
         {
             return Err(invalid());
         }
@@ -107,11 +119,33 @@ unsafe fn convert_impl<M: Clone + 'static>(
                     | DUNIT_UI_SPINBOX
                     | DUNIT_UI_PROGRESS
                     | DUNIT_UI_BUSY
+                    | DUNIT_UI_MENU
+                    | DUNIT_UI_SELECT
+                    | DUNIT_UI_MENU_ITEM
+                    | DUNIT_UI_SUBMENU
+                    | DUNIT_UI_OPTION
+                    | DUNIT_UI_OPTION_SELECTED
             )
         {
             return Err(invalid());
         }
-        let key = text(node.key, node.key_len)?;
+        let key = keys[index].take().ok_or_else(invalid)?;
+        let mut extra = extras[index].take().map(|boxed| *boxed).unwrap_or_default();
+        extra.items.reverse();
+        extra.options.reverse();
+        if crate::popup::descriptor(kind) {
+            if index == 0 {
+                return Err(invalid());
+            }
+            crate::popup::bind(
+                node,
+                key,
+                extra,
+                crate::popup::extra(&mut extras, node.parent as usize),
+                action,
+            )?;
+            continue;
+        }
         let mut nested = core::mem::take(&mut children[index]);
         nested.reverse();
         let mut view = match kind {
@@ -139,13 +173,19 @@ unsafe fn convert_impl<M: Clone + 'static>(
             ),
             DUNIT_UI_RADIO | DUNIT_UI_RADIO_CHECKED => {
                 let parent = nodes.get(node.parent as usize).ok_or_else(invalid)?;
-                if !radio_group(parent.kind) {
+                if !matches!(
+                    parent.kind,
+                    DUNIT_UI_RADIO_GROUP_COLUMN | DUNIT_UI_RADIO_GROUP_ROW
+                ) {
                     return Err(invalid());
                 }
                 View::radio(
                     key,
                     text(node.text, node.text_len)?,
-                    text(parent.key, parent.key_len)?,
+                    keys[node.parent as usize]
+                        .as_ref()
+                        .ok_or_else(invalid)?
+                        .clone(),
                     kind == DUNIT_UI_RADIO_CHECKED,
                     action(node.message),
                 )
@@ -154,6 +194,18 @@ unsafe fn convert_impl<M: Clone + 'static>(
             DUNIT_UI_ROW | DUNIT_UI_RADIO_GROUP_ROW => View::row(key, nested),
             DUNIT_UI_STACK => View::stack(key, nested),
             DUNIT_UI_GRID => View::grid(key, nested),
+            DUNIT_UI_MENU_BAR => View::menu_bar(key, nested),
+            DUNIT_UI_MENU => View::menu(
+                key,
+                text(node.text, node.text_len)?,
+                core::mem::take(&mut extra.items),
+            ),
+            DUNIT_UI_SELECT => crate::popup::select(
+                key,
+                text(node.text, node.text_len)?,
+                core::mem::take(&mut extra.options),
+                action,
+            )?,
             DUNIT_UI_INPUT | DUNIT_UI_TEXTAREA => crate::text::view(
                 node,
                 index as u32,
@@ -179,6 +231,15 @@ unsafe fn convert_impl<M: Clone + 'static>(
             _ => return Err(invalid()),
         }
         .disabled(disabled);
+        if let Some(items) = extra.context {
+            view = view.context_menu(items);
+        }
+        if let Some(tooltip) = extra.tooltip {
+            view = view.tooltip(tooltip);
+        }
+        if let Some(mnemonic) = extra.mnemonic {
+            view = view.menu_mnemonic(mnemonic);
+        }
         if let Some(decorate) = decorate {
             let mut appearance = DunitUiAppearanceV1 {
                 classes: core::ptr::null(),

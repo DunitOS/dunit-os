@@ -37,6 +37,17 @@
 #define DUNIT_UI_BUSY 23u
 #define DUNIT_UI_NUMBER_READ_ONLY 1u
 #define DUNIT_UI_NUMBER_RUNNING 2u
+#define DUNIT_UI_MENU 24u
+#define DUNIT_UI_MENU_ITEM 25u
+#define DUNIT_UI_MENU_SEPARATOR 26u
+#define DUNIT_UI_SUBMENU 27u
+#define DUNIT_UI_SELECT 28u
+#define DUNIT_UI_OPTION 29u
+#define DUNIT_UI_OPTION_SELECTED 30u
+#define DUNIT_UI_MENU_BAR 31u
+#define DUNIT_UI_CONTEXT_MENU 32u
+#define DUNIT_UI_TOOLTIP 33u
+#define DUNIT_UI_MNEMONIC 34u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 struct DunitUiAppearanceV1;

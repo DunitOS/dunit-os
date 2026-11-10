@@ -121,6 +121,9 @@ jobs:
       - name: Native C numeric controls progress and mixed callbacks
         run: python3 tools/test_c_ui_numbers.py --accel tcg
 
+      - name: Native C menus select context menu and delayed tooltip
+        run: python3 tools/test_c_ui_popups.py --accel tcg
+
       - name: Frozen C UI v1 object across a native runtime rebuild
         run: python3 tools/test_c_ui_compat.py --accel tcg
 

@@ -33,7 +33,7 @@ callbacks. C owns `user` and its model; Rust owns the converted Views and window
   that positive count. Zero, over-capacity counts, unsupported kinds, malformed
   UTF-8 and invalid trees fail. A negative callback result propagates unchanged.
 - Node 0 has parent `DUNIT_UI_ROOT`. Every other parent index precedes the child
-  and identifies a Column/Row/Stack/Grid or radio group container. Input order defines
+  and identifies a compatible UI/container or binding owner. Input order defines
   sibling order. The original SDK validator checks keys and shared tree/depth bounds.
 - Key/text spans are UTF-8 bytes with explicit lengths. They need no terminator.
   Each span is bounded by `DUNIT_UI_MAX_TEXT_BYTES`. Rust copies them into owned
@@ -79,7 +79,8 @@ These additional kinds preserve every existing ABI v1 layout/value/export.
 OR `DUNIT_UI_DISABLED` into a supported leaf's `kind`, for example
 `DUNIT_UI_CHECKBOX_CHECKED | DUNIT_UI_DISABLED`. It applies to Button, Checkbox,
 Switch, ToggleButton and Radio, in either checked state, plus Input/Textarea
-and all five numeric/progress kinds.
+and all five numeric/progress kinds. Menu/Select triggers, menu actions/submenus
+and Select options also accept the flag; separators are intrinsically disabled.
 It maps directly to
 the SDK's `View::disabled(true)`: disabled controls reject pointer activation,
 are skipped by focus navigation and retain their C-owned checked/selected state.
@@ -107,7 +108,9 @@ parser, validation, cascade and renderer as Rust applications.
 
 The optional `decorate(user, index, appearance)` callback attaches classes to
 the node at that build's array index, using the same `user` as build/update.
-It runs once per node on every successful description build; invocation order
+It runs once per visible SDK View node on every successful description build;
+popup item/option and binding descriptors do not have View appearance callbacks.
+The index always refers to the original C array. Invocation order
 is unspecified. `DunitUiAppearanceV1` starts as `{NULL,0}`. Return 0 with an
 optional ASCII-whitespace-separated UTF-8 `classes` span, or a negative error.
 Positive results are invalid. The same bounded-span checks and SDK identifier
@@ -217,6 +220,52 @@ are rejected. The example `/assets/tcc/numbers.c` combines every new kind with
 a controlled text field, application DSS, negative numeric drafts, model-declined
 proposals and external reset.
 
+## Menus, choices and transient overlays
+
+Popup descriptions extend the existing node array and use the same four run
+entry points, styles and ordinary `callbacks.update` messages. No new public
+record, callback layout or exported function is required.
+
+| Kind | Parent / payload |
+| --- | --- |
+| `DUNIT_UI_MENU_BAR` | Normal UI container; children are Menu nodes. |
+| `DUNIT_UI_MENU` | UI node; text is label, children are menu descriptors. |
+| `DUNIT_UI_MENU_ITEM` | Menu/Submenu/Context; text is label, message is action ID. |
+| `DUNIT_UI_MENU_SEPARATOR` | Same parents; key identifies the separator. |
+| `DUNIT_UI_SUBMENU` | Same parents; label plus nested menu descriptors. |
+| `DUNIT_UI_SELECT` | UI node; text is its label/empty-selection caption. |
+| `DUNIT_UI_OPTION`, `DUNIT_UI_OPTION_SELECTED` | Direct Select children; key/label and action ID. |
+| `DUNIT_UI_CONTEXT_MENU` | One binding descriptor under any visible UI node; owns menu descriptors. |
+| `DUNIT_UI_TOOLTIP` | One binding descriptor under any visible UI node; text is tooltip content. |
+| `DUNIT_UI_MNEMONIC` | One descriptor under Menu/Select/MenuItem/Submenu; text is one Unicode scalar. |
+
+All description keys, including binding descriptors, are nonempty bounded UTF-8
+and globally unique. Parents precede children and all descriptions share the
+4096-node/64-depth bound. The SDK also validates its own menu depth, item keys,
+labels and mnemonics. Wrong parent kinds, duplicate bindings, malformed spans
+and multiple selected-option markers fail before publication. UI children
+cannot be placed inside item/option/tooltip metadata. Binding descriptors add
+no visible layout node; the SDK owner of context/tooltip is their parent View.
+
+Select selection is C-controlled by the `_SELECTED` marker, with zero or one
+selected option. Activating an enabled option delivers that option's full
+64-bit message through `callbacks.update`, not through a text edit callback.
+Rebuild selected flags in the C model to accept; leave them unchanged to decline.
+The SDK supplies disabled skipping, popup closure and focus restoration. MenuBar
+F10/arrows, Alt mnemonics, nested menu navigation, Escape/outside dismissal,
+context menus and tooltip deadlines use the existing SDK overlay controller.
+No overlay state machine, hit geometry, timer or painter is implemented in C.
+
+Run `tools/test_c_ui_popups.py` for native acceptance. It derives hover positions
+from direct Rust widget geometry and the test desktop config, then injects
+ordinary PS/2 motion through `qemu_test.py`. Four whole client canvases are
+compared exactly: initial, nested menu, Select and context menu. Tooltip is
+compared against the exact SDK-painted region outside its owner, because the
+compositor cursor is over the owner during real hover. Host tests compare the
+complete tooltip canvas and prove that the region is separate from its owner.
+The script expands the marker contract's hover/leave actions into a temporary
+QEMU contract; use the wrapper rather than passing that source contract directly.
+
 Call from the C main thread before starting threads that use Rust SDK runtime
 arguments/environment. Loader argv/envp must be the valid null-terminated vectors
 received by main and remain mapped. The adapter initializes the existing Rust
@@ -261,6 +310,7 @@ python3 tools/test_c_ui_disabled.py --accel tcg
 python3 tools/test_c_ui_style.py --accel tcg
 python3 tools/test_c_ui_text.py --accel tcg
 python3 tools/test_c_ui_numbers.py --accel tcg
+python3 tools/test_c_ui_popups.py --accel tcg
 python3 tools/test_c_ui_compat_host.py
 python3 tools/test_c_ui_compat.py --accel tcg
 ```
@@ -371,5 +421,18 @@ captures disable motion and focus a button; timed Busy animation is covered
 by the existing SDK regression suite. The frozen original C object passes
 its separate forced-rebuild run with both original framebuffer comparisons.
 Archive: 2,123,556 bytes (+26,848), still in the existing installer ESP.
-Menus/popups, collections/workspace widgets and explicit C transfer/capability
+Collections/workspace widgets and explicit C transfer/capability
 bindings remain outside this block; M7.10 is still open.
+
+The popup block passes 90 host/Rust checks: 54 adapter, 15 existing SDK menu/
+overlay/tooltip, six fixture, five header/sysroot, nine image-profile and one
+archive-link test. The native example passes twelve required/six forbidden
+markers, four exact 560×420 canvases and the exact 249×26 tooltip paint region.
+It exercises F10/Alt mnemonics, disabled/separator skipping, a nested action
+using `UINT64_MAX`, controlled Select acceptance/decline, Shift+F10 context,
+real PS/2 hover deadlines and reset. Host checks include malformed parents,
+duplicate bindings/keys, multiple selected options, invalid labels, menu depth,
+owned strings, focus restoration and complete tooltip-frame equality. The
+retained original C object passes its own forced-rebuild QEMU run with both
+original complete pixel comparisons. The archive is 2,142,076 bytes (+18,520);
+the installer ESP and every existing v1 record/export remain unchanged.

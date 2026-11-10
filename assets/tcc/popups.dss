@@ -1,0 +1,9 @@
+Column#root { padding: 16; gap: 12; }
+Text#title { font-size: 22; padding: 0; }
+Row.menu-bar { height: 34; gap: 8; }
+MenuButton { width: 120; }
+Select, Button#surface, Button#help { height: 34; }
+Button#help { tooltip-delay: 100ms; }
+Row#actions { padding: 0; height: 34; gap: 8; }
+Row#actions { justify-content: space-between; }
+Text#status { color: $muted; padding: 0; }

@@ -10,6 +10,7 @@ use dunit::{time::Duration, ui::*, window::WindowEvent};
 mod generated;
 pub use generated::*;
 mod number;
+mod popup;
 mod text;
 mod tree;
 
@@ -443,6 +444,8 @@ mod checkable_tests;
 mod disabled_tests;
 #[cfg(test)]
 mod number_tests;
+#[cfg(test)]
+mod popup_tests;
 #[cfg(test)]
 mod radio_tests;
 #[cfg(test)]
