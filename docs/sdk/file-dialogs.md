@@ -4,7 +4,8 @@
 shared file-browser entries/path normalization. All labels and filters belong to
 `FileDialogOptions`; the component does not perform file writes. The native
 `NativeDirectorySource` reads the filesystem through existing ABI calls. `gui_files`
-also uses the shared browser path helper; its full SDK migration remains M7.11.
+uses the shared browser path helper, SDK menus and filename dialogs over its
+icon canvas; see the [GUI migration receipt](gui-migration.md).
 
 Embed `picker.view().map_messages(ParentMessage::Picker)` as the dialog argument of
 `View::modal`, forwarding child messages through the parent model. It then shares

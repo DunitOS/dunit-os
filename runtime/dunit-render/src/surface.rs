@@ -120,6 +120,38 @@ impl<'a> Surface<'a> {
         self.pixels[idx] = (out_a << 24) | (r << 16) | (g << 8) | b;
     }
 
+    /// Composite a complete, tightly packed premultiplied ARGB layer through this surface's
+    /// existing clip and alpha kernels. Invalid dimensions are rejected.
+    pub fn blit_premultiplied(&mut self, pixels: &[u32], width: usize, height: usize) -> bool {
+        if width.checked_mul(height) != Some(pixels.len()) {
+            return false;
+        }
+        for y in self.clip.1..self.clip.3.min(height) {
+            for x in self.clip.0..self.clip.2.min(width) {
+                let word = pixels[y * width + x];
+                let a = word >> 24;
+                if a == 0 {
+                    continue;
+                }
+                let idx = y * self.stride + x;
+                if a == 255 {
+                    self.pixels[idx] = word;
+                    continue;
+                }
+                let dst = self.pixels[idx];
+                let inv = 255 - a;
+                let channel = |shift: u32| {
+                    (((word >> shift) & 255) + (((dst >> shift) & 255) * inv) / 255).min(255)
+                };
+                self.pixels[idx] = ((a + (dst >> 24) * inv / 255) << 24)
+                    | (channel(16) << 16)
+                    | (channel(8) << 8)
+                    | channel(0);
+            }
+        }
+        true
+    }
+
     /// Overwrite every pixel in the current clip with `color` (a straight store,
     /// NOT a blend). Without a clip this resets the entire surface. Use
     /// this — never `fill_rect` — for a per-frame background reset when the

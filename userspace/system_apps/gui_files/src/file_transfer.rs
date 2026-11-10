@@ -70,19 +70,11 @@ impl Transfers {
             matches!(mode, Mode::Browse) && files.can_write() && self.operation.is_none();
         let desired = if self.files_target {
             Some(formats(TransferAction::Copy))
-        } else if matches!(mode, Mode::Text { .. }) {
-            Some(dunit::text_clipboard::preferences())
         } else {
             None
         };
         if self.registered != desired {
-            let client = window.transfers()?;
-            if let Some(offer) = &desired {
-                client.register_target(offer.clone())
-            } else {
-                client.unregister_target()
-            }
-            .map_err(native)?;
+            window.set_transfer_target(desired.clone())?;
             self.registered = desired;
             self.hover = None;
         }
@@ -121,11 +113,11 @@ impl Transfers {
     }
     pub fn paste(&mut self, window: &mut Window, files: &mut Files) {
         if self.query.is_some() || self.read.is_some() || self.operation.is_some() {
-            files.error("Paste", transfer::Error(libdunit::EBUSY));
+            files.error("Paste", transfer::Error(dunit::errno::EBUSY));
             return;
         }
         if !files.can_write() {
-            files.error("Paste", transfer::Error(libdunit::EPERM));
+            files.error("Paste", transfer::Error(dunit::errno::EPERM));
             return;
         }
         let result = files.directory().and_then(|directory| {
@@ -273,14 +265,14 @@ impl Transfers {
                 files.status = alloc::format!(
                     "Copy stopped after {} item(s): {}",
                     operation.index,
-                    libdunit::error_name(error.operation.0)
+                    dunit::Error(error.operation.0).name()
                 );
                 if let Some(cleanup) = error.cleanup {
                     files.error("Copy cleanup", cleanup);
                 }
                 self.finish(
                     window,
-                    if error.operation.0 == libdunit::EINTR {
+                    if error.operation.0 == dunit::errno::EINTR {
                         Status::Cancelled
                     } else {
                         Status::Failed
@@ -321,9 +313,9 @@ impl Transfers {
         match m.kind {
             Kind::Offer if self.query.as_ref().is_some_and(|(r, _)| *r == m.request) => {
                 let (_, destination) = self.query.take().unwrap();
-                let offer = event.offer.ok_or(dunit::Error(libdunit::EINVAL))?;
+                let offer = event.offer.ok_or(dunit::Error(dunit::errno::EINVAL))?;
                 if !offer.formats.contains(&Format::Files) {
-                    files.error("Paste", transfer::Error(libdunit::EOPNOTSUPP));
+                    files.error("Paste", transfer::Error(dunit::errno::EOPNOTSUPP));
                     return Ok(());
                 }
                 if !self.focused
@@ -447,7 +439,7 @@ impl Transfers {
                     return Ok(());
                 };
                 let Some(action) = TransferAction::from_u32(m.arg1) else {
-                    return Err(dunit::Error(libdunit::EINVAL));
+                    return Err(dunit::Error(dunit::errno::EINVAL));
                 };
                 if self.operation.is_some() {
                     window
@@ -512,7 +504,7 @@ impl Transfers {
                         alloc::format!("Clipboard rejected ({})", m.arg0)
                     };
                     if m.arg0 == Status::Ok as u32 {
-                        libdunit::println("gui_files: clipboard published");
+                        log("gui_files: clipboard published");
                     }
                 }
                 if self.source == Some(m.request) && m.arg0 != Status::Ok as u32 {

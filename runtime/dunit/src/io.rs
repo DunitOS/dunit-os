@@ -186,5 +186,7 @@ impl Write for Stderr {
     }
 }
 pub fn print(arguments: fmt::Arguments<'_>) -> Result<()> {
-    stdout().write_fmt(arguments)
+    // Keep a short formatted record in one native write. Console routing
+    // prefixes each write separately; streaming each fmt fragment splits logs.
+    stdout().write_all(alloc::fmt::format(arguments).as_bytes())
 }

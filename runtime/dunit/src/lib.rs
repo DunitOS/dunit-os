@@ -1,25 +1,28 @@
 //! Native Dunit SDK: no_std + alloc over libdunit.
-//! Retained components are available with `gui`; widgets and distribution are unfinished.
+//! Retained components, native windows and shared canvas resources use `gui`.
 #![no_std]
 extern crate alloc;
 pub mod args;
+#[cfg(feature = "gui")]
+pub mod canvas;
 pub mod env;
 mod error;
 pub mod event;
 pub mod fs;
+pub mod io;
+pub mod process;
+pub mod pty;
+pub mod system;
+pub mod testing;
 #[cfg(feature = "gui")]
-pub mod window;
+pub mod text_clipboard;
+pub mod time;
 #[cfg(feature = "gui")]
 pub mod ui;
 #[cfg(feature = "gui")]
-pub mod text_clipboard;
-#[cfg(feature = "gui")]
 mod ui_theme;
-pub mod io;
-pub mod process;
-pub mod system;
-pub mod testing;
-pub mod time;
+#[cfg(feature = "gui")]
+pub mod window;
 pub use dunit_macros::{main, test};
 pub use error::{Error, Result};
 pub use libdunit::errno_numbers as errno;

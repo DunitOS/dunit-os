@@ -2,7 +2,7 @@
 use super::*;
 use alloc::collections::BTreeMap;
 use dunit::transfer::{Error as TransferError, File, FileKind, NativeResult, OwnedHandle, Payload};
-use dunit_widgets::selection::{ListItem, ListSelection, SelectionMode};
+use dunit::ui::{ListItem, ListSelection, SelectionMode};
 pub(super) struct Item {
     pub name: String,
     pub kind: IconKind,
@@ -43,17 +43,14 @@ pub(super) struct Files {
     parents: Vec<Location>,
     held: BTreeMap<String, File>,
 }
-fn checked(n: isize) -> NativeResult<usize> {
-    if n < 0 {
-        Err(TransferError(n))
-    } else {
-        Ok(n as usize)
-    }
-}
 fn duplicate(file: &File, write: bool) -> NativeResult<File> {
-    let rights = libdunit::RIGHT_READ
-        | libdunit::RIGHT_TRANSFER
-        | if write { libdunit::RIGHT_WRITE } else { 0 };
+    let rights = dunit::transfer::RIGHT_READ
+        | dunit::transfer::RIGHT_TRANSFER
+        | if write {
+            dunit::transfer::RIGHT_WRITE
+        } else {
+            0
+        };
     Ok(File {
         handle: file.handle.duplicate(rights)?,
         path: file.path.clone(),
@@ -129,8 +126,8 @@ impl Files {
             .is_some_and(|item| self.selection.selected.contains(&item.name))
     }
     pub fn choose(&mut self, index: usize, mods: u8) {
-        let ctrl = mods & libdunit::KEYMOD_CTRL != 0;
-        let shift = mods & libdunit::KEYMOD_SHIFT != 0;
+        let ctrl = mods & dunit::window::KEYMOD_CTRL != 0;
+        let shift = mods & dunit::window::KEYMOD_SHIFT != 0;
         self.selection = self.selection.choose(
             &self.choices(),
             SelectionMode::Multiple,
@@ -180,7 +177,7 @@ impl Files {
             .map_or(!self.restricted && self.path == "/", |f| {
                 f.handle
                     .rights()
-                    .is_ok_and(|r| r & libdunit::RIGHT_WRITE != 0)
+                    .is_ok_and(|r| r & dunit::transfer::RIGHT_WRITE != 0)
             })
     }
     pub fn can_export(&self, cut: bool) -> bool {
@@ -189,7 +186,7 @@ impl Files {
             && (!cut || self.can_write())
     }
     pub fn child_path(&self, name: &str) -> String {
-        dunit_widgets::file_browser::child_path(&self.path, name)
+        dunit::ui::file_browser::child_path(&self.path, name)
     }
     fn open_file(&self, name: &str, write: bool) -> NativeResult<File> {
         if let Some(parent) = &self.authority {
@@ -199,7 +196,7 @@ impl Files {
             return self
                 .received
                 .get(name)
-                .ok_or(TransferError(libdunit::ENOENT))
+                .ok_or(TransferError(dunit::errno::ENOENT))
                 .and_then(|file| duplicate(file, write));
         }
         File::open(&self.child_path(name), write)
@@ -207,11 +204,13 @@ impl Files {
     pub fn directory(&self) -> NativeResult<OwnedHandle> {
         if let Some(file) = &self.authority {
             return file.handle.duplicate(
-                libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_TRANSFER,
+                dunit::transfer::RIGHT_READ
+                    | dunit::transfer::RIGHT_WRITE
+                    | dunit::transfer::RIGHT_TRANSFER,
             );
         }
         if self.restricted {
-            return Err(TransferError(libdunit::EACCES));
+            return Err(TransferError(dunit::errno::EACCES));
         }
         Ok(File::open(&self.path, true)?.handle)
     }
@@ -223,7 +222,7 @@ impl Files {
     }
     pub fn payload(&self, cut: bool) -> NativeResult<Payload> {
         if self.selection.selected.is_empty() {
-            return Err(TransferError(libdunit::EINVAL));
+            return Err(TransferError(dunit::errno::EINVAL));
         }
         let mut files = Vec::new();
         for item in &self.items {
@@ -233,15 +232,11 @@ impl Files {
             let held = self
                 .held
                 .get(&item.name)
-                .ok_or(TransferError(libdunit::EOPNOTSUPP))?;
+                .ok_or(TransferError(dunit::errno::EOPNOTSUPP))?;
             let file = if cut {
                 let writable = self.open_file(&item.name, true)?;
-                if checked(libdunit::file_cap::relation(
-                    held.handle.raw(),
-                    writable.handle.raw(),
-                ))? != libdunit::file_cap::Relation::Same as usize
-                {
-                    return Err(TransferError(libdunit::EAGAIN));
+                if !held.same_object(&writable)? {
+                    return Err(TransferError(dunit::errno::EAGAIN));
                 }
                 writable
             } else {
@@ -252,8 +247,8 @@ impl Files {
         Payload::from_files(files)
     }
     pub fn error(&mut self, operation: &str, error: TransferError) {
-        self.status = alloc::format!("{}: {}", operation, libdunit::error_name(error.0));
-        libdunit::println(&alloc::format!("gui_files: {}", self.status));
+        self.status = alloc::format!("{}: {}", operation, dunit::Error(error.0).name());
+        log(&alloc::format!("gui_files: {}", self.status));
     }
     fn listing(
         path: &str,
@@ -269,36 +264,32 @@ impl Files {
                 })
                 .collect());
         }
-        let entries = if let Some(file) = authority {
+        let mut items: Vec<_> = if let Some(file) = authority {
             file.entries()?
+                .into_iter()
+                .map(|e| Item {
+                    name: String::from(e.name()),
+                    kind: classify(
+                        e.name(),
+                        e.file_type == dunit::transfer::FILE_TYPE_DIRECTORY,
+                        path == "/app",
+                    ),
+                })
+                .collect()
         } else {
-            // Legacy virtual/mechanism directories cannot provide File caps.
-            // Grow until completeness is known; never pretend 1024 is a total.
-            let mut capacity = 64;
-            loop {
-                let mut entries = alloc::vec![libdunit::DirEntry::empty();capacity];
-                let n = checked(libdunit::readdir(path, &mut entries))?;
-                if n < capacity {
-                    entries.truncate(n);
-                    break entries;
-                }
-                if capacity == 1024 {
-                    return Err(TransferError(libdunit::ENOBUFS));
-                }
-                capacity *= 2;
-            }
+            dunit::fs::read_dir(path)
+                .map_err(|e| TransferError(e.0))?
+                .into_iter()
+                .map(|e| Item {
+                    kind: classify(
+                        &e.name,
+                        e.file_type == dunit::fs::FileType::Directory,
+                        path == "/app",
+                    ),
+                    name: e.name,
+                })
+                .collect()
         };
-        let mut items: Vec<_> = entries
-            .into_iter()
-            .map(|e| Item {
-                name: String::from(e.name()),
-                kind: classify(
-                    e.name(),
-                    e.file_type == libdunit::FILE_TYPE_DIRECTORY,
-                    path == "/app",
-                ),
-            })
-            .collect();
         items.sort_by(|a, b| {
             b.is_dir()
                 .cmp(&a.is_dir())
@@ -319,10 +310,8 @@ impl Files {
                     .iter()
                     .filter(|name| {
                         self.held.get(*name).is_some_and(|old| {
-                            self.open_file(name, false).map_or(true, |new| {
-                                libdunit::file_cap::relation(old.handle.raw(), new.handle.raw())
-                                    != libdunit::file_cap::Relation::Same as isize
-                            })
+                            self.open_file(name, false)
+                                .map_or(true, |new| !old.same_object(&new).unwrap_or(false))
                         })
                     })
                     .cloned()
@@ -377,7 +366,7 @@ impl Files {
         let path = self.child_path(&name);
         let authority = match self.open_file(&name, true) {
             Ok(file) => Some(file),
-            Err(error) if matches!(error.0, libdunit::EPERM | libdunit::EACCES) => {
+            Err(error) if matches!(error.0, dunit::errno::EPERM | dunit::errno::EACCES) => {
                 match self.open_file(&name, false) {
                     Ok(file) => Some(file),
                     Err(error) => {
@@ -386,7 +375,7 @@ impl Files {
                     }
                 }
             }
-            Err(error) if error.0 == libdunit::EOPNOTSUPP && !self.restricted => None,
+            Err(error) if error.0 == dunit::errno::EOPNOTSUPP && !self.restricted => None,
             Err(error) => {
                 self.error("Open directory", error);
                 return;
@@ -397,7 +386,7 @@ impl Files {
     }
     pub fn open_capability(&mut self, file: File) -> NativeResult<()> {
         if file.kind != FileKind::Directory {
-            return Err(TransferError(libdunit::ENOTDIR));
+            return Err(TransferError(dunit::errno::ENOTDIR));
         }
         let items = Self::listing(&file.path, Some(&file), &BTreeMap::new())?;
         self.generation = self.generation.wrapping_add(1);
@@ -457,7 +446,7 @@ impl Files {
     }
     pub fn open_received(&mut self, mut incoming: Vec<File>) -> NativeResult<()> {
         if incoming.is_empty() {
-            return Err(TransferError(libdunit::EINVAL));
+            return Err(TransferError(dunit::errno::EINVAL));
         }
         if incoming.len() == 1 {
             let file = incoming.pop().unwrap();
@@ -472,7 +461,7 @@ impl Files {
         let mut received = BTreeMap::new();
         for file in incoming {
             if received.insert(file.path.clone(), file).is_some() {
-                return Err(TransferError(libdunit::EINVAL));
+                return Err(TransferError(dunit::errno::EINVAL));
             }
         }
         let items = Self::listing("Received items", None, &received)?;
@@ -491,7 +480,7 @@ impl Files {
     }
     pub fn go_parent(&mut self) {
         if self.parents.is_empty() && !self.restricted && self.path != "/" {
-            let path = dunit_widgets::file_browser::parent(&self.path);
+            let path = dunit::ui::file_browser::parent(&self.path);
             if path == "/" {
                 let items = Self::listing("/", None, &BTreeMap::new());
                 match items {
@@ -534,20 +523,15 @@ impl Files {
         }
     }
     pub fn make_dir(&mut self, name: &str) -> bool {
+        if !dunit::ui::file_browser::valid_name(name) {
+            self.error("Create folder", TransferError(dunit::errno::EINVAL));
+            return false;
+        }
         let result = if !self.restricted && self.path == "/" {
-            checked(libdunit::mkdir(&self.child_path(name))).map(|_| ())
+            dunit::fs::create_dir(&self.child_path(name)).map_err(|e| TransferError(e.0))
         } else {
-            self.directory().and_then(|dir| {
-                checked(libdunit::file_cap::create_child(
-                    dir.raw(),
-                    name,
-                    libdunit::FILE_TYPE_DIRECTORY,
-                    libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_TRANSFER,
-                ))
-                .map(|h| {
-                    libdunit::handle_close(h as u32);
-                })
-            })
+            self.directory()
+                .and_then(|dir| dir.create_directory(name).map(drop))
         };
         match result {
             Ok(()) => {
@@ -562,31 +546,28 @@ impl Files {
         }
     }
     pub fn rename_selected(&mut self, name: &str) -> bool {
+        if !dunit::ui::file_browser::valid_name(name) {
+            self.error("Rename", TransferError(dunit::errno::EINVAL));
+            return false;
+        }
         let result = self
             .single_index()
-            .ok_or(TransferError(libdunit::EINVAL))
+            .ok_or(TransferError(dunit::errno::EINVAL))
             .and_then(|index| self.open_file(&self.items[index].name, true))
             .and_then(|source| {
                 let held = self
                     .held
                     .get(
-                        &self.items[self.single_index().ok_or(TransferError(libdunit::EINVAL))?]
-                            .name,
+                        &self.items[self
+                            .single_index()
+                            .ok_or(TransferError(dunit::errno::EINVAL))?]
+                        .name,
                     )
-                    .ok_or(TransferError(libdunit::EAGAIN))?;
-                if libdunit::file_cap::relation(held.handle.raw(), source.handle.raw())
-                    != libdunit::file_cap::Relation::Same as isize
-                {
-                    return Err(TransferError(libdunit::EAGAIN));
+                    .ok_or(TransferError(dunit::errno::EAGAIN))?;
+                if !held.same_object(&source).unwrap_or(false) {
+                    return Err(TransferError(dunit::errno::EAGAIN));
                 }
-                self.directory().and_then(|dir| {
-                    checked(libdunit::file_cap::move_to(
-                        source.handle.raw(),
-                        dir.raw(),
-                        name,
-                    ))
-                    .map(|_| ())
-                })
+                self.directory().and_then(|dir| source.move_to(&dir, name))
             });
         match result {
             Ok(()) => {
@@ -608,13 +589,11 @@ impl Files {
                 let old = self
                     .held
                     .get(&name)
-                    .ok_or(TransferError(libdunit::EAGAIN))?;
-                if libdunit::file_cap::relation(old.handle.raw(), file.handle.raw())
-                    != libdunit::file_cap::Relation::Same as isize
-                {
-                    return Err(TransferError(libdunit::EAGAIN));
+                    .ok_or(TransferError(dunit::errno::EAGAIN))?;
+                if !old.same_object(&file).unwrap_or(false) {
+                    return Err(TransferError(dunit::errno::EAGAIN));
                 }
-                checked(libdunit::file_cap::remove(file.handle.raw())).map(|_| ())
+                file.remove()
             });
             match result {
                 Ok(()) => removed += 1,

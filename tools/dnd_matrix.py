@@ -57,11 +57,11 @@ def prepare(overlay):
     rows=[]
     for slot,cell in enumerate(data['cells'],1):
         src,dst=cell['source'],cell['target'];positive=cell['expected'] in ('text','file_copy')
-        value='/tmp/matrix-source/'+source_leaf if src=='gui_files' else '0'
+        value='/tmp/matrix-source/'+source_leaf if src=='gui_files' else '15' if src=='gui_calc' else '0'
         mode='file' if cell['expected']=='file_copy' else 'terminal' if dst=='gui_terminal' else 'clipboard'
         expected=('matrix-file' if mode=='file' else f'm{slot}: '+value if mode=='terminal' and positive else f'm{slot}:' if mode=='terminal' else value if positive else 'm77-empty')
         rows.append('\t'.join([src,dst,mode,expected]))
-    actions=[];counts=Counter();exits=Counter();position=[0,0];completed=0;published=0;offered=0
+    actions=[];counts=Counter();exits=Counter();position=[0,0];completed=0;published=0;offered=0;profile_pages=0
     def motion(x,y,n=1):actions.append({'relative_motion':{'x':x,'y':y,'repeat':n,'interval':0.012}})
     motion(-127,-127,24)
     def move(x,y):
@@ -88,22 +88,28 @@ def prepare(overlay):
     wait('[MATRIX] observer ready')
     for case_index,cell in enumerate(cases,1):
         src,dst=cell['source'],cell['target'];source_id=f'm77_s_{src}';target_id=f'm77_t_{dst}'
-        positive=cell['expected'] in ('text','file_copy');value='/tmp/matrix-source/'+source_leaf if src=='gui_files' else '0'
+        positive=cell['expected'] in ('text','file_copy');value='/tmp/matrix-source/'+source_leaf if src=='gui_files' else '15' if src=='gui_calc' else '0'
         mode='file' if cell['expected']=='file_copy' else 'terminal' if dst=='gui_terminal' else 'clipboard'
         expected='matrix-file' if mode=='file' else value if positive else '' if mode=='terminal' else 'm77-empty'
         case_index=data['cells'].index(cell)+1
         launch(source_id);launch(target_id)
         # Prepare an empty receiving field or an actual shell echo command.
-        if dst=='gui_settings':click(660,610);click(790,270);key('ctrl','a');key('backspace')
+        if dst=='gui_settings':
+            click(660,560);profile_pages+=1;wait('gui_settings: page 12',profile_pages)
+            click(820,270);key('ctrl','a');key('backspace')
         elif dst=='gui_files' and cell['expected']!='file_copy':
             click(1050,300,'right');click(970,312);click(730,400);key('ctrl','a');key('backspace')
         elif dst=='gui_terminal':
             click(900,400);key('ctrl','u');type_text(f'echo m{case_index}: ');wait(f'[STDOUT] echo m{case_index}: ')
         focus(source_id)
         if src=='gui_settings':
-            click(160,610);click(290,270);key('ctrl','a');type_text('0');key('ctrl','a')
+            click(160,560);profile_pages+=1;wait('gui_settings: page 12',profile_pages)
+            click(320,270);key('ctrl','a');type_text('0');key('ctrl','a')
             # Verify the source selection was processed before testing drag.
             key('ctrl','c');published+=1;wait('[XFR] clipboard transfer=',published)
+        elif src=='gui_calc':
+            # Enter remains Equals even after a native SDK button gained focus.
+            click(150,390);key('esc');type_text('12+3',True)
         elif src=='gui_terminal':
             click(150,150);key('ctrl','l');type_text('echo 0',True);delay(250)
             move(109,132);button(True);move(117,132);button(False);delay()
@@ -117,8 +123,8 @@ def prepare(overlay):
         focus(source_id)
         # Keep each narrow-glyph pointer gesture independent of earlier cases.
         motion(-127,-127,24);position[:]=[0,0]
-        sx,sy=(280,270) if src=='gui_settings' else (109,132) if src=='gui_terminal' else (260,166) if src=='gui_files' else (150,150)
-        tx,ty=(780,270) if dst=='gui_settings' else (900,300) if dst=='gui_files' and cell['expected']=='file_copy' else (710,400) if dst=='gui_files' else (900,400)
+        sx,sy=(306,277) if src=='gui_settings' else (109,132) if src=='gui_terminal' else (260,166) if src=='gui_files' else (150,150)
+        tx,ty=(812,270) if dst=='gui_settings' else (900,300) if dst=='gui_files' and cell['expected']=='file_copy' else (710,400) if dst=='gui_files' else (900,400)
         move(sx,sy);actions.append({'execute':'screendump','arguments':{'filename':'/workspace/scratch/m77-matrix-source.ppm'}});button(True);move(sx+20,sy)
         if data['applications'][src]['source']!='none':
             offered+=1;wait(' kind=DragOffer transfer=0',offered)
@@ -146,7 +152,7 @@ def prepare(overlay):
     markers={'run':{'config':'limine_test_terminal.conf','cmd':['exec /app/setup import-desktop /sdk-matrix.toml','exec /app/gui_server'],
         'command_actions':{'exec /app/gui_server':actions}},
         'required':[{'marker':m,'claim':m,'source':'tools/fixtures/sdk_matrix.rs'} for m in ['[TERM-007] Starting main loop','[MATRIX] all selected native cells checked']+[f"[DND] {c['source']}->{c['target']} ok" for c in cases]],
-        'forbidden':[{'marker':m,'why':'Native matrix failure','source':'tools/fixtures/sdk_matrix.rs'} for m in ['[PANIC]','[SDK] PANIC','application failed:','gui_server: FAIL','gui_files: PANIC','gui_settings: PANIC','gui_calc: PANIC','gui_terminal: PANIC']]}
+        'forbidden':[{'marker':m,'why':'Native matrix failure','source':'tools/fixtures/sdk_matrix.rs'} for m in ['[PANIC]','[USER-FAULT]','[SDK] PANIC','application failed:','gui_server: FAIL','gui_files: PANIC','gui_settings: PANIC','gui_calc: PANIC','gui_terminal: PANIC']]}
     if move_files:markers['required'].append({'marker':'[DND] multi-file native move ok','claim':'Two real source inodes moved through Files and broker; neither source remains','source':'tools/fixtures/sdk_matrix.rs'})
     path=overlay.parent/'matrix-markers.json';path.write_text(json.dumps(markers,indent=2)+'\n');return path
 

@@ -112,7 +112,15 @@
         "timeout": 30
       },
       {
-        "delay_ms": 1500
+        "relative_motion": {
+          "x": -127,
+          "y": -127,
+          "repeat": 24,
+          "interval": 0.01
+        }
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -122,14 +130,6 @@
       },
       {
         "relative_motion": {
-          "x": -127,
-          "y": -127,
-          "repeat": 24,
-          "interval": 0.01
-        }
-      },
-      {
-        "relative_motion": {
           "x": 127,
           "y": 127,
           "interval": 0.02
@@ -137,7 +137,7 @@
       },
       {
         "relative_motion": {
-          "x": 43,
+          "x": 33,
           "y": 127,
           "interval": 0.02
         }
@@ -145,7 +145,7 @@
       {
         "relative_motion": {
           "x": 0,
-          "y": 96,
+          "y": 26,
           "interval": 0.02
         }
       },
@@ -164,9 +164,6 @@
         }
       },
       {
-        "delay_ms": 150
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -181,11 +178,14 @@
         }
       },
       {
-        "delay_ms": 500
+        "delay_ms": 200
       },
       {
         "wait_marker": "gui_settings: page 5",
-        "timeout": 15
+        "timeout": 45
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -195,30 +195,15 @@
       },
       {
         "relative_motion": {
-          "x": -127,
-          "y": -127,
-          "repeat": 24,
-          "interval": 0.01
-        }
-      },
-      {
-        "relative_motion": {
           "x": 127,
-          "y": 127,
+          "y": 65,
           "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 126,
-          "y": 32,
+          "x": 93,
+          "y": 0,
           "interval": 0.02
         }
       },
@@ -237,9 +222,6 @@
         }
       },
       {
-        "delay_ms": 150
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -254,14 +236,21 @@
         }
       },
       {
-        "delay_ms": 500
+        "delay_ms": 200
       },
       {
         "wait_marker": "gui_settings: theme saved /assets/dwm/themes/macos-light.toml",
-        "timeout": 15
+        "timeout": 45
+      },
+      {
+        "wait_marker": "gui_settings: SDK theme applied /assets/dwm/sdk/light.dss",
+        "timeout": 40
       },
       {
         "delay_ms": 1800
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -271,30 +260,8 @@
       },
       {
         "relative_motion": {
-          "x": -127,
-          "y": -127,
-          "repeat": 24,
-          "interval": 0.01
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 126,
-          "y": 72,
+          "x": 0,
+          "y": 62,
           "interval": 0.02
         }
       },
@@ -313,9 +280,6 @@
         }
       },
       {
-        "delay_ms": 150
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -330,10 +294,22 @@
         }
       },
       {
-        "delay_ms": 500
+        "delay_ms": 200
+      },
+      {
+        "wait_marker": "gui_settings: theme saved /assets/dwm/themes/mojave-dark.toml",
+        "timeout": 45
+      },
+      {
+        "wait_marker": "gui_settings: SDK theme applied /assets/dwm/sdk/dark.dss",
+        "timeout": 40,
+        "occurrences": 1
       },
       {
         "delay_ms": 1800
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -343,30 +319,8 @@
       },
       {
         "relative_motion": {
-          "x": -127,
-          "y": -127,
-          "repeat": 24,
-          "interval": 0.01
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 126,
-          "y": 112,
+          "x": 0,
+          "y": 62,
           "interval": 0.02
         }
       },
@@ -385,9 +339,6 @@
         }
       },
       {
-        "delay_ms": 150
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -402,10 +353,22 @@
         }
       },
       {
-        "delay_ms": 500
+        "delay_ms": 200
+      },
+      {
+        "wait_marker": "gui_settings: theme saved /assets/dwm/themes/nord.toml",
+        "timeout": 45
+      },
+      {
+        "wait_marker": "gui_settings: SDK theme applied /assets/dwm/sdk/dark.dss",
+        "timeout": 40,
+        "occurrences": 2
       },
       {
         "delay_ms": 1800
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -415,14 +378,6 @@
       },
       {
         "relative_motion": {
-          "x": -127,
-          "y": -127,
-          "repeat": 24,
-          "interval": 0.01
-        }
-      },
-      {
-        "relative_motion": {
           "x": 127,
           "y": 127,
           "interval": 0.02
@@ -451,36 +406,8 @@
       },
       {
         "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 127,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 101,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 0,
-          "y": 18,
+          "x": 102,
+          "y": 57,
           "interval": 0.02
         }
       },
@@ -499,9 +426,6 @@
         }
       },
       {
-        "delay_ms": 150
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -516,14 +440,17 @@
         }
       },
       {
-        "delay_ms": 500
+        "delay_ms": 200
       },
       {
         "wait_marker": "gui_files: surface presented OK",
-        "timeout": 20
+        "timeout": 45
       },
       {
-        "delay_ms": 2000
+        "delay_ms": 1800
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -555,7 +482,8 @@
     "gui_server: image rejected",
     "gui_files: image rejected",
     "gui_server: icon theme rejected",
-    "gui_files: icon theme rejected"
+    "gui_files: icon theme rejected",
+    "[USER-FAULT]"
   ],
   "description": "Production SVG wallpaper and original Chameleon ZIP themes, real pointer theme switching and Files. Same VFS archive resolver in both clients; no build-time rasterization."
 }

@@ -250,3 +250,23 @@ pub fn read_dir(path: &str) -> Result<Vec<DirectoryEntry>> {
         return Ok(entries);
     }
 }
+
+/// Read a complete file without allowing a growing file to exceed the budget.
+pub fn read_bounded(path: &str, limit: usize) -> Result<Vec<u8>> {
+    let mut file = File::open(path)?;
+    if file.metadata()?.len > limit as u64 {
+        return Err(Error(libdunit::EFBIG));
+    }
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 4096];
+    loop {
+        let n = file.read(&mut chunk)?;
+        if n == 0 {
+            return Ok(bytes);
+        }
+        if n > chunk.len() || bytes.len().saturating_add(n) > limit {
+            return Err(Error(libdunit::EFBIG));
+        }
+        bytes.extend_from_slice(&chunk[..n]);
+    }
+}

@@ -118,6 +118,10 @@ it is not fulfilled merely by a standalone widget showcase. The input-field
 clipboard dependency belongs to the system clipboard/DnD work in M7.7. Neither
 dependency is replaced with a local imitation or silently removed here.
 
+The subsequent [M7.11 GUI migration](gui-migration.md) moves all seven window
+clients onto the SDK. Standard controls use retained widgets; terminal cells and
+the Files icon grid remain application document canvases over shared resources.
+
 Cross-surface popup roles, global outside-click/grab semantics and a real system
 IME require their own system/protocol contracts. Current menus are deliberately
 client-local; negotiated focus loss dismisses them without claiming observation

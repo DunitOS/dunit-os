@@ -1,124 +1,18 @@
 #![no_std]
 #![no_main]
-
-//! Calculator client for the userspace DWM (Stack B).
-//!
-//! A modern, resizable calculator: config-driven palette (`apps/gui_calc.toml`
-//! via `dwm_settings::CalcCfg`), TrueType text (`dunit_text`/`dunit_render`),
-//! pointer + full keyboard input, and an f64 engine with guarded arithmetic and
-//! hand-written float→string formatting (no libm). Same gui-v1 protocol path as
-//! the other clients, including the server-pushed CONFIGURE resize (maximize /
-//! restore): the button grid and display re-derive from the live surface size.
-
-use core::panic::PanicInfo;
-
+//! Calculator domain model over SDK controls. SDK owns hit testing and frames.
 extern crate alloc;
-use gui_protocol_v1::control::{IN_DOWN,IN_UP,IN_MOVE,IN_KEY,IN_LEAVE,IN_FOCUS_OUT};
-use dunit::window::{Window,WindowEvent,PixelFormat};
-use dunit::transfer::{Action,Payload,Kind,Status};
-
-use alloc::string::String;
-
-
-use dunit_render::Surface;
-use dunit_style::value::Color;
-use dunit_text::Font;
-
-// Cooked key bytes the compositor forwards in the IN_KEY `button` field.
-const KEY_BACKSPACE: u8 = 0x08;
-const KEY_DEL: u8 = 0x7f;
-const KEY_ENTER_LF: u8 = 0x0a;
-const KEY_ENTER_CR: u8 = 0x0d;
-const KEY_ESC: u8 = 0x1b;
-
-const W: u32 = 260;
-const H: u32 = 360;
-const FMT_XRGB8888: u32 = 1;
-const FMT_ARGB8888: u32 = 2;
-
-const COLS: i32 = 4;
-const ROWS: i32 = 5;
-
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    libdunit::println("gui_calc: PANIC");
-    libdunit::exit(101)
-}
-
-/// Load the configured TTF (`[desktop] font`) from the VFS, falling back to the
-/// shipped /assets default font on any error — the desktop font is a live config knob.
-fn load_font() -> Result<Font, ()> {
-    let cfg = dwm_settings::load();
-    if let Some(bytes) = libdunit::read_binary(cfg.desktop.font.as_str(), 4 * 1024 * 1024) {
-        if let Ok(f) = Font::parse(bytes) {
-            return Ok(f);
-        }
-    }
-    libdunit::read_binary("/assets/fonts/DejaVuSans.ttf", 4 * 1024 * 1024)
-        .ok_or(())
-        .and_then(|b| Font::parse(b).map_err(|_| ()))
-}
-
-/// Unpack a `0xAARRGGBB` config word into a straight-alpha `Color`.
-fn col(argb: u32) -> Color {
-    Color::rgba(
-        ((argb >> 16) & 0xFF) as u8,
-        ((argb >> 8) & 0xFF) as u8,
-        (argb & 0xFF) as u8,
-        ((argb >> 24) & 0xFF) as u8,
-    )
-}
-
-
-
-fn round_i32(v: f32) -> i32 {
-    if v <= 0.0 { 0 } else { (v + 0.5) as i32 }
-}
-
-/// Total advance width of `text` at `px`.
-fn text_width(font: &Font, text: &str, px: f32) -> f32 {
-    font.layout_line(text, px).1
-}
-
-/// Draw one line of `text` with its left edge at `x` and baseline at `baseline`.
-fn draw_text(s: &mut Surface, font: &Font, x: i32, baseline: i32, px: f32, text: &str, color: Color) {
-    let (glyphs, _adv) = font.layout_line(text, px);
-    for g in glyphs {
-        if let Some(bmp) = font.rasterize(g.glyph, px) {
-            let ox = x + round_i32(g.x) + bmp.left;
-            let oy = baseline - bmp.top;
-            s.blit_glyph(&bmp, ox, oy, color);
-        }
-    }
-}
-
-/// Shrink `target_px` just enough that `text` fits within `max_w` (min 8px).
-fn fit_px(font: &Font, text: &str, target_px: f32, max_w: f32) -> f32 {
-    let w = text_width(font, text, target_px);
-    if w <= max_w || w <= 0.0 {
-        target_px
-    } else {
-        let scaled = target_px * max_w / w;
-        if scaled < 8.0 { 8.0 } else { scaled }
-    }
-}
-
-/// Resolved calculator palette, built once from `CalcCfg` (config→behavior).
-/// The window background carries the configured `bg_alpha` in `clear_bg`; every
-/// button/text color here is forced opaque.
-#[derive(Clone, Copy)]
-struct Palette {
-    display_bg: Color,
-    text: Color,
-    muted: Color,
-    btn: Color,
-    btn_fn: Color,
-    btn_op: Color,
-    btn_eq: Color,
-}
-
-/// A calculator key. Operators carry their ASCII byte (`+ - * /`) internally so
-/// the engine and the keyboard map stay ASCII; the face renders Unicode glyphs.
+use alloc::{string::String, vec};
+use dunit::transfer::{Action, Kind, Payload, Status};
+use dunit::ui::{Component, ComponentWindow, Renderer, View};
+use dunit::window::{
+    PixelFormat, WindowEvent, IN_DOWN, IN_FOCUS_OUT, IN_KEY, IN_LEAVE, IN_MOVE, IN_UP,
+};
+const KEY_BACKSPACE: u8 = 8;
+const KEY_DEL: u8 = 127;
+const KEY_ENTER_LF: u8 = 10;
+const KEY_ENTER_CR: u8 = 13;
+const KEY_ESC: u8 = 27;
 #[derive(Clone, Copy, PartialEq)]
 enum Key {
     Digit(u8), // 0..=9
@@ -135,11 +29,11 @@ enum Key {
 /// toggle and a percent key. Column 3 is the operator column; the bottom row is
 /// `± 0 . =`.
 const KEYS: [[Key; 4]; 5] = [
-    [Key::Clear,    Key::Back,     Key::Percent,  Key::Op(b'/')],
+    [Key::Clear, Key::Back, Key::Percent, Key::Op(b'/')],
     [Key::Digit(7), Key::Digit(8), Key::Digit(9), Key::Op(b'*')],
     [Key::Digit(4), Key::Digit(5), Key::Digit(6), Key::Op(b'-')],
     [Key::Digit(1), Key::Digit(2), Key::Digit(3), Key::Op(b'+')],
-    [Key::Sign,     Key::Digit(0), Key::Dot,      Key::Equals],
+    [Key::Sign, Key::Digit(0), Key::Dot, Key::Equals],
 ];
 
 fn key_label(k: Key) -> &'static str {
@@ -169,15 +63,6 @@ fn key_label(k: Key) -> &'static str {
     }
 }
 
-fn key_color(k: Key, p: &Palette) -> Color {
-    match k {
-        Key::Digit(_) | Key::Dot => p.btn,
-        Key::Op(_) => p.btn_op,
-        Key::Equals => p.btn_eq,
-        _ => p.btn_fn, // Clear, Back, Sign, Percent
-    }
-}
-
 /// The display symbol for an operator on the pending-expression line.
 fn op_sym(o: u8) -> &'static str {
     match o {
@@ -203,52 +88,6 @@ fn key_from_ascii(a: u8) -> Option<Key> {
         KEY_BACKSPACE | KEY_DEL => Some(Key::Back),
         KEY_ESC | b'c' | b'C' => Some(Key::Clear),
         _ => None,
-    }
-}
-
-/// Geometry derived from the live surface size (the compositor can resize us).
-#[derive(Clone, Copy)]
-struct Layout {
-    w: i32,
-    pad: i32,
-    disp_h: i32,
-    cw: i32,
-    ch: i32,
-    grid_y0: i32,
-}
-
-impl Layout {
-    fn new(w: i32, h: i32) -> Layout {
-        let pad = (w / 40).max(6);
-        let disp_h = (h * 27 / 100).max(48);
-        let grid_y0 = disp_h;
-        let cw = ((w - pad * (COLS + 1)) / COLS).max(1);
-        let avail = h - grid_y0 - pad * (ROWS + 1);
-        let ch = (avail / ROWS).max(1);
-        Layout { w, pad, disp_h, cw, ch, grid_y0 }
-    }
-
-    /// Screen-local rect of the (col,row) grid cell.
-    fn cell(&self, col: i32, row: i32) -> (i32, i32, i32, i32) {
-        let x = self.pad + col * (self.cw + self.pad);
-        let y = self.grid_y0 + self.pad + row * (self.ch + self.pad);
-        (x, y, self.cw, self.ch)
-    }
-
-    /// Map a client-local pointer position to a grid key, if any.
-    fn key_at(&self, px: i32, py: i32) -> Option<Key> {
-        if py < self.grid_y0 {
-            return None;
-        }
-        for r in 0..ROWS {
-            for c in 0..COLS {
-                let (x, y, w, h) = self.cell(c, r);
-                if px >= x && px < x + w && py >= y && py < y + h {
-                    return Some(KEYS[r as usize][c as usize]);
-                }
-            }
-        }
-        None
     }
 }
 
@@ -285,7 +124,11 @@ fn parse_entry(s: &str) -> f64 {
         }
     }
     let v = int_part + frac / scale;
-    if neg { -v } else { v }
+    if neg {
+        -v
+    } else {
+        v
+    }
 }
 
 fn pow10(n: u32) -> u128 {
@@ -550,153 +393,184 @@ impl Calc {
     }
 }
 
-/// Paint the whole calculator into the mapped buffer at the given geometry.
-fn render(pixels: &mut[u32], w: u32, h: u32, font: &Font, calc: &Calc, pal: &Palette, clear_bg: Color) {
-    let mut s = Surface::new(pixels, w as usize, h as usize);
-    // Base fill carries the configured alpha (translucent when bg_alpha < 255).
-    s.clear(clear_bg);
-
-    let ly = Layout::new(w as i32, h as i32);
-    let dx = ly.pad;
-    let dw = ly.w - 2 * ly.pad;
-    let dh = ly.disp_h - ly.pad;
-    s.fill_rect(dx as f32, ly.pad as f32, dw as f32, dh as f32, pal.display_bg);
-    let inner = ly.pad + 6;
-    let left_limit = dx + inner;
-
-    // Pending-expression line (muted, small, top-right).
-    if !calc.expr.is_empty() {
-        let epx = (ly.disp_h as f32 * 0.20).max(10.0);
-        let ew = text_width(font, &calc.expr, epx) as i32;
-        let ex = (dx + dw - inner - ew).max(left_limit);
-        let ebase = ly.pad + (ly.disp_h as f32 * 0.30) as i32;
-        draw_text(&mut s, font, ex, ebase, epx, &calc.expr, pal.muted);
-    }
-
-    // Main value (primary text, large, bottom-right, auto-shrunk to fit).
-    let disp = calc.display();
-    let target = (ly.disp_h as f32 * 0.42).max(14.0);
-    let vpx = fit_px(font, &disp, target, (dw - 2 * inner) as f32);
-    let vw = text_width(font, &disp, vpx) as i32;
-    let vx = (dx + dw - inner - vw).max(left_limit);
-    let vbase = ly.pad + dh - (ly.disp_h as f32 * 0.14) as i32;
-    draw_text(&mut s, font, vx, vbase, vpx, &disp, pal.text);
-
-    // Button grid.
-    for r in 0..ROWS {
-        for c in 0..COLS {
-            let k = KEYS[r as usize][c as usize];
-            let (x, y, bw, bh) = ly.cell(c, r);
-            s.fill_rect(x as f32, y as f32, bw as f32, bh as f32, key_color(k, pal));
-            let label = key_label(k);
-            let lpx = (bh as f32 * 0.44).max(12.0);
-            let lw = text_width(font, label, lpx) as i32;
-            let lx = x + (bw - lw) / 2;
-            let lbase = y + bh / 2 + (lpx * 0.34) as i32;
-            draw_text(&mut s, font, lx, lbase, lpx, label, pal.text);
+fn calculator_key(event: dunit::ui::UiEvent) -> dunit::ui::EventResponse<Key> {
+    if let dunit::ui::UiEventKind::NativeKey {
+        scancode,
+        character,
+        modifiers,
+    } = event.kind
+    {
+        if modifiers & dunit::window::KEYMOD_CTRL == 0 {
+            let ascii = match (scancode, character) {
+                (0x01, 0) => KEY_ESC,
+                (0x0e, 0) => KEY_BACKSPACE,
+                (0x53, 0) => KEY_DEL,
+                _ => character as u8,
+            };
+            if let Some(key) = key_from_ascii(ascii) {
+                return dunit::ui::EventResponse::message(key).prevent();
+            }
         }
+    }
+    Default::default()
+}
+impl Component for Calc {
+    type Message = Key;
+    fn update(&mut self, key: Key) {
+        self.press(key);
+    }
+    fn view(&self) -> View<Key> {
+        let keys = KEYS
+            .iter()
+            .flatten()
+            .enumerate()
+            .map(|(i, key)| {
+                View::button(alloc::format!("key{}", i), key_label(*key), *key).class(match key {
+                    Key::Digit(_) | Key::Dot => "digit",
+                    Key::Op(_) => "operator",
+                    Key::Equals => "equals",
+                    _ => "function",
+                })
+            })
+            .collect();
+        View::column(
+            "calculator",
+            vec![
+                View::column(
+                    "display",
+                    vec![
+                        View::text("expression", self.expr.clone()),
+                        View::text("value", self.display()),
+                    ],
+                ),
+                View::grid("keys", keys),
+            ],
+        )
+        .on_capture(calculator_key)
     }
 }
-
-fn checked<T>(result:dunit::Result<T>,operation:&str)->T{result.unwrap_or_else(|error|{libdunit::println(&alloc::format!("gui_calc: {} failed {}",operation,error.0));libdunit::exit(1)})}
-fn native(error:dunit::transfer::Error)->dunit::Error{dunit::Error(error.0)}
-fn paint(window:&mut Window,font:&Font,calc:&Calc,pal:&Palette,clear_bg:Color){checked(window.draw(|frame|{let(w,h)=frame.size();render(frame.pixels_mut(),w,h,font,calc,pal,clear_bg);}),"present frame");}
-#[no_mangle]
-pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnvp) -> ! {
-    libdunit::init_runtime(argc,argv,envp);
-    // 0) Load this app's config (apps/gui_calc.toml). A missing/garbage file
-    //    yields the built-in baseline. The resolved values below actually drive
-    //    the palette and background transparency (config→behavior).
-    let ccfg = dwm_settings::CalcCfg::load("gui_calc");
-    let fmt = if ccfg.bg_alpha < 255 { FMT_ARGB8888 } else { FMT_XRGB8888 };
-    libdunit::println(&alloc::format!(
-        "gui_calc: cfg from_file={} bg={:#010X} btn_op={:#010X} bg_alpha={} fmt={}",
-        ccfg.from_file as u32,
-        ccfg.bg,
-        ccfg.btn_op,
-        ccfg.bg_alpha,
-        if fmt == FMT_ARGB8888 { "argb8888" } else { "xrgb8888" },
-    ));
-
-    let pal = Palette {
-        display_bg: col(ccfg.display_bg | 0xFF00_0000),
-        text: col(ccfg.text | 0xFF00_0000),
-        muted: col(ccfg.muted | 0xFF00_0000),
-        btn: col(ccfg.btn | 0xFF00_0000),
-        btn_fn: col(ccfg.btn_fn | 0xFF00_0000),
-        btn_op: col(ccfg.btn_op | 0xFF00_0000),
-        btn_eq: col(ccfg.btn_eq | 0xFF00_0000),
-    };
-    let clear_bg = col((ccfg.bg_alpha << 24) | (ccfg.bg & 0x00FF_FFFF));
-
-    // A per-app `[calc] font` override wins over the desktop font; empty inherits.
-    let font = if !ccfg.font.as_str().is_empty() {
-        match libdunit::read_binary(ccfg.font.as_str(), 4 * 1024 * 1024)
-            .and_then(|b| Font::parse(b).ok())
-        {
-            Some(f) => f,
-            None => match load_font() {
-                Ok(f) => f,
-                Err(_) => {
-                    libdunit::println("gui_calc: FAIL font parse");
-                    libdunit::exit(7);
-                }
-            },
-        }
+fn native(error: dunit::transfer::Error) -> dunit::Error {
+    dunit::Error(error.0)
+}
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    let cfg = dwm_settings::CalcCfg::load("gui_calc");
+    let format = if cfg.bg_alpha < 255 {
+        PixelFormat::Argb8888
     } else {
-        match load_font() {
-            Ok(f) => f,
-            Err(_) => {
-                libdunit::println("gui_calc: FAIL font parse");
-                libdunit::exit(7);
-            }
-        }
+        PixelFormat::Xrgb8888
     };
-
-    let mut window=checked(Window::open_format(W,H,if fmt==FMT_ARGB8888{PixelFormat::Argb8888}else{PixelFormat::Xrgb8888}),"window handshake");
-    let mut calc=Calc::new();paint(&mut window,&font,&calc,&pal,clear_bg);
-    libdunit::println("gui_calc: surface presented OK");
-    let mut candidate=None;let mut source=None;
-    loop{
-        let event=checked(window.next_event(dunit::time::Duration::from_millis(40)),"window event");
-        let input=match event{
-            Some(WindowEvent::CloseRequested)=>break,
-            Some(WindowEvent::Resized{..})=>{candidate=None;paint(&mut window,&font,&calc,&pal,clear_bg);libdunit::println("gui_calc: reconfigured OK");continue;},
-            Some(WindowEvent::Transfer(event))=>{
-                let m=event.message;
-                if event.source&&matches!(m.kind,Kind::Cancelled|Kind::Finished)&&source==Some(m.request){source=None;}
-                if m.kind==Kind::Result&&source==Some(m.request)&&m.arg0!=Status::Ok as u32{source=None;libdunit::println("gui_calc: drag rejected");}
+    dunit::println!(
+        "gui_calc: cfg from_file={} bg={:#010X} btn_op={:#010X} bg_alpha={} fmt={}",
+        cfg.from_file as u32,
+        cfg.bg,
+        cfg.btn_op,
+        cfg.bg_alpha,
+        if cfg.bg_alpha < 255 {
+            "argb8888"
+        } else {
+            "xrgb8888"
+        }
+    )?;
+    let overlay = alloc::format!("Column#calculator {{ padding: 10; gap: 8; background: #00000000; }} Column#display {{ background: #{:06X}; padding: 8; height: 76; }} Text {{ color: #{:06X}; }} Text#expression {{ color: #{:06X}; font-size: 12; }} Text#value {{ font-size: 24; }} Grid#keys {{ background: #00000000; grid-columns: 4; gap: 6; height: fill; }} Button {{ background: #{:06X}; color: #{:06X}; height: fill; min-height: 36; }} Button.function {{ background: #{:06X}; }} Button.operator {{ background: #{:06X}; }} Button.equals {{ background: #{:06X}; }}", cfg.display_bg & 0xffffff, cfg.text & 0xffffff, cfg.muted & 0xffffff, cfg.btn & 0xffffff, cfg.text & 0xffffff, cfg.btn_fn & 0xffffff, cfg.btn_op & 0xffffff, cfg.btn_eq & 0xffffff);
+    let (theme, _) = dunit::ui::load_theme(&overlay)?;
+    let desktop = dwm_settings::load();
+    let font = dunit::canvas::Font::load(&[
+        cfg.font.as_str(),
+        desktop.desktop.font.as_str(),
+        "/assets/fonts/DejaVuSans.ttf",
+    ])?;
+    let mut ui = ComponentWindow::open_format(
+        260,
+        360,
+        Calc::new(),
+        Renderer::new(
+            font.into_inner(),
+            theme.cascade,
+            dunit::canvas::Color::rgba(
+                (cfg.bg >> 16) as u8,
+                (cfg.bg >> 8) as u8,
+                cfg.bg as u8,
+                cfg.bg_alpha as u8,
+            ),
+        ),
+        format,
+    )?;
+    dunit::println!("gui_calc: surface presented OK")?;
+    let mut candidate = None;
+    let mut source = None;
+    loop {
+        let input = match ui.next_event(dunit::time::Duration::from_millis(40))? {
+            Some(WindowEvent::CloseRequested) => break,
+            Some(WindowEvent::Resized { .. }) => {
+                candidate = None;
+                dunit::println!("gui_calc: reconfigured OK")?;
                 continue;
-            },
-            Some(WindowEvent::Input(input))=>input,
-            Some(WindowEvent::Protocol(_))|None=>continue,
+            }
+            Some(WindowEvent::Transfer(event)) => {
+                let m = event.message;
+                if event.source
+                    && matches!(m.kind, Kind::Cancelled | Kind::Finished)
+                    && source == Some(m.request)
+                {
+                    source = None;
+                }
+                if m.kind == Kind::Result
+                    && source == Some(m.request)
+                    && m.arg0 != Status::Ok as u32
+                {
+                    source = None;
+                    dunit::println!("gui_calc: drag rejected")?;
+                }
+                continue;
+            }
+            Some(WindowEvent::Input(input)) => input,
+            _ => continue,
         };
-        let mut dirty=false;
-        let(w,h)=window.size();let layout=Layout::new(w as i32,h as i32);
-        if input.kind==IN_FOCUS_OUT||input.kind==IN_LEAVE{candidate=None;}
-        if input.kind==IN_DOWN&&input.pointer_button()==0{
-            if input.y>=layout.pad&&input.y<layout.disp_h{
-                candidate=Some((input.x,input.y,calc.display(),dwm_settings::load().transfers.drag_threshold_px));
-            }else if let Some(key)=layout.key_at(input.x,input.y){calc.press(key);dirty=true;}
-        }else if input.kind==IN_MOVE{
-            if let Some((x,y,display,threshold))=candidate.as_ref(){
-                let dx=i64::from(input.x)-i64::from(*x);let dy=i64::from(input.y)-i64::from(*y);
-                if dx*dx+dy*dy>=i64::from(*threshold).pow(2){
-                    let payload=checked(Payload::text(display).map_err(native),"display payload");
-                    source=Some(checked(checked(window.transfers(),"transfer client").start_drag(payload,1,Action::Copy).map_err(native),"start display drag"));candidate=None;
+        if matches!(input.kind, IN_FOCUS_OUT | IN_LEAVE | IN_UP) {
+            candidate = None;
+        }
+        if input.kind == IN_DOWN && input.pointer_button() == 0 {
+            if ui.widget_rect("display").is_some_and(|r| {
+                input.x as f32 >= r.x
+                    && (input.x as f32) < r.x + r.w
+                    && input.y as f32 >= r.y
+                    && (input.y as f32) < r.y + r.h
+            }) {
+                candidate = Some((
+                    input.x,
+                    input.y,
+                    ui.component().display(),
+                    dwm_settings::load().transfers.drag_threshold_px,
+                ));
+            }
+        } else if input.kind == IN_MOVE {
+            if let Some((x, y, text, threshold)) = candidate.as_ref() {
+                let dx = i64::from(input.x) - i64::from(*x);
+                let dy = i64::from(input.y) - i64::from(*y);
+                if dx * dx + dy * dy >= i64::from(*threshold).pow(2) {
+                    let payload = Payload::text(text).map_err(native)?;
+                    source = Some(
+                        ui.transfers()?
+                            .start_drag(payload, 1, Action::Copy)
+                            .map_err(native)?,
+                    );
+                    candidate = None;
                 }
             }
-        }else if input.kind==IN_UP{candidate=None;}
-        else if input.kind==IN_KEY{
-            let modifiers=input.y as u8;
-            if modifiers&libdunit::KEYMOD_CTRL!=0{
-                if input.x==0x2e&&modifiers&!(libdunit::KEYMOD_CTRL|libdunit::KEYMOD_SHIFT)==0{
-                    let payload=checked(Payload::text(&calc.display()).map_err(native),"display payload");
-                    checked(checked(window.transfers(),"transfer client").publish_clipboard(payload,1,Action::Copy).map_err(native),"copy display");
+        } else if input.kind == IN_KEY {
+            let modifiers = input.y as u8;
+            if modifiers & dunit::window::KEYMOD_CTRL != 0 {
+                if input.x == 0x2e
+                    && modifiers & !(dunit::window::KEYMOD_CTRL | dunit::window::KEYMOD_SHIFT) == 0
+                {
+                    let payload = Payload::text(&ui.component().display()).map_err(native)?;
+                    ui.transfers()?
+                        .publish_clipboard(payload, 1, Action::Copy)
+                        .map_err(native)?;
                 }
-            }else if let Some(key)=key_from_ascii(input.value as u8){calc.press(key);dirty=true;}
+            }
         }
-        if dirty{paint(&mut window,&font,&calc,&pal,clear_bg);}
     }
-    checked(window.close(),"window close");libdunit::exit(0)
+    ui.close()
 }

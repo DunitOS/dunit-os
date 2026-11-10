@@ -227,9 +227,9 @@ impl Term {
     pub(super) fn flush_echo(&mut self) {
         #[cfg(not(test))]
         {
-            libdunit::write(1, b"[term] ");
-            libdunit::write(1, self.echo.as_bytes());
-            libdunit::write(1, b"\n");
+            let _ = dunit::io::Write::write_all(&mut dunit::io::stdout(), b"[term] ");
+            let _ = dunit::io::Write::write_all(&mut dunit::io::stdout(), self.echo.as_bytes());
+            let _ = dunit::io::Write::write_all(&mut dunit::io::stdout(), b"\n");
         }
         self.echo.clear();
     }

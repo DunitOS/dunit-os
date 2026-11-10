@@ -24,10 +24,10 @@ mod overlays;
 mod routing;
 #[path = "ui_scroll.rs"]
 mod scroll;
-#[path = "ui_transfer.rs"]
-mod transfer;
 #[path = "ui_text.rs"]
 mod text;
+#[path = "ui_transfer.rs"]
+mod transfer;
 #[path = "ui_workspace.rs"]
 mod workspace;
 
@@ -65,11 +65,18 @@ fn native(error: UiError) -> Error {
 // Target interval for automatic sampling, not a proven 16 ms rendering budget.
 const MOTION_FRAME: Duration = Duration::from_millis(16);
 
+struct CanvasLayer {
+    pixels: alloc::vec::Vec<u32>,
+    output: alloc::vec::Vec<u32>,
+    size: (u32, u32),
+    dirty: bool,
+}
 /// One root component in the existing single-window IPC session. Button input
 /// and shortcuts dispatch through `update`; resize uses compositor geometry.
 /// CPU invalidation drives buffer repair and existing gui-v1 damage metadata.
 /// Unchanged views skip publication; the compositor retains unchanged pixels.
 pub struct ComponentWindow<C: Component> {
+    canvas: Option<CanvasLayer>,
     metrics_enabled: bool,
     metrics: ComponentMetrics,
     application: alloc::boxed::Box<Application<C>>,
@@ -93,16 +100,32 @@ pub struct ComponentWindow<C: Component> {
 }
 impl<C: Component> ComponentWindow<C> {
     pub fn open(width: u32, height: u32, component: C, renderer: Renderer) -> NativeResult<Self> {
+        Self::open_format(
+            width,
+            height,
+            component,
+            renderer,
+            crate::window::PixelFormat::Xrgb8888,
+        )
+    }
+    pub fn open_format(
+        width: u32,
+        height: u32,
+        component: C,
+        renderer: Renderer,
+        format: crate::window::PixelFormat,
+    ) -> NativeResult<Self> {
         // Retained trees/theme/transfer snapshots live beyond a frame. Keep
         // their ownership on the heap so construction does not multiply large
         // return slots on the native 64 KiB user stack.
         let application = alloc::boxed::Box::new(Application::new(component).map_err(native)?);
         let mut ui = Self {
+            canvas: None,
             metrics_enabled: false,
             metrics: Default::default(),
             application,
-            renderer:alloc::boxed::Box::new(renderer),
-            window: Window::open(width, height)?,
+            renderer: alloc::boxed::Box::new(renderer),
+            window: Window::open_format(width, height, format)?,
             last_render: RenderStats::default(),
             uploaded_pixels: 0,
             failed: false,
@@ -121,6 +144,37 @@ impl<C: Component> ComponentWindow<C> {
         };
         ui.redraw()?;
         Ok(ui)
+    }
+    /// Supply custom document pixels beneath retained SDK controls. The SDK
+    /// owns a private snapshot; published buffers remain immutable. The caller
+    /// repaints domain content on resize, while menus/input keep SDK routing.
+    pub fn set_canvas(
+        &mut self,
+        pixels: alloc::vec::Vec<u32>,
+        width: u32,
+        height: u32,
+    ) -> NativeResult<()> {
+        if self.failed {
+            return Err(Error(libdunit::EPIPE));
+        }
+        let count = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or(Error(libdunit::EINVAL))?;
+        if width == 0
+            || height == 0
+            || count > 16 * 1024 * 1024
+            || pixels.len() != count
+            || self.size() != (width, height)
+        {
+            return Err(Error(libdunit::EINVAL));
+        }
+        self.canvas = Some(CanvasLayer {
+            output: pixels.clone(),
+            pixels,
+            size: (width, height),
+            dirty: true,
+        });
+        self.redraw()
     }
     /// Ask the compositor to atomically reload saved desktop/theme resources.
     pub fn reload_desktop(&mut self) -> NativeResult<()> {
@@ -144,6 +198,15 @@ impl<C: Component> ComponentWindow<C> {
         ui.theme = Some(alloc::boxed::Box::new(watcher));
         ui.theme_checked = Some(crate::time::Instant::now()?);
         Ok(ui)
+    }
+    pub fn launch_id(&self) -> u32 {
+        self.window.launch_id()
+    }
+    pub fn widget_rect(&self, key: &str) -> Option<Rect> {
+        self.renderer.widget_rect(key)
+    }
+    pub fn notify(&mut self, text: &str) -> NativeResult<()> {
+        self.window.notify(text)
     }
     /// Last rejected theme candidate. Automatic reload keeps the working theme;
     /// a later valid candidate clears this error. Drawing errors still poison.
@@ -295,6 +358,14 @@ impl<C: Component> ComponentWindow<C> {
         self.redraw()
     }
     fn redraw(&mut self) -> NativeResult<()> {
+        if self
+            .canvas
+            .as_ref()
+            .is_some_and(|c| c.size != self.window.size())
+        {
+            self.uploaded_pixels = 0;
+            return Ok(());
+        }
         self.sync_transfer_target()?;
         let metrics_enabled = self.metrics_enabled;
         let redraw_started = metrics::start(metrics_enabled);
@@ -308,8 +379,14 @@ impl<C: Component> ComponentWindow<C> {
         let last = &mut self.last_render;
         let uploaded = &mut self.uploaded_pixels;
         let metrics = &mut self.metrics;
+        let canvas = &mut self.canvas;
         let result = self.window.try_draw_damage(|frame| {
             let (w, h) = frame.size();
+            if canvas.as_ref().is_some_and(|c| c.size != (w, h)) {
+                frame.defer();
+                *uploaded = 0;
+                return Ok(None);
+            }
             sampled = Some(crate::time::Instant::now()?);
             let now =
                 u64::try_from(clock.elapsed()?.as_millis()).map_err(|_| Error(libdunit::EINVAL))?;
@@ -320,11 +397,12 @@ impl<C: Component> ComponentWindow<C> {
             let rendered = renderer.render_application_at(application, w, h, now);
             metrics.render.finish(metrics_enabled, render_started);
             *last = rendered.map_err(native)?;
-            if last.damage.is_none() && !frame.requires_full_frame() {
+            let canvas_dirty = canvas.as_ref().is_some_and(|c| c.dirty);
+            if last.damage.is_none() && !frame.requires_full_frame() && !canvas_dirty {
                 *uploaded = 0;
                 return Ok(None);
             }
-            let damage = if frame.requires_full_frame() {
+            let damage = if frame.requires_full_frame() || canvas_dirty {
                 DamageRect { x: 0, y: 0, w, h }
             } else {
                 let d = last.damage.unwrap();
@@ -336,7 +414,33 @@ impl<C: Component> ComponentWindow<C> {
                 }
             };
             let copy_started = metrics::start(metrics_enabled);
-            let copied = frame.copy_pixels(renderer.pixels(), Some(damage));
+            let copied = if let Some(canvas) = canvas.as_mut().filter(|c| c.size == (w, h)) {
+                let x = damage.x as usize;
+                let y = damage.y as usize;
+                for row in y..y + damage.h as usize {
+                    let start = row * w as usize + x;
+                    let end = start + damage.w as usize;
+                    canvas.output[start..end].copy_from_slice(&canvas.pixels[start..end]);
+                }
+                {
+                    let mut surface =
+                        dunit_render::Surface::new(&mut canvas.output, w as usize, h as usize);
+                    surface.with_clip(
+                        Rect {
+                            x: x as f32,
+                            y: y as f32,
+                            w: damage.w as f32,
+                            h: damage.h as f32,
+                        },
+                        |surface| {
+                            surface.blit_premultiplied(renderer.pixels(), w as usize, h as usize);
+                        },
+                    );
+                }
+                frame.copy_pixels(&canvas.output, Some(damage))
+            } else {
+                frame.copy_pixels(renderer.pixels(), Some(damage))
+            };
             metrics.copy.finish(metrics_enabled, copy_started);
             *uploaded = copied?;
             Ok(Some(damage))
@@ -346,6 +450,9 @@ impl<C: Component> ComponentWindow<C> {
             .finish(metrics_enabled, redraw_started);
         self.failed |= result.is_err();
         if result.is_ok() {
+            if let Some(canvas) = self.canvas.as_mut() {
+                canvas.dirty = false;
+            }
             self.motion_frame = sampled;
         }
         result

@@ -1,57 +1,28 @@
 #![no_std]
 #![no_main]
 
-//! DWM settings client for the M4 userspace DWM (Stack B), slice C.
-//!
-//! A gui-v1 client (same capability + wire path as `gui_files`) that edits the
-//! live compositor config. It loads `dwm_settings::Settings`, paints clickable
-//! color swatches, effect toggles and geometry steppers straight onto its shared
-//! surface with the M4 text runtime, and on every change writes the config back
-//! (`dwm_settings::save`) and pings the compositor to reload — the GUI<->TOML
-//! round-trip the concept calls for. RAM-only this session (disk is DunitFS/M5).
-
-use core::panic::PanicInfo;
+//! Source-preserving desktop editor over retained SDK controls.
+//! The application validates and saves documents; SDK owns input and painting.
 
 extern crate alloc;
-use gui_protocol_v1::control::{IN_DOWN,IN_KEY,IN_SCROLL,IN_FOCUS_IN,IN_FOCUS_OUT};
-use dunit::window::{Window,WindowEvent};
-mod text_transfer;
+
+use dunit::ui::{Attrs, Component, ComponentWindow, InputOptions, Sizing, View};
+use dunit::window::WindowEvent;
+
 mod document_editor;
 use document_editor::{Editor, Section};
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-
-use dunit_render::Surface;
-use dunit_style::value::Color;
-use dunit_text::Font;
-
 use dwm_settings::{Effects, Settings, Theme};
+
+fn log(message: &str) {
+    let _ = dunit::println!("{}", message);
+}
 
 const W: u32 = 600;
 const H: u32 = 600;
-const FOOTER_H: u32 = 72;
-
-/// Load the configured TTF (`[desktop] font`) from the VFS, falling back to the
-/// shipped /assets default font on any error — the desktop font is a live config knob.
-fn load_font() -> Result<Font, ()> {
-    let cfg = dwm_settings::load();
-    if let Some(bytes) = libdunit::read_binary(cfg.desktop.font.as_str(), 4 * 1024 * 1024) {
-        if let Ok(f) = Font::parse(bytes) {
-            return Ok(f);
-        }
-    }
-    libdunit::read_binary(dwm_settings::Desktop::baseline().font.as_str(), 4 * 1024 * 1024)
-        .ok_or(())
-        .and_then(|b| Font::parse(b).map_err(|_| ()))
-}
-
-// UI geometry (client-local px).
-const ROW_H: i32 = 24;
-const Y0: i32 = 100;
-
-
 const NCOLORS: usize = 17;
 const COLOR_LABELS: [&str; NCOLORS] = [
     "Desktop background",
@@ -130,9 +101,17 @@ const INT_SPECS: [IntSpec; NINTS] = [
 /// (single source of truth) — the compositor applies it on the next session
 /// re-entry, and on a fixed GOP framebuffer the request degrades to a no-op.
 const NRES: usize = 9;
-const RES_PRESETS: [(u32, u32); NRES] =
-    [(0, 0), (1280, 720), (1366, 768), (1600, 900), (1920, 1080),
-     (2560, 1440), (2560, 1600), (2880, 1800), (3072, 1920)];
+const RES_PRESETS: [(u32, u32); NRES] = [
+    (0, 0),
+    (1280, 720),
+    (1366, 768),
+    (1600, 900),
+    (1920, 1080),
+    (2560, 1440),
+    (2560, 1600),
+    (2880, 1800),
+    (3072, 1920),
+];
 
 // --- Settings field accessors (index -> field), read + mutable variants ------
 
@@ -179,7 +158,6 @@ fn color_get(t: &Theme, i: usize) -> u32 {
     }
 }
 
-
 fn toggle_get(fx: &Effects, i: usize) -> bool {
     match i {
         0 => fx.blur,
@@ -220,7 +198,6 @@ fn int_get(s: &Settings, i: usize) -> i32 {
 #[derive(Clone, Copy)]
 enum Action {
     SelectPage(usize),
-    Scroll(i32, i32),
     ColorPrev(usize),
     ColorNext(usize),
     Toggle(usize),
@@ -233,29 +210,13 @@ enum Action {
     ImportTheme(usize),
     ImportDesktop(usize),
     SelectProfile(usize),
-    FocusProfilePath,
     ImportProfile,
-    EditLine(usize),
     InsertLine,
     NewTable,
     DeleteLine,
     EditorPage(i32),
     SaveDocument,
     RevertDocument,
-}
-
-/// A clickable region and the action it fires.
-struct Hotspot {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    act: Action,
-}
-impl Hotspot {
-    fn hit(&self, px: i32, py: i32) -> bool {
-        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
-    }
 }
 
 /// Editor model: the working settings plus the palette index chosen per color.
@@ -265,10 +226,6 @@ struct App {
     palette: Vec<u32>,
     res_idx: usize,
     page: usize,
-    width: u32,
-    height: u32,
-    scroll_x: i32,
-    scroll_y: i32,
     status: &'static str,
     document_error: String,
     error: bool,
@@ -280,36 +237,36 @@ struct App {
     editor: Option<Editor>,
     editor_page: usize,
     profiles: Vec<String>,
-    profile_path: Editor,
-    profile_focused: bool,
+    profile_path: String,
+    reload: bool,
+    pending: Option<Action>,
 }
-
 
 impl App {
     fn editor_section(&self) -> Option<Section> {
         match self.page {
-            6 => Some(Section::Panels), 7 => Some(Section::Typography),
-            8 => Some(Section::Widgets), 9 => Some(Section::Bindings),
-            10 => Some(Section::Rules), 11 => Some(Section::Scripts), _ => None,
+            6 => Some(Section::Panels),
+            7 => Some(Section::Typography),
+            8 => Some(Section::Widgets),
+            9 => Some(Section::Bindings),
+            10 => Some(Section::Rules),
+            11 => Some(Section::Scripts),
+            _ => None,
         }
     }
     fn refresh_document(&mut self) {
         match dwm_settings::load_document() {
-            Ok(text) => { self.editor = Some(Editor::new(text)); self.editor_page = 0; },
-            Err(error) => { self.editor = None; self.status = error.reason; self.error = true; },
+            Ok(text) => {
+                self.editor = Some(Editor::new(text));
+                self.editor_page = 0;
+            }
+            Err(error) => {
+                self.editor = None;
+                self.status = error.reason;
+                self.error = true;
+            }
         }
     }
-    fn content_height(&self) -> u32 {
-        if self.editor_section().is_some() { return 720; }
-        if self.page == 0 {
-            (Y0 + NCOLORS as i32 * (2 * ROW_H + 8) + 24) as u32
-        } else if self.page == 12 {
-            (Y0 + 160 + self.profiles.len() as i32 * 36).max(H as i32) as u32
-        } else if self.page == 5 {
-            (Y0 + 96 + self.themes.len() as i32 * 40).max(H as i32) as u32
-        } else { H }
-    }
-
     fn new() -> App {
         let s = dwm_settings::load();
         let loaded_palette = dwm_settings::load_palette(s.desktop.palette.as_str());
@@ -317,7 +274,9 @@ impl App {
         let mut palette = loaded_palette.unwrap_or_default();
         for i in 0..NCOLORS {
             let color = color_get(&s.theme, i);
-            if !palette.contains(&color) { palette.push(color); }
+            if !palette.contains(&color) {
+                palette.push(color);
+            }
         }
         let mut color_idx = [0usize; NCOLORS];
         for (i, slot) in color_idx.iter_mut().enumerate() {
@@ -334,12 +293,11 @@ impl App {
             palette,
             res_idx,
             page: 0,
-            width: W,
-            height: H,
-            scroll_x: 0,
-            scroll_y: 0,
-            status: if valid_palette { "Settings saved to the active desktop profile." }
-                else { "Cannot read palette: using current theme colors. Set desktop.palette in setup." },
+            status: if valid_palette {
+                "Settings saved to the active desktop profile."
+            } else {
+                "Cannot read palette: using current theme colors. Set desktop.palette in setup."
+            },
             error: !valid_palette,
             document_error: String::new(),
             script_layouts: Vec::new(),
@@ -350,8 +308,9 @@ impl App {
             editor: None,
             editor_page: 0,
             profiles: Vec::new(),
-            profile_path: Editor::new(String::new()),
-            profile_focused: false,
+            reload: false,
+            pending: None,
+            profile_path: String::new(),
         };
         app.refresh_scripts();
         app
@@ -368,31 +327,47 @@ impl App {
             return;
         };
         let parent = if parent.is_empty() { "/" } else { parent };
-        if !path.starts_with('/') || parent.split('/').any(|part| part == "..")
-            || parent.bytes().any(|b| b == b'"' || b == b'\\' || b.is_ascii_control()) {
+        if !path.starts_with('/')
+            || parent.split('/').any(|part| part == "..")
+            || parent
+                .bytes()
+                .any(|b| b == b'"' || b == b'\\' || b.is_ascii_control())
+        {
             self.scripts_listing_status = "Script folder is invalid; edit scripts.layout in setup.";
             return;
         }
         self.scripts_directory.push_str(parent);
-        let mut entries = alloc::vec![libdunit::DirEntry::empty(); 1024];
-        let count = libdunit::readdir(parent, &mut entries);
-        if count < 0 {
-            self.scripts_listing_status = "Cannot read script folder; edit its path in setup.";
-            return;
-        }
-        for entry in entries.iter().take((count as usize).min(entries.len())) {
-            let name = entry.name();
-            if entry.file_type != libdunit::FILE_TYPE_FILE || !name.ends_with(".lua")
-                || !name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) {
+        let entries = match dunit::fs::read_dir(parent) {
+            Ok(entries) => entries,
+            Err(_) => {
+                self.scripts_listing_status = "Cannot read script folder; edit its path in setup.";
+                return;
+            }
+        };
+        for entry in &entries {
+            let name = entry.name.as_str();
+            if entry.file_type != dunit::fs::FileType::File
+                || !name.ends_with(".lua")
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+            {
                 continue;
             }
             let path = alloc::format!("{}/{}", parent.trim_end_matches('/'), name);
             // Empty drafts cannot return a layout. Keep them off the selector;
             // the source editor still accepts arbitrary configured script paths.
-            let Some(source) = libdunit::read_binary(&path, 64 * 1024) else { continue; };
-            if source.iter().all(|byte| byte.is_ascii_whitespace()) { continue; }
+            let Ok(source) = dunit::fs::read_bounded(&path, 64 * 1024) else {
+                continue;
+            };
+            if source.iter().all(|byte| byte.is_ascii_whitespace()) {
+                continue;
+            }
             let mut candidate = self.s;
-            dwm_settings::parse_into(&alloc::format!("[scripts]\nlayout = \"{}\"\n", path), &mut candidate);
+            dwm_settings::parse_into(
+                &alloc::format!("[scripts]\nlayout = \"{}\"\n", path),
+                &mut candidate,
+            );
             if candidate.scripts.layout.as_str() == path && dwm_settings::roundtrip_ok(&candidate) {
                 self.script_layouts.push(path);
             }
@@ -401,24 +376,34 @@ impl App {
         self.script_layouts.dedup();
         self.scripts_listing_status = if self.script_layouts.is_empty() {
             "No selectable .lua files in this folder."
-        } else { "Folder and runner can be changed in terminal setup." };
+        } else {
+            "Folder and runner can be changed in terminal setup."
+        };
     }
 
     fn refresh_profiles(&mut self) {
         self.profiles.clear();
-        let mut entries = alloc::vec![libdunit::DirEntry::empty(); 1024];
-        let count = libdunit::readdir("/assets/dwm", &mut entries);
-        if count < 0 {
-            self.status = "Cannot read bundled profile directory. Enter an absolute profile path.";
-            self.error = true;
-            return;
-        }
-        for entry in entries.iter().take((count as usize).min(entries.len())) {
-            let name = entry.name();
-            if entry.file_type == libdunit::FILE_TYPE_FILE && name.ends_with(".toml")
-                && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) {
+        let entries = match dunit::fs::read_dir("/assets/dwm") {
+            Ok(entries) => entries,
+            Err(_) => {
+                self.status =
+                    "Cannot read bundled profile directory. Enter an absolute profile path.";
+                self.error = true;
+                return;
+            }
+        };
+        for entry in &entries {
+            let name = entry.name.as_str();
+            if entry.file_type == dunit::fs::FileType::File
+                && name.ends_with(".toml")
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+            {
                 let path = alloc::format!("/assets/dwm/{}", name);
-                if dwm_settings::load_document_from(&path).is_ok() { self.profiles.push(path); }
+                if dwm_settings::load_document_from(&path).is_ok() {
+                    self.profiles.push(path);
+                }
             }
         }
         self.profiles.sort_unstable();
@@ -432,17 +417,26 @@ impl App {
             self.themes_listing_status = "Invalid theme folder; edit desktop.themes in setup.";
             return;
         }
-        let mut entries = alloc::vec![libdunit::DirEntry::empty(); 1024];
-        let count = libdunit::readdir(directory, &mut entries);
-        if count < 0 {
-            self.themes_listing_status = "Cannot read theme folder.";
-            return;
-        }
-        for entry in entries.iter().take((count as usize).min(entries.len())) {
-            let name = entry.name();
-            if entry.file_type == libdunit::FILE_TYPE_FILE && name.ends_with(".toml")
-                && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) {
-                self.themes.push(alloc::format!("{}/{}", directory.trim_end_matches('/'), name));
+        let entries = match dunit::fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(_) => {
+                self.themes_listing_status = "Cannot read theme folder.";
+                return;
+            }
+        };
+        for entry in &entries {
+            let name = entry.name.as_str();
+            if entry.file_type == dunit::fs::FileType::File
+                && name.ends_with(".toml")
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+            {
+                self.themes.push(alloc::format!(
+                    "{}/{}",
+                    directory.trim_end_matches('/'),
+                    name
+                ));
             }
         }
         self.themes.sort_unstable();
@@ -455,93 +449,115 @@ impl App {
     }
 
     fn refresh_color_choices(&mut self) {
-        self.palette = dwm_settings::load_palette(self.s.desktop.palette.as_str()).unwrap_or_default();
+        self.palette =
+            dwm_settings::load_palette(self.s.desktop.palette.as_str()).unwrap_or_default();
         for i in 0..NCOLORS {
             let color = color_get(&self.s.theme, i);
-            if !self.palette.contains(&color) { self.palette.push(color); }
+            if !self.palette.contains(&color) {
+                self.palette.push(color);
+            }
             self.color_idx[i] = self.palette.iter().position(|&p| p == color).unwrap_or(0);
         }
-        self.res_idx = RES_PRESETS.iter()
+        self.res_idx = RES_PRESETS
+            .iter()
             .position(|&(w, h)| w == self.s.display.width && h == self.s.display.height)
             .unwrap_or(0);
     }
 
     fn apply(&mut self, act: Action) {
         match act {
-            Action::ImportTheme(_) | Action::ImportDesktop(_) | Action::ImportProfile | Action::SaveDocument => {},
+            Action::ImportTheme(_)
+            | Action::ImportDesktop(_)
+            | Action::ImportProfile
+            | Action::SaveDocument => {}
             Action::SelectProfile(index) => {
                 if let Some(path) = self.profiles.get(index) {
-                    self.profile_path = Editor::new(path.clone()); self.profile_path.select(0);
-                    self.profile_focused = true;
+                    self.profile_path = path.clone();
+
                     self.status = "Profile selected. Import complete desktop validates before replacing configuration.";
                     self.error = false;
                 }
-            },
-            Action::FocusProfilePath => {
-                if self.profile_path.lines.is_empty() { self.profile_path.lines.push(String::new()); }
-                self.profile_path.select(0); self.profile_focused = true;
-            },
-            Action::EditLine(index) => if let Some(editor) = &mut self.editor { editor.select(index); },
+            }
             Action::InsertLine | Action::NewTable => {
                 if let Some(section) = self.editor_section() {
                     if let Some(editor) = &mut self.editor {
-                        if matches!(act, Action::NewTable) { editor.new_table(section); }
-                        else { editor.insert_line(section); }
+                        if matches!(act, Action::NewTable) {
+                            editor.new_table(section);
+                        } else {
+                            editor.insert_line(section);
+                        }
                         let rows = editor.rows(section);
-                        self.editor_page = rows.iter().position(|i| Some(*i) == editor.selected).unwrap_or(0) / 12;
-                        self.status = "Draft changed. Apply validates the complete desktop document.";
+                        self.editor_page = rows
+                            .iter()
+                            .position(|i| Some(*i) == editor.selected)
+                            .unwrap_or(0)
+                            / 12;
+                        self.status =
+                            "Draft changed. Apply validates the complete desktop document.";
                         self.error = false;
                     }
                 }
-            },
-            Action::DeleteLine => if let Some(editor) = &mut self.editor { editor.remove_line(); },
+            }
+            Action::DeleteLine => {
+                if let Some(editor) = &mut self.editor {
+                    editor.remove_line();
+                }
+            }
             Action::EditorPage(delta) => {
                 if let (Some(section), Some(editor)) = (self.editor_section(), &self.editor) {
-                    self.editor_page = (self.editor_page as i32 + delta).clamp(0,
-                        editor.rows(section).len().saturating_sub(1) as i32 / 12) as usize;
+                    self.editor_page = (self.editor_page as i32 + delta)
+                        .clamp(0, editor.rows(section).len().saturating_sub(1) as i32 / 12)
+                        as usize;
                 }
-            },
+            }
             Action::RevertDocument => self.refresh_document(),
             Action::SelectPage(page) => {
                 self.page = page;
-                self.profile_focused = false;
-                if let Some(editor) = &mut self.editor { editor.selected = None; }
-                self.scroll_x = 0;
-                self.scroll_y = 0;
-                if page == 4 { self.refresh_scripts(); }
-                if page == 5 { self.refresh_themes(); }
-                if page == 12 { self.refresh_profiles(); }
-                if self.editor_section().is_some() && self.editor.is_none() { self.refresh_document(); }
+
+                if let Some(editor) = &mut self.editor {
+                    editor.selected = None;
+                }
+
+                if page == 4 {
+                    self.refresh_scripts();
+                }
+                if page == 5 {
+                    self.refresh_themes();
+                }
+                if page == 12 {
+                    self.refresh_profiles();
+                }
+                if self.editor_section().is_some() && self.editor.is_none() {
+                    self.refresh_document();
+                }
             }
             Action::ScriptsToggle => self.s.scripts.enabled = !self.s.scripts.enabled,
             Action::ScriptTimeout(delta) => {
-                self.s.scripts.timeout_ms = (self.s.scripts.timeout_ms as i32 + delta).clamp(50, 5000) as u32;
+                self.s.scripts.timeout_ms =
+                    (self.s.scripts.timeout_ms as i32 + delta).clamp(50, 5000) as u32;
             }
             Action::ScriptLayout(direction) => {
                 if !self.script_layouts.is_empty() {
                     let len = self.script_layouts.len();
-                    let current = self.script_layouts.iter().position(|path| path == self.s.scripts.layout.as_str());
+                    let current = self
+                        .script_layouts
+                        .iter()
+                        .position(|path| path == self.s.scripts.layout.as_str());
                     let index = match (current, direction < 0) {
                         (Some(i), true) => (i + len - 1) % len,
                         (Some(i), false) => (i + 1) % len,
                         (None, true) => len - 1,
                         (None, false) => 0,
                     };
-                    dwm_settings::parse_into(&alloc::format!("[scripts]\nlayout = \"{}\"\n", self.script_layouts[index]), &mut self.s);
+                    dwm_settings::parse_into(
+                        &alloc::format!("[scripts]\nlayout = \"{}\"\n", self.script_layouts[index]),
+                        &mut self.s,
+                    );
                 }
             }
-            Action::Scroll(x, y) => {
-                self.scroll_x = self
-                    .scroll_x
-                    .saturating_add(x)
-                    .clamp(0, (if self.editor_section().is_some() { 1200u32 } else { W }).saturating_sub(self.width) as i32);
-                self.scroll_y = self.scroll_y.saturating_add(y).clamp(
-                    0,
-                    self.content_height().saturating_sub(self.height.saturating_sub(FOOTER_H)) as i32,
-                );
-            }
             Action::ColorPrev(i) => {
-                self.color_idx[i] = (self.color_idx[i] + self.palette.len() - 1) % self.palette.len();
+                self.color_idx[i] =
+                    (self.color_idx[i] + self.palette.len() - 1) % self.palette.len();
                 *color_ref(&mut self.s.theme, i) = self.palette[self.color_idx[i]];
             }
             Action::ColorNext(i) => {
@@ -570,747 +586,23 @@ impl App {
     }
 }
 
-// --- Low-level drawing (straight onto the shared surface) --------------------
-
-/// ARGB8888 -> render Color.
-fn col(argb: u32) -> Color {
-    Color::rgba(
-        ((argb >> 16) & 0xFF) as u8,
-        ((argb >> 8) & 0xFF) as u8,
-        (argb & 0xFF) as u8,
-        ((argb >> 24) & 0xFF) as u8,
-    )
-}
-
-/// Draw one line of text with its top-left at (x, y_top). Mirrors the runtime
-/// painter's baseline math so it looks identical to DUI-rendered text.
-fn draw_text(
-    surf: &mut Surface,
-    font: &Font,
-    x: i32,
-    y_top: i32,
-    px: f32,
-    color: Color,
-    text: &str,
-) {
-    let baseline = y_top as f32 + font.line_metrics(px).ascent;
-    let (glyphs, _adv) = font.layout_line(text, px);
-    for g in glyphs {
-        if let Some(bmp) = font.rasterize(g.glyph, px) {
-            let ox = (x as f32 + g.x + 0.5) as i32 + bmp.left;
-            let oy = (baseline + 0.5) as i32 - bmp.top;
-            surf.blit_glyph(&bmp, ox, oy, color);
-        }
-    }
-}
-
-/// Draw a small labelled button; returns nothing (hotspot is registered by the
-/// caller so hit rects stay in one place).
-fn button(surf: &mut Surface, font: &Font, theme: &Theme, x: i32, y: i32, w: i32, label: &str) {
-    let h = ROW_H - 6;
-    surf.fill_rect(x as f32, y as f32, w as f32, h as f32, col(theme.taskbtn));
-    surf.stroke_rect(
-        x as f32,
-        y as f32,
-        w as f32,
-        h as f32,
-        1.0,
-        col(theme.border_unfocused),
-    );
-    draw_text(surf, font, x + 6, y + 2, 13.0, col(theme.panel_text), label);
-}
-
-
-fn push_hex_byte(s: &mut String, v: u32) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    s.push(HEX[((v >> 4) & 0xF) as usize] as char);
-    s.push(HEX[(v & 0xF) as usize] as char);
-}
-fn hex_argb(argb: u32) -> String {
-    let mut s = String::from("#");
-    push_hex_byte(&mut s, (argb >> 24) & 0xFF);
-    push_hex_byte(&mut s, (argb >> 16) & 0xFF);
-    push_hex_byte(&mut s, (argb >> 8) & 0xFF);
-    push_hex_byte(&mut s, argb & 0xFF);
-    s
-}
-fn push_int(s: &mut String, mut v: i32) {
-    if v < 0 {
-        s.push('-');
-        v = -v;
-    }
-    if v == 0 {
-        s.push('0');
-        return;
-    }
-    let mut tmp = [0u8; 12];
-    let mut n = 0;
-    while v > 0 {
-        tmp[n] = b'0' + (v % 10) as u8;
-        v /= 10;
-        n += 1;
-    }
-    while n > 0 {
-        n -= 1;
-        s.push(tmp[n] as char);
-    }
-}
-
-
-/// Paint the whole editor into the shared surface and return the hit rects.
-fn render(pixels: &mut[u32], font: &Font, app: &App) -> Vec<Hotspot> {
-    // Maintain the full form on small surfaces and expose its clipped portion
-    // through scrolling. Large surfaces expand the backdrop without stretching text.
-    let canvas_w = app.width.max(if app.editor_section().is_some() { 1200 } else { W });
-    let canvas_h = app.height.saturating_sub(FOOTER_H).max(app.content_height());
-    let mut canvas = alloc::vec![0u32; canvas_w as usize * canvas_h as usize];
-    let mut surf = Surface::new(&mut canvas, canvas_w as usize, canvas_h as usize);
-    let mut spots: Vec<Hotspot> = Vec::new();
-
-    let theme = &app.s.theme;
-    let foreground = col(theme.panel_text);
-    let accent = col(theme.border_focused);
-    let sidebar = 154;
-    let content = sidebar + 22;
-    surf.fill_rect(
-        0.0,
-        0.0,
-        canvas_w as f32,
-        canvas_h as f32,
-        col(theme.menu),
-    );
-    surf.fill_rect(0.0, 0.0, sidebar as f32, canvas_h as f32, col(theme.panel));
-    surf.fill_rect(
-        sidebar as f32,
-        0.0,
-        1.0,
-        canvas_h as f32,
-        col(theme.border_unfocused),
-    );
-    draw_text(&mut surf, font, 16, 22, 18.0, foreground, "Settings");
-    const PAGES: [&str; 13] = ["Appearance", "Animations", "Desktop geometry", "Display", "Lua Scripts", "Themes", "Panels", "Typography", "Widgets", "Keybindings", "Window Rules", "Lua event hook", "Desktop profiles"];
-    for (page, label) in PAGES.iter().enumerate() {
-        let y = if page < 6 { 76 + page as i32 * 40 }
-            else { 316 + (page as i32 - 6) * 30 };
-        let nav_height = if page < 6 { 32 } else { 28 };
-        if app.page == page {
-            surf.fill_rect(
-                8.0,
-                y as f32,
-                (sidebar - 16) as f32,
-                nav_height as f32,
-                col(theme.taskbtn_focused),
-            );
-            surf.fill_rect(8.0, y as f32, 3.0, nav_height as f32, accent);
-        }
-        draw_text(&mut surf, font, 18, y + 8, 13.0, foreground, label);
-        spots.push(Hotspot {
-            x: 8,
-            y,
-            w: sidebar - 16,
-            h: nav_height,
-            act: Action::SelectPage(page),
-        });
-    }
-    draw_text(
-        &mut surf,
-        font,
-        content,
-        28,
-        23.0,
-        foreground,
-        PAGES[app.page],
-    );
-    draw_text(
-        &mut surf,
-        font,
-        content,
-        65,
-        12.0,
-        foreground,
-        if app.editor_section().is_some() { "Edit a draft, then Apply to validate and reload." }
-            else { "Changes save and apply to the current desktop." },
-    );
-    let mut y = Y0;
-    if app.page == 0 {
-        for i in 0..NCOLORS {
-            draw_text(
-                &mut surf,
-                font,
-                content,
-                y,
-                14.0,
-                foreground,
-                COLOR_LABELS[i],
-            );
-            y += ROW_H;
-            button(&mut surf, font, theme, content, y, 26, "<");
-            spots.push(Hotspot {
-                x: content,
-                y,
-                w: 26,
-                h: ROW_H,
-                act: Action::ColorPrev(i),
-            });
-            let c = color_get(theme, i);
-            surf.fill_rect((content + 34) as f32, y as f32, 40.0, 18.0, col(c));
-            surf.stroke_rect(
-                (content + 34) as f32,
-                y as f32,
-                40.0,
-                18.0,
-                1.0,
-                col(theme.border_unfocused),
-            );
-            button(&mut surf, font, theme, content + 82, y, 26, ">");
-            spots.push(Hotspot {
-                x: content + 82,
-                y,
-                w: 26,
-                h: ROW_H,
-                act: Action::ColorNext(i),
-            });
-            draw_text(
-                &mut surf,
-                font,
-                content + 124,
-                y + 2,
-                14.0,
-                foreground,
-                &hex_argb(c),
-            );
-            y += ROW_H + 8;
-        }
-    } else if app.page == 1 {
-        for (i, label) in TOGGLE_LABELS.iter().enumerate() {
-            let on = toggle_get(&app.s.effects, i);
-            button(
-                &mut surf,
-                font,
-                theme,
-                content,
-                y,
-                62,
-                if on { "[x] on" } else { "[ ] off" },
-            );
-            spots.push(Hotspot {
-                x: content,
-                y,
-                w: 62,
-                h: ROW_H,
-                act: Action::Toggle(i),
-            });
-            draw_text(
-                &mut surf,
-                font,
-                content + 84,
-                y + 2,
-                14.0,
-                foreground,
-                label,
-            );
-            y += 38;
-        }
-    }
-    // Effect geometry belongs beside its toggles; window/shell geometry has
-    // its own category. Each existing control appears in exactly one page.
-    for (i, spec) in INT_SPECS.iter().enumerate() {
-        if !((app.page == 1 && i >= 3) || (app.page == 2 && i < 3)) {
-            continue;
-        }
-        draw_text(&mut surf, font, content, y, 14.0, foreground, spec.label);
-        y += ROW_H;
-        button(&mut surf, font, theme, content, y, 26, "-");
-        spots.push(Hotspot {
-            x: content,
-            y,
-            w: 26,
-            h: ROW_H,
-            act: Action::IntDelta(i, -spec.step),
-        });
-        let mut val = String::new();
-        push_int(&mut val, int_get(&app.s, i));
-        draw_text(&mut surf, font, content + 42, y + 2, 14.0, foreground, &val);
-        button(&mut surf, font, theme, content + 100, y, 26, "+");
-        spots.push(Hotspot {
-            x: content + 100,
-            y,
-            w: 26,
-            h: ROW_H,
-            act: Action::IntDelta(i, spec.step),
-        });
-        y += ROW_H + 16;
-    }
-    if app.page == 3 {
-        draw_text(
-            &mut surf,
-            font,
-            content,
-            y,
-            14.0,
-            foreground,
-            "Desktop resolution",
-        );
-        y += 38;
-        button(&mut surf, font, theme, content, y, 26, "<");
-        spots.push(Hotspot {
-            x: content,
-            y,
-            w: 26,
-            h: ROW_H,
-            act: Action::ResPrev,
-        });
-        button(&mut surf, font, theme, content + 42, y, 26, ">");
-        spots.push(Hotspot {
-            x: content + 42,
-            y,
-            w: 26,
-            h: ROW_H,
-            act: Action::ResNext,
-        });
-        let (rw, rh) = RES_PRESETS[app.res_idx];
-        let mut label = String::new();
-        if rw == 0 || rh == 0 {
-            label.push_str("Keep boot mode");
-        } else {
-            push_int(&mut label, rw as i32);
-            label.push('x');
-            push_int(&mut label, rh as i32);
-        }
-        draw_text(
-            &mut surf,
-            font,
-            content + 90,
-            y + 2,
-            16.0,
-            foreground,
-            &label,
-        );
-        draw_text(
-            &mut surf,
-            font,
-            content,
-            y + 48,
-            12.0,
-            foreground,
-            "The desktop rebuilds buffers after a mode change.",
-        );
-        draw_text(
-            &mut surf,
-            font,
-            content,
-            y + 68,
-            12.0,
-            foreground,
-            "Fixed framebuffer backends keep their boot mode.",
-        );
-    }
-    if app.page == 4 {
-        button(&mut surf, font, theme, content, y, 64,
-            if app.s.scripts.enabled { "[x] on" } else { "[ ] off" });
-        spots.push(Hotspot { x: content, y, w: 64, h: ROW_H, act: Action::ScriptsToggle });
-        draw_text(&mut surf, font, content + 80, y + 2, 14.0, foreground, "Lua window policy");
-        y += 44;
-        draw_text(&mut surf, font, content, y, 14.0, foreground, "Layout script");
-        y += ROW_H;
-        if !app.script_layouts.is_empty() {
-            for (offset, label, direction) in [(0, "<", -1), (38, ">", 1)] {
-                button(&mut surf, font, theme, content + offset, y, 26, label);
-                spots.push(Hotspot { x: content + offset, y, w: 26, h: ROW_H,
-                    act: Action::ScriptLayout(direction) });
-            }
-        }
-        let filename = app.s.scripts.layout.as_str().rsplit('/').next().unwrap_or("");
-        draw_text(&mut surf, font, content + 80, y + 2, 12.0, foreground, filename);
-        y += 30;
-        draw_text(&mut surf, font, content, y, 11.0, foreground, &app.scripts_directory);
-        y += 24;
-        draw_text(&mut surf, font, content, y, 11.0, foreground, app.scripts_listing_status);
-        y += 36;
-        draw_text(&mut surf, font, content, y, 14.0, foreground, "Runner timeout (ms)");
-        y += ROW_H;
-        for (offset, label, delta) in [(0, "-", -50), (100, "+", 50)] {
-            button(&mut surf, font, theme, content + offset, y, 26, label);
-            spots.push(Hotspot { x: content + offset, y, w: 26, h: ROW_H,
-                act: Action::ScriptTimeout(delta) });
-        }
-        let mut timeout = String::new();
-        push_int(&mut timeout, app.s.scripts.timeout_ms as i32);
-        draw_text(&mut surf, font, content + 38, y + 2, 14.0, foreground, &timeout);
-        y += 42;
-        draw_text(&mut surf, font, content, y, 14.0, foreground, "Runner (read-only)");
-        y += ROW_H;
-        draw_text(&mut surf, font, content, y, 12.0, foreground, app.s.scripts.runner.as_str());
-        y += 28;
-        draw_text(&mut surf, font, content, y, 11.0, foreground, "Use setup to edit scripts.runner and the script folder.");
-        y += 24;
-        draw_text(&mut surf, font, content, y, 11.0, foreground, "Lua applies placement and fade policy asynchronously.");
-    }
-    if app.page == 5 {
-        draw_text(&mut surf, font, content, y, 12.0, foreground,
-            app.s.desktop.themes.as_str());
-        y += 28;
-        draw_text(&mut surf, font, content, y, 11.0, foreground,
-            app.themes_listing_status);
-        y += 40;
-        for (index, path) in app.themes.iter().enumerate() {
-            let filename = path.rsplit('/').next().unwrap_or(path);
-            button(&mut surf, font, theme, content, y, 240, filename);
-            spots.push(Hotspot { x: content, y, w: 240, h: ROW_H,
-                act: Action::ImportTheme(index) });
-            button(&mut surf, font, theme, content + 248, y, 120, "Full desktop");
-            spots.push(Hotspot { x: content + 248, y, w: 120, h: ROW_H,
-                act: Action::ImportDesktop(index) });
-            y += 40;
-        }
-    }
-    if app.page == 12 {
-        draw_text(&mut surf, font, content, y, 12.0, foreground,
-            "Complete profiles replace panels, widgets, registry, rules and settings.");
-        y += 28;
-        draw_text(&mut surf, font, content, y, 12.0, foreground,
-            "Choose a bundled profile or type any absolute TOML file path.");
-        y += 32;
-        surf.fill_rect(content as f32, y as f32, 390.0, 28.0,
-            col(if app.profile_focused { theme.taskbtn_focused } else { theme.panel }));
-        let path = app.profile_path.lines.first().map(String::as_str).unwrap_or("");
-        let cursor = app.profile_path.cursor.min(path.len());
-        let start = path[..cursor].char_indices().rev().nth(42).map(|p| p.0).unwrap_or(0);
-        let end = path[start..].char_indices().nth(50).map(|p| start + p.0).unwrap_or(path.len());
-        let shown = &path[start..end];
-        let label = if app.profile_focused && cursor <= end {
-            alloc::format!("{}|{}", &shown[..cursor-start], &shown[cursor-start..])
-        } else { String::from(shown) };
-        draw_text(&mut surf, font, content + 4, y + 6, 12.0, foreground, &label);
-        spots.push(Hotspot { x: content, y, w: 390, h: 28, act: Action::FocusProfilePath });
-        y += 40;
-        button(&mut surf, font, theme, content, y, 232, "Import complete desktop");
-        spots.push(Hotspot { x: content, y, w: 232, h: ROW_H, act: Action::ImportProfile });
-        y += 40;
-        for (index, path) in app.profiles.iter().enumerate() {
-            let filename = path.rsplit('/').next().unwrap_or(path);
-            button(&mut surf, font, theme, content, y, 370, filename);
-            spots.push(Hotspot { x: content, y, w: 370, h: ROW_H, act: Action::SelectProfile(index) });
-            y += 36;
-        }
-    }
-    if let Some(section) = app.editor_section() {
-        let hints = match section {
-            Section::Panels => "Panel containers: edge, size, children, autohide and reservation.",
-            Section::Widgets => "Components: kind, children, format, entries, action and class.",
-            Section::Bindings => "Bindings: scancode, modifiers and checked action string.",
-            Section::Rules => "Rules: app matcher, geometry, opacity, floating and animation.",
-            Section::Typography => "Font path and panel/title sizes; values use their original tables.",
-            Section::Scripts => "Layout and event hooks run outside the compositor frame loop.",
-        };
-        draw_text(&mut surf, font, content, y, 12.0, foreground, hints);
-        y += 28;
-        draw_text(&mut surf, font, content, y, 11.0, foreground,
-            "Click a line; type to edit. Arrows/Home/End move; Backspace/Delete erase.");
-        y += 28;
-        for (offset, width, label, act) in [
-            (0, 76, "Apply", Action::SaveDocument),
-            (84, 76, "Revert", Action::RevertDocument),
-            (168, 82, "+ line", Action::InsertLine),
-            (258, 90, "+ table", Action::NewTable),
-            (356, 90, "- line", Action::DeleteLine),
-        ] {
-            if matches!(act, Action::NewTable) && matches!(section, Section::Typography | Section::Scripts) { continue; }
-            button(&mut surf, font, theme, content + offset, y, width, label);
-            spots.push(Hotspot { x: content + offset, y, w: width, h: ROW_H, act });
-        }
-        y += 40;
-        if let Some(editor) = &app.editor {
-            let rows = editor.rows(section);
-            let pages = (rows.len().saturating_sub(1) / 12) + 1;
-            draw_text(&mut surf, font, content, y, 12.0, foreground,
-                &alloc::format!("Page {}/{} — {}", app.editor_page.min(pages - 1) + 1, pages,
-                    if editor.dirty { "unsaved draft" } else { "saved document" }));
-            for (offset, label, delta) in [(270, "<", -1), (310, ">", 1)] {
-                button(&mut surf, font, theme, content + offset, y - 4, 28, label);
-                spots.push(Hotspot { x: content + offset, y: y - 4, w: 28, h: ROW_H,
-                    act: Action::EditorPage(delta) });
-            }
-            y += 32;
-            if rows.is_empty() {
-                draw_text(&mut surf, font, content, y, 12.0, foreground,
-                    "No tables configured. Add a table, then add its fields as lines.");
-            }
-            for &index in rows.iter().skip(app.editor_page.min(pages - 1) * 12).take(12) {
-                let selected = editor.selected == Some(index);
-                if selected { surf.fill_rect(content as f32, (y - 3) as f32, 1000.0, 26.0,
-                    col(theme.taskbtn_focused)); }
-                let line = &editor.lines[index];
-                let start = if selected { line[..editor.cursor].char_indices().rev().nth(100)
-                    .map(|p| p.0).unwrap_or(0) } else { 0 };
-                let end = line[start..].char_indices().nth(120).map(|p| start + p.0).unwrap_or(line.len());
-                let visible = &line[start..end];
-                let display = if selected && editor.cursor >= start && editor.cursor <= end {
-                    let local = editor.cursor - start;
-                    alloc::format!("{} | {}", &visible[..local], &visible[local..])
-                } else { String::from(visible) };
-                draw_text(&mut surf, font, content, y, 13.0, foreground, &display);
-                spots.push(Hotspot { x: content, y: y - 3, w: 1000, h: 26,
-                    act: Action::EditLine(index) });
-                y += 30;
-            }
-        }
-    }
-    drop(surf);
-    let mut target = Surface::new(pixels, app.width as usize, app.height as usize);
-    target.clear(col(theme.menu));
-    drop(target);
-    let visible_h = app.height.saturating_sub(FOOTER_H) as usize;
-    let sx = app
-        .scroll_x
-        .clamp(0, canvas_w.saturating_sub(app.width) as i32) as usize;
-    let sy = app
-        .scroll_y
-        .clamp(0, canvas_h.saturating_sub(visible_h as u32) as i32) as usize;
-    for row in 0..visible_h {
-        let source = (row + sy) * canvas_w as usize + sx;
-        let destination = row * app.width as usize;
-        if app.width as i32 >= sidebar + 160 {
-            let fixed = sidebar as usize;
-            let fixed_source = row * canvas_w as usize;
-            pixels[destination..destination + fixed]
-                .copy_from_slice(&canvas[fixed_source..fixed_source + fixed]);
-            pixels[destination + fixed..destination + app.width as usize]
-                .copy_from_slice(&canvas[source + fixed..source + app.width as usize]);
-        } else {
-            pixels[destination..destination + app.width as usize]
-                .copy_from_slice(&canvas[source..source + app.width as usize]);
-        }
-    }
-    for spot in &mut spots {
-        let fixed_sidebar = app.width as i32 >= sidebar + 160;
-        let navigation = matches!(spot.act, Action::SelectPage(_));
-        if !(fixed_sidebar && navigation) {
-            spot.x -= sx as i32;
-            spot.y -= sy as i32;
-        }
-        // Match the fixed navigation and scrolling content viewports.
-        let right = (spot.x + spot.w).min(app.width as i32);
-        let bottom = (spot.y + spot.h).min(visible_h as i32);
-        spot.x = spot.x.max(if fixed_sidebar && !navigation { sidebar } else { 0 });
-        spot.y = spot.y.max(0);
-        spot.w = (right - spot.x).max(0);
-        spot.h = (bottom - spot.y).max(0);
-    }
-    let mut footer = Surface::new(pixels, app.width as usize, app.height as usize);
-    let footer_y = app.height.saturating_sub(FOOTER_H) as i32;
-    footer.fill_rect(
-        0.0,
-        footer_y as f32,
-        app.width as f32,
-        FOOTER_H as f32,
-        col(theme.panel),
-    );
-    for (i, (label, action)) in [
-        ("<", Action::Scroll(-100, 0)),
-        (">", Action::Scroll(100, 0)),
-        ("^", Action::Scroll(0, -100)),
-        ("v", Action::Scroll(0, 100)),
-    ]
-    .iter()
-    .enumerate()
-    {
-        let x = 8 + i as i32 * 30;
-        button(&mut footer, font, theme, x, footer_y + 3, 24, label);
-        spots.push(Hotspot {
-            x,
-            y: footer_y + 3,
-            w: 24,
-            h: 20,
-            act: *action,
-        });
-    }
-    let mut status_line = String::new();
-    let mut status_y = footer_y + 27;
-    let status_color = col(if app.error {
-        theme.close
-    } else {
-        theme.panel_text
-    });
-    let status = if app.document_error.is_empty() { app.status } else { &app.document_error };
-    for word in status.split_whitespace() {
-        let candidate = if status_line.is_empty() {
-            String::from(word)
-        } else {
-            alloc::format!("{} {}", status_line, word)
-        };
-        if font.layout_line(&candidate, 11.0).1 > app.width.saturating_sub(16) as f32
-            && !status_line.is_empty()
-        {
-            draw_text(
-                &mut footer,
-                font,
-                8,
-                status_y,
-                11.0,
-                status_color,
-                &status_line,
-            );
-            status_y += 13;
-            status_line.clear();
-        }
-        if !status_line.is_empty() {
-            status_line.push(' ');
-        }
-        status_line.push_str(word);
-    }
-    draw_text(
-        &mut footer,
-        font,
-        8,
-        status_y,
-        11.0,
-        status_color,
-        &status_line,
-    );
-
-    spots
-}
-
-fn checked<T>(result:dunit::Result<T>,operation:&str)->T{result.unwrap_or_else(|error|{libdunit::println(&alloc::format!("gui_settings: {} failed {}",operation,error.0));libdunit::exit(1)})}
-fn paint(window: &mut Window, font: &Font, app: &mut App) -> Vec<Hotspot> {
-    let mut spots = Vec::new();
-    checked(window.draw(|frame| {
-        // Window::draw can accept CONFIGURE before invoking this callback.
-        // Queued Resized events need not have reached the application's loop.
-        let (width, height) = frame.size();
-        app.width = width;
-        app.height = height;
-        spots = render(frame.pixels_mut(), font, app);
-    }), "present frame");
-    spots
-}
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    libdunit::println("gui_settings: PANIC");
-    dunit::__private::panic(info)
-}
-
-#[no_mangle]
-pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnvp)->!{
-    libdunit::init_runtime(argc,argv,envp);
-    let font=load_font().unwrap_or_else(|_|{libdunit::println("gui_settings: FAIL font parse");libdunit::exit(7)});
-    let mut window=checked(Window::open(W,H),"window handshake");
-    let mut app=App::new();let (width,height)=window.size();app.width=width;app.height=height;
-    let mut spots=paint(&mut window,&font,&mut app);
-    libdunit::println("gui_settings: surface presented OK");
-    // 8.5) Headless resolution-picker proof (config-gated `[startup] self_test`,
-    //      true only in test.toml — NEVER on the real desktop). The automated
-    //      harness has no mouse, so we actuate the SAME `apply(ResNext)` path a
-    //      `>` click drives, walking the picker to a concrete non-boot mode, then
-    //      persist it (`dwm_settings::save`) and ping the compositor to reload —
-    //      exactly what a click does. This drives the full GUI -> [display] ->
-    //      live-resolution round trip: the compositor diffs the new `[display]`,
-    //      re-enters its session and asks the kernel backend to mode-set. One-shot
-    //      (fires once before the input loop), so the compositor re-enters exactly
-    //      once — no reload storm.
-    if dwm_settings::load_config().apps.self_test {
-        let previous = app.s;
-        let previous_resolution = app.res_idx;
-        let target = (1600u32, 900u32);
-        let mut guard = 0;
-        while RES_PRESETS[app.res_idx] != target && guard < NRES {
-            app.apply(Action::ResNext);
-            guard += 1;
-        }
-        if dwm_settings::save_changes(&previous, &app.s) {
-            checked(window.reload_desktop(),"reload desktop");
-            spots = paint(&mut window, &font, &mut app);
-            let (tw, th) = RES_PRESETS[app.res_idx];
-            let mut msg = String::from("gui_settings: res picker self-test picked ");
-            push_int(&mut msg, tw as i32);
-            msg.push('x');
-            push_int(&mut msg, th as i32);
-            msg.push_str(" (saved, reload pinged)");
-            libdunit::println(&msg);
-        } else {
-            app.s = previous;
-            app.res_idx = previous_resolution;
-            app.status = "Save failed. Previous settings restored.";
-            app.error = true;
-            spots = paint(&mut window, &font, &mut app);
-            libdunit::println("gui_settings: FAIL resolution picker save");
-        }
-    }
-
-    // 9) Interactive loop: a pointer-down inside a hotspot mutates the working
-    //    Settings, writes them back to the config (RAM this session) and pings
-    //    the compositor to reload — the GUI<->TOML round-trip applied live. We
-    //    then repaint our shared buffer so the swatch/value reflects the change.
-    let mut draft_repaint=false;
-    let mut transfers=text_transfer::Transfers::default();
-    checked(transfers.register_opener(&mut window),"register document opener");
-    loop{
-        checked(transfers.sync(&mut window,&app),"text target registration");
-        let event=checked(window.next_event(dunit::time::Duration::from_millis(if draft_repaint{0}else{40})),"window event");
-        let input=match event{
-            None=>{if draft_repaint{spots=paint(&mut window,&font,&mut app);draft_repaint=false;}continue;},
-            Some(WindowEvent::CloseRequested)=>break,
-            Some(WindowEvent::Resized{width,height})=>{
-                app.width=width;app.height=height;
-                app.scroll_x=app.scroll_x.min((if app.editor_section().is_some(){1200u32}else{W}).saturating_sub(width)as i32);
-                app.scroll_y=app.scroll_y.min(app.content_height().saturating_sub(height.saturating_sub(FOOTER_H))as i32);
-                spots=paint(&mut window,&font,&mut app);draft_repaint=false;transfers.invalidate();
-                libdunit::println("gui_settings: reconfigured OK");continue;
-            },
-            Some(WindowEvent::Transfer(event))=>{draft_repaint|=checked(transfers.event(&mut window,&mut app,&spots,&font,event),"transfer event");continue;},
-            Some(WindowEvent::Protocol(_))=>continue,
-            Some(WindowEvent::Input(input))=>input,
-        };
-        let kind=input.kind;
-        if matches!(kind,IN_FOCUS_IN|IN_FOCUS_OUT){transfers.focus(kind==IN_FOCUS_IN);continue;}
-        if kind==IN_KEY&&checked(transfers.key(&mut window,&app,&input),"clipboard command"){continue;}
-        if let Some(repaint)=checked(transfers.pointer(&mut window,&mut app,&spots,&font,&input),"text drag"){
-            if repaint{spots=paint(&mut window,&font,&mut app);}continue;
-        }
-        if kind==IN_KEY||kind==IN_DOWN{transfers.invalidate();}
-        if kind == IN_SCROLL {
-            let delta = input.x;
-            app.apply(Action::Scroll(0, delta.saturating_mul(-32)));
-            spots = paint(&mut window, &font, &mut app);
-        }
-        if kind == IN_KEY && app.page == 12 && app.profile_focused {
-            app.profile_path.input(&input);
-            app.document_error.clear();
-            app.status = "Path edited. Import complete desktop validates the file before saving.";
-            app.error = false;
-            draft_repaint = true;
-        }
-        if kind == IN_KEY && app.editor_section().is_some() {
-            app.document_error.clear();
-            if let Some(editor) = &mut app.editor {
-                editor.input(&input);
-                app.status = "Draft only. Apply validates and saves; Revert reloads the saved document.";
-                app.error = false;
-                draft_repaint = true;
-            }
-        }
-        if kind == IN_DOWN {
-            let lx = input.x;
-            let ly = input.y;
-            let mut act = None;
-            for hs in spots.iter() {
-                if hs.hit(lx, ly) {
-                    act = Some(hs.act);
-                    break;
+impl App {
+    #[inline(never)]
+    fn activate(&mut self, a: Action) {
+        self.document_error.clear();
+        if matches!(
+            a,
+            Action::SaveDocument | Action::ImportDesktop(_) | Action::ImportProfile
+        ) {
+            let import_path = match a {
+                Action::ImportDesktop(index) => {
+                    Some(self.themes.get(index).cloned().unwrap_or_default())
                 }
-            }
-            if let Some(a) = act {
-                app.document_error.clear();
-                if matches!(a, Action::SaveDocument | Action::ImportDesktop(_) | Action::ImportProfile) {
-                    let import_path = match a {
-                        Action::ImportDesktop(index) => Some(app.themes.get(index).cloned().unwrap_or_default()),
-                        Action::ImportProfile => Some(app.profile_path.lines.first().cloned().unwrap_or_default()),
-                        _ => None,
-                    };
-                    let result = if let Some(path) = &import_path {
-                        dwm_settings::load_document_from(path)
+                Action::ImportProfile => Some(self.profile_path.clone()),
+                _ => None,
+            };
+            let result = if let Some(path) = &import_path {
+                dwm_settings::load_document_from(path)
                             .and_then(|text| {
                                 let config = dwm_settings::validate_installed_document(&text)?;
                                 if !config.valid || config.apps.apps.is_empty() {
@@ -1319,104 +611,668 @@ pub extern "C" fn _start(argc:usize,argv:libdunit::RawArgv,envp:libdunit::RawEnv
                                 }
                                 if matches!(a,Action::ImportProfile){dwm_settings::save_user_document(&text)}else{dwm_settings::save_document(&text)}
                             })
-                    } else if let Some(editor) = &app.editor {
-                        dwm_settings::load_document().and_then(|current| {
-                            if current != editor.original {
-                                return Err(dwm_settings::ConfigError { line: 0, field: String::new(),
-                                    reason: "Desktop changed elsewhere. Revert before applying this draft." });
-                            }
-                            dwm_settings::save_document(&editor.text())
-                        })
-                    } else { continue; };
-                    match result {
-                        Err(error) => {
-                            app.status = error.reason; app.error = true;
-                            app.document_error = alloc::format!("{} line {} {}: {}",
-                                import_path.as_deref().unwrap_or("saved desktop"), error.line, error.field, error.reason);
-                            libdunit::println(&alloc::format!("gui_settings: document rejected file={} line={} field={} reason={}",
-                                import_path.as_deref().unwrap_or("saved desktop"), error.line, error.field, error.reason));
-                        },
-                        Ok(()) => {
-                            app.refresh_document(); app.s = dwm_settings::load(); app.refresh_color_choices();
-                            app.error = window.reload_desktop().is_err();
-                            app.status = if app.error { "Document saved; reload request failed." }
-                                else { "Document validated and saved; desktop reload requested." };
-                            libdunit::println("gui_settings: complete document saved");
-                            if let Some(path) = &import_path {
-                                libdunit::println(&alloc::format!("gui_settings: desktop profile saved {}",path));
-                            }
-                        },
+            } else if let Some(editor) = &self.editor {
+                dwm_settings::load_document().and_then(|current| {
+                    if current != editor.original {
+                        return Err(dwm_settings::ConfigError {
+                            line: 0,
+                            field: String::new(),
+                            reason: "Desktop changed elsewhere. Revert before applying this draft.",
+                        });
                     }
-                    spots = paint(&mut window, &font, &mut app);
-                    continue;
+                    dwm_settings::save_document(&editor.text())
+                })
+            } else {
+                return;
+            };
+            match result {
+                Err(error) => {
+                    self.status = error.reason;
+                    self.error = true;
+                    self.document_error = alloc::format!(
+                        "{} line {} {}: {}",
+                        import_path.as_deref().unwrap_or("saved desktop"),
+                        error.line,
+                        error.field,
+                        error.reason
+                    );
+                    log(&alloc::format!(
+                        "gui_settings: document rejected file={} line={} field={} reason={}",
+                        import_path.as_deref().unwrap_or("saved desktop"),
+                        error.line,
+                        error.field,
+                        error.reason
+                    ));
                 }
-                if matches!(a, Action::SelectPage(_) | Action::Scroll(_, _) | Action::EditLine(_)
-                    | Action::InsertLine | Action::NewTable | Action::DeleteLine | Action::EditorPage(_)
-                    | Action::RevertDocument | Action::SelectProfile(_) | Action::FocusProfilePath) {
-                    app.apply(a);
-                    spots = paint(&mut window, &font, &mut app);
-                    match a {
-                        Action::SelectPage(page) => libdunit::println(&alloc::format!("gui_settings: page {}", page)),
-                        Action::Scroll(_, _) => libdunit::println(&alloc::format!("gui_settings: scroll {},{}", app.scroll_x, app.scroll_y)),
-                        _ => {},
+                Ok(()) => {
+                    self.refresh_document();
+                    self.s = dwm_settings::load();
+                    self.refresh_color_choices();
+                    self.reload = true;
+                    self.error = false;
+                    self.status = "Document validated and saved; desktop reload requested.";
+                    log("gui_settings: complete document saved");
+                    if let Some(path) = &import_path {
+                        log(&alloc::format!(
+                            "gui_settings: desktop profile saved {}",
+                            path
+                        ));
                     }
-                    continue;
                 }
-                let previous = app.s;
-                let previous_colors = app.color_idx;
-                let previous_resolution = app.res_idx;
-                let mut explicit_overlay = None;
-                if let Action::ImportTheme(index) = a {
-                    let candidate = app.themes.get(index)
-                        .ok_or("Theme selection is no longer available.")
-                        .and_then(|path| dwm_settings::load_overlay_patch(&app.s,path));
-                    match candidate {
-                        Ok((candidate,source)) => { app.s = candidate; explicit_overlay = Some(source); },
-                        Err(error) => {
-                            app.status = error;
-                            app.error = true;
-                            libdunit::println(&alloc::format!("gui_settings: theme rejected; previous settings retained: {}",error));
-                            spots = paint(&mut window, &font, &mut app);
-                            continue;
-                        }
+            }
+
+            return;
+        }
+        if matches!(
+            a,
+            Action::SelectPage(_)
+                | Action::InsertLine
+                | Action::NewTable
+                | Action::DeleteLine
+                | Action::EditorPage(_)
+                | Action::RevertDocument
+                | Action::SelectProfile(_)
+        ) {
+            self.apply(a);
+
+            return;
+        }
+        let previous = self.s;
+        let previous_colors = self.color_idx;
+        let previous_resolution = self.res_idx;
+        let mut explicit_overlay = None;
+        if let Action::ImportTheme(index) = a {
+            let candidate = self
+                .themes
+                .get(index)
+                .ok_or("Theme selection is no longer available.")
+                .and_then(|path| dwm_settings::load_overlay_patch(&self.s, path));
+            match candidate {
+                Ok((candidate, source)) => {
+                    self.s = candidate;
+                    explicit_overlay = Some(source);
+                }
+                Err(error) => {
+                    self.status = error;
+                    self.error = true;
+                    log(&alloc::format!(
+                        "gui_settings: theme rejected; previous settings retained: {}",
+                        error
+                    ));
+
+                    return;
+                }
+            }
+        } else {
+            self.apply(a);
+        }
+        // Persist to the live config and ask the compositor to reload,
+        // so the desktop reflects the new theme/geometry immediately.
+        let saved = if let Some(source) = &explicit_overlay {
+            dwm_settings::save_overlay(source)
+        } else {
+            dwm_settings::save_changes(&previous, &self.s)
+        };
+        if !saved {
+            self.s = previous;
+            self.color_idx = previous_colors;
+            self.res_idx = previous_resolution;
+            self.status = "Save failed. Previous settings restored.";
+            self.error = true;
+            log("gui_settings: save failed; previous settings retained");
+
+            return;
+        }
+        if self.editor.as_ref().map(|e| !e.dirty).unwrap_or(false) {
+            self.refresh_document();
+        }
+        if let Action::ImportTheme(index) = a {
+            self.refresh_color_choices();
+            log(&alloc::format!(
+                "gui_settings: theme saved {}",
+                self.themes[index]
+            ));
+        }
+        self.reload = true;
+        self.status = "Saved and desktop reload requested (session RAM).";
+        self.error = false;
+    }
+}
+
+const PAGES: [&str; 13] = [
+    "Appearance",
+    "Animations",
+    "Desktop geometry",
+    "Display",
+    "Lua Scripts",
+    "Themes",
+    "Panels",
+    "Typography",
+    "Widgets",
+    "Keybindings",
+    "Window Rules",
+    "Lua event hook",
+    "Desktop profiles",
+];
+#[derive(Clone)]
+enum Message {
+    Action(Action),
+    Apply(Action),
+    Line(usize, String),
+    SelectLine(usize),
+    Profile(String),
+    Open(String),
+    Reloaded(bool),
+}
+fn action(key: impl Into<String>, label: impl Into<String>, a: Action) -> View<Message> {
+    View::button(key, label, Message::Action(a))
+}
+#[derive(Clone)]
+enum LineMessage {
+    Edit(String),
+    Select,
+}
+fn select_line(event: dunit::ui::UiEvent) -> dunit::ui::EventResponse<LineMessage> {
+    if matches!(
+        event.kind,
+        dunit::ui::UiEventKind::Pointer {
+            event: dunit::ui::PointerEvent::Down,
+            ..
+        } | dunit::ui::UiEventKind::NativeKey { .. }
+    ) {
+        dunit::ui::EventResponse::message(LineMessage::Select)
+    } else {
+        Default::default()
+    }
+}
+impl Component for App {
+    type Message = Message;
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::Action(a) => self.pending = Some(a),
+            Message::Apply(a) => {
+                self.pending = None;
+                self.activate(a);
+            }
+            Message::SelectLine(index) => {
+                if let Some(editor) = &mut self.editor {
+                    editor.select(index);
+                }
+            }
+            Message::Line(index, text) => {
+                if let Some(editor) = &mut self.editor {
+                    editor.replace_line(index, text);
+                }
+                self.document_error.clear();
+                self.error = false;
+                self.status =
+                    "Draft only. Apply validates and saves; Revert reloads the saved document.";
+            }
+            Message::Profile(text) => {
+                self.profile_path = text;
+                self.document_error.clear();
+                self.error = false;
+            }
+            Message::Open(text) => {
+                let baseline = dwm_settings::load_document();
+                match baseline {
+                    Ok(baseline) => {
+                        let mut editor = Editor::new(text);
+                        editor.original = baseline;
+                        editor.dirty = true;
+                        self.editor = Some(editor);
+                        self.page = 6;
+                        self.editor_page = 0;
+                        self.error = false;
+                        self.document_error.clear();
+                        self.status =
+                            "Opened a document draft. Apply explicitly to validate and save.";
                     }
-                } else {
-                    app.apply(a);
+                    Err(error) => {
+                        self.status = error.reason;
+                        self.error = true;
+                    }
                 }
-                // Persist to the live config and ask the compositor to reload,
-                // so the desktop reflects the new theme/geometry immediately.
-                let saved = if let Some(source) = &explicit_overlay {
-                    dwm_settings::save_overlay(source)
-                } else {
-                    dwm_settings::save_changes(&previous, &app.s)
-                };
-                if !saved {
-                    app.s = previous;
-                    app.color_idx = previous_colors;
-                    app.res_idx = previous_resolution;
-                    app.status = "Save failed. Previous settings restored.";
-                    app.error = true;
-                    libdunit::println("gui_settings: save failed; previous settings retained");
-                    spots = paint(&mut window, &font, &mut app);
-                    continue;
+            }
+            Message::Reloaded(ok) => {
+                self.reload = false;
+                if !ok {
+                    self.error = true;
+                    self.status = "Saved; desktop reload could not be requested.";
                 }
-                if app.editor.as_ref().map(|e| !e.dirty).unwrap_or(false) { app.refresh_document(); }
-                if let Action::ImportTheme(index) = a {
-                    app.refresh_color_choices();
-                    libdunit::println(&alloc::format!("gui_settings: theme saved {}", app.themes[index]));
-                }
-                if window.reload_desktop().is_err() {
-                    app.status = "Saved; desktop reload could not be requested.";
-                    app.error = true;
-                } else {
-                    app.status = "Saved and desktop reload requested (session RAM).";
-                    app.error = false;
-                }
-                spots = paint(&mut window, &font, &mut app);
             }
         }
     }
-
-    checked(window.close(),"window close");
-    libdunit::exit(0)
+    fn view(&self) -> View<Message> {
+        let nav = PAGES
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                action(alloc::format!("page{}", i), *label, Action::SelectPage(i)).class(
+                    if self.page == i {
+                        "selected"
+                    } else {
+                        "navigation"
+                    },
+                )
+            })
+            .collect();
+        let mut rows = alloc::vec![
+            View::text("heading", PAGES[self.page]).class("heading"),
+            View::text(
+                "hint",
+                if self.editor_section().is_some() {
+                    "Edit a draft, then Apply to validate and reload."
+                } else {
+                    "Changes save and apply to the current desktop."
+                }
+            )
+        ];
+        if self.page == 0 {
+            for (i, label) in COLOR_LABELS.iter().enumerate() {
+                rows.push(
+                    View::column(
+                        alloc::format!("color{}", i),
+                        alloc::vec![
+                            View::text(alloc::format!("colorlabel{}", i), *label),
+                            View::row(
+                                alloc::format!("colorrow{}", i),
+                                alloc::vec![
+                                    action(alloc::format!("prev{}", i), "<", Action::ColorPrev(i)),
+                                    View::text(
+                                        alloc::format!("colorvalue{}", i),
+                                        alloc::format!("#{:08X}", color_get(&self.s.theme, i))
+                                    ),
+                                    action(alloc::format!("next{}", i), ">", Action::ColorNext(i))
+                                ]
+                            )
+                        ],
+                    )
+                    .class("field"),
+                );
+            }
+        }
+        if self.page == 1 {
+            for (i, label) in TOGGLE_LABELS.iter().enumerate() {
+                rows.push(View::switch(
+                    alloc::format!("effect{}", i),
+                    *label,
+                    toggle_get(&self.s.effects, i),
+                    Message::Action(Action::Toggle(i)),
+                ));
+            }
+        }
+        for (i, spec) in INT_SPECS.iter().enumerate() {
+            if (self.page == 1 && i >= 3) || (self.page == 2 && i < 3) {
+                rows.push(
+                    View::column(
+                        alloc::format!("geometry{}", i),
+                        alloc::vec![
+                            View::text(alloc::format!("geometrylabel{}", i), spec.label),
+                            View::row(
+                                alloc::format!("geometryrow{}", i),
+                                alloc::vec![
+                                    action(
+                                        alloc::format!("less{}", i),
+                                        "-",
+                                        Action::IntDelta(i, -spec.step)
+                                    ),
+                                    View::text(
+                                        alloc::format!("number{}", i),
+                                        alloc::format!("{}", int_get(&self.s, i))
+                                    ),
+                                    action(
+                                        alloc::format!("more{}", i),
+                                        "+",
+                                        Action::IntDelta(i, spec.step)
+                                    )
+                                ]
+                            )
+                        ],
+                    )
+                    .class("field"),
+                );
+            }
+        }
+        if self.page == 3 {
+            let (w, h) = RES_PRESETS[self.res_idx];
+            rows.push(View::text("resolutionlabel", "Desktop resolution"));
+            rows.push(View::row(
+                "resolution",
+                alloc::vec![
+                    action("resprev", "<", Action::ResPrev),
+                    action("resnext", ">", Action::ResNext),
+                    View::text(
+                        "resolutionvalue",
+                        if w == 0 || h == 0 {
+                            String::from("Keep boot mode")
+                        } else {
+                            alloc::format!("{}x{}", w, h)
+                        }
+                    )
+                ],
+            ));
+            rows.push(View::text(
+                "resolutionhint",
+                "The desktop rebuilds buffers after a mode change.",
+            ));
+        }
+        if self.page == 4 {
+            rows.push(View::switch(
+                "scriptsenabled",
+                "Lua window policy",
+                self.s.scripts.enabled,
+                Message::Action(Action::ScriptsToggle),
+            ));
+            rows.push(View::text("layoutlabel", "Layout script"));
+            rows.push(View::row(
+                "layout",
+                alloc::vec![
+                    action("layoutprev", "<", Action::ScriptLayout(-1)),
+                    action("layoutnext", ">", Action::ScriptLayout(1)),
+                    View::text(
+                        "layoutvalue",
+                        self.s
+                            .scripts
+                            .layout
+                            .as_str()
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or("")
+                    )
+                ],
+            ));
+            rows.push(View::text(
+                "scriptsdirectory",
+                self.scripts_directory.clone(),
+            ));
+            rows.push(View::text("scriptsstatus", self.scripts_listing_status));
+            rows.push(View::text("timeoutlabel", "Runner timeout (ms)"));
+            rows.push(View::row(
+                "timeout",
+                alloc::vec![
+                    action("timeoutless", "-", Action::ScriptTimeout(-50)),
+                    View::text(
+                        "timeoutvalue",
+                        alloc::format!("{}", self.s.scripts.timeout_ms)
+                    ),
+                    action("timeoutmore", "+", Action::ScriptTimeout(50))
+                ],
+            ));
+            rows.push(View::text("runnerlabel", "Runner (read-only)"));
+            rows.push(View::text("runner", self.s.scripts.runner.as_str()));
+        }
+        if self.page == 5 {
+            rows.push(View::text(
+                "themesdirectory",
+                self.s.desktop.themes.as_str(),
+            ));
+            rows.push(View::text("themesstatus", self.themes_listing_status));
+            for (i, path) in self.themes.iter().enumerate() {
+                rows.push(View::row(
+                    alloc::format!("theme{}", i),
+                    alloc::vec![
+                        action(
+                            alloc::format!("overlay{}", i),
+                            path.rsplit('/').next().unwrap_or(path),
+                            Action::ImportTheme(i)
+                        ),
+                        action(
+                            alloc::format!("import{}", i),
+                            "Full desktop",
+                            Action::ImportDesktop(i)
+                        )
+                    ],
+                ));
+            }
+        }
+        if self.page == 12 {
+            rows.push(View::text(
+                "profilehint",
+                "Complete profiles replace panels, widgets, registry, rules and settings.",
+            ));
+            rows.push(View::input(
+                "profilepath",
+                "Absolute profile path",
+                self.profile_path.clone(),
+                Message::Profile,
+                InputOptions::default(),
+            ));
+            rows.push(action(
+                "importprofile",
+                "Import complete desktop",
+                Action::ImportProfile,
+            ));
+            for (i, path) in self.profiles.iter().enumerate() {
+                rows.push(action(
+                    alloc::format!("profile{}", i),
+                    path.rsplit('/').next().unwrap_or(path),
+                    Action::SelectProfile(i),
+                ));
+            }
+        }
+        if let Some(section) = self.editor_section() {
+            let mut buttons = alloc::vec![
+                action("apply", "Apply", Action::SaveDocument),
+                action("revert", "Revert", Action::RevertDocument),
+                action("insert", "+ line", Action::InsertLine),
+                action("delete", "- line", Action::DeleteLine)
+            ];
+            if !matches!(section, Section::Typography | Section::Scripts) {
+                buttons.push(action("table", "+ table", Action::NewTable));
+            }
+            rows.push(View::row("documentactions", buttons));
+            if let Some(editor) = &self.editor {
+                let indices = editor.rows(section);
+                let pages = indices.len().saturating_sub(1) / 12 + 1;
+                rows.push(View::row(
+                    "pagination",
+                    alloc::vec![
+                        action("pageprev", "<", Action::EditorPage(-1)),
+                        View::text(
+                            "pagenumber",
+                            alloc::format!(
+                                "Page {}/{} - {}",
+                                self.editor_page.min(pages - 1) + 1,
+                                pages,
+                                if editor.dirty {
+                                    "unsaved draft"
+                                } else {
+                                    "saved document"
+                                }
+                            )
+                        ),
+                        action("pagenext", ">", Action::EditorPage(1))
+                    ],
+                ));
+                for &index in indices
+                    .iter()
+                    .skip(self.editor_page.min(pages - 1) * 12)
+                    .take(12)
+                {
+                    rows.push(
+                        View::input(
+                            alloc::format!("line{}", index),
+                            alloc::format!("Line {}", index + 1),
+                            editor.lines[index].clone(),
+                            LineMessage::Edit,
+                            InputOptions {
+                                max_chars: document_editor::MAX_BYTES,
+                                ..Default::default()
+                            },
+                        )
+                        .on_capture(select_line)
+                        .map_messages(move |message| match message {
+                            LineMessage::Edit(text) => Message::Line(index, text),
+                            LineMessage::Select => Message::SelectLine(index),
+                        }),
+                    );
+                }
+                if indices.is_empty() {
+                    rows.push(View::text(
+                        "empty",
+                        "No tables configured. Add a table, then add its fields as lines.",
+                    ));
+                }
+            }
+        }
+        let content = View::scroll(
+            alloc::format!("content{}", self.page),
+            "Settings content",
+            alloc::vec![View::column("form", rows)],
+        )
+        .scroll_axes(dunit::ui::ScrollAxes::Both)
+        .layout(Attrs {
+            width: Sizing::Grow(1.),
+            height: Sizing::Grow(1.),
+            ..Default::default()
+        });
+        View::column(
+            "settings",
+            alloc::vec![
+                View::row(
+                    "body",
+                    alloc::vec![
+                        View::scroll(
+                            "navigation",
+                            "Settings pages",
+                            alloc::vec![View::column("pages", nav)]
+                        )
+                        .layout(Attrs {
+                            width: Sizing::Px(154.),
+                            height: Sizing::Grow(1.),
+                            ..Default::default()
+                        }),
+                        content
+                    ]
+                ),
+                View::text(
+                    "status",
+                    if self.document_error.is_empty() {
+                        self.status
+                    } else {
+                        &self.document_error
+                    }
+                )
+                .class(if self.error { "error" } else { "status" })
+            ],
+        )
+    }
+}
+// Release large configuration/constructor temporaries before the event loop.
+#[inline(never)]
+fn open_window() -> dunit::Result<ComponentWindow<App>> {
+    let mut app = App::new();
+    if dwm_settings::load_config().apps.self_test {
+        let previous = app.s;
+        let previous_resolution = app.res_idx;
+        for _ in 0..NRES {
+            if RES_PRESETS[app.res_idx] == (1600, 900) {
+                break;
+            }
+            app.apply(Action::ResNext);
+        }
+        if dwm_settings::save_changes(&previous, &app.s) {
+            app.reload = true;
+            let (w, h) = RES_PRESETS[app.res_idx];
+            dunit::println!(
+                "gui_settings: res picker self-test picked {}x{} (saved, reload pinged)",
+                w,
+                h
+            )?;
+        } else {
+            app.s = previous;
+            app.res_idx = previous_resolution;
+            app.status = "Save failed. Previous settings restored.";
+            app.error = true;
+            dunit::println!("gui_settings: FAIL resolution picker save")?;
+        }
+    }
+    let mut ui=ComponentWindow::open_themed_with_style(W,H,app,"Column#settings { height: fill; gap: 0; } Row#body { height: fill; gap: 0; } Column#pages { padding: 8; gap: 4; } Button.navigation { height: 30; font-size: 12; padding: 4; } Column#form { padding: 16; gap: 12; min-width: 420; } Text#heading { font-size: 23; } Text#hint { font-size: 12; } Column.field { gap: 6; } Row { gap: 8; } Button { min-width: 26; } Text#status { height: 52; padding: 8; font-size: 11; } Button.selected { height: 30; font-size: 12; padding: 4; background: $accent; } Text.error { color: #F38BA8; } Input { height: 30; font-size: 13; }")?;
+    ui.transfers()?
+        .register_opener(dunit::transfer::Offer {
+            formats: alloc::vec![dunit::transfer::Format::Files],
+            actions: 1,
+            preferred: dunit::transfer::Action::Copy,
+        })
+        .map_err(|e| dunit::Error(e.0))?;
+    dunit::println!("gui_settings: surface presented OK")?;
+    Ok(ui)
+}
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    let mut ui = open_window()?;
+    loop {
+        let mut imported_theme = false;
+        if let Some(action) = ui.component().pending {
+            ui.update(Message::Apply(action))?;
+            imported_theme = matches!(action, Action::ImportTheme(_)) && !ui.component().error;
+            if let Action::SelectPage(page) = action {
+                dunit::println!("gui_settings: page {}", page)?;
+            }
+        }
+        if ui.component().reload {
+            let ok = ui.reload_desktop().is_ok();
+            ui.update(Message::Reloaded(ok))?;
+            // Publish our imported profile before acknowledging it. The periodic
+            // watcher remains responsible for changes made by other clients.
+            if ok && imported_theme {
+                match ui.reload_theme() {
+                    Ok(_) => dunit::println!(
+                        "gui_settings: SDK theme applied {}",
+                        ui.component().s.desktop.sdk_theme.as_str()
+                    )?,
+                    Err(error) => dunit::println!("gui_settings: SDK theme rejected {}", error)?,
+                }
+            }
+        }
+        match ui.next_event(dunit::time::Duration::from_millis(40))? {
+            Some(WindowEvent::CloseRequested) => break,
+            Some(WindowEvent::Resized { .. }) => {
+                dunit::println!("gui_settings: reconfigured OK")?;
+            }
+            Some(WindowEvent::Input(input)) if input.kind == dunit::window::IN_SCROLL => {
+                let key = alloc::format!("content{}", ui.component().page);
+                let x = ui.scroll_offset_x(&key).unwrap_or(0.) as i32;
+                let y = ui.scroll_offset(&key).unwrap_or(0.) as i32;
+                dunit::println!("gui_settings: scroll {},{}", x, y)?;
+            }
+            Some(WindowEvent::Transfer(event))
+                if event.message.kind == dunit::transfer::Kind::OpenData =>
+            {
+                let result = (|| {
+                    let payload = event.payload.ok_or(dunit::Error(dunit::errno::EINVAL))?;
+                    if payload.files.len() != 1 {
+                        return Err(dunit::Error(dunit::errno::EOPNOTSUPP));
+                    }
+                    let text = String::from_utf8(
+                        payload.files[0]
+                            .read_all(document_editor::MAX_BYTES)
+                            .map_err(|e| dunit::Error(e.0))?,
+                    )
+                    .map_err(|_| dunit::Error(dunit::errno::EINVAL))?;
+                    dwm_settings::validate_installed_document(&text)
+                        .map_err(|_| dunit::Error(dunit::errno::EINVAL))?;
+                    ui.update(Message::Open(text))?;
+                    if ui.component().error {
+                        Err(dunit::Error(dunit::errno::EIO))
+                    } else {
+                        Ok(())
+                    }
+                })();
+                ui.transfers()?
+                    .complete(
+                        event.message.transfer,
+                        if result.is_ok() {
+                            dunit::transfer::Status::Ok
+                        } else {
+                            dunit::transfer::Status::Failed
+                        },
+                    )
+                    .map_err(|e| dunit::Error(e.0))?;
+            }
+            _ => {}
+        }
+    }
+    ui.close()
 }

@@ -14,19 +14,43 @@ fn blank() -> [u32; W * H] {
 fn nested_clip_contains_clear_fill_and_disjoint_children_then_restores() {
     use dunit_ui::Rect;
     let mut pixels = blank();
-    let mut surface = Surface::new(&mut pixels,W,H);
-    let red = Color::rgb(255,0,0);
-    let blue = Color::rgb(0,0,255);
-    surface.with_clip(Rect{x:2.0,y:2.0,w:4.0,h:4.0},|s| {
-        s.clear(red);
-        s.with_clip(Rect{x:3.0,y:3.0,w:1.0,h:1.0},|s| s.fill_rect(0.0,0.0,10.0,10.0,blue));
-        s.with_clip(Rect{x:8.0,y:8.0,w:2.0,h:2.0},|s| s.clear(blue));
-    });
-    assert_eq!(surface.get(2,2),pack_argb(red));
-    assert_eq!(surface.get(3,3),pack_argb(blue));
-    assert_eq!(surface.get(8,8),0);
-    surface.fill_rect(0.0,0.0,1.0,1.0,blue);
-    assert_eq!(surface.get(0,0),pack_argb(blue));
+    let mut surface = Surface::new(&mut pixels, W, H);
+    let red = Color::rgb(255, 0, 0);
+    let blue = Color::rgb(0, 0, 255);
+    surface.with_clip(
+        Rect {
+            x: 2.0,
+            y: 2.0,
+            w: 4.0,
+            h: 4.0,
+        },
+        |s| {
+            s.clear(red);
+            s.with_clip(
+                Rect {
+                    x: 3.0,
+                    y: 3.0,
+                    w: 1.0,
+                    h: 1.0,
+                },
+                |s| s.fill_rect(0.0, 0.0, 10.0, 10.0, blue),
+            );
+            s.with_clip(
+                Rect {
+                    x: 8.0,
+                    y: 8.0,
+                    w: 2.0,
+                    h: 2.0,
+                },
+                |s| s.clear(blue),
+            );
+        },
+    );
+    assert_eq!(surface.get(2, 2), pack_argb(red));
+    assert_eq!(surface.get(3, 3), pack_argb(blue));
+    assert_eq!(surface.get(8, 8), 0);
+    surface.fill_rect(0.0, 0.0, 1.0, 1.0, blue);
+    assert_eq!(surface.get(0, 0), pack_argb(blue));
 }
 
 #[test]
@@ -97,7 +121,7 @@ fn blit_image_places_and_blends_rgba() {
     assert_eq!(s.get(3, 4), pack_argb(Color::rgb(255, 0, 0)));
     assert_eq!(s.get(4, 4), pack_argb(Color::rgb(0, 255, 0)));
     assert_eq!(s.get(3, 5), 0); // transparent pixel left the surface untouched
-    // Half-white over opaque black: 255 * 128/255 = 128 per channel.
+                                // Half-white over opaque black: 255 * 128/255 = 128 per channel.
     let hw = s.get(4, 5);
     assert_eq!((hw >> 16) & 0xff, 128);
 }
@@ -107,11 +131,39 @@ fn blit_image_clips_out_of_bounds() {
     let mut buf = blank();
     let mut s = Surface::new(&mut buf, W, H);
     let img = [255u8; 4 * 4]; // 2x2 opaque white
-    // Straddle the bottom-right corner: only (9,9) lands on the surface.
+                              // Straddle the bottom-right corner: only (9,9) lands on the surface.
     s.blit_image(9, 9, &img, 2, 2);
     assert_eq!(s.get(9, 9), pack_argb(Color::rgb(255, 255, 255)));
     // A short slice must not panic (clips trailing rows).
     let short = [255u8; 5];
     s.blit_image(0, 0, &short, 2, 2);
     assert_eq!(s.get(0, 0), pack_argb(Color::rgb(255, 255, 255)));
+}
+
+#[test]
+fn argb_canvas_composites_through_clip_without_mutating_the_snapshot() {
+    use dunit_ui::Rect;
+    let base = 0xff102030;
+    let mut pixels = [base; 4];
+    let overlay = [0x80405060, 0xffff0000, 0xff00ff00, 0];
+    let snapshot = overlay;
+    let mut surface = Surface::new(&mut pixels, 2, 2);
+    surface.with_clip(
+        Rect {
+            x: 0.,
+            y: 0.,
+            w: 1.,
+            h: 2.,
+        },
+        |s| {
+            assert!(s.blit_premultiplied(&overlay, 2, 2));
+        },
+    );
+    assert_eq!(surface.get(0, 0), 0xff475f77);
+    assert_eq!(surface.get(1, 0), base);
+    assert_eq!(surface.get(0, 1), 0xff00ff00);
+    assert_eq!(surface.get(1, 1), base);
+    assert_eq!(overlay, snapshot);
+    assert!(!surface.blit_premultiplied(&overlay, 3, 2));
+    assert_eq!(surface.get(1, 1), base);
 }

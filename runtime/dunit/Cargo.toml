@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dunit_render = { path = "../dunit-render", optional = true }
+dunit_text = { path = "../dunit-text", optional = true }
 dunit_macros = { path = "../dunit-macros" }
 libdunit = { path = "../../userspace/libdunit" }
 
@@ -13,4 +15,4 @@ dunit_component = { path = "../dunit-component", optional = true }
 dwm_settings = { path = "../../userspace/dwm_settings", optional = true }
 
 [features]
-gui = ["dep:gui_protocol_v1", "dep:dunit_transfer", "dep:dunit_component", "dep:dwm_settings"]
+gui = ["dep:dunit_render", "dep:dunit_text", "dep:gui_protocol_v1", "dep:dunit_transfer", "dep:dunit_component", "dep:dwm_settings"]

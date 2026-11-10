@@ -7,7 +7,8 @@ use dunit_transfer::{Action, Kind, Offer, Payload, Status};
 pub(super) struct Transfers {
     clipboard: crate::text_clipboard::Session<InputContext>,
     drop: Option<TextDrop>,
-    registered: bool,
+    registered: Option<Offer>,
+    external: Option<Offer>,
     candidate: Option<TextDrag>,
     source: Option<u64>,
 }
@@ -45,17 +46,27 @@ impl<C: Component> ComponentWindow<C> {
     pub fn transfers(&mut self) -> NativeResult<&mut dunit_transfer::Client> {
         self.window.transfers()
     }
+    /// Register an application-specific drop target beneath SDK text controls.
+    /// A writable Input has priority; its removal restores this explicit offer.
+    pub fn set_transfer_target(&mut self, offer: Option<Offer>) -> NativeResult<()> {
+        self.transfers.external = offer;
+        self.sync_transfer_target()
+    }
     pub(super) fn sync_transfer_target(&mut self) -> NativeResult<()> {
-        let enabled = self.application.has_text_drop_target();
-        if enabled != self.transfers.registered {
+        let desired = if self.application.has_text_drop_target() {
+            Some(preferences())
+        } else {
+            self.transfers.external.clone()
+        };
+        if desired != self.transfers.registered {
             let client = self.window.transfers()?;
-            if enabled {
-                client.register_target(preferences())
+            if let Some(offer) = desired.as_ref() {
+                client.register_target(offer.clone())
             } else {
                 client.unregister_target()
             }
             .map_err(native_transfer)?;
-            self.transfers.registered = enabled;
+            self.transfers.registered = desired;
         }
         Ok(())
     }
@@ -205,6 +216,12 @@ impl<C: Component> ComponentWindow<C> {
                         .map_err(native)
                 })?;
         let m = event.message;
+        if self.transfers.external.is_some()
+            && !self.application.has_text_drop_target()
+            && !event.source
+        {
+            return Ok(());
+        }
         match m.kind {
             Kind::Result => {
                 if self.transfers.source == Some(m.request) && m.arg0 != Status::Ok as u32 {

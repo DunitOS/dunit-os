@@ -2,7 +2,6 @@
 //! shared dwm_settings document API, never to a second graphical schema.
 extern crate alloc;
 use alloc::{string::String, vec::Vec};
-use dunit::ui::TextEditor;
 
 pub const MAX_BYTES: usize = 64 * 1024;
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,8 +43,6 @@ pub struct Editor {
     pub original: String,
     pub lines: Vec<String>,
     pub selected: Option<usize>,
-    pub cursor: usize,
-    pub input: TextEditor,
     pub dirty: bool,
 }
 impl Editor {
@@ -54,8 +51,6 @@ impl Editor {
             lines: text.lines().map(String::from).collect(),
             original: text,
             selected: None,
-            cursor: 0,
-            input:TextEditor::new(String::new()),
             dirty: false,
         }
     }
@@ -84,10 +79,8 @@ impl Editor {
             .collect()
     }
     pub fn select(&mut self, index: usize) {
-        if let Some(line) = self.lines.get(index) {
+        if index < self.lines.len() {
             self.selected = Some(index);
-            self.input=TextEditor::new(line.clone());
-            self.cursor = self.input.cursor();
         }
     }
     pub fn insert_line(&mut self, section: Section) {
@@ -118,36 +111,48 @@ impl Editor {
     pub fn remove_line(&mut self) {
         if let Some(index) = self.selected.take() {
             self.lines.remove(index);
-            self.cursor = 0;
             self.dirty = true;
         }
     }
-    fn commit_input(&mut self,old:TextEditor)->bool{
-        let Some(index)=self.selected else{self.input=old;return false;};
-        let bytes=self.lines.iter().map(|line|line.len()+1).sum::<usize>();
-        if bytes.saturating_sub(self.lines[index].len()).saturating_add(self.input.text().len())>MAX_BYTES{
-            self.input=old;return false;
+    /// Controlled SDK input proposal; reject an oversized complete document.
+    pub fn replace_line(&mut self, index: usize, text: String) -> bool {
+        if index >= self.lines.len() || text.contains(['\n', '\r']) {
+            return false;
         }
-        let changed=self.input!=old;
-        if self.lines[index]!=self.input.text(){self.lines[index]=String::from(self.input.text());self.dirty=true;}
-        self.cursor=self.input.cursor();changed
+        let size = self.lines.iter().map(|s| s.len() + 1).sum::<usize>();
+        if size
+            .saturating_sub(self.lines[index].len())
+            .saturating_add(text.len())
+            > MAX_BYTES
+        {
+            return false;
+        }
+        self.selected = Some(index);
+        if self.lines[index] == text {
+            return false;
+        }
+        self.lines[index] = text;
+        self.dirty = true;
+        true
     }
-    pub fn input(&mut self,input:&dunit::window::Input)->bool{
-        if self.selected.is_none(){return false;}
-        let Some(command)=dunit::text_clipboard::edit_command(input,false)else{return false;};
-        let old=self.input.clone();self.input.apply(command,MAX_BYTES,false);self.commit_input(old)
-    }
-    pub fn insert(&mut self,text:&str)->bool{
-        if self.selected.is_none(){return false;}
-        let old=self.input.clone();self.input.insert_text(text,MAX_BYTES,false);self.commit_input(old)
-    }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn key(editor:&mut Editor,scan:u8,ascii:u8){editor.input(&dunit::window::Input{kind:gui_protocol_v1::control::IN_KEY,x:scan as i32,y:0,value:ascii as u32});}
+    fn key(input: &mut dunit::ui::TextEditor, scan: u8, ascii: u8) {
+        let event = dunit::window::Input {
+            kind: dunit::window::IN_KEY,
+            x: scan as i32,
+            y: 0,
+            value: ascii as u32,
+        };
+        input.apply(
+            dunit::text_clipboard::edit_command(&event, false).unwrap(),
+            MAX_BYTES,
+            false,
+        );
+    }
 
     #[test]
     fn editing_preserves_other_tables_and_unicode_boundaries() {
@@ -157,12 +162,16 @@ mod tests {
         assert_eq!(e.rows(Section::Panels), alloc::vec![1, 2]);
         assert_eq!(e.rows(Section::Widgets), alloc::vec![3, 4]);
         e.select(2);
-        key(&mut e,0x0e, 0);
-        key(&mut e,0, b'8');
+        let mut input = dunit::ui::TextEditor::new(e.lines[2].clone());
+        key(&mut input, 0x0e, 0);
+        key(&mut input, 0, b'8');
+        e.replace_line(2, String::from(input.text()));
         assert!(e.text().contains("size = 38\n[components.clock]"));
         e.select(4);
-        key(&mut e,0x4b, 0);
-        key(&mut e,0x0e, 0);
+        let mut input = dunit::ui::TextEditor::new(e.lines[4].clone());
+        key(&mut input, 0x4b, 0);
+        key(&mut input, 0x0e, 0);
+        e.replace_line(4, String::from(input.text()));
         assert!(e.text().contains("label = \"час\""));
         assert!(e.dirty);
     }
@@ -180,28 +189,39 @@ mod tests {
     fn incomplete_headers_stay_editable() {
         let mut e = Editor::new("[panels.main]\nsize = 32\n".into());
         e.select(0);
-        key(&mut e,0x0e, 0);
+        e.replace_line(0, String::from("[panels.main"));
         assert_eq!(e.lines[0], "[panels.main");
         assert!(e.rows(Section::Panels).contains(&0));
-        key(&mut e,0, b']');
+        e.replace_line(0, String::from("[panels.main]"));
         assert_eq!(e.rows(Section::Panels), alloc::vec![0, 1]);
     }
     #[test]
-    fn source_lines_accept_one_atomic_utf8_paste_and_undo(){
-        let mut editor=Editor::new("[scripts]\nlabel = \"old\"\n".into());editor.select(1);
-        editor.input.apply(dunit::ui::EditCommand::SelectAll,MAX_BYTES,false);
-        assert!(editor.insert("label = \"часы 👩‍💻\""));assert!(editor.text().contains("часы 👩‍💻"));
-        let before=editor.text();assert!(!editor.insert(&"x".repeat(MAX_BYTES)));assert_eq!(editor.text(),before);
-        assert!(!editor.insert("bad\nsecond line"));assert_eq!(editor.text(),before);
-        editor.input(&dunit::window::Input{kind:gui_protocol_v1::control::IN_KEY,x:0x2c,y:libdunit::KEYMOD_CTRL as i32,value:0});
-        assert_eq!(editor.lines[1],"label = \"old\"");
+    fn source_lines_accept_atomic_utf8_proposals_and_reject_invalid_document_sizes() {
+        let mut editor = Editor::new("[scripts]\nlabel = \"old\"\n".into());
+        assert!(editor.replace_line(1, "label = \"часы 👩‍💻\"".into()));
+        assert!(editor.text().contains("часы 👩‍💻"));
+        let before = editor.text();
+        assert!(!editor.replace_line(1, "x".repeat(MAX_BYTES)));
+        assert_eq!(editor.text(), before);
+        assert!(!editor.replace_line(1, "bad\nsecond line".into()));
+        assert_eq!(editor.text(), before);
+        assert!(editor.replace_line(1, "label = \"old\"".into()));
+        assert_eq!(editor.lines[1], "label = \"old\"");
     }
     #[test]
-    fn every_section_can_add_a_selected_draft_table_without_losing_source(){
-        for section in [Section::Panels,Section::Typography,Section::Widgets,Section::Bindings,Section::Rules,Section::Scripts]{
-            let mut editor=Editor::new("# preserved\n".into());editor.new_table(section);
-            assert_eq!(editor.rows(section).last(),editor.selected.as_ref());assert!(editor.text().starts_with("# preserved\n"));
+    fn every_section_can_add_a_selected_draft_table_without_losing_source() {
+        for section in [
+            Section::Panels,
+            Section::Typography,
+            Section::Widgets,
+            Section::Bindings,
+            Section::Rules,
+            Section::Scripts,
+        ] {
+            let mut editor = Editor::new("# preserved\n".into());
+            editor.new_table(section);
+            assert_eq!(editor.rows(section).last(), editor.selected.as_ref());
+            assert!(editor.text().starts_with("# preserved\n"));
         }
     }
-
 }

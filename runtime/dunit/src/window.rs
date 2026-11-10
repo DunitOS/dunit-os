@@ -24,6 +24,8 @@ use gui_protocol_v1::{
     wire::*,
 };
 
+pub use libdunit::{KEYMOD_CTRL,KEYMOD_SHIFT,KEYMOD_ALT,KEYMOD_SUPER};
+
 const TRANSACTION: Duration = Duration::from_secs(5);
 const MAX_RETRIES: usize = 8;
 const MAX_DEFERRED: usize = 128;
@@ -55,11 +57,15 @@ pub struct Frame<'a> {
     full_damage: bool,
     repair: Option<DamageRect>,
     modified: bool,
+    deferred: bool,
 }
 impl Frame<'_> {
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
+    /// SDK canvas snapshots are geometry-bound. A concurrent configure can
+    /// require the application to supply a replacement before any publication.
+    pub(crate) fn defer(&mut self) {self.deferred=true;}
     /// A new surface or geometry has no reusable compositor baseline.
     pub fn requires_full_frame(&self) -> bool {
         self.full_damage
@@ -177,6 +183,7 @@ pub struct Window {
     protocol_error: Option<(u64, u64, u32, u32)>,
     resized: bool,
     peer: u32,
+    launch_id:u32,
     serial: u64,
     server_serial: u64,
     configure: u64,
@@ -210,6 +217,8 @@ impl Window {
     pub fn open_legacy(width: u32, height: u32) -> Result<Self> {
         Self::open_features(width, height, 0,PixelFormat::Xrgb8888)
     }
+    /// Compositor-assigned launch/tint identity, not a security credential.
+    pub fn launch_id(&self)->u32{self.launch_id}
     /// Enable or disable aggregate diagnostics without resetting prior samples.
     /// Disabled by default; the disabled path makes no diagnostic clock calls.
     pub fn enable_metrics(&mut self, enabled: bool) {
@@ -254,6 +263,7 @@ impl Window {
             protocol_error: None,
             resized: false,
             peer: 0,
+            launch_id:0,
             serial: 0,
             server_serial: 0,
             configure: 0,
@@ -283,6 +293,7 @@ impl Window {
                 .is_some_and(|intro| intro.compositor == sender && sender != 0)
             {
                 window.peer = sender;
+                window.launch_id=Bootstrap::decode(&bytes[..n]).unwrap().client;
                 window.transfer = Some(dunit_transfer::Client::new(sender, 0));
                 break;
             }
@@ -696,9 +707,16 @@ impl Window {
             full_damage,
             repair,
             modified: false,
+            deferred: false,
         };
         let damage = paint(&mut frame)?;
         let modified = frame.modified;
+        if frame.deferred {
+            buffer.valid=false;
+            self.reusable=Some(buffer);
+            self.resized=true;
+            return Ok(());
+        }
         if damage.is_none() && !full_damage {
             buffer.valid &= !modified;
             self.reusable = Some(buffer);
@@ -859,6 +877,17 @@ impl Window {
         let result=libdunit::ipc_send(self.peer,&gui_protocol_v1::control::RELOAD);
         if result<0{Err(Error(result))}else{Ok(())}
     }
+    /// Post a bounded notification through the authenticated compositor connection.
+    pub fn notify(&mut self, text: &str) -> Result<()> {
+        let mut bytes = [0; gui_protocol_v1::control::NOTIFY_LEN];
+        let n = gui_protocol_v1::control::notification(text, &mut bytes);
+        let result = libdunit::ipc_send(self.peer, &bytes[..n]);
+        if result < 0 {
+            Err(Error(result))
+        } else {
+            Ok(())
+        }
+    }
     /// Queue transfer requests here; the existing receive/event pump flushes
     /// them and delivers replies as WindowEvent::Transfer, also during draw.
     pub fn transfers(&mut self) -> Result<&mut dunit_transfer::Client> {
@@ -928,6 +957,7 @@ mod tests {
                 h: 1,
             }),
             modified: false,
+            deferred: false,
         };
         assert_eq!(
             frame
@@ -956,6 +986,7 @@ mod tests {
             full_damage: false,
             repair: None,
             modified: false,
+            deferred: false,
         };
         assert_eq!(frame.copy_pixels(&source, None).unwrap(), 0);
         assert!(!frame.modified);

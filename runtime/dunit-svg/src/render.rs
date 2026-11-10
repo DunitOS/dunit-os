@@ -306,6 +306,9 @@ struct Context {
     layer_pixels: u64,
 }
 impl Context {
+    // Keep traversal frames small on the native 64 KiB user stack. Raster
+    // shaders/pipelines must not remain live in every recursive group frame.
+    #[inline(never)]
     fn node<'a>(
         &mut self,
         n: Node<'a, '_>,
@@ -364,23 +367,14 @@ impl Context {
             if let Some(filter) = filter {
                 crate::filter::apply(n, filter, ts, self.view, &mut layer)?;
             }
-            pix.draw_pixmap(
-                0,
-                0,
-                layer.as_ref(),
-                &PixmapPaint {
-                    opacity: alpha,
-                    ..PixmapPaint::default()
-                },
-                Transform::identity(),
-                None,
-            );
+            composite_layer(pix, &layer, alpha);
             self.layer_pixels -= pixels;
         } else {
             self.content(n, &style, ts, pix, depth, visible)?;
         }
         Ok(())
     }
+    #[inline(never)]
     fn content<'a>(
         &mut self,
         n: Node<'a, '_>,
@@ -425,42 +419,69 @@ impl Context {
                     visible,
                 )?;
             }
-            _ => {
-                if !visible {
-                    return Ok(());
+            _ => self.shape(n, style, ts, pix, visible)?,
+        }
+        Ok(())
+    }
+    #[inline(never)]
+    fn shape<'a>(
+        &mut self,
+        n: Node<'a, '_>,
+        style: &Style<'a>,
+        ts: Transform,
+        pix: &mut Pixmap,
+        visible: bool,
+    ) -> Result<()> {
+        if !visible {
+            return Ok(());
+        }
+        if let Some(path) = geometry::shape(n, self.view, &mut self.segments)? {
+            let bounds = path.compute_tight_bounds().ok_or(Error::Invalid)?;
+            for stroke in if style.stroke_first {
+                [true, false]
+            } else {
+                [false, true]
+            } {
+                if stroke && style.pen.width <= 0.0 {
+                    continue;
                 }
-                if let Some(path) = geometry::shape(n, self.view, &mut self.segments)? {
-                    let bounds = path.compute_tight_bounds().ok_or(Error::Invalid)?;
-                    for stroke in if style.stroke_first {
-                        [true, false]
+                let (value, alpha) = if stroke {
+                    (style.stroke, style.stroke_alpha)
+                } else {
+                    (style.fill, style.fill_alpha)
+                };
+                if let Some(shader) =
+                    crate::paint::shader(value, alpha, style.color, n, bounds, self.view)?
+                {
+                    let paint = Paint {
+                        shader,
+                        ..Paint::default()
+                    };
+                    if stroke {
+                        pix.stroke_path(&path, &paint, &style.pen, ts, None);
                     } else {
-                        [false, true]
-                    } {
-                        if stroke && style.pen.width <= 0.0 {
-                            continue;
-                        }
-                        let (value, alpha) = if stroke {
-                            (style.stroke, style.stroke_alpha)
-                        } else {
-                            (style.fill, style.fill_alpha)
-                        };
-                        if let Some(shader) =
-                            crate::paint::shader(value, alpha, style.color, n, bounds, self.view)?
-                        {
-                            let paint = Paint {
-                                shader,
-                                ..Paint::default()
-                            };
-                            if stroke {
-                                pix.stroke_path(&path, &paint, &style.pen, ts, None);
-                            } else {
-                                pix.fill_path(&path, &paint, style.rule, ts, None);
-                            }
-                        }
+                        pix.fill_path(&path, &paint, style.rule, ts, None);
                     }
                 }
             }
         }
         Ok(())
     }
+}
+
+// Large paint/pipeline temporaries belong to one completed layer, rather than
+// the recursive traversal frame that must remain live while children draw.
+#[inline(never)]
+fn composite_layer(pix: &mut Pixmap, layer: &Pixmap, alpha: f32) {
+    pix.draw_pixmap(
+        0,
+        0,
+        layer.as_ref(),
+        &PixmapPaint {
+            opacity: alpha,
+            ..PixmapPaint::default()
+        },
+        Transform::identity(),
+        None,
+    );
 }

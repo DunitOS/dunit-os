@@ -1,10 +1,4 @@
-# Untrusted terminal client for the M4 userspace DWM (Stack B).
-#
-# A normal unprivileged ELF: it owns a PTY, spawns the `dsh` shell as the pty
-# slave, forwards keystrokes the compositor routes to it (IN_KEY) into the pty
-# master, drains the shell's stdout into an on-screen scrollback, and paints
-# that scrollback into its own shared buffer via the M4 UI Runtime (DUI + DSS +
-# TTF). Same capability + wire-protocol path as gui_client/gui_stat.
+# Native SDK GUI client; application state is separate from platform resources.
 [package]
 name = "gui_terminal"
 version = "0.1.0"
@@ -13,15 +7,16 @@ edition = "2021"
 [dependencies]
 dunit = { path = "../../../runtime/dunit", features = ["gui"] }
 dunit_shell = { path = "../../../runtime/dunit-shell" }
-libdunit = { path = "../../libdunit" }
-gui_protocol_v1 = { path = "../../../protocols/gui-v1" }
 dwm_settings = { path = "../../dwm_settings" }
 dunit_ui = { path = "../../../runtime/dunit-ui" }
-dunit_style = { path = "../../../runtime/dunit-style" }
-dunit_text = { path = "../../../runtime/dunit-text" }
 dunit_widgets = { path = "../../../runtime/dunit-widgets" }
-dunit_render = { path = "../../../runtime/dunit-render" }
 
 [[bin]]
 name = "gui_terminal"
 path = "src/main.rs"
+
+# The SDK retained runtime is generic; link-time pruning keeps the existing ESP budget.
+[profile.release]
+lto = "fat"
+opt-level = "z"
+codegen-units = 1

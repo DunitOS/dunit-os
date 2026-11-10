@@ -1,6 +1,7 @@
 //! Text selection export and path/text insertion over the window's transfer pump.
-use super::{pending_input::PendingInput, terminal_model::Term, PAD_X, PAD_Y, ROW_PX};
+use super::{terminal_model::Term, PAD_X, PAD_Y, ROW_PX};
 use alloc::string::String;
+use dunit::pty::PendingInput;
 use dunit::{
     transfer::{self, *},
     window::{Input, Window},
@@ -63,7 +64,7 @@ impl Transfers {
     }
     pub fn key(&mut self, window: &mut Window, term: &Term, input: &Input) -> dunit::Result<bool> {
         let mods = input.y as u8;
-        if mods != libdunit::KEYMOD_CTRL | libdunit::KEYMOD_SHIFT {
+        if mods != dunit::window::KEYMOD_CTRL | dunit::window::KEYMOD_SHIFT {
             return Ok(false);
         }
         if input.x == 0x2e {
@@ -94,7 +95,7 @@ impl Transfers {
         term: &mut Term,
         input: &Input,
     ) -> dunit::Result<()> {
-        use gui_protocol_v1::control::*;
+        use dunit::window::*;
         if matches!(input.kind, IN_UP | IN_DOWN) && input.pointer_button() != 0 {
             return Ok(());
         }

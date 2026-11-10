@@ -12,13 +12,14 @@ edition = "2021"
 
 [dependencies]
 dunit = { path = "../../../runtime/dunit", features = ["gui"] }
-libdunit = { path = "../../libdunit" }
-gui_protocol_v1 = { path = "../../../protocols/gui-v1" }
 dwm_settings = { path = "../../dwm_settings" }
-dunit_style = { path = "../../../runtime/dunit-style" }
-dunit_text = { path = "../../../runtime/dunit-text" }
-dunit_render = { path = "../../../runtime/dunit-render" }
 
 [[bin]]
 name = "gui_calc"
 path = "src/main.rs"
+
+# The SDK retained runtime is generic; link-time pruning keeps the existing ESP budget.
+[profile.release]
+lto = "fat"
+opt-level = "z"
+codegen-units = 1

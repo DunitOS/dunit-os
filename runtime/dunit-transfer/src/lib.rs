@@ -4,7 +4,7 @@
 extern crate alloc;
 use alloc::{string::String, vec::Vec};
 pub use gui_protocol_v1::transfer::*;
-pub use libdunit::{RIGHT_READ, RIGHT_TRANSFER, RIGHT_WRITE};
+pub use libdunit::{FILE_TYPE_DIRECTORY, RIGHT_READ, RIGHT_TRANSFER, RIGHT_WRITE};
 mod client;
 pub mod file_ops;
 pub mod transport;
@@ -38,6 +38,15 @@ impl OwnedHandle {
     }
     pub fn duplicate(&self, rights: u32) -> NativeResult<Self> {
         Ok(Self(checked(libdunit::handle_dup(self.0, rights))? as u32))
+    }
+    /// Create a directory under a held parent and retain the resulting owner.
+    pub fn create_directory(&self, name: &str) -> NativeResult<Self> {
+        Ok(Self(checked(libdunit::file_cap::create_child(
+            self.0,
+            name,
+            libdunit::FILE_TYPE_DIRECTORY,
+            libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_TRANSFER,
+        ))? as u32))
     }
     pub fn rights(&self) -> NativeResult<u32> {
         checked(libdunit::handle_rights(self.0)).map(|n| n as u32)
@@ -98,6 +107,25 @@ impl File {
         .validate()
         .map_err(invalid)?;
         Ok(value)
+    }
+    /// Kernel identity relation; display paths never establish file identity.
+    pub fn same_object(&self, other: &Self) -> NativeResult<bool> {
+        checked(libdunit::file_cap::relation(
+            self.handle.raw(),
+            other.handle.raw(),
+        ))
+        .map(|r| r == libdunit::file_cap::Relation::Same as usize)
+    }
+    pub fn move_to(&self, directory: &OwnedHandle, name: &str) -> NativeResult<()> {
+        checked(libdunit::file_cap::move_to(
+            self.handle.raw(),
+            directory.raw(),
+            name,
+        ))
+        .map(|_| ())
+    }
+    pub fn remove(&self) -> NativeResult<()> {
+        checked(libdunit::file_cap::remove(self.handle.raw())).map(|_| ())
     }
     pub fn item(&self) -> FileItem {
         FileItem {

@@ -1,119 +1,54 @@
 #![no_std]
 #![no_main]
 
-//! Untrusted terminal client for the M4 userspace DWM (Stack B).
-//!
-//! The last legacy GUI app reborn on the userspace stack. It owns a PTY, spawns
-//! the `dsh` shell or an explicit command as the slave, and bridges three streams:
-//! keystrokes the
-//! compositor routes to the focused window (IN_KEY) are written into the pty
-//! master; the shell's stdout is drained from the master into an on-screen
-//! scrollback; that scrollback is painted into our own shared buffer via the M4
-//! UI Runtime (DUI + DSS + TTF). Same capability + wire-protocol path as
-//! gui_client/gui_stat — the compositor owns display/input, we own our surface.
-
-use core::panic::PanicInfo;
+//! Console frontend: ANSI cells, scrollback and document selection.
+//! Native SDK owns window buffers, cached glyph masks, PTYs and child status.
 
 extern crate alloc;
-use gui_protocol_v1::control::{IN_KEY,IN_SCROLL,IN_DOWN,IN_MOVE,IN_UP,IN_LEAVE,IN_FOCUS_IN,IN_FOCUS_OUT};
-use dunit::window::{Window,WindowEvent,PixelFormat};
-mod pending_input;
+use dunit::window::{PixelFormat, Window, WindowEvent};
+use dunit::window::{
+    IN_DOWN, IN_FOCUS_IN, IN_FOCUS_OUT, IN_KEY, IN_LEAVE, IN_MOVE, IN_SCROLL, IN_UP,
+};
+
 mod terminal_transfer;
 
 use alloc::vec::Vec;
 
+use dunit::canvas::{Color, Font, Surface};
 
-
-use dunit_render::Surface;
-use dunit_style::value::Color;
-use dunit_text::Font;
-
-// Modifier bit in the IN_KEY `mods` field (mirrors libdunit::KEYMOD_CTRL).
-const KEYMOD_CTRL: u8 = 1 << 1;
-
-// PS/2 scancodes (sc & 0x7F) for keys the kernel leaves un-cooked (ascii = 0).
-const SC_BACKSPACE: u8 = 0x0E;
-const SC_HOME: u8 = 0x47;
-const SC_UP: u8 = 0x48;
-const SC_LEFT: u8 = 0x4B;
-const SC_RIGHT: u8 = 0x4D;
-const SC_END: u8 = 0x4F;
-const SC_DOWN: u8 = 0x50;
-const SC_DELETE: u8 = 0x53;
-// Page keys are handled locally for scrollback (never forwarded to the pty).
 const SC_PGUP: u8 = 0x49;
 const SC_PGDN: u8 = 0x51;
-
-/// Translate a widened IN_KEY event (scancode + mods + cooked ASCII) into the
-/// byte sequence to feed the pty. Returns the number of bytes written to `out`.
-///
-/// - Ctrl + letter -> the control code (`c & 0x1F`): Ctrl-C=0x03, Ctrl-D=0x04,
-///   Ctrl-L=0x0C, etc.
-/// - Any other cooked byte (printable, Enter `\n`, Tab `\t`) -> itself.
-/// - Backspace (no ASCII) -> 0x08.
-/// - Arrows / Home / End / Delete (no ASCII) -> the usual xterm ESC sequences,
-///   which `dsh` parses for line editing and history.
-fn encode_key(scancode: u8, mods: u8, ascii: u8, out: &mut [u8; 4]) -> usize {
-    if mods & KEYMOD_CTRL != 0 && ascii.is_ascii_alphabetic() {
-        out[0] = ascii & 0x1F;
-        return 1;
-    }
-    if ascii != 0 {
-        out[0] = ascii;
-        return 1;
-    }
-    // Extended / navigation keys arrive with ascii == 0.
-    let esc: &[u8] = match scancode {
-        SC_BACKSPACE => &[0x08],
-        SC_UP => &[0x1B, b'[', b'A'],
-        SC_DOWN => &[0x1B, b'[', b'B'],
-        SC_RIGHT => &[0x1B, b'[', b'C'],
-        SC_LEFT => &[0x1B, b'[', b'D'],
-        SC_HOME => &[0x1B, b'[', b'H'],
-        SC_END => &[0x1B, b'[', b'F'],
-        SC_DELETE => &[0x1B, b'[', b'3', b'~'],
-        _ => &[],
-    };
-    out[..esc.len()].copy_from_slice(esc);
-    esc.len()
-}
-
-const W:u32=560;
-const H:u32=360;
+use dunit::io::{Read, Write};
+use dunit::pty::{encode_key, PendingInput, Pty};
+const W: u32 = 560;
+const H: u32 = 360;
 /// Poll cadence: block on compositor IPC at most this long, then drain the pty
 /// and repaint. The compositor blits our buffer every tick regardless.
 const POLL_MS: u64 = 40;
-
 
 /// Load the terminal's TTF, falling back to the shipped monospace default in the
 /// initrd (/assets/fonts) on any error — assets live on the filesystem, not baked
 /// into the ELF. Prefers the per-terminal `[terminal] font` when set; otherwise
 /// the shared `[desktop] font`. Both are live config knobs.
-fn load_font(tcfg: &dwm_settings::TerminalCfg) -> Result<Font, ()> {
+fn load_font(tcfg: &dwm_settings::TerminalCfg) -> dunit::Result<Font> {
     let cfg = dwm_settings::load();
     let path = if tcfg.font.as_str().is_empty() {
         cfg.desktop.font.as_str()
     } else {
         tcfg.font.as_str()
     };
-    if let Some(bytes) = libdunit::read_binary(path, 4 * 1024 * 1024) {
-        if let Ok(f) = Font::parse(bytes) {
-            return Ok(f);
-        }
-    }
-    libdunit::read_binary("/assets/fonts/DejaVuSansMono.ttf", 4 * 1024 * 1024)
-        .ok_or(())
-        .and_then(|b| Font::parse(b).map_err(|_| ()))
+    Font::load(&[path, "/assets/fonts/DejaVuSansMono.ttf"])
 }
-
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    libdunit::println("gui_terminal: PANIC");
-    libdunit::exit(101)
+fn log(message: &str) {
+    let _ = dunit::println!("{}", message);
 }
-
-fn fatal(why:&str,error:isize)->!{libdunit::println(&alloc::format!("gui_terminal: FAIL {} ({})",why,error));libdunit::exit(1)}
-fn checked<T>(result:dunit::Result<T>,why:&str)->T{result.unwrap_or_else(|error|fatal(why,error.0))}
+fn fatal(why: &str, error: isize) -> ! {
+    log(&alloc::format!("gui_terminal: FAIL {} ({})", why, error));
+    dunit::process::exit(1)
+}
+fn checked<T>(result: dunit::Result<T>, why: &str) -> T {
+    result.unwrap_or_else(|error| fatal(why, error.0))
+}
 
 /// Fixed layout metric: the point size the scrollback renders at, paired with
 /// `ROW_PX`. This is a rendering invariant (not user palette), so it stays a
@@ -165,21 +100,34 @@ fn col(argb: u32) -> Color {
 /// `clear` — NOT `fill_rect`, which would blend over the previous frame and drift
 /// the alpha toward opaque. Glyphs draw opaque on top, so text stays crisp while
 /// the background lets the desktop show through when `bg_alpha < 255`.
-fn render(pixels:&mut[u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32) {
+fn render(pixels: &mut [u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32) {
     let mut surf = Surface::new(pixels, w as usize, h as usize);
     surf.clear(col(bg));
 
     // The document is `scrollback` (evicted rows) followed by the live `grid`.
     // `scroll` counts how many rows the view is lifted above the live bottom
     // (0 = pinned to the bottom, where the cursor lives).
-    let sb=term.scrollback.len();let start=term.visible_start();
-    for (i,idx)in (start..start+term.rows).enumerate(){
-        let y=PAD_Y+i as i32*ROW_PX;
-        let row=if idx<sb{&term.scrollback[idx]}else{&term.grid[idx-sb]};
-        for column in 0..term.cols{
-            if term.selected(idx,column){surf.fill_rect((PAD_X+column as i32*term.cell_w)as f32,y as f32,term.cell_w as f32,ROW_PX as f32,col(term.palette.ansi[4]));}
+    let sb = term.scrollback.len();
+    let start = term.visible_start();
+    for (i, idx) in (start..start + term.rows).enumerate() {
+        let y = PAD_Y + i as i32 * ROW_PX;
+        let row = if idx < sb {
+            &term.scrollback[idx]
+        } else {
+            &term.grid[idx - sb]
+        };
+        for column in 0..term.cols {
+            if term.selected(idx, column) {
+                surf.fill_rect(
+                    (PAD_X + column as i32 * term.cell_w) as f32,
+                    y as f32,
+                    term.cell_w as f32,
+                    ROW_PX as f32,
+                    col(term.palette.ansi[4]),
+                );
+            }
         }
-        draw_row(&mut surf,font,term.cell_w,y,row);
+        draw_row(&mut surf, font, term.cell_w, y, row);
     }
 
     // Block caret: only when pinned to the bottom (scroll == 0), drawn as a
@@ -221,37 +169,49 @@ fn draw_row(surf: &mut Surface, font: &Font, cell_w: i32, y: i32, row: &[Cell]) 
     }
 }
 
-fn paint(window:&mut Window,term:&mut Term,font:&Font,bg:u32){
-    let mut resized=None;
-    checked(window.draw(|frame|{
-        let (w,h)=frame.size();let cols=cols_for(w,term.cell_w);let rows=visible_rows_for(h);
-        if cols!=term.cols||rows!=term.rows{
-            let mut candidate=term.clone();candidate.resize(cols,rows);
-            render(frame.pixels_mut(),font,&candidate,w,h,bg);resized=Some(candidate);
-        }else{render(frame.pixels_mut(),font,term,w,h,bg);resized=None;}
-    }),"present frame");
-    if let Some(candidate)=resized{*term=candidate;}
-    term.dirty=false;
+fn paint(window: &mut Window, term: &mut Term, font: &Font, bg: u32) {
+    let mut resized = None;
+    checked(
+        window.draw(|frame| {
+            let (w, h) = frame.size();
+            let cols = cols_for(w, term.cell_w);
+            let rows = visible_rows_for(h);
+            if cols != term.cols || rows != term.rows {
+                let mut candidate = term.clone();
+                candidate.resize(cols, rows);
+                render(frame.pixels_mut(), font, &candidate, w, h, bg);
+                resized = Some(candidate);
+            } else {
+                render(frame.pixels_mut(), font, term, w, h, bg);
+                resized = None;
+            }
+        }),
+        "present frame",
+    );
+    if let Some(candidate) = resized {
+        *term = candidate;
+    }
+    term.dirty = false;
 }
 
-#[no_mangle]
-pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::RawEnvp) -> ! {
-    libdunit::init_runtime(argc, argv, envp);
-    let arguments: Vec<&str> = (0..libdunit::argc()).filter_map(libdunit::arg).collect();
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    let owned_arguments = dunit::args::args()?;
+    let arguments: Vec<&str> = owned_arguments.iter().map(|s| s.as_str()).collect();
     let command = if arguments.len() == 1 {
         alloc::vec!["dsh"]
     } else if arguments.len() >= 3 && arguments[1] == "--execute" && !arguments[2].is_empty() {
         arguments[2..].to_vec()
     } else {
-        libdunit::println("gui_terminal: FAIL expected --execute executable [arguments]");
-        libdunit::exit(2);
+        log("gui_terminal: FAIL expected --execute executable [arguments]");
+        dunit::process::exit(2);
     };
     // 0) Load this app's config (apps/gui_terminal.toml). A missing/garbage file
     // yields the built-in baseline. The resolved values drive the prompt (via the
     // shell's env), the font, the background (with alpha), and the text palette;
     // they also go to serial so a TOML edit is observable headless.
     let tcfg = dwm_settings::TerminalCfg::load("gui_terminal");
-    libdunit::println(&alloc::format!(
+    log(&alloc::format!(
         "gui_terminal: cfg from_file={} theme={} prompt={} fg={:#010X} bg={:#010X} bg_alpha={} font={}",
         tcfg.from_file as u32,
         tcfg.theme.as_str(),
@@ -278,7 +238,7 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
         ansi: tcfg.ansi,
         ansi_bright: tcfg.ansi_bright,
     };
-    libdunit::println(&alloc::format!(
+    log(&alloc::format!(
         "gui_terminal: argb bg_alpha={} fmt={}",
         tcfg.bg_alpha,
         if fmt == PixelFormat::Argb8888 {
@@ -288,109 +248,137 @@ pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::R
         },
     ));
 
-    let font=load_font(&tcfg).unwrap_or_else(|_|fatal("font parse",libdunit::EINVAL));
-    let cell_w=mono_cell_w(&font);
-    let mut window=checked(Window::open_format(W,H,fmt),"window handshake");
-    let (width,height)=window.size();
-    let mut term=Term::new(palette,cols_for(width,cell_w),visible_rows_for(height),cell_w);
-    paint(&mut window,&mut term,&font,bg);
-    libdunit::println("gui_terminal: surface presented OK");
-    let mut transfers=terminal_transfer::Transfers::start(&mut window);
+    let font = load_font(&tcfg).unwrap_or_else(|_| fatal("font parse", dunit::errno::EINVAL));
+    let cell_w = mono_cell_w(&font);
+    let mut window = checked(Window::open_format(W, H, fmt), "window handshake");
+    let (width, height) = window.size();
+    let mut term = Term::new(
+        palette,
+        cols_for(width, cell_w),
+        visible_rows_for(height),
+        cell_w,
+    );
+    paint(&mut window, &mut term, &font, bg);
+    log("gui_terminal: surface presented OK");
+    let mut transfers = terminal_transfer::Transfers::start(&mut window);
 
     // 9) Spawn the shell/command as our PTY slave; keep argv distinct.
-    let pty = libdunit::pty_create();
-    if pty <= 0 {
-        libdunit::println("gui_terminal: FAIL pty create");
-        libdunit::exit(8);
-    }
-    let pty = pty as u32;
+    let mut pty = Pty::open()?;
     // Hand the shell its prompt through the environment (desktop policy lives in
     // config, not baked into dsh): `[terminal] prompt` → `PROMPT=<value>`.
     let prompt_env = alloc::format!("PROMPT={}", tcfg.prompt.as_str());
-    let child = libdunit::process::pty_spawn_args(command[0], pty, &command, &[&prompt_env]);
-    if child <= 0 {
-        libdunit::println("gui_terminal: FAIL pty spawn");
-        libdunit::pty_close(pty);
-        libdunit::exit(9);
-    }
-    let mut child = Some(child as u32);
+    let mut child = Some(pty.spawn(command[0], &command, &[&prompt_env])?);
 
-    let mut sbuf=[0u8;256];
-    let mut input=pending_input::PendingInput::new(dunit::transfer::MAX_BODY_BYTES);
+    let mut sbuf = [0u8; 256];
+    let mut input = PendingInput::new(dunit::transfer::MAX_BODY_BYTES);
     loop {
-        let mut closing=false;
-        for batch in 0..64{
-        let timeout=if batch!=0{0}else if input.is_empty(){POLL_MS}else{5};
-        match checked(window.next_event(dunit::time::Duration::from_millis(timeout)),"window event"){
-            None=>break,
-            Some(WindowEvent::CloseRequested)=>{closing=true;break;},
-            Some(WindowEvent::Resized{..})=>{
-                transfers.resized();
-                let (w,h)=window.size();term.resize(cols_for(w,cell_w),visible_rows_for(h));term.dirty=true;
-                libdunit::println("gui_terminal: reconfigured OK");
-            },
-            Some(WindowEvent::Transfer(event))=>checked(transfers.event(&mut window,event,&mut input),"transfer event"),
-            Some(WindowEvent::Input(event))=>match event.kind {
-                IN_FOCUS_IN|IN_FOCUS_OUT=>transfers.focus(event.kind==IN_FOCUS_IN,&mut term),
-                IN_DOWN|IN_UP|IN_MOVE|IN_LEAVE=>checked(transfers.pointer(&mut window,&mut term,&event),"selection"),
-                IN_SCROLL=>term.scroll_wheel(event.x,3),
-                IN_KEY=>{
-                    if !checked(transfers.key(&mut window,&term,&event),"clipboard key"){
-                        let scan=event.x as u8;
-                        if scan==SC_PGUP{term.scroll_by(term.rows.saturating_sub(1),true);}
-                        else if scan==SC_PGDN{term.scroll_by(term.rows.saturating_sub(1),false);}
-                        else if child.is_some(){let mut seq=[0;4];let len=encode_key(scan,event.y as u8,event.value as u8,&mut seq);
-                            if len!=0&&!input.push(&seq[..len]){libdunit::println("gui_terminal: input queue full");}
+        let mut closing = false;
+        for batch in 0..64 {
+            let timeout = if batch != 0 {
+                0
+            } else if input.is_empty() {
+                POLL_MS
+            } else {
+                5
+            };
+            match checked(
+                window.next_event(dunit::time::Duration::from_millis(timeout)),
+                "window event",
+            ) {
+                None => break,
+                Some(WindowEvent::CloseRequested) => {
+                    closing = true;
+                    break;
+                }
+                Some(WindowEvent::Resized { .. }) => {
+                    transfers.resized();
+                    let (w, h) = window.size();
+                    term.resize(cols_for(w, cell_w), visible_rows_for(h));
+                    term.dirty = true;
+                    log("gui_terminal: reconfigured OK");
+                }
+                Some(WindowEvent::Transfer(event)) => checked(
+                    transfers.event(&mut window, event, &mut input),
+                    "transfer event",
+                ),
+                Some(WindowEvent::Input(event)) => match event.kind {
+                    IN_FOCUS_IN | IN_FOCUS_OUT => {
+                        transfers.focus(event.kind == IN_FOCUS_IN, &mut term)
+                    }
+                    IN_DOWN | IN_UP | IN_MOVE | IN_LEAVE => checked(
+                        transfers.pointer(&mut window, &mut term, &event),
+                        "selection",
+                    ),
+                    IN_SCROLL => term.scroll_wheel(event.x, 3),
+                    IN_KEY => {
+                        if !checked(transfers.key(&mut window, &term, &event), "clipboard key") {
+                            let scan = event.x as u8;
+                            if scan == SC_PGUP {
+                                term.scroll_by(term.rows.saturating_sub(1), true);
+                            } else if scan == SC_PGDN {
+                                term.scroll_by(term.rows.saturating_sub(1), false);
+                            } else if child.is_some() {
+                                let mut seq = [0; 4];
+                                let len =
+                                    encode_key(scan, event.y as u8, event.value as u8, &mut seq);
+                                if len != 0 && !input.push(&seq[..len]) {
+                                    log("gui_terminal: input queue full");
+                                }
+                            }
                         }
                     }
+                    _ => {}
                 },
-                _=>{},
-            },
-            _=>{},
+                _ => {}
+            }
         }
+        if closing {
+            break;
         }
-        if closing{break;}
-        if let Err(error)=input.drain(|bytes|libdunit::pty_write(pty,bytes)){
-            if error==libdunit::EPIPE{input.clear();checked(transfers.read_only(&mut window),"read-only terminal");}
-            else if error!=libdunit::EAGAIN&&error!=libdunit::ENOBUFS{fatal("PTY input",error);}
+        if let Err(error) = input.drain(|bytes| pty.write(bytes)) {
+            if error.0 == dunit::errno::EPIPE {
+                input.clear();
+                checked(transfers.read_only(&mut window), "read-only terminal");
+            } else if error.0 != dunit::errno::EAGAIN && error.0 != dunit::errno::ENOBUFS {
+                fatal("PTY input", error.0);
+            }
         }
         // Drain whatever the child has produced since the last tick.
         loop {
-            let r = libdunit::pty_read(pty, &mut sbuf);
-            if r > 0 {
-                term.feed(&sbuf[..r as usize]);
-            } else {
-                break; // EAGAIN / EOF / EPIPE — nothing more this tick
+            match pty.read(&mut sbuf) {
+                Ok(0) => break,
+                Ok(n) => term.feed(&sbuf[..n]),
+                Err(error) if matches!(error.0, dunit::errno::EAGAIN | dunit::errno::EPIPE) => {
+                    break
+                }
+                Err(error) => return Err(error),
             }
         }
-        if let Some(pid) = child {
-            let mut status = libdunit::WaitStatus::empty();
-            let result = libdunit::wait(pid, &mut status);
-            if result >= 0 {
-                // Keep the final output visible until the window is closed.
-                // Reap once; the dead child must not leave a zombie per launch.
-                child = None;input.clear();checked(transfers.read_only(&mut window),"read-only terminal");
-                libdunit::println(&alloc::format!("gui_terminal: child={} exited kind={} code={}", command[0], status.kind, status.code));
-            } else if result != libdunit::EAGAIN {
-                libdunit::println("gui_terminal: FAIL child wait");
-                break;
+        if let Some(process) = child.as_mut() {
+            if let Some(status) = process.try_wait()? {
+                child = None;
+                input.clear();
+                checked(transfers.read_only(&mut window), "read-only terminal");
+                log(&alloc::format!(
+                    "gui_terminal: child={} exited kind={} code={}",
+                    command[0],
+                    status.kind(),
+                    status.raw_code()
+                ));
             }
         }
         if term.dirty {
-            paint(&mut window,&mut term,&font,bg);
+            paint(&mut window, &mut term, &font, bg);
         }
     }
 
-    if let Some(pid) = child {
-        libdunit::kill(pid);
-        let mut status = libdunit::WaitStatus::empty();
-        if libdunit::wait(pid, &mut status) < 0 {
-            libdunit::println("gui_terminal: FAIL child cleanup");
-            libdunit::exit(10);
-        }
-        libdunit::println(&alloc::format!("gui_terminal: child={} stopped on close", command[0]));
+    if let Some(mut process) = child {
+        process.terminate_and_wait()?;
+        log(&alloc::format!(
+            "gui_terminal: child={} stopped on close",
+            command[0]
+        ));
     }
-    libdunit::pty_close(pty);
-    checked(window.close(),"window close");
-    libdunit::exit(0)
+    pty.close()?;
+    window.close()
 }

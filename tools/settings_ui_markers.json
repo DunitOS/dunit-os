@@ -121,28 +121,7 @@
         }
       },
       {
-        "relative_motion": {
-          "x": 24,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 0,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 0,
-          "y": 8,
-          "interval": 0.02
-        }
-      },
-      {
-        "delay_ms": 1000
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -154,21 +133,28 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.05
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 51,
+          "x": 127,
           "y": 127,
-          "interval": 0.05
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 0,
-          "y": 81,
-          "interval": 0.05
+          "x": 127,
+          "y": 127,
+          "interval": 0.02
+        }
+      },
+      {
+        "relative_motion": {
+          "x": 119,
+          "y": 69,
+          "interval": 0.02
         }
       },
       {
@@ -178,7 +164,7 @@
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": true
               }
             }
@@ -186,16 +172,13 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": false
               }
             }
@@ -203,7 +186,7 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
         "execute": "input-send-event",
@@ -212,7 +195,7 @@
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": true
               }
             }
@@ -220,16 +203,13 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": false
               }
             }
@@ -237,7 +217,7 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
         "execute": "input-send-event",
@@ -246,7 +226,7 @@
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": true
               }
             }
@@ -254,16 +234,13 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": false
               }
             }
@@ -271,7 +248,7 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
         "execute": "input-send-event",
@@ -280,7 +257,7 @@
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": true
               }
             }
@@ -288,16 +265,13 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": false
               }
             }
@@ -305,7 +279,7 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
         "execute": "input-send-event",
@@ -314,7 +288,7 @@
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
                 "down": true
               }
             }
@@ -322,7 +296,21 @@
         }
       },
       {
-        "delay_ms": 300
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
       },
       {
         "execute": "input-send-event",
@@ -331,7 +319,21 @@
             {
               "type": "btn",
               "data": {
-                "button": "left",
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
                 "down": false
               }
             }
@@ -339,7 +341,1064 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "execute": "input-send-event",
+        "arguments": {
+          "events": [
+            {
+              "type": "btn",
+              "data": {
+                "button": "wheel-down",
+                "down": false
+              }
+            }
+          ]
+        }
+      },
+      {
+        "delay_ms": 200
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -349,23 +1408,23 @@
       },
       {
         "relative_motion": {
-          "x": -62,
+          "x": -127,
           "y": -127,
-          "interval": 0.05
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 0,
-          "y": -127,
-          "interval": 0.05
+          "x": -127,
+          "y": -76,
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 0,
-          "y": -35,
-          "interval": 0.05
+          "x": -86,
+          "y": 0,
+          "interval": 0.02
         }
       },
       {
@@ -383,9 +1442,6 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -400,10 +1456,14 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
-        "wait_marker": "gui_settings: page 4"
+        "wait_marker": "gui_settings: page 4",
+        "timeout": 45
+      },
+      {
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -414,15 +1474,15 @@
       {
         "relative_motion": {
           "x": 127,
-          "y": -127,
-          "interval": 0.05
+          "y": -48,
+          "interval": 0.02
         }
       },
       {
         "relative_motion": {
-          "x": 33,
-          "y": -15,
-          "interval": 0.05
+          "x": 23,
+          "y": 0,
+          "interval": 0.02
         }
       },
       {
@@ -440,9 +1500,6 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -457,14 +1514,14 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
         "wait_marker": "gui_server: Lua geometry committed windows=1",
-        "timeout": 25
+        "timeout": 45
       },
       {
-        "delay_ms": 1000
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -474,9 +1531,9 @@
       },
       {
         "relative_motion": {
-          "x": -73,
-          "y": 70,
-          "interval": 0.05
+          "x": -52,
+          "y": 87,
+          "interval": 0.02
         }
       },
       {
@@ -494,9 +1551,6 @@
         }
       },
       {
-        "delay_ms": 300
-      },
-      {
         "execute": "input-send-event",
         "arguments": {
           "events": [
@@ -511,14 +1565,14 @@
         }
       },
       {
-        "delay_ms": 300
+        "delay_ms": 200
       },
       {
         "wait_marker": "duration_ms=0 easing=linear",
-        "timeout": 25
+        "timeout": 45
       },
       {
-        "delay_ms": 1000
+        "delay_ms": 600
       },
       {
         "execute": "screendump",
@@ -544,6 +1598,7 @@
     "gui_settings: PANIC",
     "gui_settings: surface protocol error",
     "gui_server: Lua policy rejected",
-    "gui_settings: save failed"
+    "gui_settings: save failed",
+    "[USER-FAULT]"
   ]
 }

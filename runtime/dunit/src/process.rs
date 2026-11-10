@@ -17,6 +17,12 @@ impl ExitStatus {
     pub fn code(self) -> Option<i32> {
         (self.kind == libdunit::WAIT_KIND_EXITED).then_some(self.code)
     }
+    pub fn kind(self) -> i32 {
+        self.kind
+    }
+    pub fn raw_code(self) -> i32 {
+        self.code
+    }
     pub fn fault_kind(self) -> Option<i32> {
         (self.kind > 0).then_some(self.kind)
     }
@@ -28,7 +34,13 @@ pub struct Child {
 }
 impl Child {
     pub fn spawn(path: &str) -> Result<Self> {
-        let pid = checked(libdunit::spawn(path))?;
+        Self::from_spawned(libdunit::spawn(path))
+    }
+    pub(crate) fn from_spawned(result: isize) -> Result<Self> {
+        let pid = checked(result)?;
+        if pid == 0 {
+            return Err(Error(libdunit::EIO));
+        }
         Ok(Self {
             pid: pid as u32,
             status: None,
@@ -42,6 +54,17 @@ impl Child {
             return Err(Error(libdunit::ECHILD));
         }
         checked(libdunit::kill(self.pid)).map(|_| ())
+    }
+    /// Reap natural completion or terminate a live child, including the race
+    /// where the child exits between the nonblocking wait and kill.
+    pub fn terminate_and_wait(&mut self) -> Result<ExitStatus> {
+        if let Some(status) = self.try_wait()? {
+            return Ok(status);
+        }
+        match self.kill() {
+            Ok(()) => self.wait(),
+            Err(error) => self.try_wait()?.ok_or(error),
+        }
     }
     fn wait_ns(&mut self, timeout: u64) -> Result<Option<ExitStatus>> {
         if let Some(status) = self.status {
@@ -77,4 +100,9 @@ impl Child {
 }
 pub fn id() -> u32 {
     libdunit::get_pid()
+}
+
+/// Terminate the current process through the native runtime.
+pub fn exit(code: i32) -> ! {
+    libdunit::exit(code)
 }
