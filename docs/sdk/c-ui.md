@@ -1,4 +1,4 @@
-# C UI v1: the first native component bridge
+# Native C SDK: shared Rust component runtime
 
 `<dunit.h>` now includes generated `<dunit/ui.h>`. Link a native C program with
 `-ldunit_ui` and call `dunit_ui_run_v1(argc, argv, envp, width, height, &callbacks)`.
@@ -11,8 +11,9 @@ and grouped Radio nodes. It opens one native themed window and dispatches
 activation messages back to the C-owned model.
 Slider, VerticalSlider, Spinbox, Progress and Busy are available through the
 combined application entry described below.
-Other widgets and C transfer/file-capability
-interfaces remain later M7.10 increments. This is not the complete C SDK.
+Menus/popups, collections, workspace controls, controlled rename, explicit
+clipboard/DnD/file capabilities and the native file picker are described below.
+The C layer shares these implementations with Rust applications.
 
 ## Frozen v1 contract
 
@@ -108,7 +109,8 @@ parser, validation, cascade and renderer as Rust applications.
 
 The optional `decorate(user, index, appearance)` callback attaches classes to
 the node at that build's array index, using the same `user` as build/update.
-It runs once per visible SDK View node on every successful description build;
+It runs once per C-described View node on every successful description build,
+including inactive tab content;
 popup item/option and binding descriptors do not have View appearance callbacks.
 The index always refers to the original C array. Invocation order
 is unspecified. `DunitUiAppearanceV1` starts as `{NULL,0}`. Return 0 with an
@@ -289,15 +291,16 @@ Rust code, LLVM bitcode and unneeded symbols are excluded from the shipped C
 archive. The linker script coalesces sections; it fixes no code addresses.
 Real undefined libc references remain linkable. C linkers need no LLVM plugin.
 
-The first unpruned archive was 8,094,406 bytes; LTO intermediate archives carry
-additional bitcode and are not shipped. The final machine-code archive is
-2,057,768 bytes in this checkpoint. The full initrd is about 123 MB and still
-fits the existing 128 MiB installer ESP; no partition size/format change was
-needed. Minimal images omit the library with the rest of the toolchain.
-The checkable-widget extension brings the archive to 2,059,096 bytes (+1,328);
-the existing installer ESP still fits without changes.
+The final M7.10 machine-code archive is 2,922,604 bytes. The measured full initrd
+is 124,015,854 bytes including the retained development compatibility object;
+it fits the existing 128 MiB installer ESP without a partition/format change.
+The original unpruned archive was 8,094,406 bytes; LLVM/LTO intermediate archives
+are not shipped. Minimal images omit the library with the rest of the toolchain.
 
-## Validation
+## Historical validation by increment
+
+The following results record the individual implementation checkpoints. Current
+complete acceptance and its economical combined runner appear at the end.
 
 ```sh
 python3 tools/gen_abi.py --check
@@ -436,3 +439,195 @@ owned strings, focus restoration and complete tooltip-frame equality. The
 retained original C object passes its own forced-rebuild QEMU run with both
 original complete pixel comparisons. The archive is 2,142,076 bytes (+18,520);
 the installer ESP and every existing v1 record/export remain unchanged.
+
+## Collections and workspace
+
+`dunit_ui_run_extended_v1` takes the normal loader/window/callback arguments and
+`DunitUiExtendedV1`. Set its version and exact `sizeof`; `app`, `collections` and
+`transfers` are optional pointers. The original Node, Callbacks, Style, Text,
+Number, Numbers and App records and the four original exports remain frozen.
+All seven exports share the one-session-per-process guard.
+
+Workspace kinds compose real SDK Views:
+
+| Kind | Description |
+| --- | --- |
+| `SCROLL`, `SCROLL_HORIZONTAL`, `SCROLL_BOTH` | Vertical, horizontal or both axes; node text is the accessible label. |
+| `TABS` | Direct `TAB`/`TAB_SELECTED` descriptors, exactly one selected. Each descriptor has one content View, a label and activation message; disabled tabs use the existing flag. |
+| `TOOLBAR`, `TOOLBAR_SEPARATOR`, `STATUS_BAR` | Native roving toolbar and status. Status text comes from node text; its accessible label is its stable key. |
+| `DIALOG` | Title in node text, exactly one body View, action/default/cancel descriptors. |
+| `MESSAGE_BOX` | Title plus one `MESSAGE_BODY` descriptor and dialog action descriptors. The SDK handles multiline content and scrolling. |
+| `MODAL` | One content View and an optional dialog; the SDK creates the scrim and focus scope. |
+| `SPLITTER`, `VERTICAL_SPLITTER` | Exactly two pane Views; the existing Numbers configure/changed callbacks provide value/range/label. SDK ranges remain bounded to 0..1000. |
+
+All kind names above have the `DUNIT_UI_` prefix. `DIALOG_ACTION` has a key,
+label and action message. `DIALOG_DEFAULT.text` names an action key;
+`DIALOG_CANCEL.message` supplies the cancellation action. Duplicate defaults,
+cancels or message bodies fail. Descriptor keys are unique within the C array;
+SDK-generated internal keys must also pass the ordinary final View validator.
+DSS classes and layout rules apply to the actual generated SDK workspace tree.
+Inactive tab content is validated but only the selected SDK panel is rendered.
+
+`LIST`, `TREE` and `TABLE` require `DunitUiCollectionsV1.configure` and `changed`.
+Both are synchronous and use the normal model `user`. Configure receives the
+original node index and a zero-initialized `DunitUiCollectionV1`; supply item,
+column and row-major cell arrays. Each array is bounded to `MAX_VIEW_NODES`
+(4096); all strings use the normal 64 KiB UTF-8 span limit and are copied before
+configure is called for another node. A nonzero count requires a nonnull pointer.
+Unknown flags and nonzero reserved fields fail.
+
+Items have stable key/label, an optional Tree parent key, and flags for disabled,
+selected, current, anchor and expanded. `COLLECTION_MULTIPLE` enables multiple
+selection; a single-selection model cannot contain multiple selected keys.
+Disabled selection, duplicate keys/current/anchor, missing/cyclic parents and
+invalid expansion are rejected through the existing SDK model validators.
+Parent and expanded fields are Tree-only. Collection data keys are local to
+the collection, distinct from the global C View/descriptor key namespace.
+
+Table columns have key/label, optional positive integer pixel width (zero means
+SDK automatic sizing), `COLUMN_SORTABLE` and `COLUMN_EDITABLE`. Cells are typed
+`CELL_TEXT`, `CELL_INTEGER` or `CELL_UNSIGNED`; signed values use the two's
+complement bits of the `uint64_t value` field. Numeric sorting remains numeric,
+including full-width signed/unsigned values. Cell count must equal rows × columns.
+`sort` names the sort column; `COLLECTION_SORT_DESCENDING` selects descending
+order. `column` is the current column. These fields are Table-only.
+
+`changed(user, message, state)` receives the original full-width node message
+and borrowed proposed state. Its items contain keys and selection/current/
+anchor/expanded flags, not model labels or rows; columns/cells are empty. Sort
+and current-column spans carry the Table proposal. Copy the state into the C
+model before returning. Return 0 to rebuild, 1 to close, or a negative error.
+Keeping the old C state declines a proposal; the SDK owns no independent choice.
+
+Optional `renamed` enables the SDK's F2 controlled editor for collections.
+Configure's optional `rename` points to a `DunitUiRenameV1` with kind/reserved 0,
+row, optional Table column and current editor value. Callback events are BEGIN
+(row/column), CHANGE (proposed value), COMMIT and CANCEL; unused spans are empty.
+The C model decides when to retain/remove the editor and when to commit data.
+Table edits still require an editable column. SDK focus, select-all, Unicode
+editing, validation and restoration are shared with Rust applications.
+
+## Explicit clipboard, drag/drop and file capabilities
+
+`DunitTransfersV1.callback(user, session, event)` runs initially, after window
+input and on authenticated SDK transfer replies. The SDK remains the sole IPC
+receiver. `event.kind == 0` denotes a service/input notification; optional
+`event.input` describes the native event **after** SDK defaults. Its kind values
+are generated directly from gui-v1's owning control definitions as
+`DUNIT_GUI_IN_*`. Coordinates, value, pointer button and modifiers use the SDK's
+existing interpretation. Observe input to start a drag while the source window
+has real pointer capture and has crossed the configured drag threshold.
+
+The callback returns 0 for no model rebuild, 2 to rebuild the current C View,
+1 to close, or a negative error. This avoids rendering on every service
+notification. Never receive IPC independently, retain `session` or event spans,
+use them on another thread, recursively invoke a run entry, unwind or longjmp.
+The `session` pointer is valid exclusively during that callback invocation.
+
+`dunit_transfer_request_v1(session, request, result)` returns 0 or a negative
+native error. Initialize the whole request to zero. SDK requests return their
+asynchronous ID in `result.request`; inspect subsequent RESULT/DATA/etc events
+for completion. Use the generated `DUNIT_TRANSFER_KIND_*`, action/status and MIME
+constants from `<dunit/transfer.h>`, not copied protocol values.
+
+| Request kind | Fields |
+| --- | --- |
+| CLIPBOARD_OFFER / DRAG_OFFER | `data` is UTF-8 text, or `files` is an array of locally owned capability tokens. `flags` is the action mask; `preferred` is the preferred action. File payloads use SDK-generated file/URI/text alternatives. |
+| CLIPBOARD_READ / REGISTER_TARGET / REGISTER_OPENER | `formats` is a MIME preference array; `flags`/`preferred` specify actions. Empty REGISTER_TARGET unregisters. |
+| DRAG_ACCEPT | `transfer`, zero-based offer format index in `offset`, action in `preferred`; preferred 0 rejects. |
+| COMPLETE / CANCEL | `transfer`; COMPLETE uses `flags` as the native status. |
+| CLIPBOARD_QUERY / CLIPBOARD_CLEAR | No additional data. |
+| GRANT | `transfer` and a local writable directory token in `capability`. Await GRANT_ACK. |
+| FILE_MOVE | `transfer`, source item index in `offset`, broker-local destination from GRANT_ACK.arg0 in `capability`, and destination leaf in `data`. This ID is sent back to the broker, never adopted as local authority. |
+| `DUNIT_C_FILE_OPEN` | Path in `data`; flags 0 or `DUNIT_RIGHT_WRITE`. Returns a local token, kind and rights. |
+| `DUNIT_C_FILE_CHILD` | Parent token and relative path; same writable flag. The kernel enforces attenuation and subtree boundaries. |
+| `DUNIT_C_FILE_READ` | Token, offset and caller-owned output buffer, at most 64 KiB. `result.size` is bytes read. |
+| `DUNIT_C_FILE_STAT` | Token; returns size, kind and rights. |
+| `DUNIT_C_FILE_CLOSE` | Token; subsequent use returns EBADF. |
+
+Local tokens are monotonically allocated, never kernel handle numbers. The
+session retains at most 1024 files and drops all remaining handles at exit.
+File clipboard/drag publication duplicates only the SDK rights required for
+Copy/Move; opening a path does not bypass native filesystem permissions.
+Focus, capture, broker transfer ownership and received handle attestation remain
+those of the existing SDK/kernel. Text publication and file publication are the
+explicit source helpers; received custom/RGBA representations remain borrowed
+validated SDK bytes, not another C codec.
+
+Offers carry ordered MIME spans. Data events carry representation MIME/data
+spans and file records with token, display path, kind and actual attenuated
+rights. Received file tokens survive the event until closed/session end; display
+paths never substitute for their authority. File-list wire handle integers are
+hidden from representation bytes; use the token records. Other event data lasts
+only for the callback, including display paths even if a token is closed there.
+The callback must decide/complete custom drops; ordinary SDK text defaults still
+run first. It must not acknowledge the same operation twice.
+
+## Native file picker
+
+`dunit_ui_choose_file_v1` opens the existing native SDK chooser in a fresh
+single-window process. `DunitUiFileDialogV1` supplies mode OPEN/SAVE/DIRECTORY,
+key/title/directory/filename, filters and a required `DunitUiFileLabelsV1`.
+Labels, filter labels and extension spans are application data; the adapter
+provides no hidden language or filesystem policy. Options and spans are copied.
+Filter/extension arrays share the 4096-entry bound. The SDK supplies the native
+directory source, history, filtering, overwrite confirmation, focus and renderer.
+
+Return 0 means the selected path was copied into the caller's buffer without a
+NUL terminator, with byte count in `written`. Return 1 means cancellation and
+written 0. A too-small buffer returns `-DUNIT_ENOBUFS` and the required length;
+no partial path is copied. Other errors are negative. The buffer is bounded to
+64 KiB and must not alias the options/length output. A valid open attempt consumes
+the process window session, just like the component entries. The selected path
+is a path, not a capability grant; open it explicitly with the desired rights.
+
+
+## M7.10 acceptance and ABI maintenance
+
+The complete published v1 declaration set is frozen in
+`tools/fixtures/c_ui_abi_v1.json`. `tools/test_c_ui_abi.py` rejects changes to its
+records, callbacks, type aliases, constants or exports while allowing new names.
+It also compiles all frozen sizes/alignments and C function-pointer signatures
+against the current generated header. Do not refresh that fixture to make an
+incompatible change pass; introduce a new versioned record/entry instead. The
+original binary execution fixture in `tools/fixtures/c_ui_v1/` stays unchanged.
+
+Reproduce the complete remaining-block acceptance with:
+
+```sh
+python3 tools/gen_abi.py --check
+python3 tools/test_c_ui_abi.py
+python3 tools/test_c_ui_workspace.py --accel tcg
+python3 tools/test_c_ui_compat.py --accel tcg
+```
+
+The workspace runner builds once, then uses that same image for the file picker.
+OS execution always uses `qemu_test.py`. Host references are direct SDK models,
+not screenshots generated by the adapter. The final accepted results are:
+
+- 60 Rust adapter/model tests, including the entire prior C widget suite,
+  malformed collection data, workspace shape validation, controlled F2 rename,
+  transfer validation and borrowed-event lifetimes, and file-dialog option copying.
+- 23 host tooling checks: frozen complete ABI, actual C layout/prototype compile,
+  generated headers, seven real archive roots, original fixture integrity and
+  image profiles. ABI regeneration is clean.
+- QEMU TCG workspace: native TCC compile/link, multiple selection, expanded child,
+  signed/unsigned numeric table sorting, tab change, modal open/Esc restore,
+  splitter change, controlled rename, focus-aware text clipboard, actual file
+  clipboard capability and rights/stale-token denial. A real PS/2 drag is
+  accepted, dropped, delivered through the SDK, checked for exact text and completed.
+  C asserts the callback counts/model state before normal process exit. Five
+  complete 640×620 canvases exactly match independent Rust SDK rendering.
+- QEMU TCG picker: native TCC compile/link, real filtered directory listing and
+  acceptance of an existing file; exact 640×500 SDK canvas and exit status 0.
+- QEMU TCG compatibility: the original v1 object is compiled before a forced
+  native Rust rebuild, retained unchanged, then linked without C compilation in
+  the guest. Original markers and two 400×180 exact SDK canvases pass. The receipt
+  verifies object and runtime hashes from the actual initrd.
+
+The shipped machine-code archive is 2,922,604 bytes; the measured full initrd
+is 124,015,854 bytes including the development compatibility object. The 128 MiB
+installer ESP is unchanged. Screenshots and receipts remain generated build
+artifacts. The core M7.10 C SDK acceptance is complete; the Rust session's existing
+single-window/bootstrap limit and unsupported kernel/libc facilities are not
+expanded by this bridge. This does not complete M7.11 application migration.

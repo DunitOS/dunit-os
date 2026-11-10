@@ -9,16 +9,25 @@ use core::{
 use dunit::{time::Duration, ui::*, window::WindowEvent};
 mod generated;
 pub use generated::*;
+mod collection;
+mod file_dialog;
+mod transfer;
+pub use file_dialog::dunit_ui_choose_file_v1;
+pub use transfer::dunit_transfer_request_v1;
 mod number;
 mod popup;
 mod text;
 mod tree;
+mod workspace;
 
 #[derive(Clone)]
 enum Message {
     Action(u64),
+    Refresh,
     Edit(u64, String),
     Number(u64, i64),
+    Collection(u64, collection::State),
+    Rename(u64, RenameEvent),
 }
 impl From<u64> for Message {
     fn from(value: u64) -> Self {
@@ -29,6 +38,21 @@ impl From<u64> for Message {
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static CONSUMED: AtomicBool = AtomicBool::new(false);
 struct Session;
+impl Session {
+    fn enter() -> dunit::Result<Self> {
+        if RUNNING
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Err(dunit::Error(dunit::errno::EBUSY));
+        }
+        let session = Self;
+        if CONSUMED.load(Ordering::Acquire) {
+            return Err(dunit::Error(dunit::errno::EPIPE));
+        }
+        Ok(session)
+    }
+}
 impl Drop for Session {
     fn drop(&mut self) {
         RUNNING.store(false, Ordering::Release);
@@ -43,12 +67,22 @@ struct Model {
     decorate: Option<DunitUiDecorateV1>,
     text: Option<DunitUiTextV1>,
     numbers: Option<DunitUiNumbersV1>,
+    collections: Option<DunitUiCollectionsV1>,
 }
 impl Component for Model {
     type Message = Message;
     fn update(&mut self, message: Message) {
         let result = unsafe {
             match message {
+                Message::Rename(id, event) => match self.collections.and_then(|c| c.renamed) {
+                    Some(f) => collection::rename_dispatch(self.callbacks.user, id, &event, f),
+                    None => dunit::errno::EINVAL as i32,
+                },
+                Message::Refresh => 0,
+                Message::Collection(id, state) => match self.collections.and_then(|c| c.changed) {
+                    Some(changed) => state.dispatch(self.callbacks.user, id, changed),
+                    None => dunit::errno::EINVAL as i32,
+                },
                 Message::Action(id) => (self.callbacks.update.unwrap())(self.callbacks.user, id),
                 Message::Edit(id, value) => match self.text.and_then(|config| config.changed) {
                     Some(changed) => changed(self.callbacks.user, id, value.as_ptr(), value.len()),
@@ -75,12 +109,13 @@ impl Component for Model {
             return;
         }
         match unsafe {
-            build_configured(
+            build_extended(
                 &self.callbacks,
                 &mut self.nodes,
                 self.decorate,
                 self.text.as_ref(),
                 self.numbers.as_ref(),
+                self.collections.as_ref(),
             )
         } {
             Ok(tree) => self.tree = tree,
@@ -129,13 +164,23 @@ impl Model {
         text: Option<DunitUiTextV1>,
         numbers: Option<DunitUiNumbersV1>,
     ) -> dunit::Result<Self> {
+        Self::new_extended(callbacks, decorate, text, numbers, None)
+    }
+    unsafe fn new_extended(
+        callbacks: DunitUiCallbacksV1,
+        decorate: Option<DunitUiDecorateV1>,
+        text: Option<DunitUiTextV1>,
+        numbers: Option<DunitUiNumbersV1>,
+        collections: Option<DunitUiCollectionsV1>,
+    ) -> dunit::Result<Self> {
         let mut nodes = node_buffer();
-        let tree = build_configured(
+        let tree = build_extended(
             &callbacks,
             &mut nodes,
             decorate,
             text.as_ref(),
             numbers.as_ref(),
+            collections.as_ref(),
         )?;
         Ok(Self {
             callbacks,
@@ -146,6 +191,7 @@ impl Model {
             decorate,
             text,
             numbers,
+            collections,
         })
     }
 }
@@ -156,12 +202,23 @@ unsafe fn build(
 ) -> dunit::Result<View<Message>> {
     build_configured(callbacks, nodes, None, None, None)
 }
+#[cfg(test)]
 unsafe fn build_configured(
     callbacks: &DunitUiCallbacksV1,
     nodes: &mut [DunitUiNodeV1],
     decorate: Option<DunitUiDecorateV1>,
     text: Option<&DunitUiTextV1>,
     numbers: Option<&DunitUiNumbersV1>,
+) -> dunit::Result<View<Message>> {
+    build_extended(callbacks, nodes, decorate, text, numbers, None)
+}
+unsafe fn build_extended(
+    callbacks: &DunitUiCallbacksV1,
+    nodes: &mut [DunitUiNodeV1],
+    decorate: Option<DunitUiDecorateV1>,
+    text: Option<&DunitUiTextV1>,
+    numbers: Option<&DunitUiNumbersV1>,
+    collections: Option<&DunitUiCollectionsV1>,
 ) -> dunit::Result<View<Message>> {
     let count = (callbacks.build.unwrap())(callbacks.user, nodes.as_mut_ptr(), nodes.len() as u32);
     if count <= 0 {
@@ -174,12 +231,13 @@ unsafe fn build_configured(
     if count as usize > nodes.len() {
         return Err(invalid());
     }
-    tree::convert_app(
+    tree::convert_extended(
         &nodes[..count as usize],
         callbacks.user,
         decorate,
         text,
         numbers,
+        collections,
     )
 }
 
@@ -199,7 +257,9 @@ pub unsafe extern "C" fn dunit_ui_run_v1(
     height: u32,
     callbacks: *const DunitUiCallbacksV1,
 ) -> i32 {
-    run(argc, argv, envp, width, height, callbacks, None, None, None)
+    run(
+        argc, argv, envp, width, height, callbacks, None, None, None, None, None,
+    )
 }
 
 /// Open using the SDK application DSS layer and optional per-node appearance callback.
@@ -227,6 +287,8 @@ pub unsafe extern "C" fn dunit_ui_run_styled_v1(
         height,
         callbacks,
         Some(style),
+        None,
+        None,
         None,
         None,
     )
@@ -281,6 +343,8 @@ pub unsafe extern "C" fn dunit_ui_run_text_v1(
         style,
         Some(text),
         None,
+        None,
+        None,
     )
 }
 
@@ -311,21 +375,36 @@ pub unsafe extern "C" fn dunit_ui_run_app_v1(
     callbacks: *const DunitUiCallbacksV1,
     app: *const DunitUiAppV1,
 ) -> i32 {
+    let (style, text, numbers) = match read_app(app) {
+        Ok(v) => v,
+        Err(e) => return e.0 as i32,
+    };
+    run(
+        argc, argv, envp, width, height, callbacks, style, text, numbers, None, None,
+    )
+}
+unsafe fn read_app(
+    app: *const DunitUiAppV1,
+) -> dunit::Result<(
+    Option<DunitUiStyleV1>,
+    Option<DunitUiTextV1>,
+    Option<DunitUiNumbersV1>,
+)> {
     if app.is_null() {
-        return invalid().0 as i32;
+        return Err(invalid());
     }
     let app = *app;
     if app.abi_version != DUNIT_UI_ABI_VERSION
         || app.struct_size as usize != core::mem::size_of::<DunitUiAppV1>()
     {
-        return invalid().0 as i32;
+        return Err(invalid());
     }
     let style = if app.style.is_null() {
         None
     } else {
         match read_style(app.style) {
             Ok(style) => Some(style),
-            Err(error) => return error.0 as i32,
+            Err(error) => return Err(error),
         }
     };
     let text = if app.text.is_null() {
@@ -333,7 +412,7 @@ pub unsafe extern "C" fn dunit_ui_run_app_v1(
     } else {
         match read_text(app.text) {
             Ok(text) => Some(text),
-            Err(error) => return error.0 as i32,
+            Err(error) => return Err(error),
         }
     };
     let numbers = if app.numbers.is_null() {
@@ -343,12 +422,79 @@ pub unsafe extern "C" fn dunit_ui_run_app_v1(
         if numbers.abi_version != DUNIT_UI_ABI_VERSION
             || numbers.struct_size as usize != core::mem::size_of::<DunitUiNumbersV1>()
         {
-            return invalid().0 as i32;
+            return Err(invalid());
         }
         Some(numbers)
     };
+    Ok((style, text, numbers))
+}
+/// Run an application with controlled collection bindings. Old records stay frozen.
+/// # Safety
+/// All nested records and callbacks obey the synchronous v1 lifetime contract.
+#[no_mangle]
+pub unsafe extern "C" fn dunit_ui_run_extended_v1(
+    argc: i32,
+    argv: *const *const u8,
+    envp: *const *const u8,
+    width: u32,
+    height: u32,
+    callbacks: *const DunitUiCallbacksV1,
+    extended: *const DunitUiExtendedV1,
+) -> i32 {
+    if extended.is_null() {
+        return invalid().0 as i32;
+    }
+    let e = *extended;
+    if e.abi_version != DUNIT_UI_ABI_VERSION
+        || e.struct_size as usize != core::mem::size_of::<DunitUiExtendedV1>()
+    {
+        return invalid().0 as i32;
+    }
+    let (style, text, numbers) = if e.app.is_null() {
+        (None, None, None)
+    } else {
+        match read_app(e.app) {
+            Ok(v) => v,
+            Err(e) => return e.0 as i32,
+        }
+    };
+    let collections = if e.collections.is_null() {
+        None
+    } else {
+        let c = *e.collections;
+        if c.abi_version != DUNIT_UI_ABI_VERSION
+            || c.struct_size as usize != core::mem::size_of::<DunitUiCollectionsV1>()
+            || c.configure.is_none()
+            || c.changed.is_none()
+        {
+            return invalid().0 as i32;
+        }
+        Some(c)
+    };
+    let transfers = if e.transfers.is_null() {
+        None
+    } else {
+        let t = *e.transfers;
+        if t.abi_version != DUNIT_UI_ABI_VERSION
+            || t.struct_size as usize != core::mem::size_of::<DunitTransfersV1>()
+            || t.callback.is_none()
+        {
+            return invalid().0 as i32;
+        }
+        Some(t)
+    };
     run(
-        argc, argv, envp, width, height, callbacks, style, text, numbers,
+        argc,
+        argv,
+        envp,
+        width,
+        height,
+        callbacks,
+        style,
+        text,
+        numbers,
+        collections,
+        transfers,
     )
 }
 
@@ -362,6 +508,8 @@ unsafe fn run(
     style: Option<DunitUiStyleV1>,
     text: Option<DunitUiTextV1>,
     numbers: Option<DunitUiNumbersV1>,
+    collections: Option<DunitUiCollectionsV1>,
+    transfers: Option<DunitTransfersV1>,
 ) -> i32 {
     if callbacks.is_null()
         || argc < 0
@@ -387,18 +535,14 @@ unsafe fn run(
         },
         None => (String::new(), None),
     };
-    if RUNNING
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        return dunit::errno::EBUSY as i32;
-    }
-    let _session = Session;
-    if CONSUMED.load(Ordering::Acquire) {
-        return dunit::errno::EPIPE as i32;
-    }
+    let _session = match Session::enter() {
+        Ok(s) => s,
+        Err(e) => return e.0 as i32,
+    };
     let result = (|| {
-        let model = if numbers.is_some() {
+        let model = if collections.is_some() {
+            Model::new_extended(callbacks, decorate, text, numbers, collections)?
+        } else if numbers.is_some() {
             Model::new_app(callbacks, decorate, text, numbers)?
         } else if text.is_some() {
             Model::new_configured(callbacks, decorate, text)?
@@ -410,19 +554,53 @@ unsafe fn run(
         CONSUMED.store(true, Ordering::Release);
         dunit::__private::init_c_runtime(argc as usize, argv, envp);
         let mut ui = ComponentWindow::open_themed_with_style(width, height, model, &overlay)?;
-        let result = loop {
-            match ui.next_event(Duration::from_secs(30)) {
-                Err(error) => break Err(error),
-                Ok(Some(WindowEvent::CloseRequested)) => break Ok(()),
-                _ => {}
-            }
-            if let Some(error) = ui.component().error {
-                break Err(error);
-            }
-            if ui.component().stop {
-                break Ok(());
-            }
-        };
+        let result = (|| {
+            let mut files = transfer::Files::default();
+            let mut transfer_event = None;
+            let mut native_input = None;
+            let result = loop {
+                if let Some(config) = transfers {
+                    let result = transfer::dispatch(
+                        ui.transfers()?,
+                        &mut files,
+                        callbacks.user,
+                        config.callback.unwrap(),
+                        transfer_event.take(),
+                        native_input.take(),
+                    )?;
+                    if result == 1 {
+                        break Ok(());
+                    }
+                    if !matches!(result, 0 | 2) {
+                        break Err(if result < 0 {
+                            dunit::Error(result as isize)
+                        } else {
+                            invalid()
+                        });
+                    }
+                    if result == 2 {
+                        ui.update(Message::Refresh)?;
+                    }
+                    if let Some(e) = ui.component().error {
+                        break Err(e);
+                    }
+                }
+                match ui.next_event(Duration::from_secs(30)) {
+                    Err(error) => break Err(error),
+                    Ok(Some(WindowEvent::CloseRequested)) => break Ok(()),
+                    Ok(Some(WindowEvent::Transfer(event))) => transfer_event = Some(event),
+                    Ok(Some(WindowEvent::Input(input))) => native_input = Some(input),
+                    _ => {}
+                }
+                if let Some(error) = ui.component().error {
+                    break Err(error);
+                }
+                if ui.component().stop {
+                    break Ok(());
+                }
+            };
+            result
+        })();
         let closed = ui.close();
         result.and(closed)
     })();
@@ -454,3 +632,9 @@ mod style_tests;
 mod tests;
 #[cfg(test)]
 mod text_tests;
+
+#[cfg(test)]
+mod workspace_tests;
+
+#[cfg(test)]
+mod file_dialog_tests;

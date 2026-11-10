@@ -21,7 +21,19 @@ pub(super) unsafe fn convert_decorated(
     user: *mut c_void,
     decorate: Option<DunitUiDecorateV1>,
 ) -> dunit::Result<View<u64>> {
-    convert_impl(nodes, user, decorate, None, None, |id| id, None, None)
+    convert_impl(
+        nodes,
+        user,
+        decorate,
+        None,
+        None,
+        None,
+        |id| id,
+        None,
+        None,
+        None,
+        None,
+    )
 }
 #[cfg(test)]
 pub(super) unsafe fn convert_runtime(
@@ -32,6 +44,7 @@ pub(super) unsafe fn convert_runtime(
 ) -> dunit::Result<View<Message>> {
     convert_app(nodes, user, decorate, text, None)
 }
+#[cfg(test)]
 pub(super) unsafe fn convert_app(
     nodes: &[DunitUiNodeV1],
     user: *mut c_void,
@@ -39,15 +52,28 @@ pub(super) unsafe fn convert_app(
     text: Option<&DunitUiTextV1>,
     numbers: Option<&DunitUiNumbersV1>,
 ) -> dunit::Result<View<Message>> {
+    convert_extended(nodes, user, decorate, text, numbers, None)
+}
+pub(super) unsafe fn convert_extended(
+    nodes: &[DunitUiNodeV1],
+    user: *mut c_void,
+    decorate: Option<DunitUiDecorateV1>,
+    text: Option<&DunitUiTextV1>,
+    numbers: Option<&DunitUiNumbersV1>,
+    collections: Option<&DunitUiCollectionsV1>,
+) -> dunit::Result<View<Message>> {
     convert_impl(
         nodes,
         user,
         decorate,
         text,
         numbers,
+        collections,
         Message::Action,
         Some(Message::Edit),
         Some(Message::Number),
+        Some(Message::Collection),
+        Some(Message::Rename),
     )
 }
 unsafe fn convert_impl<M: Clone + 'static>(
@@ -56,9 +82,12 @@ unsafe fn convert_impl<M: Clone + 'static>(
     decorate: Option<DunitUiDecorateV1>,
     inputs: Option<&DunitUiTextV1>,
     numbers: Option<&DunitUiNumbersV1>,
+    collections: Option<&DunitUiCollectionsV1>,
     action: fn(u64) -> M,
     edit: Option<fn(u64, String) -> M>,
     numeric: Option<fn(u64, i64) -> M>,
+    collection: Option<fn(u64, crate::collection::State) -> M>,
+    renamed: Option<fn(u64, RenameEvent) -> M>,
 ) -> dunit::Result<View<M>> {
     if nodes.is_empty() || nodes.len() > MAX_VIEW_NODES || nodes[0].parent != DUNIT_UI_ROOT {
         return Err(invalid());
@@ -125,6 +154,11 @@ unsafe fn convert_impl<M: Clone + 'static>(
                     | DUNIT_UI_SUBMENU
                     | DUNIT_UI_OPTION
                     | DUNIT_UI_OPTION_SELECTED
+                    | DUNIT_UI_TAB
+                    | DUNIT_UI_TAB_SELECTED
+                    | DUNIT_UI_LIST
+                    | DUNIT_UI_TREE
+                    | DUNIT_UI_TABLE
             )
         {
             return Err(invalid());
@@ -133,6 +167,8 @@ unsafe fn convert_impl<M: Clone + 'static>(
         let mut extra = extras[index].take().map(|boxed| *boxed).unwrap_or_default();
         extra.items.reverse();
         extra.options.reverse();
+        let mut nested = core::mem::take(&mut children[index]);
+        nested.reverse();
         if crate::popup::descriptor(kind) {
             if index == 0 {
                 return Err(invalid());
@@ -143,12 +179,30 @@ unsafe fn convert_impl<M: Clone + 'static>(
                 extra,
                 crate::popup::extra(&mut extras, node.parent as usize),
                 action,
+                nested,
             )?;
             continue;
         }
-        let mut nested = core::mem::take(&mut children[index]);
-        nested.reverse();
         let mut view = match kind {
+            DUNIT_UI_SCROLL
+            | DUNIT_UI_SCROLL_HORIZONTAL
+            | DUNIT_UI_SCROLL_BOTH
+            | DUNIT_UI_TABS
+            | DUNIT_UI_TOOLBAR
+            | DUNIT_UI_TOOLBAR_SEPARATOR
+            | DUNIT_UI_STATUS_BAR
+            | DUNIT_UI_DIALOG
+            | DUNIT_UI_MESSAGE_BOX
+            | DUNIT_UI_MODAL => crate::workspace::view(node, key, nested, &mut extra)?,
+            DUNIT_UI_LIST | DUNIT_UI_TREE | DUNIT_UI_TABLE => crate::collection::view(
+                node,
+                index as u32,
+                key,
+                user,
+                collections.ok_or_else(invalid)?,
+                collection.ok_or_else(invalid)?,
+                renamed.ok_or_else(invalid)?,
+            )?,
             DUNIT_UI_TEXT => View::text(key, text(node.text, node.text_len)?),
             DUNIT_UI_BUTTON => {
                 View::button(key, text(node.text, node.text_len)?, action(node.message))
@@ -220,13 +274,16 @@ unsafe fn convert_impl<M: Clone + 'static>(
             | DUNIT_UI_VERTICAL_SLIDER
             | DUNIT_UI_SPINBOX
             | DUNIT_UI_PROGRESS
-            | DUNIT_UI_BUSY => crate::number::view(
+            | DUNIT_UI_BUSY
+            | DUNIT_UI_SPLITTER
+            | DUNIT_UI_VERTICAL_SPLITTER => crate::number::view(
                 node,
                 index as u32,
                 key,
                 user,
                 numbers.ok_or_else(invalid)?,
                 numeric.ok_or_else(invalid)?,
+                nested,
             )?,
             _ => return Err(invalid()),
         }

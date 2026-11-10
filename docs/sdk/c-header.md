@@ -45,5 +45,7 @@ QEMU TCG passed all five required/four forbidden markers on 5 November 2026:
 the parent, not inferred from a printed success line.
 
 The [first native C GUI proof](c-ui.md) now uses the Rust runtime static library.
-M7.10 remains open for the remaining widget/transfer types and full compatibility
-acceptance. No second widget implementation is introduced.
+The [C SDK contract](c-ui.md) also documents collections/workspace, controlled
+rename, clipboard/DnD/capability bindings and the native file picker. Their
+declarations are generated with the Rust layouts; no second widget implementation
+is introduced.

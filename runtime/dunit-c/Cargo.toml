@@ -9,6 +9,8 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 dunit = { path = "../dunit", features = ["gui"] }
 
+dunit_transfer = { path = "../dunit-transfer" }
+
 # Native C linkers consume machine code; whole-runtime LTO keeps the SDK payload bounded.
 [profile.release]
 opt-level = "s"

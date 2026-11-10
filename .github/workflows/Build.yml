@@ -93,6 +93,7 @@ jobs:
           python3 tools/test_qemu_boot_actions.py
           python3 tools/test_image_profiles.py
           python3 tools/test_c_sdk_headers.py
+          python3 tools/test_c_ui_abi.py
           python3 tools/test_c_ui_archive.py
           python3 tools/test_c_ui_compat_host.py
           python3 tools/test_dunit_cli.py
@@ -123,6 +124,9 @@ jobs:
 
       - name: Native C menus select context menu and delayed tooltip
         run: python3 tools/test_c_ui_popups.py --accel tcg
+
+      - name: Native C collections workspace transfers rename and file picker
+        run: python3 tools/test_c_ui_workspace.py --accel tcg
 
       - name: Frozen C UI v1 object across a native runtime rebuild
         run: python3 tools/test_c_ui_compat.py --accel tcg

@@ -43,6 +43,63 @@ pub const DUNIT_UI_MENU_BAR:u32=31;
 pub const DUNIT_UI_CONTEXT_MENU:u32=32;
 pub const DUNIT_UI_TOOLTIP:u32=33;
 pub const DUNIT_UI_MNEMONIC:u32=34;
+pub const DUNIT_UI_SCROLL:u32=35;
+pub const DUNIT_UI_SCROLL_HORIZONTAL:u32=36;
+pub const DUNIT_UI_SCROLL_BOTH:u32=37;
+pub const DUNIT_UI_TABS:u32=38;
+pub const DUNIT_UI_TAB:u32=39;
+pub const DUNIT_UI_TAB_SELECTED:u32=40;
+pub const DUNIT_UI_TOOLBAR:u32=41;
+pub const DUNIT_UI_TOOLBAR_SEPARATOR:u32=42;
+pub const DUNIT_UI_STATUS_BAR:u32=43;
+pub const DUNIT_UI_DIALOG:u32=44;
+pub const DUNIT_UI_MESSAGE_BOX:u32=45;
+pub const DUNIT_UI_MODAL:u32=46;
+pub const DUNIT_UI_SPLITTER:u32=47;
+pub const DUNIT_UI_VERTICAL_SPLITTER:u32=48;
+pub const DUNIT_UI_DIALOG_ACTION:u32=49;
+pub const DUNIT_UI_DIALOG_DEFAULT:u32=50;
+pub const DUNIT_UI_DIALOG_CANCEL:u32=51;
+pub const DUNIT_UI_MESSAGE_BODY:u32=52;
+pub const DUNIT_UI_LIST:u32=53;
+pub const DUNIT_UI_TREE:u32=54;
+pub const DUNIT_UI_TABLE:u32=55;
+pub const DUNIT_UI_COLLECTION_MULTIPLE:u32=1;
+pub const DUNIT_UI_COLLECTION_SORT_DESCENDING:u32=2;
+pub const DUNIT_UI_ITEM_DISABLED:u32=1;
+pub const DUNIT_UI_ITEM_SELECTED:u32=2;
+pub const DUNIT_UI_ITEM_CURRENT:u32=4;
+pub const DUNIT_UI_ITEM_ANCHOR:u32=8;
+pub const DUNIT_UI_ITEM_EXPANDED:u32=16;
+pub const DUNIT_UI_COLUMN_SORTABLE:u32=1;
+pub const DUNIT_UI_CELL_TEXT:u32=0;
+pub const DUNIT_UI_CELL_INTEGER:u32=1;
+pub const DUNIT_UI_CELL_UNSIGNED:u32=2;
+pub const DUNIT_C_FILE_OPEN:u32=65536;
+pub const DUNIT_C_FILE_CHILD:u32=65537;
+pub const DUNIT_C_FILE_READ:u32=65538;
+pub const DUNIT_C_FILE_STAT:u32=65539;
+pub const DUNIT_C_FILE_CLOSE:u32=65540;
+pub const DUNIT_UI_COLUMN_EDITABLE:u32=2;
+pub const DUNIT_UI_RENAME_BEGIN:u32=1;
+pub const DUNIT_UI_RENAME_CHANGE:u32=2;
+pub const DUNIT_UI_RENAME_COMMIT:u32=3;
+pub const DUNIT_UI_RENAME_CANCEL:u32=4;
+pub const DUNIT_UI_FILE_OPEN:u32=0;
+pub const DUNIT_UI_FILE_SAVE:u32=1;
+pub const DUNIT_UI_FILE_DIRECTORY:u32=2;
+pub const DUNIT_GUI_IN_MOVE:u32=1;
+pub const DUNIT_GUI_IN_DOWN:u32=2;
+pub const DUNIT_GUI_IN_UP:u32=3;
+pub const DUNIT_GUI_IN_LEAVE:u32=4;
+pub const DUNIT_GUI_IN_KEY:u32=5;
+pub const DUNIT_GUI_IN_SCROLL:u32=6;
+pub const DUNIT_GUI_IN_KEY_UP:u32=7;
+pub const DUNIT_GUI_IN_FOCUS_IN:u32=8;
+pub const DUNIT_GUI_IN_QUIT:u32=9;
+pub const DUNIT_GUI_IN_FOCUS_OUT:u32=10;
+pub const DUNIT_TRANSFER_FILE_KIND_FILE:u32=1;
+pub const DUNIT_TRANSFER_FILE_KIND_DIRECTORY:u32=2;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
 pub type DunitUiUpdateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64)->i32;
 pub type DunitUiDecorateV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiAppearanceV1)->i32;
@@ -50,6 +107,10 @@ pub type DunitUiConfigureInputV1=unsafe extern "C" fn(*mut core::ffi::c_void, u3
 pub type DunitUiTextChangedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, *const u8, usize)->i32;
 pub type DunitUiConfigureNumberV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiNumberV1)->i32;
 pub type DunitUiNumberChangedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, i64)->i32;
+pub type DunitUiConfigureCollectionV1=unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut DunitUiCollectionV1)->i32;
+pub type DunitUiCollectionChangedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, *const DunitUiCollectionV1)->i32;
+pub type DunitTransferCallbackV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *const DunitTransferEventV1)->i32;
+pub type DunitUiRenamedV1=unsafe extern "C" fn(*mut core::ffi::c_void, u64, *const DunitUiRenameV1)->i32;
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct DunitUiNodeV1 {
@@ -153,7 +214,303 @@ pub struct DunitUiAppV1 {
 }
 const _: [();32]=[();core::mem::size_of::<DunitUiAppV1>()];
 const _: [();8]=[();core::mem::align_of::<DunitUiAppV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiCollectionItemV1 {
+    pub key:*const u8,
+    pub key_len:usize,
+    pub label:*const u8,
+    pub label_len:usize,
+    pub parent:*const u8,
+    pub parent_len:usize,
+    pub flags:u32,
+    pub reserved:u32,
+}
+const _: [();56]=[();core::mem::size_of::<DunitUiCollectionItemV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiCollectionItemV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiTableColumnV1 {
+    pub key:*const u8,
+    pub key_len:usize,
+    pub label:*const u8,
+    pub label_len:usize,
+    pub width:i64,
+    pub flags:u32,
+    pub reserved:u32,
+}
+const _: [();48]=[();core::mem::size_of::<DunitUiTableColumnV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiTableColumnV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiTableCellV1 {
+    pub text:*const u8,
+    pub text_len:usize,
+    pub value:u64,
+    pub kind:u32,
+    pub reserved:u32,
+}
+const _: [();32]=[();core::mem::size_of::<DunitUiTableCellV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiTableCellV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiCollectionV1 {
+    pub items:*const DunitUiCollectionItemV1,
+    pub items_len:usize,
+    pub columns:*const DunitUiTableColumnV1,
+    pub columns_len:usize,
+    pub cells:*const DunitUiTableCellV1,
+    pub cells_len:usize,
+    pub flags:u32,
+    pub reserved:u32,
+    pub sort:*const u8,
+    pub sort_len:usize,
+    pub column:*const u8,
+    pub column_len:usize,
+    pub rename:*const DunitUiRenameV1,
+}
+const _: [();96]=[();core::mem::size_of::<DunitUiCollectionV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiCollectionV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiCollectionsV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub configure:Option<DunitUiConfigureCollectionV1>,
+    pub changed:Option<DunitUiCollectionChangedV1>,
+    pub renamed:Option<DunitUiRenamedV1>,
+}
+const _: [();32]=[();core::mem::size_of::<DunitUiCollectionsV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiCollectionsV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiExtendedV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub app:*const DunitUiAppV1,
+    pub collections:*const DunitUiCollectionsV1,
+    pub transfers:*const DunitTransfersV1,
+}
+const _: [();32]=[();core::mem::size_of::<DunitUiExtendedV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiExtendedV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransferFormatV1 {
+    pub mime:*const u8,
+    pub mime_len:usize,
+}
+const _: [();16]=[();core::mem::size_of::<DunitTransferFormatV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransferFormatV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransferFileV1 {
+    pub capability:u64,
+    pub path:*const u8,
+    pub path_len:usize,
+    pub kind:u32,
+    pub rights:u32,
+}
+const _: [();32]=[();core::mem::size_of::<DunitTransferFileV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransferFileV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransferDataV1 {
+    pub mime:*const u8,
+    pub mime_len:usize,
+    pub data:*const u8,
+    pub data_len:usize,
+}
+const _: [();32]=[();core::mem::size_of::<DunitTransferDataV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransferDataV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransferEventV1 {
+    pub kind:u32,
+    pub arg0:u32,
+    pub arg1:u32,
+    pub source:u32,
+    pub request:u64,
+    pub transfer:u64,
+    pub formats:*const DunitTransferFormatV1,
+    pub formats_len:usize,
+    pub files:*const DunitTransferFileV1,
+    pub files_len:usize,
+    pub representations:*const DunitTransferDataV1,
+    pub representations_len:usize,
+    pub input:*const DunitUiNativeInputV1,
+}
+const _: [();88]=[();core::mem::size_of::<DunitTransferEventV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransferEventV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransferRequestV1 {
+    pub kind:u32,
+    pub flags:u32,
+    pub preferred:u32,
+    pub reserved:u32,
+    pub transfer:u64,
+    pub capability:u64,
+    pub offset:u64,
+    pub data:*const u8,
+    pub data_len:usize,
+    pub files:*const u64,
+    pub files_len:usize,
+    pub formats:*const DunitTransferFormatV1,
+    pub formats_len:usize,
+    pub buffer:*mut u8,
+    pub buffer_len:usize,
+}
+const _: [();104]=[();core::mem::size_of::<DunitTransferRequestV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransferRequestV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransferResultV1 {
+    pub request:u64,
+    pub capability:u64,
+    pub size:u64,
+    pub kind:u32,
+    pub rights:u32,
+}
+const _: [();32]=[();core::mem::size_of::<DunitTransferResultV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransferResultV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitTransfersV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub callback:Option<DunitTransferCallbackV1>,
+}
+const _: [();16]=[();core::mem::size_of::<DunitTransfersV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitTransfersV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiRenameV1 {
+    pub kind:u32,
+    pub reserved:u32,
+    pub row:*const u8,
+    pub row_len:usize,
+    pub column:*const u8,
+    pub column_len:usize,
+    pub value:*const u8,
+    pub value_len:usize,
+}
+const _: [();56]=[();core::mem::size_of::<DunitUiRenameV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiRenameV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiStringV1 {
+    pub data:*const u8,
+    pub length:usize,
+}
+const _: [();16]=[();core::mem::size_of::<DunitUiStringV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiStringV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiFileLabelsV1 {
+    pub location:*const u8,
+    pub location_len:usize,
+    pub name:*const u8,
+    pub name_len:usize,
+    pub files:*const u8,
+    pub files_len:usize,
+    pub back:*const u8,
+    pub back_len:usize,
+    pub forward:*const u8,
+    pub forward_len:usize,
+    pub up:*const u8,
+    pub up_len:usize,
+    pub refresh:*const u8,
+    pub refresh_len:usize,
+    pub enter:*const u8,
+    pub enter_len:usize,
+    pub accept:*const u8,
+    pub accept_len:usize,
+    pub cancel:*const u8,
+    pub cancel_len:usize,
+    pub hidden:*const u8,
+    pub hidden_len:usize,
+    pub filter:*const u8,
+    pub filter_len:usize,
+    pub name_column:*const u8,
+    pub name_column_len:usize,
+    pub kind_column:*const u8,
+    pub kind_column_len:usize,
+    pub size_column:*const u8,
+    pub size_column_len:usize,
+    pub file_kind:*const u8,
+    pub file_kind_len:usize,
+    pub directory_kind:*const u8,
+    pub directory_kind_len:usize,
+    pub device_kind:*const u8,
+    pub device_kind_len:usize,
+    pub replace_title:*const u8,
+    pub replace_title_len:usize,
+    pub replace_message:*const u8,
+    pub replace_message_len:usize,
+    pub replace_accept:*const u8,
+    pub replace_accept_len:usize,
+    pub invalid_path:*const u8,
+    pub invalid_path_len:usize,
+    pub invalid_name:*const u8,
+    pub invalid_name_len:usize,
+    pub missing_file:*const u8,
+    pub missing_file_len:usize,
+    pub not_directory:*const u8,
+    pub not_directory_len:usize,
+    pub invalid_entries:*const u8,
+    pub invalid_entries_len:usize,
+}
+const _: [();416]=[();core::mem::size_of::<DunitUiFileLabelsV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiFileLabelsV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiFileFilterV1 {
+    pub key:*const u8,
+    pub key_len:usize,
+    pub label:*const u8,
+    pub label_len:usize,
+    pub extensions:*const DunitUiStringV1,
+    pub extensions_len:usize,
+}
+const _: [();48]=[();core::mem::size_of::<DunitUiFileFilterV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiFileFilterV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiFileDialogV1 {
+    pub abi_version:u32,
+    pub struct_size:u32,
+    pub mode:u32,
+    pub reserved:u32,
+    pub key:*const u8,
+    pub key_len:usize,
+    pub title:*const u8,
+    pub title_len:usize,
+    pub directory:*const u8,
+    pub directory_len:usize,
+    pub filename:*const u8,
+    pub filename_len:usize,
+    pub filters:*const DunitUiFileFilterV1,
+    pub filters_len:usize,
+    pub labels:*const DunitUiFileLabelsV1,
+}
+const _: [();104]=[();core::mem::size_of::<DunitUiFileDialogV1>()];
+const _: [();8]=[();core::mem::align_of::<DunitUiFileDialogV1>()];
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct DunitUiNativeInputV1 {
+    pub kind:u32,
+    pub x:i32,
+    pub y:i32,
+    pub value:u32,
+    pub button:u32,
+    pub modifiers:u32,
+}
+const _: [();24]=[();core::mem::size_of::<DunitUiNativeInputV1>()];
+const _: [();4]=[();core::mem::align_of::<DunitUiNativeInputV1>()];
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1)->i32=crate::dunit_ui_run_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1)->i32=crate::dunit_ui_run_styled_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1, *const DunitUiTextV1)->i32=crate::dunit_ui_run_text_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiAppV1)->i32=crate::dunit_ui_run_app_v1;
+const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiExtendedV1)->i32=crate::dunit_ui_run_extended_v1;
+const _:unsafe extern "C" fn(*mut core::ffi::c_void, *const DunitTransferRequestV1, *mut DunitTransferResultV1)->i32=crate::dunit_transfer_request_v1;
+const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, *const DunitUiFileDialogV1, *mut u8, usize, *mut usize)->i32=crate::dunit_ui_choose_file_v1;

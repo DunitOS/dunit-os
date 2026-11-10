@@ -12,6 +12,11 @@ pub(super) struct Extra<M> {
     pub context: Option<Vec<MenuItem<M>>>,
     pub tooltip: Option<String>,
     pub mnemonic: Option<char>,
+    pub pages: Vec<(Tab<M>, bool)>,
+    pub actions: Vec<DialogAction<M>>,
+    pub default: Option<String>,
+    pub cancel: Option<M>,
+    pub body: Option<String>,
 }
 impl<M> Default for Extra<M> {
     fn default() -> Self {
@@ -21,6 +26,11 @@ impl<M> Default for Extra<M> {
             context: None,
             tooltip: None,
             mnemonic: None,
+            pages: Vec::new(),
+            actions: Vec::new(),
+            default: None,
+            cancel: None,
+            body: None,
         }
     }
 }
@@ -30,7 +40,13 @@ pub(super) fn extra<M>(entries: &mut [Option<Box<Extra<M>>>], index: usize) -> &
 pub(super) fn descriptor(kind: u32) -> bool {
     matches!(
         kind,
-        DUNIT_UI_MENU_ITEM
+        DUNIT_UI_TAB
+            | DUNIT_UI_TAB_SELECTED
+            | DUNIT_UI_DIALOG_ACTION
+            | DUNIT_UI_DIALOG_DEFAULT
+            | DUNIT_UI_DIALOG_CANCEL
+            | DUNIT_UI_MESSAGE_BODY
+            | DUNIT_UI_MENU_ITEM
             | DUNIT_UI_MENU_SEPARATOR
             | DUNIT_UI_SUBMENU
             | DUNIT_UI_OPTION
@@ -42,6 +58,11 @@ pub(super) fn descriptor(kind: u32) -> bool {
 }
 pub(super) fn parent_allowed(kind: u32, parent: u32) -> bool {
     match kind {
+        DUNIT_UI_TAB | DUNIT_UI_TAB_SELECTED => parent == DUNIT_UI_TABS,
+        DUNIT_UI_DIALOG_ACTION | DUNIT_UI_DIALOG_DEFAULT | DUNIT_UI_DIALOG_CANCEL => {
+            matches!(parent, DUNIT_UI_DIALOG | DUNIT_UI_MESSAGE_BOX)
+        }
+        DUNIT_UI_MESSAGE_BODY => parent == DUNIT_UI_MESSAGE_BOX,
         DUNIT_UI_MENU_ITEM | DUNIT_UI_MENU_SEPARATOR | DUNIT_UI_SUBMENU => matches!(
             parent,
             DUNIT_UI_MENU | DUNIT_UI_SUBMENU | DUNIT_UI_CONTEXT_MENU
@@ -52,16 +73,19 @@ pub(super) fn parent_allowed(kind: u32, parent: u32) -> bool {
             parent,
             DUNIT_UI_MENU | DUNIT_UI_SELECT | DUNIT_UI_MENU_ITEM | DUNIT_UI_SUBMENU
         ),
-        _ => matches!(
-            parent,
-            DUNIT_UI_COLUMN
-                | DUNIT_UI_ROW
-                | DUNIT_UI_STACK
-                | DUNIT_UI_GRID
-                | DUNIT_UI_MENU_BAR
-                | DUNIT_UI_RADIO_GROUP_COLUMN
-                | DUNIT_UI_RADIO_GROUP_ROW
-        ),
+        _ => {
+            crate::workspace::container(parent)
+                || matches!(
+                    parent,
+                    DUNIT_UI_COLUMN
+                        | DUNIT_UI_ROW
+                        | DUNIT_UI_STACK
+                        | DUNIT_UI_GRID
+                        | DUNIT_UI_MENU_BAR
+                        | DUNIT_UI_RADIO_GROUP_COLUMN
+                        | DUNIT_UI_RADIO_GROUP_ROW
+                )
+        }
     }
 }
 pub(super) unsafe fn bind<M: Clone>(
@@ -70,10 +94,54 @@ pub(super) unsafe fn bind<M: Clone>(
     mut own: Extra<M>,
     parent: &mut Extra<M>,
     action: fn(u64) -> M,
+    mut children: Vec<View<M>>,
 ) -> dunit::Result<()> {
     let kind = node.kind & !DUNIT_UI_DISABLED;
     let disabled = node.kind & DUNIT_UI_DISABLED != 0;
     match kind {
+        DUNIT_UI_TAB | DUNIT_UI_TAB_SELECTED => {
+            if children.len() != 1 {
+                return Err(invalid());
+            }
+            parent.pages.push((
+                Tab::new(
+                    key,
+                    tree::text(node.text, node.text_len)?,
+                    action(node.message),
+                    children.remove(0),
+                )
+                .disabled(disabled),
+                kind == DUNIT_UI_TAB_SELECTED,
+            ));
+        }
+        DUNIT_UI_DIALOG_ACTION => parent.actions.push(DialogAction::new(
+            key,
+            tree::text(node.text, node.text_len)?,
+            action(node.message),
+        )),
+        DUNIT_UI_DIALOG_DEFAULT => {
+            if parent
+                .default
+                .replace(tree::text(node.text, node.text_len)?)
+                .is_some()
+            {
+                return Err(invalid());
+            }
+        }
+        DUNIT_UI_DIALOG_CANCEL => {
+            if parent.cancel.replace(action(node.message)).is_some() {
+                return Err(invalid());
+            }
+        }
+        DUNIT_UI_MESSAGE_BODY => {
+            if parent
+                .body
+                .replace(tree::text(node.text, node.text_len)?)
+                .is_some()
+            {
+                return Err(invalid());
+            }
+        }
         DUNIT_UI_MENU_ITEM | DUNIT_UI_SUBMENU | DUNIT_UI_MENU_SEPARATOR => {
             let mut item = match kind {
                 DUNIT_UI_MENU_ITEM => MenuItem::action(

@@ -1,0 +1,12 @@
+Column#body { padding: 12; gap: 6; }
+Text#title { font-size: 22; padding: 0; }
+List, Tree { height: 86; }
+Table { height: 112; }
+Column#tabs { height: 92; }
+Row.tab-list { height: 30; }
+Row#split { height: 52; }
+Scroll { height: 44; }
+Row#bar { height: 34; padding: 0; gap: 8; }
+Button { width: 120; }
+Text#status { padding: 0; }
+Column#about { width: 420; height: 220; }

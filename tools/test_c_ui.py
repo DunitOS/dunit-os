@@ -37,9 +37,10 @@ def prepare_reference():
     subprocess.run([cargo(),'test','--manifest-path',str(ROOT/'runtime/dunit-c/Cargo.toml'),'--lib'],cwd=ROOT,env=env,check=True)
 
 
-def run_native(accel, markers=None, overlay=None):
-    subprocess.run([cargo(),'build','--release','--features','boot-smoke-tests','-Z','build-std=core,alloc,compiler_builtins','-Z','build-std-features=compiler-builtins-mem','-Z','json-target-spec'],cwd=ROOT/'kernel',check=True)
-    command=[sys.executable,str(ROOT/'tools/qemu_test.py'),'--build','--markers-file',str(markers or ROOT/'tools/c_ui_markers.json'),'--accel',accel,'--post-boot-delay','3','--settle','3','--cmd-timeout','180','--timeout','480','--boot-timeout','180']
+def run_native(accel, markers=None, overlay=None, build=True):
+    if overlay is not None and not build:raise ValueError('overlay requires a build')
+    if build:subprocess.run([cargo(),'build','--release','--features','boot-smoke-tests','-Z','build-std=core,alloc,compiler_builtins','-Z','build-std-features=compiler-builtins-mem','-Z','json-target-spec'],cwd=ROOT/'kernel',check=True)
+    command=[sys.executable,str(ROOT/'tools/qemu_test.py'),*(['--build']if build else []),'--markers-file',str(markers or ROOT/'tools/c_ui_markers.json'),'--accel',accel,'--post-boot-delay','3','--settle','3','--cmd-timeout','180','--timeout','480','--boot-timeout','180']
     if overlay is not None:command+=['--initrd-overlay',str(overlay)]
     subprocess.run(command,cwd=ROOT,check=True)
 

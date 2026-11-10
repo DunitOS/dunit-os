@@ -7,6 +7,7 @@ pub(super) unsafe fn view<M: Clone + 'static>(
     user: *mut c_void,
     callbacks: &DunitUiNumbersV1,
     changed: fn(u64, i64) -> M,
+    mut children: Vec<View<M>>,
 ) -> dunit::Result<View<M>> {
     let mut config = DunitUiNumberV1 {
         label: key.as_ptr(),
@@ -63,6 +64,39 @@ pub(super) unsafe fn view<M: Clone + 'static>(
         step: config.step,
         page_step: config.page_step,
     };
+    if matches!(kind, DUNIT_UI_SPLITTER | DUNIT_UI_VERTICAL_SPLITTER) {
+        if children.len() != 2 {
+            return Err(invalid());
+        }
+        #[derive(Clone)]
+        enum Split<M> {
+            Child(M),
+            Value(i64),
+        }
+        let first = children.remove(0).map_messages(Split::Child);
+        let second = children.remove(0).map_messages(Split::Child);
+        let id = node.message;
+        return Ok(View::splitter(
+            key,
+            label,
+            config.value,
+            SplitterOptions {
+                axis: if kind == DUNIT_UI_SPLITTER {
+                    SplitAxis::Horizontal
+                } else {
+                    SplitAxis::Vertical
+                },
+                range: options,
+            },
+            first,
+            second,
+            Split::Value,
+        )
+        .map_messages(move |m| match m {
+            Split::Child(m) => m,
+            Split::Value(v) => changed(id, v),
+        }));
+    }
     let view = match kind {
         DUNIT_UI_SLIDER => View::slider(key, label, config.value, options, |value| value),
         DUNIT_UI_VERTICAL_SLIDER => {

@@ -395,6 +395,9 @@ impl Component for Reference {
     type Message = Message;
     fn update(&mut self, message: Message) {
         match message {
+            Message::Rename(_, _) => panic!("unexpected rename in reference"),
+            Message::Refresh => panic!("unexpected transfer refresh in reference"),
+            Message::Collection(_, _) => panic!("unexpected collection event in text reference"),
             Message::Action(id) => {
                 self.0.action(id);
             }

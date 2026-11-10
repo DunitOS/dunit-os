@@ -27,6 +27,7 @@ name = "dunit_c"
 version = "0.1.0"
 dependencies = [
  "dunit",
+ "dunit_transfer",
 ]
 
 [[package]]

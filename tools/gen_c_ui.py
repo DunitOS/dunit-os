@@ -15,12 +15,46 @@ TYPES={
     'number_mut':('struct DunitUiNumberV1 *','*mut DunitUiNumberV1'),
     'numbers_const':('const struct DunitUiNumbersV1 *','*const DunitUiNumbersV1'),
     'app_const':('const struct DunitUiAppV1 *','*const DunitUiAppV1'),
+    'collection_mut':('struct DunitUiCollectionV1 *','*mut DunitUiCollectionV1'),
+    'collection_const':('const struct DunitUiCollectionV1 *','*const DunitUiCollectionV1'),
+    'collections_const':('const struct DunitUiCollectionsV1 *','*const DunitUiCollectionsV1'),
+    'items_const':('const struct DunitUiCollectionItemV1 *','*const DunitUiCollectionItemV1'),
+    'columns_const':('const struct DunitUiTableColumnV1 *','*const DunitUiTableColumnV1'),
+    'cells_const':('const struct DunitUiTableCellV1 *','*const DunitUiTableCellV1'),
+    'extended_const':('const struct DunitUiExtendedV1 *','*const DunitUiExtendedV1'),
+    'transfer_event_const':('const struct DunitTransferEventV1 *','*const DunitTransferEventV1'),
+    'formats_const':('const struct DunitTransferFormatV1 *','*const DunitTransferFormatV1'),
+    'transfer_files_const':('const struct DunitTransferFileV1 *','*const DunitTransferFileV1'),
+    'representations_const':('const struct DunitTransferDataV1 *','*const DunitTransferDataV1'),
+    'transfers_const':('const struct DunitTransfersV1 *','*const DunitTransfersV1'),
+    'transfer_request_const':('const struct DunitTransferRequestV1 *','*const DunitTransferRequestV1'),
+    'transfer_result_mut':('struct DunitTransferResultV1 *','*mut DunitTransferResultV1'),
+    'bytes_mut':('uint8_t *','*mut u8'),
+    'u64_const':('const uint64_t *','*const u64'),
+    'rename_const':('const struct DunitUiRenameV1 *','*const DunitUiRenameV1'),
+    'ui_strings_const':('const struct DunitUiStringV1 *','*const DunitUiStringV1'),
+    'filters_const':('const struct DunitUiFileFilterV1 *','*const DunitUiFileFilterV1'),
+    'file_labels_const':('const struct DunitUiFileLabelsV1 *','*const DunitUiFileLabelsV1'),
+    'file_dialog_const':('const struct DunitUiFileDialogV1 *','*const DunitUiFileDialogV1'),
+    'usize_mut':('size_t *','*mut usize'),
+    'native_input_const':('const struct DunitUiNativeInputV1 *','*const DunitUiNativeInputV1'),
     'strings':('const char *const *','*const *const u8'),
 }
 
 def outputs(root):
     schema=json.loads((root/'runtime/dunit-c/api.json').read_text())
     if set(schema)!={'constants','callbacks','records','functions'}:raise ValueError('unknown C UI API section')
+    # gui-v1 owns its input kind values; the C observer never copies them.
+    control=(root/'protocols/gui-v1/src/control.rs').read_text()
+    inputs=re.findall(r'^pub const (IN_\w+): u8 = (\d+);',control,re.M)
+    if not inputs:raise ValueError('missing gui-v1 input kinds')
+    schema['constants'].update(('DUNIT_GUI_'+name,int(value))for name,value in inputs)
+    transfer=(root/'protocols/gui-v1/src/transfer.rs').read_text()
+    file_kind=re.search(r'pub enum FileKind \{(.*?)\n\}',transfer,re.S)
+    if file_kind is None:raise ValueError('missing transfer FileKind')
+    kinds=re.findall(r'(\w+)\s*=\s*(\d+)',file_kind.group(1))
+    if not kinds:raise ValueError('missing transfer file kind values')
+    schema['constants'].update(('DUNIT_TRANSFER_FILE_KIND_'+name.upper(),int(value))for name,value in kinds)
     types=dict(TYPES)
     for name in schema['callbacks']:types[name]=(name,f'Option<{name}>')
     def ident(name):

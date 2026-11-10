@@ -1,0 +1,1095 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /system/bin/tcc /assets/tcc/workspace.c -o /tmp/c-gui -ldunit_ui",
+      "exec /app/setup import-desktop /assets/tcc/workspace.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[GUI-PRESENT] app=c_gui",
+          "timeout": 60
+        },
+        {
+          "focus_client": true
+        },
+        {
+          "wait_marker": "[C-TRANSFER] file clipboard real attenuated capability",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 800
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-workspace-initial.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "shift"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "up"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "up"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "shift"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "right"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "right"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "down"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "right"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "right"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "f4"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "f4"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "f4"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "f4"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "wait_marker": "[C-WORKSPACE] numeric column descending",
+          "timeout": 30
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-workspace-collections.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ctrl"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ctrl"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ret"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ret"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "wait_marker": "[C-WORKSPACE] modal opened",
+          "timeout": 30
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-workspace-dialog.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "esc"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "esc"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "right"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "right"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "wait_marker": "[C-WORKSPACE] splitter changed",
+          "timeout": 30
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-workspace-split.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "tab"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "f2"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "f2"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "r"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "r"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "e"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "e"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "n"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "n"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "a"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "a"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "m"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "m"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "e"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "e"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "d"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "d"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "key",
+                "data": {
+                  "down": true,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ret"
+                  }
+                }
+              },
+              {
+                "type": "key",
+                "data": {
+                  "down": false,
+                  "key": {
+                    "type": "qcode",
+                    "data": "ret"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 180
+        },
+        {
+          "wait_marker": "[C-WORKSPACE] controlled rename committed",
+          "timeout": 30
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/c-ui-workspace-renamed.ppm"
+          }
+        },
+        {
+          "drag_self": true
+        },
+        {
+          "wait_marker": "[C-TRANSFER] real pointer drag drop round trip",
+          "timeout": 30
+        },
+        {
+          "click_quit": true
+        },
+        {
+          "wait_marker": "[C-WORKSPACE] ok",
+          "timeout": 30
+        },
+        {
+          "wait_marker": "[GUI-EXIT] app=c_gui kind=0 code=0",
+          "timeout": 30
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "gui_server: desktop ready",
+    "[GUI-PRESENT] app=c_gui",
+    "[C-TRANSFER] real file directory capability rights and stale token",
+    "[C-TRANSFER] text clipboard round trip",
+    "[C-TRANSFER] file clipboard real attenuated capability",
+    "[C-WORKSPACE] multiple selection",
+    "[C-WORKSPACE] expanded child selected",
+    "[C-WORKSPACE] numeric column descending",
+    "[C-WORKSPACE] tab changed",
+    "[C-WORKSPACE] modal opened",
+    "[C-WORKSPACE] modal closed",
+    "[C-WORKSPACE] splitter changed",
+    "[C-WORKSPACE] ok",
+    "[GUI-EXIT] app=c_gui kind=0 code=0",
+    "[C-WORKSPACE] controlled rename committed",
+    "[C-TRANSFER] drag accepted",
+    "[C-TRANSFER] real pointer drag drop round trip"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "tcc: error",
+    "gui_server: FAIL",
+    "setup: error:",
+    "setup: fatal error",
+    "[C-WORKSPACE] failure"
+  ]
+}

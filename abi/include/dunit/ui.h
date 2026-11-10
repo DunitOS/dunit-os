@@ -48,6 +48,63 @@
 #define DUNIT_UI_CONTEXT_MENU 32u
 #define DUNIT_UI_TOOLTIP 33u
 #define DUNIT_UI_MNEMONIC 34u
+#define DUNIT_UI_SCROLL 35u
+#define DUNIT_UI_SCROLL_HORIZONTAL 36u
+#define DUNIT_UI_SCROLL_BOTH 37u
+#define DUNIT_UI_TABS 38u
+#define DUNIT_UI_TAB 39u
+#define DUNIT_UI_TAB_SELECTED 40u
+#define DUNIT_UI_TOOLBAR 41u
+#define DUNIT_UI_TOOLBAR_SEPARATOR 42u
+#define DUNIT_UI_STATUS_BAR 43u
+#define DUNIT_UI_DIALOG 44u
+#define DUNIT_UI_MESSAGE_BOX 45u
+#define DUNIT_UI_MODAL 46u
+#define DUNIT_UI_SPLITTER 47u
+#define DUNIT_UI_VERTICAL_SPLITTER 48u
+#define DUNIT_UI_DIALOG_ACTION 49u
+#define DUNIT_UI_DIALOG_DEFAULT 50u
+#define DUNIT_UI_DIALOG_CANCEL 51u
+#define DUNIT_UI_MESSAGE_BODY 52u
+#define DUNIT_UI_LIST 53u
+#define DUNIT_UI_TREE 54u
+#define DUNIT_UI_TABLE 55u
+#define DUNIT_UI_COLLECTION_MULTIPLE 1u
+#define DUNIT_UI_COLLECTION_SORT_DESCENDING 2u
+#define DUNIT_UI_ITEM_DISABLED 1u
+#define DUNIT_UI_ITEM_SELECTED 2u
+#define DUNIT_UI_ITEM_CURRENT 4u
+#define DUNIT_UI_ITEM_ANCHOR 8u
+#define DUNIT_UI_ITEM_EXPANDED 16u
+#define DUNIT_UI_COLUMN_SORTABLE 1u
+#define DUNIT_UI_CELL_TEXT 0u
+#define DUNIT_UI_CELL_INTEGER 1u
+#define DUNIT_UI_CELL_UNSIGNED 2u
+#define DUNIT_C_FILE_OPEN 65536u
+#define DUNIT_C_FILE_CHILD 65537u
+#define DUNIT_C_FILE_READ 65538u
+#define DUNIT_C_FILE_STAT 65539u
+#define DUNIT_C_FILE_CLOSE 65540u
+#define DUNIT_UI_COLUMN_EDITABLE 2u
+#define DUNIT_UI_RENAME_BEGIN 1u
+#define DUNIT_UI_RENAME_CHANGE 2u
+#define DUNIT_UI_RENAME_COMMIT 3u
+#define DUNIT_UI_RENAME_CANCEL 4u
+#define DUNIT_UI_FILE_OPEN 0u
+#define DUNIT_UI_FILE_SAVE 1u
+#define DUNIT_UI_FILE_DIRECTORY 2u
+#define DUNIT_GUI_IN_MOVE 1u
+#define DUNIT_GUI_IN_DOWN 2u
+#define DUNIT_GUI_IN_UP 3u
+#define DUNIT_GUI_IN_LEAVE 4u
+#define DUNIT_GUI_IN_KEY 5u
+#define DUNIT_GUI_IN_SCROLL 6u
+#define DUNIT_GUI_IN_KEY_UP 7u
+#define DUNIT_GUI_IN_FOCUS_IN 8u
+#define DUNIT_GUI_IN_QUIT 9u
+#define DUNIT_GUI_IN_FOCUS_OUT 10u
+#define DUNIT_TRANSFER_FILE_KIND_FILE 1u
+#define DUNIT_TRANSFER_FILE_KIND_DIRECTORY 2u
 struct DunitUiNodeV1;
 struct DunitUiCallbacksV1;
 struct DunitUiAppearanceV1;
@@ -57,6 +114,25 @@ struct DunitUiTextV1;
 struct DunitUiNumberV1;
 struct DunitUiNumbersV1;
 struct DunitUiAppV1;
+struct DunitUiCollectionItemV1;
+struct DunitUiTableColumnV1;
+struct DunitUiTableCellV1;
+struct DunitUiCollectionV1;
+struct DunitUiCollectionsV1;
+struct DunitUiExtendedV1;
+struct DunitTransferFormatV1;
+struct DunitTransferFileV1;
+struct DunitTransferDataV1;
+struct DunitTransferEventV1;
+struct DunitTransferRequestV1;
+struct DunitTransferResultV1;
+struct DunitTransfersV1;
+struct DunitUiRenameV1;
+struct DunitUiStringV1;
+struct DunitUiFileLabelsV1;
+struct DunitUiFileFilterV1;
+struct DunitUiFileDialogV1;
+struct DunitUiNativeInputV1;
 typedef int32_t (*DunitUiBuildV1)(void * user, struct DunitUiNodeV1 * nodes, uint32_t capacity);
 typedef int32_t (*DunitUiUpdateV1)(void * user, uint64_t message);
 typedef int32_t (*DunitUiDecorateV1)(void * user, uint32_t index, struct DunitUiAppearanceV1 * appearance);
@@ -64,6 +140,10 @@ typedef int32_t (*DunitUiConfigureInputV1)(void * user, uint32_t index, struct D
 typedef int32_t (*DunitUiTextChangedV1)(void * user, uint64_t message, const uint8_t * value, size_t value_len);
 typedef int32_t (*DunitUiConfigureNumberV1)(void * user, uint32_t index, struct DunitUiNumberV1 * number);
 typedef int32_t (*DunitUiNumberChangedV1)(void * user, uint64_t message, int64_t value);
+typedef int32_t (*DunitUiConfigureCollectionV1)(void * user, uint32_t index, struct DunitUiCollectionV1 * collection);
+typedef int32_t (*DunitUiCollectionChangedV1)(void * user, uint64_t message, const struct DunitUiCollectionV1 * state);
+typedef int32_t (*DunitTransferCallbackV1)(void * user, void * session, const struct DunitTransferEventV1 * event);
+typedef int32_t (*DunitUiRenamedV1)(void * user, uint64_t message, const struct DunitUiRenameV1 * event);
 typedef struct DunitUiNodeV1 {
     uint32_t kind;
     uint32_t parent;
@@ -131,6 +211,223 @@ typedef struct DunitUiAppV1 {
     const struct DunitUiTextV1 * text;
     const struct DunitUiNumbersV1 * numbers;
 } DunitUiAppV1;
+typedef struct DunitUiCollectionItemV1 {
+    const uint8_t * key;
+    size_t key_len;
+    const uint8_t * label;
+    size_t label_len;
+    const uint8_t * parent;
+    size_t parent_len;
+    uint32_t flags;
+    uint32_t reserved;
+} DunitUiCollectionItemV1;
+typedef struct DunitUiTableColumnV1 {
+    const uint8_t * key;
+    size_t key_len;
+    const uint8_t * label;
+    size_t label_len;
+    int64_t width;
+    uint32_t flags;
+    uint32_t reserved;
+} DunitUiTableColumnV1;
+typedef struct DunitUiTableCellV1 {
+    const uint8_t * text;
+    size_t text_len;
+    uint64_t value;
+    uint32_t kind;
+    uint32_t reserved;
+} DunitUiTableCellV1;
+typedef struct DunitUiCollectionV1 {
+    const struct DunitUiCollectionItemV1 * items;
+    size_t items_len;
+    const struct DunitUiTableColumnV1 * columns;
+    size_t columns_len;
+    const struct DunitUiTableCellV1 * cells;
+    size_t cells_len;
+    uint32_t flags;
+    uint32_t reserved;
+    const uint8_t * sort;
+    size_t sort_len;
+    const uint8_t * column;
+    size_t column_len;
+    const struct DunitUiRenameV1 * rename;
+} DunitUiCollectionV1;
+typedef struct DunitUiCollectionsV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    DunitUiConfigureCollectionV1 configure;
+    DunitUiCollectionChangedV1 changed;
+    DunitUiRenamedV1 renamed;
+} DunitUiCollectionsV1;
+typedef struct DunitUiExtendedV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    const struct DunitUiAppV1 * app;
+    const struct DunitUiCollectionsV1 * collections;
+    const struct DunitTransfersV1 * transfers;
+} DunitUiExtendedV1;
+typedef struct DunitTransferFormatV1 {
+    const uint8_t * mime;
+    size_t mime_len;
+} DunitTransferFormatV1;
+typedef struct DunitTransferFileV1 {
+    uint64_t capability;
+    const uint8_t * path;
+    size_t path_len;
+    uint32_t kind;
+    uint32_t rights;
+} DunitTransferFileV1;
+typedef struct DunitTransferDataV1 {
+    const uint8_t * mime;
+    size_t mime_len;
+    const uint8_t * data;
+    size_t data_len;
+} DunitTransferDataV1;
+typedef struct DunitTransferEventV1 {
+    uint32_t kind;
+    uint32_t arg0;
+    uint32_t arg1;
+    uint32_t source;
+    uint64_t request;
+    uint64_t transfer;
+    const struct DunitTransferFormatV1 * formats;
+    size_t formats_len;
+    const struct DunitTransferFileV1 * files;
+    size_t files_len;
+    const struct DunitTransferDataV1 * representations;
+    size_t representations_len;
+    const struct DunitUiNativeInputV1 * input;
+} DunitTransferEventV1;
+typedef struct DunitTransferRequestV1 {
+    uint32_t kind;
+    uint32_t flags;
+    uint32_t preferred;
+    uint32_t reserved;
+    uint64_t transfer;
+    uint64_t capability;
+    uint64_t offset;
+    const uint8_t * data;
+    size_t data_len;
+    const uint64_t * files;
+    size_t files_len;
+    const struct DunitTransferFormatV1 * formats;
+    size_t formats_len;
+    uint8_t * buffer;
+    size_t buffer_len;
+} DunitTransferRequestV1;
+typedef struct DunitTransferResultV1 {
+    uint64_t request;
+    uint64_t capability;
+    uint64_t size;
+    uint32_t kind;
+    uint32_t rights;
+} DunitTransferResultV1;
+typedef struct DunitTransfersV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    DunitTransferCallbackV1 callback;
+} DunitTransfersV1;
+typedef struct DunitUiRenameV1 {
+    uint32_t kind;
+    uint32_t reserved;
+    const uint8_t * row;
+    size_t row_len;
+    const uint8_t * column;
+    size_t column_len;
+    const uint8_t * value;
+    size_t value_len;
+} DunitUiRenameV1;
+typedef struct DunitUiStringV1 {
+    const uint8_t * data;
+    size_t length;
+} DunitUiStringV1;
+typedef struct DunitUiFileLabelsV1 {
+    const uint8_t * location;
+    size_t location_len;
+    const uint8_t * name;
+    size_t name_len;
+    const uint8_t * files;
+    size_t files_len;
+    const uint8_t * back;
+    size_t back_len;
+    const uint8_t * forward;
+    size_t forward_len;
+    const uint8_t * up;
+    size_t up_len;
+    const uint8_t * refresh;
+    size_t refresh_len;
+    const uint8_t * enter;
+    size_t enter_len;
+    const uint8_t * accept;
+    size_t accept_len;
+    const uint8_t * cancel;
+    size_t cancel_len;
+    const uint8_t * hidden;
+    size_t hidden_len;
+    const uint8_t * filter;
+    size_t filter_len;
+    const uint8_t * name_column;
+    size_t name_column_len;
+    const uint8_t * kind_column;
+    size_t kind_column_len;
+    const uint8_t * size_column;
+    size_t size_column_len;
+    const uint8_t * file_kind;
+    size_t file_kind_len;
+    const uint8_t * directory_kind;
+    size_t directory_kind_len;
+    const uint8_t * device_kind;
+    size_t device_kind_len;
+    const uint8_t * replace_title;
+    size_t replace_title_len;
+    const uint8_t * replace_message;
+    size_t replace_message_len;
+    const uint8_t * replace_accept;
+    size_t replace_accept_len;
+    const uint8_t * invalid_path;
+    size_t invalid_path_len;
+    const uint8_t * invalid_name;
+    size_t invalid_name_len;
+    const uint8_t * missing_file;
+    size_t missing_file_len;
+    const uint8_t * not_directory;
+    size_t not_directory_len;
+    const uint8_t * invalid_entries;
+    size_t invalid_entries_len;
+} DunitUiFileLabelsV1;
+typedef struct DunitUiFileFilterV1 {
+    const uint8_t * key;
+    size_t key_len;
+    const uint8_t * label;
+    size_t label_len;
+    const struct DunitUiStringV1 * extensions;
+    size_t extensions_len;
+} DunitUiFileFilterV1;
+typedef struct DunitUiFileDialogV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t mode;
+    uint32_t reserved;
+    const uint8_t * key;
+    size_t key_len;
+    const uint8_t * title;
+    size_t title_len;
+    const uint8_t * directory;
+    size_t directory_len;
+    const uint8_t * filename;
+    size_t filename_len;
+    const struct DunitUiFileFilterV1 * filters;
+    size_t filters_len;
+    const struct DunitUiFileLabelsV1 * labels;
+} DunitUiFileDialogV1;
+typedef struct DunitUiNativeInputV1 {
+    uint32_t kind;
+    int32_t x;
+    int32_t y;
+    uint32_t value;
+    uint32_t button;
+    uint32_t modifiers;
+} DunitUiNativeInputV1;
 
 #ifdef __cplusplus
 extern "C" {
@@ -139,6 +436,9 @@ int32_t dunit_ui_run_v1(int32_t argc, const char *const * argv, const char *cons
 int32_t dunit_ui_run_styled_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style);
 int32_t dunit_ui_run_text_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style, const struct DunitUiTextV1 * text);
 int32_t dunit_ui_run_app_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiAppV1 * app);
+int32_t dunit_ui_run_extended_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiExtendedV1 * extended);
+int32_t dunit_transfer_request_v1(void * session, const struct DunitTransferRequestV1 * request, struct DunitTransferResultV1 * result);
+int32_t dunit_ui_choose_file_v1(int32_t argc, const char *const * argv, const char *const * envp, const struct DunitUiFileDialogV1 * options, uint8_t * buffer, size_t capacity, size_t * written);
 #ifdef __cplusplus
 }
 #endif
