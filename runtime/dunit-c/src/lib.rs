@@ -13,7 +13,7 @@ mod collection;
 mod file_dialog;
 mod transfer;
 pub use file_dialog::dunit_ui_choose_file_v1;
-pub use transfer::dunit_transfer_request_v1;
+pub use transfer::{dunit_transfer_request_v1, dunit_ui_pointer_mode_v1};
 mod number;
 mod popup;
 mod text;
@@ -558,6 +558,10 @@ unsafe fn run(
             let mut files = transfer::Files::default();
             let mut transfer_event = None;
             let mut native_input = None;
+            let mut commands = transfer::Commands {
+                supported: ui.supports_pointer_mode(),
+                ..Default::default()
+            };
             let result = loop {
                 if let Some(config) = transfers {
                     let result = transfer::dispatch(
@@ -567,7 +571,11 @@ unsafe fn run(
                         config.callback.unwrap(),
                         transfer_event.take(),
                         native_input.take(),
+                        &mut commands,
                     )?;
+                    if let Some(mode) = commands.pointer_mode.take() {
+                        ui.request_pointer_mode(mode)?;
+                    }
                     if result == 1 {
                         break Ok(());
                     }

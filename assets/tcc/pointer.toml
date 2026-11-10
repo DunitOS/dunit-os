@@ -1,0 +1,33 @@
+[meta]
+schema_version = 2
+[application.gui_client]
+name = "Pointer focus peer"
+exec = "/app/gui_client"
+[application.c_pointer]
+name = "C pointer test"
+exec = "/tmp/c-pointer"
+[startup]
+entries = ["gui_client", "c_pointer"]
+self_test = false
+[widgets]
+enabled = false
+[notifications]
+enabled = false
+[effects]
+anim = false
+[panels.header]
+edge = "top"
+size = 28
+children = ["caption"]
+[components.caption]
+kind = "title"
+[rules.pointer]
+app = "c_pointer"
+x = 100
+y = 100
+width = 400
+height = 180
+floating = true
+
+[workspaces]
+count = 2

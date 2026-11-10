@@ -465,6 +465,8 @@ pub(super) struct ClientState {
     pub(super) pid: u32,
     pub(super) conn: gui_protocol_v1::server::ConnId,
     pub(super) features: u64,
+    pub(super) pointer_effective: gui_protocol_v1::control::PointerMode,
+    pub(super) pointer_request: Option<gui_protocol_v1::control::PointerRequest>,
     pub(super) slot_x: u32,
     pub(super) slot_y: u32,
     pub(super) buf_ptr: *const u8,
@@ -505,6 +507,8 @@ impl ClientState {
             pid: 0,
             conn: 0,
             features: 0,
+            pointer_request: None,
+            pointer_effective: gui_protocol_v1::control::PointerMode::Normal,
             slot_x: 0,
             slot_y: 0,
             buf_ptr: core::ptr::null(),
@@ -549,6 +553,7 @@ pub(super) fn handle_client_payload(
     reload: &mut bool,
     notify_out: &mut Vec<alloc::string::String>,
 ) {
+    if pointer_runtime::receive(c,payload){return;}
     if let Some(announcement) = gui_protocol_v1::control::Capability::decode(payload) {
         c.buffers.announce(announcement.object as u64,announcement.handle);
         return;
@@ -972,6 +977,7 @@ pub(super) fn keyboard_window(wins: &[Win], z: &[usize], workspace: usize) -> Op
 }
 /// Keep OUT before IN and both before the next input to a newly focused client.
 pub(super) fn sync_keyboard_focus(
+    pointer_modes:&mut pointer_runtime::Runtime,
     lifecycle: &mut crate::input_lifecycle::Lifecycle,
     clients: &mut [ClientState],
     wins: &[Win],
@@ -984,6 +990,7 @@ pub(super) fn sync_keyboard_focus(
     } else {
         keyboard_window(wins, z, workspace).map(|i| wins[i].pid)
     };
+    pointer_modes.reconcile(clients,next);
     if let Some(change) = lifecycle.focus(next) {
         if let Some(pid) = change.previous {
             send_input(clients, pid, IN_FOCUS_OUT, 0, 0, 0);

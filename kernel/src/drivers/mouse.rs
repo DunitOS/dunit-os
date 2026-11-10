@@ -56,7 +56,8 @@ pub fn init() {
         }
 
         mouse_write(0xF4);
-        let _ = mouse_read_ack();
+        let enabled = mouse_read_ack();
+        crate::input::set_mouse_relative_source(enabled==0xFA);
 
         drain_output();
         (*PACKET.0.get()).index = 0;

@@ -24,7 +24,13 @@ impl Files {
             .ok_or(dunit::Error(dunit::errno::EBADF))
     }
 }
+#[derive(Default)]
+pub(super) struct Commands {
+    pub supported: bool,
+    pub pointer_mode: Option<dunit::window::PointerMode>,
+}
 struct Context<'a> {
+    commands: &'a mut Commands,
     client: &'a mut Client,
     files: &'a mut Files,
 }
@@ -222,6 +228,30 @@ pub unsafe extern "C" fn dunit_transfer_request_v1(
         Err(e) => e.0 as i32,
     }
 }
+/// Queue a mode change in the current native-event callback session.
+/// Zero means queued; DUNIT_GUI_IN_POINTER_MODE reports acceptance or refusal.
+/// # Safety
+/// The session must be the live pointer supplied to this callback invocation,
+/// used on the UI thread without retaining it or re-entering the UI. Its scoped
+/// lifetime is the same as for dunit_transfer_request_v1.
+#[no_mangle]
+pub unsafe extern "C" fn dunit_ui_pointer_mode_v1(session: *mut c_void, mode: u32) -> i32 {
+    if session.is_null() {
+        return invalid().0 as i32;
+    }
+    let Some(mode) = dunit::window::PointerMode::from_u32(mode) else {
+        return invalid().0 as i32;
+    };
+    let context = &mut *(session as *mut Context<'_>);
+    if !context.commands.supported {
+        return dunit::errno::EOPNOTSUPP as i32;
+    }
+    if context.commands.pointer_mode.is_some() {
+        return dunit::errno::EBUSY as i32;
+    }
+    context.commands.pointer_mode = Some(mode);
+    0
+}
 pub(super) unsafe fn dispatch(
     client: &mut Client,
     files: &mut Files,
@@ -229,6 +259,7 @@ pub(super) unsafe fn dispatch(
     callback: DunitTransferCallbackV1,
     mut event: Option<dunit_transfer::Event>,
     input: Option<dunit::window::Input>,
+    commands: &mut Commands,
 ) -> dunit::Result<i32> {
     let mut formats = Vec::new();
     let mut representations = Vec::new();
@@ -336,7 +367,11 @@ pub(super) unsafe fn dispatch(
         e.transfer = m.transfer;
         e.source = native.source as u32;
     }
-    let mut context = Context { client, files };
+    let mut context = Context {
+        client,
+        files,
+        commands,
+    };
     Ok(callback(user, &mut context as *mut _ as *mut c_void, &e))
 }
 
@@ -366,7 +401,9 @@ mod tests {
     fn invalid_transfer_requests_and_stale_tokens_fail_before_native_io() {
         let mut client = Client::new(42, 0);
         let mut files = Files::default();
+        let mut commands = Commands::default();
         let mut context = Context {
+            commands: &mut commands,
             client: &mut client,
             files: &mut files,
         };
@@ -482,11 +519,48 @@ mod tests {
                     callback,
                     Some(event),
                     None,
+                    &mut Commands::default(),
                 )
             }
             .unwrap(),
             2
         );
         assert!(seen);
+    }
+    #[test]
+    fn pointer_command_is_scoped_bounded_and_rejects_unsupported_modes() {
+        let mut client = Client::new(42, 0);
+        let mut files = Files::default();
+        let mut commands = Commands::default();
+        let mut context = Context {
+            client: &mut client,
+            files: &mut files,
+            commands: &mut commands,
+        };
+        let session = &mut context as *mut _ as *mut c_void;
+        unsafe {
+            assert_eq!(
+                dunit_ui_pointer_mode_v1(core::ptr::null_mut(), 0),
+                dunit::errno::EINVAL as i32
+            );
+            assert_eq!(
+                dunit_ui_pointer_mode_v1(session, 99),
+                dunit::errno::EINVAL as i32
+            );
+            assert_eq!(
+                dunit_ui_pointer_mode_v1(session, 2),
+                dunit::errno::EOPNOTSUPP as i32
+            );
+            context.commands.supported = true;
+            assert_eq!(dunit_ui_pointer_mode_v1(session, 2), 0);
+            assert_eq!(
+                dunit_ui_pointer_mode_v1(session, 1),
+                dunit::errno::EBUSY as i32
+            );
+        }
+        assert_eq!(
+            commands.pointer_mode,
+            Some(dunit::window::PointerMode::Locked)
+        );
     }
 }

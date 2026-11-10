@@ -631,3 +631,11 @@ installer ESP is unchanged. Screenshots and receipts remain generated build
 artifacts. The core M7.10 C SDK acceptance is complete; the Rust session's existing
 single-window/bootstrap limit and unsupported kernel/libc facilities are not
 expanded by this bridge. This does not complete M7.11 application migration.
+
+## Game pointer modes
+
+`dunit_ui_pointer_mode_v1(session, mode)` queues Normal, Confined or Locked on
+the current callback's window. The existing native input callback receives
+`DUNIT_GUI_IN_POINTER_MODE` acknowledgements/revocation and
+`DUNIT_GUI_IN_RELATIVE` signed deltas. A zero return means queued, not granted.
+See the [lifetime, compatibility and tested C example](pointer-modes.md).

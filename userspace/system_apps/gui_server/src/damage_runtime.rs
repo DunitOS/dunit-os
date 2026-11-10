@@ -28,6 +28,7 @@ struct Key {
     ws: usize,
     focus: Option<usize>,
     mouse: (i32, i32),
+    cursor_visible: bool,
     z: Vec<usize>,
     wins: Vec<VisualKey>,
     theme: Theme,
@@ -46,6 +47,7 @@ pub struct Context<'a> {
     pub focused: Option<usize>,
     pub workspace: usize,
     pub mouse: (i32, i32),
+    pub cursor_visible: bool,
     pub now: u64,
     pub duration: u32,
     pub epoch: u64,
@@ -116,6 +118,7 @@ impl Cache {
             ws: c.workspace,
             focus: c.focused,
             mouse: c.mouse,
+            cursor_visible: c.cursor_visible,
             z: c.z.to_vec(),
             wins,
             theme: *c.theme,
@@ -216,7 +219,7 @@ impl Cache {
                 return false;
             }
         }
-        draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1, &c.shell.cursor, c.shell.visuals.cursor_colors());
+        if c.cursor_visible {draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1, &c.shell.cursor, c.shell.visuals.cursor_colors());}
         for copy in &p.copies {
             let r = copy.destination;
             self.present.clear();

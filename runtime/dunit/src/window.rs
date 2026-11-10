@@ -16,7 +16,7 @@ use core::{
 };
 pub use gui_protocol_v1::control::{
     Input, IN_DOWN, IN_FOCUS_IN, IN_FOCUS_OUT, IN_KEY, IN_KEY_UP, IN_LEAVE, IN_MOVE, IN_QUIT,
-    IN_SCROLL, IN_UP,
+    IN_SCROLL, IN_UP, IN_RELATIVE, IN_POINTER_MODE, PointerMode,
 };
 pub use gui_protocol_v1::wire::{Event as ProtocolEvent, Rect as DamageRect};
 use gui_protocol_v1::{
@@ -177,6 +177,8 @@ pub struct Window {
     metrics_enabled: bool,
     metrics: crate::ui::metrics::WindowMetrics,
     features: u64,
+    pointer_mode: PointerMode,
+    pointer_request_serial:u32,
     format: PixelFormat,
     surface: u64,
     live_buffers: Vec<u64>,
@@ -210,8 +212,21 @@ impl Window {
         Self::open_format(width,height,PixelFormat::Xrgb8888)
     }
     pub fn open_format(width:u32,height:u32,format:PixelFormat)->Result<Self>{
-        let features=FEATURE_INPUT_LIFECYCLE|FEATURE_DATA_TRANSFER|if format==PixelFormat::Argb8888{FEATURE_ARGB8888}else{0};
+        let features=FEATURE_INPUT_LIFECYCLE|FEATURE_DATA_TRANSFER|FEATURE_POINTER_MODE|if format==PixelFormat::Argb8888{FEATURE_ARGB8888}else{0};
         Self::open_features(width,height,features,format)
+    }
+    /// Whether the compositor negotiated pointer-mode support.
+    pub fn supports_pointer_mode(&self)->bool{self.features&FEATURE_POINTER_MODE!=0}
+    /// Effective mode, updated only by authenticated compositor acknowledgement.
+    pub fn pointer_mode(&self)->PointerMode{self.pointer_mode}
+    /// Queue an asynchronous request. IN_POINTER_MODE carries request id in x,
+    /// negative errno in y and the effective mode in value. Zero id is revocation.
+    pub fn request_pointer_mode(&mut self,mode:PointerMode)->Result<u32>{
+        if !self.supports_pointer_mode(){return Err(Error(libdunit::EOPNOTSUPP));}
+        let id=self.pointer_request_serial.checked_add(1).filter(|n|*n<=i32::MAX as u32).ok_or(Error(libdunit::EFBIG))?;
+        let message=gui_protocol_v1::control::PointerRequest{request:id,mode};
+        checked(libdunit::ipc_send(self.peer,&message.encode()))?;
+        self.pointer_request_serial=id;Ok(id)
     }
     /// Compatibility clients can explicitly retain legacy cooked-only input.
     pub fn open_legacy(width: u32, height: u32) -> Result<Self> {
@@ -257,6 +272,8 @@ impl Window {
             metrics_enabled: false,
             metrics: Default::default(),
             features: 0,
+            pointer_mode: PointerMode::Normal,
+            pointer_request_serial:0,
             format,
             surface: 1,
             live_buffers: Vec::new(),
@@ -421,6 +438,9 @@ impl Window {
             }
             if attachment.is_some() { return Err(Error(libdunit::EIO)); }
             if let Some(input) = Input::decode_for_features(&bytes[..n], self.features) {
+                if input.kind==IN_POINTER_MODE {
+                    self.pointer_mode=PointerMode::from_u32(input.value).ok_or(Error(libdunit::EIO))?;
+                }
                 if self.metrics_enabled {
                     self.metrics.input_received = self.metrics.input_received.saturating_add(1);
                 }

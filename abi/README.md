@@ -146,9 +146,13 @@ remains compatible. See the [complete contract](../docs/sdk/pointer-events-propo
 The compatible modifier extension approved 2 November 2026 keeps length 32 as
 exact v1. Length 40 returns those same bytes plus a u32 Shift/Ctrl/Alt/Super mask
 at 32..36 (bits 0..3), captured at enqueue, and zero reserved bytes at 36..40.
+Length 56 adds v3: the v2 prefix, signed i32 device dx/dy at offsets 40/44,
+a u32 relative-source flag at 48, and four zero reserved bytes at 52. Absolute
+sources have zero deltas. `read_with_motion` requests v3 and preserves movement
+beyond display bounds. See [pointer modes](../docs/sdk/pointer-modes.md).
 Other lengths return EINVAL. `libdunit::pointer::read_with_modifiers` uses v2;
 the existing `read` still uses v1. Pure motion coalesces only with equal masks.
-Both formats retain an event on failed user copy. No syscall number or right
+All formats retain an event on failed user copy. No syscall number or right
 changes. See the [approved extension](../docs/sdk/pointer-modifier-snapshot-proposal.md).
 
 

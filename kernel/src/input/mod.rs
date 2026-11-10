@@ -1,4 +1,8 @@
-use core::sync::atomic::{AtomicI32, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
+static MOUSE_RELATIVE: AtomicBool = AtomicBool::new(false);
+pub fn set_mouse_relative_source(relative: bool) {
+    MOUSE_RELATIVE.store(relative, Ordering::Relaxed);
+}
 
 static MOUSE_X: AtomicI32 = AtomicI32::new(0);
 static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
@@ -16,9 +20,13 @@ pub fn reset_pointer_queue() {
     let _irq = crate::sync::InterruptGuard::new();
     let (x, y) = mouse_position();
     let modifiers = crate::drivers::keyboard::modifier_mask() as u32;
-    POINTER_QUEUE
-        .lock()
-        .reset(x as u32, y as u32, mouse_buttons() as u32, modifiers);
+    POINTER_QUEUE.lock().reset_motion(
+        x as u32,
+        y as u32,
+        mouse_buttons() as u32,
+        modifiers,
+        MOUSE_RELATIVE.load(Ordering::Relaxed),
+    );
 }
 pub fn clear_pointer_queue() {
     POINTER_QUEUE.lock().clear();
@@ -33,10 +41,15 @@ pub fn read_pointer_event(
 pub fn read_pointer_event_with_modifiers(
     copy: impl FnOnce(&[u8; dunit_pointer_abi::RECORD_WITH_MODIFIERS_LEN]) -> Result<(), i64>,
 ) -> Result<bool, i64> {
+    consume_pointer_event(|event| copy(&event.legacy().encode()))
+}
+pub fn read_pointer_event_with_motion(
+    copy: impl FnOnce(&[u8; dunit_pointer_abi::RECORD_WITH_MOTION_LEN]) -> Result<(), i64>,
+) -> Result<bool, i64> {
     consume_pointer_event(|event| copy(&event.encode()))
 }
 fn consume_pointer_event(
-    copy: impl FnOnce(dunit_pointer_abi::PointerEventWithModifiers) -> Result<(), i64>,
+    copy: impl FnOnce(dunit_pointer_abi::PointerEventWithMotion) -> Result<(), i64>,
 ) -> Result<bool, i64> {
     let mut queue = POINTER_QUEUE.lock();
     let Some(event) = queue.peek() else {
@@ -81,6 +94,7 @@ pub fn take_mouse_scroll_delta() -> i32 {
 }
 
 pub fn push_mouse_relative(dx: i32, dy: i32, buttons: u8, wheel: i32) {
+    set_mouse_relative_source(true);
     let _irq = crate::sync::InterruptGuard::new();
     let modifiers = crate::drivers::keyboard::modifier_mask() as u32;
     let current_x = MOUSE_X.load(Ordering::Relaxed);
@@ -94,12 +108,20 @@ pub fn push_mouse_relative(dx: i32, dy: i32, buttons: u8, wheel: i32) {
         MOUSE_WHEEL_DELTA.fetch_add(wheel, Ordering::Relaxed);
     }
 
-    POINTER_QUEUE
-        .lock()
-        .push(x as u32, y as u32, buttons as u32, wheel, modifiers);
+    POINTER_QUEUE.lock().push_motion(
+        x as u32,
+        y as u32,
+        buttons as u32,
+        wheel,
+        modifiers,
+        dx,
+        dy,
+        true,
+    );
 }
 
 pub fn push_mouse_absolute(x: i32, y: i32, buttons: u8, wheel: i32) {
+    set_mouse_relative_source(false);
     let _irq = crate::sync::InterruptGuard::new();
     let modifiers = crate::drivers::keyboard::modifier_mask() as u32;
     let (x, y) = clamp_mouse_xy(x, y);

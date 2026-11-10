@@ -41,3 +41,25 @@ pub fn read_with_modifiers(handle: u32) -> Result<Option<PointerEventWithModifie
         .map(Some)
         .ok_or(crate::EINVAL)
 }
+
+/// Read v3 device motion; the old coordinate/modifier records stay unchanged.
+pub fn read_with_motion(
+    handle: u32,
+) -> Result<Option<dunit_pointer_abi::PointerEventWithMotion>, isize> {
+    let mut record = [0; dunit_pointer_abi::RECORD_WITH_MOTION_LEN];
+    let result = crate::syscall3(
+        crate::SYSCALL_READ_POINTER_EVENT,
+        handle as usize,
+        record.as_mut_ptr() as usize,
+        record.len(),
+    );
+    if result == crate::EAGAIN {
+        return Ok(None);
+    }
+    if result < 0 {
+        return Err(result);
+    }
+    dunit_pointer_abi::PointerEventWithMotion::decode(&record)
+        .map(Some)
+        .ok_or(crate::EINVAL)
+}

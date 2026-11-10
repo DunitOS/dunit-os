@@ -128,3 +128,10 @@ File and standard-stream reads/writes use bounded native transfers, so logical
 `read_exact`/`write_all` operations can exceed the per-syscall copy budget. The
 native API probe verifies a 200,003-byte binary roundtrip; the monitor also
 loads its TTF through this file API.
+
+## Pointer confinement and game camera input
+
+Native Rust and C applications can request Normal, Confined or Locked pointer
+modes on their own focused window. Requests are asynchronous and the compositor
+reports effective state and revocation. Locked input carries device-relative
+deltas beyond screen bounds. See [pointer modes and C examples](pointer-modes.md).

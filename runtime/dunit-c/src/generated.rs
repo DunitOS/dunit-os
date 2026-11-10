@@ -98,6 +98,11 @@ pub const DUNIT_GUI_IN_KEY_UP:u32=7;
 pub const DUNIT_GUI_IN_FOCUS_IN:u32=8;
 pub const DUNIT_GUI_IN_QUIT:u32=9;
 pub const DUNIT_GUI_IN_FOCUS_OUT:u32=10;
+pub const DUNIT_GUI_IN_RELATIVE:u32=11;
+pub const DUNIT_GUI_IN_POINTER_MODE:u32=12;
+pub const DUNIT_POINTER_NORMAL:u32=0;
+pub const DUNIT_POINTER_CONFINED:u32=1;
+pub const DUNIT_POINTER_LOCKED:u32=2;
 pub const DUNIT_TRANSFER_FILE_KIND_FILE:u32=1;
 pub const DUNIT_TRANSFER_FILE_KIND_DIRECTORY:u32=2;
 pub type DunitUiBuildV1=unsafe extern "C" fn(*mut core::ffi::c_void, *mut DunitUiNodeV1, u32)->i32;
@@ -507,6 +512,7 @@ pub struct DunitUiNativeInputV1 {
 }
 const _: [();24]=[();core::mem::size_of::<DunitUiNativeInputV1>()];
 const _: [();4]=[();core::mem::align_of::<DunitUiNativeInputV1>()];
+const _:unsafe extern "C" fn(*mut core::ffi::c_void, u32)->i32=crate::dunit_ui_pointer_mode_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1)->i32=crate::dunit_ui_run_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1)->i32=crate::dunit_ui_run_styled_v1;
 const _:unsafe extern "C" fn(i32, *const *const u8, *const *const u8, u32, u32, *const DunitUiCallbacksV1, *const DunitUiStyleV1, *const DunitUiTextV1)->i32=crate::dunit_ui_run_text_v1;

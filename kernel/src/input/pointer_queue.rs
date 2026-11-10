@@ -1,13 +1,13 @@
 //! Bounded device facts. The consumer decides what a lost stream means for UI.
-use dunit_pointer_abi::{PointerEvent, PointerEventWithModifiers, LOST_BEFORE};
+use dunit_pointer_abi::{PointerEvent, PointerEventWithMotion, LOST_BEFORE};
 pub const CAPACITY: usize = 64;
 #[derive(Clone, Copy)]
 struct Entry {
-    event: PointerEventWithModifiers,
+    event: PointerEventWithMotion,
     edge: bool,
 }
 const EMPTY: Entry = Entry {
-    event: PointerEventWithModifiers::EMPTY,
+    event: PointerEventWithMotion::EMPTY,
     edge: false,
 };
 pub struct PointerQueue {
@@ -31,14 +31,31 @@ impl PointerQueue {
         self.head = 0;
         self.len = 0;
     }
+    #[cfg(test)]
     pub fn reset(&mut self, x: u32, y: u32, buttons: u32, modifiers: u32) {
+        self.reset_motion(x, y, buttons, modifiers, false);
+    }
+    pub fn reset_motion(&mut self, x: u32, y: u32, buttons: u32, modifiers: u32, relative: bool) {
         self.clear();
         self.buttons = buttons;
-        self.push(x, y, buttons, 0, modifiers);
+        self.push_motion(x, y, buttons, 0, modifiers, 0, 0, relative);
         self.entries[self.head].event.event.flags |= LOST_BEFORE;
         self.entries[self.head].edge = true;
     }
     pub fn push(&mut self, x: u32, y: u32, buttons: u32, wheel: i32, modifiers: u32) {
+        self.push_motion(x, y, buttons, wheel, modifiers, 0, 0, false);
+    }
+    pub fn push_motion(
+        &mut self,
+        x: u32,
+        y: u32,
+        buttons: u32,
+        wheel: i32,
+        modifiers: u32,
+        dx: i32,
+        dy: i32,
+        relative: bool,
+    ) {
         self.sequence = self.sequence.wrapping_add(1);
         let wrapped = self.sequence == 0;
         if wrapped {
@@ -47,7 +64,7 @@ impl PointerQueue {
         }
         let edge = buttons != self.buttons;
         self.buttons = buttons;
-        let mut event = PointerEventWithModifiers {
+        let mut event = PointerEventWithMotion {
             event: PointerEvent {
                 x,
                 y,
@@ -57,14 +74,27 @@ impl PointerQueue {
                 flags: if wrapped { LOST_BEFORE } else { 0 },
             },
             modifiers,
+            dx,
+            dy,
+            relative,
         };
         if self.len > 0 && !edge && wheel == 0 && !wrapped {
             let last = (self.head + self.len - 1) % CAPACITY;
             if !self.entries[last].edge
                 && self.entries[last].event.event.wheel == 0
                 && self.entries[last].event.modifiers == modifiers
+                && self.entries[last].event.relative == relative
             {
-                event.event.flags |= self.entries[last].event.event.flags;
+                let previous = self.entries[last].event;
+                if let (Some(dx), Some(dy)) =
+                    (previous.dx.checked_add(dx), previous.dy.checked_add(dy))
+                {
+                    event.dx = dx;
+                    event.dy = dy;
+                } else {
+                    event.event.flags |= LOST_BEFORE;
+                }
+                event.event.flags |= previous.event.flags;
                 self.entries[last].event = event;
                 return;
             }
@@ -78,14 +108,14 @@ impl PointerQueue {
         self.entries[(self.head + self.len) % CAPACITY] = Entry { event, edge };
         self.len += 1;
     }
-    pub fn peek(&self) -> Option<PointerEventWithModifiers> {
+    pub fn peek(&self) -> Option<PointerEventWithMotion> {
         if self.len == 0 {
             None
         } else {
             Some(self.entries[self.head].event)
         }
     }
-    pub fn pop(&mut self) -> Option<PointerEventWithModifiers> {
+    pub fn pop(&mut self) -> Option<PointerEventWithMotion> {
         let e = self.peek()?;
         self.head = (self.head + 1) % CAPACITY;
         self.len -= 1;
@@ -180,5 +210,31 @@ mod tests {
             (30, 40, 0, 0, LOST_BEFORE)
         );
         assert!(q.pop().is_none());
+    }
+}
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+    #[test]
+    fn sums_raw_motion_even_at_display_edge_and_preserves_source_edges() {
+        let mut q = PointerQueue::new();
+        q.push_motion(99, 0, 0, 0, 0, 100, -5, true);
+        q.push_motion(99, 0, 0, 0, 0, 200, 3, true);
+        q.push_motion(99, 0, 0, 0, 0, -50, 2, true);
+        let e = q.pop().unwrap();
+        assert_eq!((e.dx, e.dy, e.event.x), (250, 0, 99));
+        q.push_motion(99, 0, 0, 0, 0, 10, 0, true);
+        q.push(99, 0, 0, 0, 0);
+        assert!(q.pop().unwrap().relative);
+        assert!(!q.pop().unwrap().relative);
+    }
+    #[test]
+    fn sum_overflow_marks_loss_instead_of_wrapping() {
+        let mut q = PointerQueue::new();
+        q.push_motion(99, 0, 0, 0, 0, i32::MAX, 0, true);
+        q.push_motion(99, 0, 0, 0, 0, 1, 0, true);
+        let e = q.pop().unwrap();
+        assert_eq!(e.event.flags, LOST_BEFORE);
+        assert_eq!(e.dx, 1);
     }
 }

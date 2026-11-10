@@ -199,6 +199,9 @@ impl<C: Component> ComponentWindow<C> {
         ui.theme_checked = Some(crate::time::Instant::now()?);
         Ok(ui)
     }
+    pub fn supports_pointer_mode(&self)->bool{self.window.supports_pointer_mode()}
+    pub fn pointer_mode(&self)->crate::window::PointerMode{self.window.pointer_mode()}
+    pub fn request_pointer_mode(&mut self,mode:crate::window::PointerMode)->NativeResult<u32>{self.window.request_pointer_mode(mode)}
     pub fn launch_id(&self) -> u32 {
         self.window.launch_id()
     }

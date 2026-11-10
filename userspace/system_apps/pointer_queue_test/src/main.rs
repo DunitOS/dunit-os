@@ -12,10 +12,11 @@ pub extern "C" fn _start() -> ! {
     libdunit::println("[POINTERQ] start");
     assert_eq!(pointer::read(0), Err(libdunit::EACCES));
     assert_eq!(pointer::read_with_modifiers(0), Err(libdunit::EACCES));
+    assert_eq!(pointer::read_with_motion(0), Err(libdunit::EACCES));
     let handle = libdunit::handle_input_acquire();
     assert!(handle > 0);
     let mut record = [0u8; pointer::RECORD_WITH_MODIFIERS_LEN];
-    for invalid in [31, 33, 39, 41] {
+    for invalid in [31, 33, 39, 41, 55, 57] {
         assert_eq!(
             syscall3(
                 SYSCALL_READ_POINTER_EVENT,
@@ -34,6 +35,7 @@ pub extern "C" fn _start() -> ! {
         syscall3(SYSCALL_READ_POINTER_EVENT, handle as usize, 0, 40),
         libdunit::EFAULT
     );
+    assert_eq!(syscall3(SYSCALL_READ_POINTER_EVENT,handle as usize,0,56),libdunit::EFAULT);
     let initial = pointer::read(handle as u32).unwrap().unwrap();
     assert_eq!(initial.flags, pointer::LOST_BEFORE);
     assert_eq!(pointer::read(handle as u32), Ok(None));

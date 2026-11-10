@@ -103,6 +103,11 @@
 #define DUNIT_GUI_IN_FOCUS_IN 8u
 #define DUNIT_GUI_IN_QUIT 9u
 #define DUNIT_GUI_IN_FOCUS_OUT 10u
+#define DUNIT_GUI_IN_RELATIVE 11u
+#define DUNIT_GUI_IN_POINTER_MODE 12u
+#define DUNIT_POINTER_NORMAL 0u
+#define DUNIT_POINTER_CONFINED 1u
+#define DUNIT_POINTER_LOCKED 2u
 #define DUNIT_TRANSFER_FILE_KIND_FILE 1u
 #define DUNIT_TRANSFER_FILE_KIND_DIRECTORY 2u
 struct DunitUiNodeV1;
@@ -432,6 +437,7 @@ typedef struct DunitUiNativeInputV1 {
 #ifdef __cplusplus
 extern "C" {
 #endif
+int32_t dunit_ui_pointer_mode_v1(void * session, uint32_t mode);
 int32_t dunit_ui_run_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks);
 int32_t dunit_ui_run_styled_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style);
 int32_t dunit_ui_run_text_v1(int32_t argc, const char *const * argv, const char *const * envp, uint32_t width, uint32_t height, const struct DunitUiCallbacksV1 * callbacks, const struct DunitUiStyleV1 * style, const struct DunitUiTextV1 * text);

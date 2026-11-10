@@ -106,7 +106,8 @@ NEW или ACTIVE -- fatal error / EOF / peer death --> CLOSED
 выбирает максимальную общую версию; v1.0 поддерживает только [0,0]. Major в
 header обязан быть 1. После WELCOME header содержит выбранную версию.
 `required_features` обязан быть подмножеством `offered_features`.
-В v1.0 feature bit 0 = ARGB8888; bit 1 = INPUT_LIFECYCLE для live INP1.
+В v1.0 feature bit 0 = ARGB8888; bit 1 = INPUT_LIFECYCLE для live INP1;
+bit 2 = DATA_TRANSFER; bit 3 = POINTER_MODE (см. контракт ниже).
 XRGB8888 обязателен без feature bit. Сервер
 возвращает поддерживаемое подмножество offered; неизвестные offered bits
 игнорируются **только в HELLO**, неподдержанный required bit — UNSUPPORTED.
@@ -489,3 +490,9 @@ legacy clients. Invalid canonical events fail rather than being encoded.
 `tests/input_lifecycle.rs` exercises all feature combinations, format independence,
 new golden bytes, legacy projection for all pointer kinds/button values and all
 modifier masks, malformed fields/lengths, fallback and bounded arbitrary input.
+
+## Optional pointer modes
+
+Feature bit 3 (`FEATURE_POINTER_MODE`) negotiates confinement, relative lock,
+mode acknowledgement/revocation and device-relative input. Existing records and
+legacy clients retain their wire semantics. See the [complete contract](../../docs/sdk/pointer-modes.md).

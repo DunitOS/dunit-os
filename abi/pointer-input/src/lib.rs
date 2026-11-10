@@ -19,6 +19,55 @@ pub struct PointerEventWithModifiers {
     pub event: PointerEvent,
     pub modifiers: u32,
 }
+/// Explicit v3 record: device motion is retained before display clamping.
+pub const RECORD_WITH_MOTION_LEN: usize = 56;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PointerEventWithMotion {
+    pub event: PointerEvent,
+    pub modifiers: u32,
+    pub dx: i32,
+    pub dy: i32,
+    pub relative: bool,
+}
+impl PointerEventWithMotion {
+    pub const EMPTY: Self = Self {
+        event: PointerEvent::EMPTY,
+        modifiers: 0,
+        dx: 0,
+        dy: 0,
+        relative: false,
+    };
+    pub fn legacy(self) -> PointerEventWithModifiers {
+        PointerEventWithModifiers {
+            event: self.event,
+            modifiers: self.modifiers,
+        }
+    }
+    pub fn encode(self) -> [u8; RECORD_WITH_MOTION_LEN] {
+        let mut b = [0; RECORD_WITH_MOTION_LEN];
+        b[..40].copy_from_slice(&self.legacy().encode());
+        b[40..44].copy_from_slice(&self.dx.to_le_bytes());
+        b[44..48].copy_from_slice(&self.dy.to_le_bytes());
+        b[48..52].copy_from_slice(&(self.relative as u32).to_le_bytes());
+        b
+    }
+    pub fn decode(b: &[u8; RECORD_WITH_MOTION_LEN]) -> Option<Self> {
+        let old = PointerEventWithModifiers::decode(b[..40].try_into().ok()?)?;
+        let source = u32::from_le_bytes(b[48..52].try_into().ok()?);
+        let dx = i32::from_le_bytes(b[40..44].try_into().ok()?);
+        let dy = i32::from_le_bytes(b[44..48].try_into().ok()?);
+        if source > 1 || b[52..] != [0; 4] || (source == 0 && (dx != 0 || dy != 0)) {
+            return None;
+        }
+        Some(Self {
+            event: old.event,
+            modifiers: old.modifiers,
+            dx,
+            dy,
+            relative: source == 1,
+        })
+    }
+}
 impl PointerEventWithModifiers {
     pub const EMPTY: Self = Self {
         event: PointerEvent::EMPTY,
@@ -127,5 +176,40 @@ mod tests {
             bad[32..36].copy_from_slice(&modifiers.to_le_bytes());
             assert_eq!(PointerEventWithModifiers::decode(&bad), None);
         }
+    }
+}
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+    #[test]
+    fn motion_record_preserves_legacy_prefix_and_validates_source() {
+        let mut e = PointerEventWithMotion {
+            event: PointerEvent {
+                x: 99,
+                y: 0,
+                sequence: 1,
+                ..PointerEvent::EMPTY
+            },
+            modifiers: 3,
+            dx: 5000,
+            dy: -4000,
+            relative: true,
+        };
+        let b = e.encode();
+        assert_eq!(&b[..40], &e.legacy().encode());
+        assert_eq!(PointerEventWithMotion::decode(&b), Some(e));
+        let mut bad = b;
+        bad[48] = 2;
+        assert_eq!(PointerEventWithMotion::decode(&bad), None);
+        bad = b;
+        bad[52] = 1;
+        assert_eq!(PointerEventWithMotion::decode(&bad), None);
+        bad = b;
+        bad[48] = 0;
+        assert_eq!(PointerEventWithMotion::decode(&bad), None);
+        e.relative = false;
+        e.dx = 0;
+        e.dy = 0;
+        assert_eq!(PointerEventWithMotion::decode(&e.encode()), Some(e));
     }
 }

@@ -19,6 +19,8 @@ mod animation;
 mod protocol_runtime;
 mod transfer_runtime;
 mod input_lifecycle;
+mod pointer_mode;
+mod pointer_runtime;
 mod frame_pacing;
 mod frame_runtime;
 mod performance;
@@ -551,6 +553,8 @@ fn run_desktop_session(
     let mut pressed_win = pointer.captured_pid.and_then(|pid|
         wins.iter().position(|w| w.alive && w.pid == pid));
     let mut input_focus: Option<usize> = None; // window under the pointer
+    let mut pointer_modes=pointer_runtime::Runtime::default();
+    pointer_modes.state.position=(pointer.state.x as i32,pointer.state.y as i32);
     let mut keyboard_lifecycle=core::mem::take(&mut pointer.keyboard);
     let mut last_lx = i32::MIN;
     let mut last_ly = i32::MIN;
@@ -788,6 +792,7 @@ fn run_desktop_session(
                     pointer.left = prev_left;
                     pointer.right = prev_right;
                     pointer.captured_pid = pressed_win.map(|wi| wins[wi].pid);
+                    pointer_modes.revoke(clients);
                     pointer.keyboard = keyboard_lifecycle;
                     return true;
                 }
@@ -1379,8 +1384,13 @@ fn run_desktop_session(
         // Route every queued transition in order, bounded independently of
         // queue refill. A stationary pass still reconciles moved window geometry.
         shell_clicks.clear();
+        sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
+        pointer_modes.service(clients,if transfers.active().is_some()||drag.is_some(){None}else{keyboard_lifecycle.current()});
+        if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
+        pointer_modes.state.bound(pointer_modes.bounds(&wins,(bw,bh)));
         let mut batch=frame_pacing::InputBatch::new();
-        let mut pointer_sample=batch.next(||libdunit::pointer::read_with_modifiers(pointer.input)).unwrap_or_else(|error|{
+        let mut pointer_sample=batch.next(||libdunit::pointer::read_with_motion(pointer.input)).unwrap_or_else(|error|{
             libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));libdunit::exit(1)
         });
         let (mx,my,wx,wy,menu_view,menu_org,menu_ly,qs_applet,qs_edge)=loop {
@@ -1394,6 +1404,7 @@ fn run_desktop_session(
                 m = libdunit::MouseState { x: event.x, y: event.y,
                     buttons: event.buttons, wheel: event.wheel };
                 if event.flags & libdunit::pointer::LOST_BEFORE != 0 {
+                    pointer_modes.revoke(clients);
                     // A new owner or an overrun has no trustworthy press history.
                     // Leave cancels client presses/selection without activation.
                     for wi in [pressed_win, input_focus.filter(|wi| Some(*wi) != pressed_win)].into_iter().flatten() {
@@ -1407,8 +1418,17 @@ fn run_desktop_session(
                     prev_left = m.left();
                     prev_right = m.right();
                 }
+                if pointer_modes.hidden() && !sample.relative { pointer_modes.revoke(clients); }
+                let bounds=pointer_modes.bounds(&wins,(bw,bh));
+                let (x,y)=pointer_modes.state.sample((event.x as i32,event.y as i32),(sample.dx,sample.dy),sample.relative,bounds);
+                m.x=x.max(0) as u32;m.y=y.max(0) as u32;
+                if pointer_modes.hidden() && (sample.dx!=0||sample.dy!=0) {
+                    if let Some(pid)=pointer_modes.owner(){send_pointer(clients,pid,gui_protocol_v1::control::IN_RELATIVE,sample.dx,sample.dy,m.buttons as u8,pointer.modifiers);}
+                }
             }
-            frame_pacing::PointerSample::Stationary => {},
+            frame_pacing::PointerSample::Stationary => {
+                if pointer_modes.owner().is_some(){m.x=pointer_modes.state.position.0.max(0) as u32;m.y=pointer_modes.state.position.1.max(0) as u32;}
+            },
         }
         // A live modeset can shrink bounds while old events remain queued.
         m.x = m.x.min(bw.saturating_sub(1) as u32);
@@ -1445,7 +1465,8 @@ fn run_desktop_session(
         let (qs_applet,qs_edge)=active_qs_anchor.or_else(||shell.first_quicksettings_anchor()).unwrap_or(((0,0,0,0),panel_edge));
         let in_shell = |x: i32, y: i32| shell.contains(x,y);
 
-        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
 
         // --- Right-button press: forward to the content window under the cursor
         // as IN_DOWN with button=1 (context-menu trigger). Panel/dock/title are
@@ -1458,7 +1479,8 @@ fn run_desktop_session(
                 if wins[wi].alive && wins[wi].ws == current_ws && !wins[wi].minimized && !effects.covers(wins[wi].pid,animation_now) && effects.input_geometry(&wins[wi],animation_now).in_content(wx,wy) {
                     z.retain(|&i| i != wi);
                     z.push(wi);
-                    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                    sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                    if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
                     let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_DOWN,x,y, 1, pointer.modifiers);
                     break;
                 }
@@ -1617,7 +1639,8 @@ fn run_desktop_session(
                     }
                 } else if wins[wi].in_content(wx, wy) {
                     // Click landed on client content: forward it to the client.
-                    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                    sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                    if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
                     let (x,y)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);send_pointer(clients, wins[wi].pid,IN_DOWN,x,y, 0, pointer.modifiers);
                     transfers.begin_press(wins[wi].pid,mx,my);
                     pressed_win = Some(wi);
@@ -1648,7 +1671,8 @@ fn run_desktop_session(
             wins[wi].cy = ncy;
         }
 
-        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
 
         // --- Pointer focus + motion routed to the topmost content window ---
         let cur = if drag.is_some() || shell.contains(mx,my) || menu_open || qs_open {
@@ -1669,6 +1693,7 @@ fn run_desktop_session(
         // Preserve the existing client's implicit button grab until a real
         // transfer takes it over, including a first movement outside its window.
         let cur=if left&&!transfers.dragging(){pressed_win.filter(|wi|wins[*wi].alive).or(cur)}else{cur};
+        let cur=pointer_modes.owner().and_then(|pid|wins.iter().position(|w|w.pid==pid&&w.alive)).or(cur);
         if cur != input_focus {
             if let Some(old) = input_focus {
                 if wins[old].alive {
@@ -1686,7 +1711,7 @@ fn run_desktop_session(
         }
         if let Some(wi) = cur.filter(|_|!transfers.dragging()) {
             let (lx,ly)=effects.input_geometry(&wins[wi],animation_now).content_position(wx,wy);
-            if lx != last_lx || ly != last_ly {
+            if !pointer_modes.hidden() && (lx != last_lx || ly != last_ly) {
                 send_pointer(clients, wins[wi].pid, IN_MOVE, lx, ly, 0, pointer.modifiers);
                 last_lx = lx;
                 last_ly = ly;
@@ -1698,7 +1723,8 @@ fn run_desktop_session(
             if transfers.dragging(){
                 if let Some(wi)=transfers.active().and_then(|(_,_,target,_)|target).and_then(|pid|wins.iter().position(|w|w.pid==pid&&w.alive)){
                     raise_window(&mut z,wi);
-                    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                    sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,false);
+                    if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
                 }
                 transfers.drop_pointer(animation_now);
                 while let Some((index,id))=transfers.take_launch(){
@@ -1736,7 +1762,7 @@ fn run_desktop_session(
             }
         }
 
-        pointer_sample=batch.next(||libdunit::pointer::read_with_modifiers(pointer.input)).unwrap_or_else(|error|{
+        pointer_sample=batch.next(||libdunit::pointer::read_with_motion(pointer.input)).unwrap_or_else(|error|{
             libdunit::println(&alloc::format!("gui_server: FAIL pointer queue read {}",error));libdunit::exit(1)
         });
         if pointer_sample.is_none(){break (mx,my,wx,wy,menu_view,menu_org,menu_ly,qs_applet,qs_edge);}
@@ -1761,10 +1787,15 @@ fn run_desktop_session(
         }
         while let Some(ev) = libdunit::get_key_event() {
             performance.key();
+            // cmd_mod is configured desktop policy, Escape is its release action.
+            if ev.pressed && ev.scancode==SC_ESC && ev.mods&shortcuts.cmd_mod.mask()!=0 && pointer_modes.owner().is_some(){
+                pointer_modes.revoke(clients);continue;
+            }
             if ev.pressed&&ev.scancode==SC_ESC&&transfers.active().is_some(){transfers.cancel();continue;}
             // Synchronize before every key, not once per frame: a preceding
             // shortcut or switcher commit may already have raised another window.
-            sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+            sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+            if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
             let key_observation=keyboard_lifecycle.observe(ev.scancode,ev.pressed);
             if let Some(pid)=key_observation.released_to {
                 send_input(clients,pid,IN_KEY_UP,ev.scancode as i32,ev.mods as i32,0);
@@ -1865,7 +1896,8 @@ fn run_desktop_session(
             // Re-resolve after shortcuts have changed z/workspace. Negotiated
             // clients suppress held repeats that began in an earlier focus
             // scope; the legacy make-only stream remains unchanged.
-            sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+            sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+            if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
             if let Some(wi) = keyboard_window(&wins,&z,current_ws) {
                 let pid=wins[wi].pid;
                 let lifecycle=clients.iter().find(|c|c.pid==pid).is_some_and(|c|c.features&gui_protocol_v1::wire::FEATURE_INPUT_LIFECYCLE!=0);
@@ -1874,7 +1906,8 @@ fn run_desktop_session(
                 }
             }
         }
-        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
 
         performance.finish(performance::Stage::Input, perf_input);
         for win in wins.iter_mut().filter(|w|w.alive&&!w.rule_applied) {
@@ -2087,7 +2120,8 @@ fn run_desktop_session(
         }
 
         // Policy/Lua commands may have changed focus after keyboard dispatch.
-        sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,menu_open||qs_open||switcher.active);
+        if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
 
         let damage_duration=if animation_clock.is_some(){anim_duration_ms}else{0};
         let mut desktop_widget_stats=libdunit::SystemStats::default();
@@ -2103,7 +2137,7 @@ fn run_desktop_session(
             ||desktop_tracks.animating(animation_now)||desktop_motion::changed(&workspace_damage_view,bw,bh);
         let perf_compose = performance.begin_compose();
         let partial=damage_cache.compose(damage_runtime::Context{
-            wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),now:animation_now,
+            wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),cursor_visible:!pointer_modes.hidden(),now:animation_now,
             duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,effects:&fx,
             shell:&shell,window_effects:&effects,blocked:damage_blocked,
             widgets:(wg.enabled,widget_seconds,desktop_widget_stats.memory_used_percent(),desktop_widget_stats.process_running),
@@ -2442,7 +2476,7 @@ fn run_desktop_session(
                 draw_shell_text(&mut back,bw,bh,font.as_ref(),x+side+gap,y,ly.panel_font_px,theme.panel_text,label.as_bytes());
             }
         }
-        draw_cursor(&mut back, bw, bh, mx, my, &shell.cursor, skin.cursor_colors());
+        if !pointer_modes.hidden(){draw_cursor(&mut back, bw, bh, mx, my, &shell.cursor, skin.cursor_colors());}
 
 
         let bytes =
@@ -2512,7 +2546,7 @@ fn run_desktop_session(
     }
 
     performance.flush();
-    sync_keyboard_focus(&mut keyboard_lifecycle,clients,&wins,&z,current_ws,true);
+    sync_keyboard_focus(&mut pointer_modes,&mut keyboard_lifecycle,clients,&wins,&z,current_ws,true);
     // Session over: tell every client to exit its input loop so serve_two_clients
     // can reap them (a QUIT to an already-exited pid is a harmless no-op).
     for w in wins.iter() {

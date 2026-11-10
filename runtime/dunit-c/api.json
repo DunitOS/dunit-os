@@ -44,6 +44,7 @@
     "DunitUiNativeInputV1": {"size": 24, "align": 4, "fields": [["kind", "u32"], ["x", "i32"], ["y", "i32"], ["value", "u32"], ["button", "u32"], ["modifiers", "u32"]]}
   },
   "functions": {
+    "dunit_ui_pointer_mode_v1": {"result":"i32","args":[["session","void_ptr"],["mode","u32"]]},
     "dunit_ui_run_v1": {"result": "i32", "args": [["argc", "i32"], ["argv", "strings"], ["envp", "strings"], ["width", "u32"], ["height", "u32"], ["callbacks", "callbacks_const"]]},
     "dunit_ui_run_styled_v1": {"result": "i32", "args": [["argc", "i32"], ["argv", "strings"], ["envp", "strings"], ["width", "u32"], ["height", "u32"], ["callbacks", "callbacks_const"], ["style", "style_const"]]},
     "dunit_ui_run_text_v1": {"result": "i32", "args": [["argc", "i32"], ["argv", "strings"], ["envp", "strings"], ["width", "u32"], ["height", "u32"], ["callbacks", "callbacks_const"], ["style", "style_const"], ["text", "text_const"]]},

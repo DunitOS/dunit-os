@@ -379,7 +379,7 @@ impl Server {
                 if required_features & !offered_features != 0 {
                     return error(obj, ser, ErrorCode::Malformed, true);
                 }
-                let supported = FEATURE_ARGB8888 | FEATURE_INPUT_LIFECYCLE | FEATURE_DATA_TRANSFER;
+                let supported = FEATURE_ARGB8888 | FEATURE_INPUT_LIFECYCLE | FEATURE_DATA_TRANSFER | crate::wire::FEATURE_POINTER_MODE;
                 if required_features & !supported != 0 {
                     return error(obj, ser, ErrorCode::Unsupported, true);
                 }
