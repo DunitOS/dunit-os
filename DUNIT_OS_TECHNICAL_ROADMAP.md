@@ -1228,11 +1228,17 @@ M7 + M8 + шрифты/декодеры --> M10 браузер
 
 ## 23. Приоритеты: must-have / should-have / later
 
+**Отдельный трек производительности/SMP, 11 ноября 2026:** по запросу пользователя
+создан [performance roadmap OP0–OP9](DUNIT_OS_PERFORMANCE_ROADMAP.md). Измерения и
+аудит UP — первые шаги; настоящая параллельная работа допускается после CPU-local
+контекста, AP/IPI, memory/lock audit и TLB shootdown. Это план, не статус готового
+SMP; функциональные долги M7 сохраняются.
+
 **Must-have:** M0; preemption/threads/wait queues/handles/shared VM; GUI protocol/server; DWM parity; DunitFS recovery + disk-root/init; persistence matrix.
 
 **Should-have:** static musl port (сделано), **M7 Dunit SDK** (wait-set, рантайм, декларативный GUI/виджеты/темы, DnD, миграция программ), config hot reload, workspaces/session restore, VirtIO modern block, ACPI shutdown.
 
-**Later:** M8 сеть (`netd`/TCP/TLS), M9 программы на SDK (rock и др.), M10 браузер; dynamic loader, full signals/fork, SMP, GPU acceleration, audio mixer, USB mass storage, signed repositories, suspend/resume.
+**Later:** M8 сеть (`netd`/TCP/TLS), M9 программы на SDK (rock и др.), M10 браузер; dynamic loader, full signals/fork, GPU acceleration, audio mixer, USB mass storage, signed repositories, suspend/resume.
 
 ## 24. Risk register
 
