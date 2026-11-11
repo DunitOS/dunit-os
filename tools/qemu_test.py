@@ -580,6 +580,13 @@ def run(args: argparse.Namespace) -> RunResult:
 
     display = args.display if getattr(args, "interactive", False) else "none"
     extra_args = list(args.qemu_arg or [])
+    cpus = getattr(args, "cpus", None)
+    if cpus is not None:
+        if not 1 <= cpus <= 256:
+            raise ValueError("--cpus must be between 1 and 256")
+        if any(a == "-smp" or a.startswith("-smp=") for a in extra_args):
+            raise ValueError("use --cpus or raw -smp, not both")
+        extra_args += ["-smp", str(cpus)]
     # UEFI: prepend an OVMF pflash pair (CODE read-only, a writable VARS copy) so
     # the same image boots through its EFI path instead of SeaBIOS.
     if args.uefi:
@@ -616,9 +623,17 @@ def run(args: argparse.Namespace) -> RunResult:
                                   serial_log, extra_args, display)
     print("[qemu_test] launch:", " ".join(qemu_cmd), file=sys.stderr)
 
+    metadata = None
+    metadata_path = getattr(args, "performance_record", None)
+    if metadata_path:
+        from performance_metadata import collect
+
+        metadata = collect(REPO_ROOT, image, qemu_cmd, args.image_profile)
     result = RunResult(ok=False, reason="", booted=False, iso=str(image))
-    proc = subprocess.Popen(qemu_cmd, cwd=REPO_ROOT,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    launch_started = time.monotonic()
+    proc = subprocess.Popen(
+        qemu_cmd, cwd=REPO_ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     hard_deadline = time.monotonic() + args.timeout
     qmp = Qmp(qmp_sock)
     serial = SerialTail(serial_log)
@@ -644,6 +659,10 @@ def run(args: argparse.Namespace) -> RunResult:
     try:
         qmp.connect(timeout=min(20.0, args.timeout))
         serial.open(timeout=min(20.0, args.timeout))
+        if metadata is not None:
+            cpus_reply = qmp.execute("query-cpus-fast")
+            if isinstance(cpus_reply.get("return"), list):
+                metadata["guest"]["emulator_vcpus"] = len(cpus_reply["return"])
 
         if args.interactive:
             # Human-in-the-loop mode: a real QEMU window is open on the user's
@@ -670,8 +689,14 @@ def run(args: argparse.Namespace) -> RunResult:
         booted = serial.wait_for_marker(args.ready_marker, boot_budget)
         result.booted = booted
         result.boot_serial = serial.text
+        if metadata is not None and booted:
+            metadata["measurements"]["launch_to_ready_wall_ms"] = (
+                time.monotonic() - launch_started
+            ) * 1000
         if not booted:
-            force_quit(f"boot marker {args.ready_marker!r} not seen in {boot_budget:.0f}s")
+            force_quit(
+                f"boot marker {args.ready_marker!r} not seen in {boot_budget:.0f}s"
+            )
             result.ok = False
             return result
 
@@ -731,6 +756,8 @@ def run(args: argparse.Namespace) -> RunResult:
         result.ok = False
         result.reason = f"error: {err}"
     finally:
+        if proc.poll() is None:
+            force_quit("run stopped")
         serial.pump()
         qmp.close()
         result.full_serial_len = len(serial.text)
@@ -759,6 +786,31 @@ def run(args: argparse.Namespace) -> RunResult:
                     result.reason = f"{result.reason}; {marker_reason}"
                 result.ok = False
 
+        if metadata is not None:
+            import re
+
+            cpu_state = re.search(
+                r"\[SMP\] hardware_online=(\d+) scheduler=(\w+) dispatch_cpus=(\d+)",
+                serial.text,
+            )
+            if cpu_state:
+                metadata["guest"].update(
+                    kernel_online_cpus=int(cpu_state[1]),
+                    kernel_scheduler=cpu_state[2],
+                    dispatch_cpus=int(cpu_state[3]),
+                )
+            metadata["measurements"]["run_wall_ms"] = (
+                time.monotonic() - launch_started
+            ) * 1000
+            metadata["result"] = {
+                "ok": result.ok,
+                "reason": result.reason,
+                "missing": result.missing_markers,
+                "forbidden": result.forbidden_hits,
+            }
+            output = Path(metadata_path)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(metadata, indent=2) + "\n")
     return result
 
 
@@ -830,15 +882,35 @@ def main() -> int:
                         help="serial substring that means the terminal is ready")
     parser.add_argument("--screenshot", metavar="FILE.ppm",
                         help="grab a framebuffer screenshot (PPM) before shutdown")
-    parser.add_argument("--accel", choices=["auto", "kvm", "tcg"], default="auto",
-                        help="QEMU acceleration (default auto: kvm if /dev/kvm writable)")
+    parser.add_argument(
+        "--accel",
+        choices=["auto", "kvm", "tcg"],
+        default="auto",
+        help="QEMU acceleration (default auto: kvm if /dev/kvm writable)",
+    )
+    parser.add_argument("--cpus", type=int, help="explicit guest vCPU count (1..256)")
+    parser.add_argument(
+        "--performance-record",
+        type=Path,
+        help="write opt-in reproducibility and wall-time JSON",
+    )
     parser.add_argument("--mem", default="512M", help="guest RAM (default 512M)")
-    parser.add_argument("--workdir", help="where to place qmp socket / serial log (default build/)")
-    parser.add_argument("--qemu-arg", action="append",
-                        help="extra raw argument passed to qemu (repeatable)")
+    parser.add_argument(
+        "--workdir", help="where to place qmp socket / serial log (default build/)"
+    )
+    parser.add_argument(
+        "--qemu-arg",
+        action="append",
+        help="extra raw argument passed to qemu (repeatable)",
+    )
     from image_profile import PROFILES
-    parser.add_argument("--image-profile",choices=PROFILES,default="full",
-                        help="composition for a developer --build ISO; independent of its boot config")
+
+    parser.add_argument(
+        "--image-profile",
+        choices=PROFILES,
+        default="full",
+        help="composition for a developer --build ISO; independent of its boot config",
+    )
     parser.add_argument("--scratch-disk", type=int, metavar="SIZE_MB",
                         help="attach a blank raw AHCI scratch disk of SIZE_MB MiB before "
                              "booting (for the installer self-test; enumerates as sda on an ISO boot)")

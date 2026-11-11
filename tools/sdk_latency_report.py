@@ -7,15 +7,12 @@ import re
 import statistics
 
 
-def summarize(timing, serial):
+def parse_phases(timing, serial):
     phases = {}
     for raw in Path(timing).read_text().splitlines():
         if raw.startswith('[INPUT-TIMING] '):
             item = json.loads(raw.split(' ', 1)[1])
             phases[item['phase']] = {'wall_ms': item['wall_ns'] / 1_000_000}
-    expected = {f'{case}-{n}' for case in ('wheel', 'short', 'long', 'drag') for n in range(1, 4)}
-    if set(phases) not in (expected, expected | {'wheel-burst'}):
-        raise ValueError(f'{timing}: expected all twelve input phases and only the optional wheel burst')
     if 'Result    : OK (completed)' not in Path(timing).read_text():
         raise ValueError(f'{timing}: QEMU scenario did not complete successfully')
     def field(text, name):
@@ -44,6 +41,20 @@ def summarize(timing, serial):
             commit_result_ms=duration(text, 'commit_result'), frame_done_ms=duration(text, 'frame_done'),
             retire_ms=duration(text, 'retire'), redraws=field(text, 'redraw_calls'),
             commits=field(text, 'commits'), input_qmax=field(text, 'input_queue_high_water'))
+    return phases
+
+
+def summarize(timing, serial):
+    phases = parse_phases(timing, serial)
+    expected = {
+        f"{case}-{n}"
+        for case in ("wheel", "short", "long", "drag")
+        for n in range(1, 4)
+    }
+    if set(phases) not in (expected, expected | {"wheel-burst"}):
+        raise ValueError(
+            f"{timing}: expected all twelve input phases and only the optional wheel burst"
+        )
     result = {}
     cases = [(case, [f'{case}-{n}' for n in range(1, 4)])
              for case in ('wheel', 'short', 'long', 'drag')]

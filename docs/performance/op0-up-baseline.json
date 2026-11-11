@@ -1,0 +1,900 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "schema_version": 1,
+    "started_utc": "2026-11-11T14:31:01.638143+00:00",
+    "git": {
+      "commit": "1ba1905366c0411d8cfa7aa1d2c26e1e2ceb59e4",
+      "status": "M Makefile\n M tools/qemu_test.py\n M tools/sdk_latency_report.py\n M tools/test_sdk_gui_fixture.py\n?? assets/tcc/performance.c\n?? runtime/dunit-c/target\n?? tools/performance_baseline.py\n?? tools/performance_metadata.py\n?? userspace/system_apps/abi_test/target\n?? userspace/system_apps/args_test/target\n?? userspace/system_apps/bmp_viewer/target\n?? userspace/system_apps/calc/target\n?? userspace/system_apps/color_test/target\n?? userspace/system_apps/cwd_test/target\n?? userspace/system_apps/dsh/target\n?? userspace/system_apps/dsh_calc_test/target\n?? userspace/system_apps/dtop/target\n?? userspace/system_apps/dufetch/target\n?? userspace/system_apps/elf_demo/target\n?? userspace/system_apps/env_test/target\n?? userspace/system_apps/exit_test/target\n?? userspace/system_apps/fault_pf/target\n?? userspace/system_apps/fault_ud/target\n?? userspace/system_apps/file_api_test/target\n?? userspace/system_apps/fs_test/target\n?? userspace/system_apps/fsck_dunit/target\n?? userspace/system_apps/futex_test/target\n?? userspace/system_apps/gui_calc/target\n?? userspace/system_apps/gui_client/target\n?? userspace/system_apps/gui_demo/target\n?? userspace/system_apps/gui_files/target\n?? userspace/system_apps/gui_server/target\n?? userspace/system_apps/gui_settings/target\n?? userspace/system_apps/gui_shbuf_peer/target\n?? userspace/system_apps/gui_stat/target\n?? userspace/system_apps/gui_terminal/target\n?? userspace/system_apps/handle_test/target\n?? userspace/system_apps/image_demo/target\n?? userspace/system_apps/init/target\n?? userspace/system_apps/init_probe/target\n?? userspace/system_apps/input_test/target\n?? userspace/system_apps/ipc_child/target\n?? userspace/system_apps/ipc_parent/target\n?? userspace/system_apps/kill_target/target\n?? userspace/system_apps/path_test/target\n?? userspace/system_apps/pointer_queue_denied/target\n?? userspace/system_apps/pointer_queue_test/target\n?? userspace/system_apps/pointer_test/target\n?? userspace/system_apps/preempt_child/target\n?? userspace/system_apps/preempt_test/target\n?? userspace/system_apps/pty_echo/target\n?? userspace/system_apps/pty_test/target\n?? userspace/system_apps/resumable_child/target\n?? userspace/system_apps/resumable_test/target\n?? userspace/system_apps/runtime_stress/target\n?? userspace/system_apps/scheduler_test/target\n?? userspace/system_apps/sdk_api_test/target\n?? userspace/system_apps/sdk_catalog_test/target\n?? userspace/system_apps/setup/target\n?? userspace/system_apps/spawn_ready_test/target\n?? userspace/system_apps/stdin_test/target\n?? userspace/system_apps/svg_test/target\n?? userspace/system_apps/thread_test/target\n?? userspace/system_apps/tls_test/target\n?? userspace/system_apps/vm_guard_fault/target\n?? userspace/system_apps/vm_peer/target\n?? userspace/system_apps/vm_protect_fault/target\n?? userspace/system_apps/vm_test/target\n?? userspace/system_apps/wait_test/target\n?? userspace/system_apps/waitset_pty_peer/target\n?? userspace/system_apps/waitset_test/target\n?? userspace/system_apps/yield_child/target\n?? userspace/system_apps/yield_test/target",
+      "tracked_diff_sha256": "caec8de133980dfebe664f9dce905a37dbcdc3a58d6e44729511359f686d17a0",
+      "untracked_sha256": {
+        "assets/tcc/performance.c": "ca4b131b79de925475c54e40d87b6a9c02eb3f6344afb3a721bc31e0ce8c0618",
+        "tools/performance_baseline.py": "0fee5c4a0cfa4ddb904fb7c6ce29aa1ca18fcfd1ff841db1126deb60be8a8a6e",
+        "tools/performance_metadata.py": "1ec349ae3f1b7123afab57881bab4ef2597536bfbb7e2c774b60633764ccc15b"
+      }
+    },
+    "image": {
+      "path": "/workspace/dunit-os/build/microkernel.iso",
+      "sha256": "745a17cb163445b151985d6878e0461005d7fd6d4f40c6810fc04acef1af0594",
+      "bytes": 269699072,
+      "profile": "full"
+    },
+    "tools": {
+      "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+      "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+      "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+    },
+    "guest": {
+      "qemu_command": [
+        "qemu-system-x86_64",
+        "-no-reboot",
+        "-m",
+        "512M",
+        "-display",
+        "none",
+        "-serial",
+        "file:/workspace/dunit-os/build/performance/up-baseline/qemu-serial.log",
+        "-qmp",
+        "unix:/workspace/dunit-os/build/performance/up-baseline/qemu-qmp.sock,server,nowait",
+        "-vga",
+        "std",
+        "-global",
+        "VGA.vgamem_mb=32",
+        "-cdrom",
+        "/workspace/dunit-os/build/microkernel.iso",
+        "-boot",
+        "d",
+        "-machine",
+        "q35,accel=tcg",
+        "-smp",
+        "1"
+      ],
+      "machine": "q35,accel=tcg",
+      "requested_vcpus": 1,
+      "emulator_vcpus": 1,
+      "kernel_online_cpus": null
+    },
+    "host": {
+      "system": "Linux",
+      "release": "6.18.57",
+      "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+      "logical_cpus": 3,
+      "affinity": [
+        0,
+        1,
+        2
+      ],
+      "cgroup": {
+        "cpu.max": "max 100000",
+        "cpuset.cpus.effective": "0-2",
+        "memory.max": "max"
+      },
+      "kvm_accessible": false
+    },
+    "clock": {
+      "guest_source": "PIT (current UP kernel)",
+      "guest_resolution_ns": 10000000,
+      "host": "time.monotonic",
+      "physical_scanout_measured": false
+    },
+    "measurements": {
+      "launch_to_ready_wall_ms": 4721.339235000414,
+      "run_wall_ms": 63436.220978000165,
+      "cpu_time_ms": null,
+      "rss_bytes": null
+    },
+    "result": {
+      "ok": true,
+      "reason": "completed",
+      "missing": [],
+      "forbidden": []
+    }
+  },
+  "ui": {
+    "wheel": {
+      "stream_completion_ms": {
+        "samples": 5,
+        "p50": 1019.358234,
+        "p95": 1059.934668,
+        "p99": 1059.934668,
+        "min": 1001.491522,
+        "max": 1059.934668,
+        "raw": [
+          1018.724698,
+          1019.358234,
+          1001.491522,
+          1058.378336,
+          1059.934668
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "trials": [
+        {
+          "wall_ms": 1018.724698,
+          "accepted": 24,
+          "render_ms": 420.0,
+          "redraw_ms": 980.0,
+          "import_attach_ms": 50.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 260.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 1019.358234,
+          "accepted": 24,
+          "render_ms": 400.0,
+          "redraw_ms": 990.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 250.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 1001.491522,
+          "accepted": 24,
+          "render_ms": 460.0,
+          "redraw_ms": 970.0,
+          "import_attach_ms": 30.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 230.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 1058.378336,
+          "accepted": 24,
+          "render_ms": 490.0,
+          "redraw_ms": 1010.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 270.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        },
+        {
+          "wall_ms": 1059.934668,
+          "accepted": 24,
+          "render_ms": 490.0,
+          "redraw_ms": 1010.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 270.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 23
+        }
+      ],
+      "warmup": {
+        "wall_ms": 1021.897096,
+        "accepted": 24,
+        "render_ms": 440.0,
+        "redraw_ms": 980.0,
+        "import_attach_ms": 10.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 260.0,
+        "retire_ms": 240.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 23
+      },
+      "physical_input_to_photon": null
+    },
+    "short": {
+      "stream_completion_ms": {
+        "samples": 5,
+        "p50": 721.334884,
+        "p95": 744.539079,
+        "p99": 744.539079,
+        "min": 600.020086,
+        "max": 744.539079,
+        "raw": [
+          744.539079,
+          624.502105,
+          722.894861,
+          721.334884,
+          600.020086
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "trials": [
+        {
+          "wall_ms": 744.539079,
+          "accepted": 24,
+          "render_ms": 120.0,
+          "redraw_ms": 660.0,
+          "import_attach_ms": 50.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 300.0,
+          "retire_ms": 170.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 37
+        },
+        {
+          "wall_ms": 624.502105,
+          "accepted": 24,
+          "render_ms": 110.0,
+          "redraw_ms": 480.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 10.0,
+          "frame_done_ms": 280.0,
+          "retire_ms": 70.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 37
+        },
+        {
+          "wall_ms": 722.894861,
+          "accepted": 24,
+          "render_ms": 190.0,
+          "redraw_ms": 660.0,
+          "import_attach_ms": 20.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 330.0,
+          "retire_ms": 120.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 39
+        },
+        {
+          "wall_ms": 721.334884,
+          "accepted": 24,
+          "render_ms": 140.0,
+          "redraw_ms": 600.0,
+          "import_attach_ms": 30.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 320.0,
+          "retire_ms": 110.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 37
+        },
+        {
+          "wall_ms": 600.020086,
+          "accepted": 24,
+          "render_ms": 130.0,
+          "redraw_ms": 480.0,
+          "import_attach_ms": 20.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 260.0,
+          "retire_ms": 70.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 41
+        }
+      ],
+      "warmup": {
+        "wall_ms": 716.756962,
+        "accepted": 24,
+        "render_ms": 140.0,
+        "redraw_ms": 600.0,
+        "import_attach_ms": 20.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 320.0,
+        "retire_ms": 120.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 39
+      },
+      "physical_input_to_photon": null
+    },
+    "long": {
+      "stream_completion_ms": {
+        "samples": 5,
+        "p50": 1954.459413,
+        "p95": 1993.802717,
+        "p99": 1993.802717,
+        "min": 1930.179373,
+        "max": 1993.802717,
+        "raw": [
+          1930.179373,
+          1931.004498,
+          1954.459413,
+          1993.802717,
+          1970.438065
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "trials": [
+        {
+          "wall_ms": 1930.179373,
+          "accepted": 24,
+          "render_ms": 1240.0,
+          "redraw_ms": 1860.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 370.0,
+          "retire_ms": 240.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        },
+        {
+          "wall_ms": 1931.004498,
+          "accepted": 24,
+          "render_ms": 1220.0,
+          "redraw_ms": 1870.0,
+          "import_attach_ms": 0.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 420.0,
+          "retire_ms": 230.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        },
+        {
+          "wall_ms": 1954.459413,
+          "accepted": 24,
+          "render_ms": 1280.0,
+          "redraw_ms": 1860.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 370.0,
+          "retire_ms": 200.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        },
+        {
+          "wall_ms": 1993.802717,
+          "accepted": 24,
+          "render_ms": 1250.0,
+          "redraw_ms": 1880.0,
+          "import_attach_ms": 30.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 370.0,
+          "retire_ms": 230.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        },
+        {
+          "wall_ms": 1970.438065,
+          "accepted": 24,
+          "render_ms": 1260.0,
+          "redraw_ms": 1870.0,
+          "import_attach_ms": 10.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 390.0,
+          "retire_ms": 210.0,
+          "redraws": 24,
+          "commits": 24,
+          "input_qmax": 45
+        }
+      ],
+      "warmup": {
+        "wall_ms": 2012.124765,
+        "accepted": 24,
+        "render_ms": 1270.0,
+        "redraw_ms": 1890.0,
+        "import_attach_ms": 40.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 330.0,
+        "retire_ms": 230.0,
+        "redraws": 24,
+        "commits": 24,
+        "input_qmax": 45
+      },
+      "physical_input_to_photon": null
+    },
+    "drag": {
+      "stream_completion_ms": {
+        "samples": 5,
+        "p50": 273.064412,
+        "p95": 330.040048,
+        "p99": 330.040048,
+        "min": 251.120315,
+        "max": 330.040048,
+        "raw": [
+          330.040048,
+          292.154503,
+          272.639642,
+          273.064412,
+          251.120315
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "trials": [
+        {
+          "wall_ms": 330.040048,
+          "accepted": 0,
+          "render_ms": 30.0,
+          "redraw_ms": 280.0,
+          "import_attach_ms": 60.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 110.0,
+          "retire_ms": 80.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 292.154503,
+          "accepted": 0,
+          "render_ms": 40.0,
+          "redraw_ms": 240.0,
+          "import_attach_ms": 40.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 70.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 272.639642,
+          "accepted": 0,
+          "render_ms": 40.0,
+          "redraw_ms": 240.0,
+          "import_attach_ms": 60.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 70.0,
+          "retire_ms": 70.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        },
+        {
+          "wall_ms": 273.064412,
+          "accepted": 0,
+          "render_ms": 30.0,
+          "redraw_ms": 230.0,
+          "import_attach_ms": 100.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 60.0,
+          "retire_ms": 40.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 3
+        },
+        {
+          "wall_ms": 251.120315,
+          "accepted": 0,
+          "render_ms": 50.0,
+          "redraw_ms": 210.0,
+          "import_attach_ms": 30.0,
+          "commit_result_ms": 0.0,
+          "frame_done_ms": 90.0,
+          "retire_ms": 40.0,
+          "redraws": 5,
+          "commits": 4,
+          "input_qmax": 4
+        }
+      ],
+      "warmup": {
+        "wall_ms": 283.15337,
+        "accepted": 0,
+        "render_ms": 40.0,
+        "redraw_ms": 250.0,
+        "import_attach_ms": 70.0,
+        "commit_result_ms": 0.0,
+        "frame_done_ms": 80.0,
+        "retire_ms": 60.0,
+        "redraws": 5,
+        "commits": 4,
+        "input_qmax": 4
+      },
+      "physical_input_to_photon": null
+    },
+    "wheel-burst": {
+      "wall_ms": 66.254569,
+      "accepted": 24,
+      "render_ms": 20.0,
+      "redraw_ms": 50.0,
+      "import_attach_ms": 0.0,
+      "commit_result_ms": 0.0,
+      "frame_done_ms": 20.0,
+      "retire_ms": 10.0,
+      "redraws": 1,
+      "commits": 1,
+      "input_qmax": 1
+    }
+  },
+  "core": {
+    "cpu-1": {
+      "coarse_guest_elapsed_ms": {
+        "samples": 5,
+        "p50": 40.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "min": 40.0,
+        "max": 50.0,
+        "raw": [
+          40.0,
+          50.0,
+          40.0,
+          40.0,
+          40.0
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "clock_resolution_ms": 10,
+      "irq_off_may_undercount": true,
+      "trials": [
+        {
+          "scene": "cpu-1",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 1,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 3,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 4,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 5,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        }
+      ]
+    },
+    "cpu-2": {
+      "coarse_guest_elapsed_ms": {
+        "samples": 5,
+        "p50": 50.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "min": 50.0,
+        "max": 50.0,
+        "raw": [
+          50.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "clock_resolution_ms": 10,
+      "irq_off_may_undercount": true,
+      "trials": [
+        {
+          "scene": "cpu-2",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 1,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 3,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 5,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        }
+      ]
+    },
+    "cpu-4": {
+      "coarse_guest_elapsed_ms": {
+        "samples": 5,
+        "p50": 50.0,
+        "p95": 50.0,
+        "p99": 50.0,
+        "min": 40.0,
+        "max": 50.0,
+        "raw": [
+          50.0,
+          50.0,
+          40.0,
+          50.0,
+          50.0
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "clock_resolution_ms": 10,
+      "irq_off_may_undercount": true,
+      "trials": [
+        {
+          "scene": "cpu-4",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 1,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 3,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 5,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        }
+      ]
+    },
+    "cpu-8": {
+      "coarse_guest_elapsed_ms": {
+        "samples": 5,
+        "p50": 50.0,
+        "p95": 80.0,
+        "p99": 80.0,
+        "min": 50.0,
+        "max": 80.0,
+        "raw": [
+          80.0,
+          50.0,
+          50.0,
+          50.0,
+          50.0
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "clock_resolution_ms": 10,
+      "irq_off_may_undercount": true,
+      "trials": [
+        {
+          "scene": "cpu-8",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 1,
+          "elapsed_ns": 80000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 3,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 5,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        }
+      ]
+    },
+    "allocator": {
+      "coarse_guest_elapsed_ms": {
+        "samples": 5,
+        "p50": 230.0,
+        "p95": 240.0,
+        "p99": 240.0,
+        "min": 220.0,
+        "max": 240.0,
+        "raw": [
+          220.0,
+          230.0,
+          220.0,
+          230.0,
+          240.0
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "clock_resolution_ms": 10,
+      "irq_off_may_undercount": true,
+      "trials": [
+        {
+          "scene": "allocator",
+          "trial": 0,
+          "elapsed_ns": 230000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 1,
+          "elapsed_ns": 220000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 2,
+          "elapsed_ns": 230000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 3,
+          "elapsed_ns": 220000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 4,
+          "elapsed_ns": 230000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 5,
+          "elapsed_ns": 240000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        }
+      ]
+    },
+    "memfs-io": {
+      "coarse_guest_elapsed_ms": {
+        "samples": 5,
+        "p50": 30.0,
+        "p95": 30.0,
+        "p99": 30.0,
+        "min": 20.0,
+        "max": 30.0,
+        "raw": [
+          30.0,
+          30.0,
+          30.0,
+          20.0,
+          30.0
+        ],
+        "tails": "empirical nearest rank; five trials do not establish an event-latency SLA"
+      },
+      "clock_resolution_ms": 10,
+      "irq_off_may_undercount": true,
+      "trials": [
+        {
+          "scene": "memfs-io",
+          "trial": 0,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 1,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 2,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 3,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 4,
+          "elapsed_ns": 20000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 5,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        }
+      ]
+    }
+  },
+  "unmeasured": [
+    "guest CPU accounting",
+    "physical scanout",
+    "per-event p95/p99",
+    "KVM scaling",
+    "allocation counts",
+    "kernel pointer queue occupancy",
+    "IPC microbenchmark"
+  ],
+  "interpretation": "UI times include injection and polling; core times are PIT elapsed, not CPU time. Thread counts are not kernel online CPUs."
+}

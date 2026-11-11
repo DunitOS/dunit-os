@@ -149,7 +149,7 @@ $(BUILD_DIR)/kernel.o: hal userspace
 kernel: $(BUILD_DIR)/kernel.o
 
 $(BUILD_DIR)/kernel.elf: kernel
-	/usr/bin/ld.lld -T $(KERNEL_DIR)/linker.ld -o $@ $(HAL_OBJS) $(BUILD_DIR)/kernel.o
+	/usr/bin/ld.lld --gc-sections -T $(KERNEL_DIR)/linker.ld -o $@ $(HAL_OBJS) $(BUILD_DIR)/kernel.o
 
 userspace:
 	mkdir -p $(USERSPACE_BUILD_DIR)

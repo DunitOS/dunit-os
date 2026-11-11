@@ -18,24 +18,58 @@ def main(fixture=None):
     if fixture is None:
         parser.add_argument('fixture', choices=('resize', 'canvas', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers', 'transfer', 'matrix', 'clipboard', 'shellprobe'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
-    parser.add_argument('--reuse-image', action='store_true')
+    parser.add_argument("--markers-file", type=Path)
+    parser.add_argument("--run-dir", type=Path)
+    parser.add_argument("--cpus", type=int, default=1)
+    parser.add_argument("--cmd-timeout", type=int, default=180)
+    parser.add_argument("--timeout", type=int, default=360)
+    parser.add_argument("--reuse-image", action="store_true")
     args = parser.parse_args()
     fixture = fixture or args.fixture
     source_name = "sdk_window_resize" if fixture == "resize" else f"sdk_{fixture}"
     app_id = f'sdk_{fixture}_fixture'
     config_name = f'sdk-{fixture.replace("_", "-")}.toml'
-    contract = json.loads((ROOT / f'tools/{source_name}_markers.json').read_text()) if fixture!='matrix' else {}
-    image_profile = contract.get('run', {}).get('image_profile', 'dwm')
-    if image_profile not in ('dwm', 'full'):
-        raise ValueError('SDK fixtures require dwm or full image composition')
-    boot_config = ('limine_test_terminal.conf' if image_profile=='full' else 'limine_sdk_terminal.conf')
+    markers=args.markers_file or ROOT / f'tools/{source_name}_markers.json'
+    contract = json.loads(markers.read_text()) if fixture != "matrix" else {}
+    image_profile = contract.get("run", {}).get("image_profile", "dwm")
+    if image_profile not in ("dwm", "full"):
+        raise ValueError("SDK fixtures require dwm or full image composition")
+    boot_config = (
+        "limine_test_terminal.conf"
+        if image_profile == "full"
+        else "limine_sdk_terminal.conf"
+    )
 
-    os.environ['RUSTUP_TOOLCHAIN'] = 'nightly'
-    os.environ['PATH'] = str(Path(cargo()).parent) + os.pathsep + os.environ['PATH']
-    command = [sys.executable, str(ROOT / 'tools/qemu_test.py'), '--markers-file',
-        str(ROOT / f'tools/{source_name}_markers.json'), '--accel', args.accel,
-        '--post-boot-delay', '3', '--settle', '1.5', '--timeout', '360',
-        '--boot-timeout', '180', '--cmd-timeout', '180']
+    os.environ["RUSTUP_TOOLCHAIN"] = "nightly"
+    os.environ["PATH"] = str(Path(cargo()).parent) + os.pathsep + os.environ["PATH"]
+    command = [
+        sys.executable,
+        str(ROOT / "tools/qemu_test.py"),
+        "--markers-file",
+        str(markers),
+        "--accel",
+        args.accel,
+        "--post-boot-delay",
+        "3",
+        "--settle",
+        "1.5",
+        "--timeout",
+        str(args.timeout),
+        "--boot-timeout",
+        "180",
+        "--cmd-timeout",
+        str(args.cmd_timeout),
+        "--cpus",
+        str(args.cpus),
+    ]
+    if args.run_dir:
+        args.run_dir.mkdir(parents=True, exist_ok=True)
+        command += [
+            "--workdir",
+            str(args.run_dir),
+            "--performance-record",
+            str(args.run_dir / "metadata.json"),
+        ]
     if fixture=='transfer':
         command[command.index('--timeout')+1]='600'
         command[command.index('--cmd-timeout')+1]='480'
@@ -52,15 +86,25 @@ def main(fixture=None):
                 (app_folder / 'target').symlink_to(fixture_cache, target_is_directory=True)
                 if fixture in ('component', 'resize', 'transfer', 'theme'):
                     with (app_folder / 'Cargo.toml').open('a') as manifest_file:
-                        manifest_file.write('dwm_settings = { path = '
-                            + json.dumps(str(ROOT / 'userspace/dwm_settings')) + ' }\n')
-                (app_folder / 'src/main.rs').write_text(TEST_ATTRIBUTES + (ROOT / f'tools/fixtures/{source}.rs').read_text())
+                        manifest_file.write(
+                            "dwm_settings = { path = "
+                            + json.dumps(str(ROOT / "userspace/dwm_settings"))
+                            + " }\n"
+                        )
+                if contract.get("run", {}).get("fixture_release_profile") == "size":
+                    with (app_folder / "Cargo.toml").open("a") as f:
+                        f.write(
+                            '\n[profile.release]\nlto = "fat"\nopt-level = "z"\ncodegen-units = 1\n'
+                        )
+                (app_folder / "src/main.rs").write_text(
+                    TEST_ATTRIBUTES + (ROOT / f"tools/fixtures/{source}.rs").read_text()
+                )
                 manifest, package, app = project(app_folder)
                 artifact = build(manifest, package, app)
-                executable = overlay / 'app' / app.binary
+                executable = overlay / "app" / app.binary
                 executable.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(artifact, executable)
-                metadata = overlay / 'system/share/dunit/apps' / app.id / 'dunit.toml'
+                metadata = overlay / "system/share/dunit/apps" / app.id / "dunit.toml"
                 metadata.parent.mkdir(parents=True)
                 metadata.write_text(installed_manifest(app))
                 return executable
