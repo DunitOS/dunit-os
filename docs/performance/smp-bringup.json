@@ -1,0 +1,643 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-11",
+  "scope": "isolated AP hardware bring-up; application dispatch remains UP",
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "source_fingerprint": {
+    "commit": "1ba1905366c0411d8cfa7aa1d2c26e1e2ceb59e4",
+    "tracked_diff_sha256": "91bfab8e315ed71bc3c48ce590bb1148e84414ca6b3d5fa05505b4d53c788d66",
+    "untracked_sha256": {
+      "assets/tcc/performance.c": "fff881ba44e07147f83760baabdca6d8863a30a1ec4a502ec8e7abf8d595ae40",
+      "docs/performance/op0-baseline.md": "39f040bc858d5096109823f304671b53cff5f7f9d8560009562eb2b6b852aa52",
+      "docs/performance/op0-up-baseline.json": "824bd304c039e5847f44ffad5a4414aa4b18c74d1d796b350938c2390e6ec57a",
+      "docs/performance/smp-audit.md": "62aeef241e108c6fbf28f8b6d93caaf235b7cea9b50119eac939d11df03b170d",
+      "hal/src/cpu_local.c": "f211f0272ff7b7c4ecc854b9b5b87d178a46bde8c4f772caf4811c3676c25a56",
+      "hal/src/cpu_local.h": "288019a86204418a1532001d29b0897fef9f7d38397a88b826ee5ef41ee0b1c4",
+      "hal/src/cpu_local.inc": "52316a3109ebfde7c1ca83d30ea3be5b98f7e807706bbbb9dbc24a69881f6712",
+      "hal/src/cpu_local.json": "aa67f2341114eecc3445a805a1de9a2b81f8f9ae19150301ba436a3e67096b64",
+      "hal/src/mp.asm": "0ecc025c61cc55a5dd4d654f73cbace9775fddd24f73748e1c7af99bcd36fdfc",
+      "hal/src/mp.c": "f2f00d6d763125f1a8e7fd2cc9e937fa2feb1edc9d6bb7d4e92177a945c3ce3c",
+      "hal/src/mp.h": "4f3cb01bd3dd7156215d9603d6b7ee9d1571825a749ab514ca9f3df990897451",
+      "kernel/src/cpu_layout.rs": "49b906dc3527ee364c5a965079d5206cf63e548d4708d47d7621c5a737895ad8",
+      "tools/check_kernel_elf.py": "acc809ee2c7a4207377f25f57305515234094c7c0a7760a7f7444d658cf7d619",
+      "tools/gen_cpu_local.py": "387a45a34685cdc73205024897918ce6fc423deea1021699cfee62aa0c311fe6",
+      "tools/performance_baseline.py": "926f1c773e570c3804eaf8a590e6747888ba3d4d1c42c887fc3cab42c8308787",
+      "tools/performance_metadata.py": "f76636c380206d69d01559fa40ab603aadb11fd03444105e4b3d32740d1b3cc4",
+      "tools/test_performance_baseline.py": "dbce430b2f9f68556d259f2a545749cfa112a44cdba850e660222fe8b3534f14",
+      "tools/test_smp_boot.py": "ac30e8b53be0c0fc0275c3002d96061c44eefcc7428e4b0831b0d875e7acd4da",
+      "tools/test_smp_boot_host.py": "eb1b7252182fb00262dac262c8441e7b885f67201261eaf8df314ecded2603eb"
+    }
+  },
+  "kernel_elf": {
+    "file_bytes": 3603768,
+    "bss_bytes": 2539672,
+    "data_file_bytes": 455336,
+    "data_memory_bytes": 2998424
+  },
+  "runs": [
+    {
+      "firmware": "BIOS",
+      "evidence": {
+        "hardware_online": 1,
+        "dispatch_cpus": 1,
+        "scheduler": "up",
+        "ap_state": "parked",
+        "cpus": [
+          [
+            0,
+            0,
+            1,
+            0,
+            2,
+            0
+          ]
+        ]
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/smp-boot/1/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/smp-boot/1/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "firmware": "BIOS",
+      "evidence": {
+        "hardware_online": 2,
+        "dispatch_cpus": 1,
+        "scheduler": "up",
+        "ap_state": "parked",
+        "cpus": [
+          [
+            0,
+            0,
+            1,
+            1,
+            2,
+            0
+          ],
+          [
+            1,
+            1,
+            1,
+            1,
+            2,
+            4294901760
+          ]
+        ]
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/smp-boot/2/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/smp-boot/2/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "2"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 2,
+        "emulator_vcpus": 2,
+        "kernel_online_cpus": 2,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "firmware": "BIOS",
+      "evidence": {
+        "hardware_online": 4,
+        "dispatch_cpus": 1,
+        "scheduler": "up",
+        "ap_state": "parked",
+        "cpus": [
+          [
+            0,
+            0,
+            1,
+            3,
+            2,
+            0
+          ],
+          [
+            1,
+            1,
+            1,
+            1,
+            2,
+            4294901760
+          ],
+          [
+            2,
+            2,
+            1,
+            1,
+            2,
+            6442352640
+          ],
+          [
+            3,
+            3,
+            1,
+            1,
+            2,
+            8589803520
+          ]
+        ]
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/smp-boot/4/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/smp-boot/4/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "firmware": "BIOS",
+      "evidence": {
+        "hardware_online": 8,
+        "dispatch_cpus": 1,
+        "scheduler": "up",
+        "ap_state": "parked",
+        "cpus": [
+          [
+            0,
+            0,
+            1,
+            7,
+            2,
+            0
+          ],
+          [
+            1,
+            1,
+            1,
+            1,
+            2,
+            4294901760
+          ],
+          [
+            2,
+            2,
+            1,
+            1,
+            2,
+            6442352640
+          ],
+          [
+            3,
+            3,
+            1,
+            1,
+            2,
+            8589803520
+          ],
+          [
+            4,
+            4,
+            1,
+            1,
+            2,
+            10737254400
+          ],
+          [
+            5,
+            5,
+            1,
+            1,
+            2,
+            12884705280
+          ],
+          [
+            6,
+            6,
+            1,
+            1,
+            2,
+            15032156160
+          ],
+          [
+            7,
+            7,
+            1,
+            1,
+            2,
+            17179607040
+          ]
+        ]
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/smp-boot/8/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/smp-boot/8/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "firmware": "UEFI",
+      "evidence": {
+        "hardware_online": 4,
+        "dispatch_cpus": 1,
+        "scheduler": "up",
+        "ap_state": "parked",
+        "cpus": [
+          [
+            0,
+            0,
+            1,
+            3,
+            2,
+            0
+          ],
+          [
+            1,
+            1,
+            1,
+            1,
+            2,
+            4294901760
+          ],
+          [
+            2,
+            2,
+            1,
+            1,
+            2,
+            6442352640
+          ],
+          [
+            3,
+            3,
+            1,
+            1,
+            2,
+            8589803520
+          ]
+        ]
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/smp-uefi4/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/smp-uefi4/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4",
+          "-drive",
+          "if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd",
+          "-drive",
+          "if=pflash,format=raw,unit=1,file=build/performance/smp-uefi4/ovmf-vars.fd"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "regressions": [
+    {
+      "name": "smp-threads-8.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "smp-pointer-8.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "smp-gui-4.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "17c96b2a18e0a4585a695a45c62d9e1b922d972467edbfb7521db04dce2eb3fe",
+        "bytes": 266385408,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "unvalidated": [
+    "parallel application dispatch",
+    "shared kernel lifetime/locking",
+    "remote TLB shootdown",
+    "x2APIC",
+    "KVM scaling",
+    "high-resolution/TSC clocksource",
+    "XSAVE/AVX"
+  ]
+}

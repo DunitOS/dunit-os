@@ -1,5 +1,6 @@
 section .text
 bits 64
+%include "hal/src/cpu_local.inc"
 
 %macro ISR_NOERRCODE 1
 global isr%1
@@ -57,7 +58,6 @@ ISR_NOERRCODE i
 
 extern interrupt_handler
 extern syscall_escape_user_fault
-extern user_fpu_state
 
 isr_common_stub:
     ; Interrupts can land inside a backwards userspace/kernel memmove (DF=1).
@@ -79,11 +79,22 @@ isr_common_stub:
     push r13
     push r14
     push r15
+    ; Recover kernel GS even for an NMI in a SWAPGS/IRET transition window.
+    ; User FSGSBASE is disabled: user GS is always a lower-half base.
+    xor r10d,r10d
+    mov ecx,0xc0000101
+    rdmsr
+    test edx,0x80000000
+    jnz .kernel_gs
+    swapgs
+    mov r10d,1
+.kernel_gs:
+    lfence
     ; Save SIMD before Rust/C interrupt handling can touch XMM registers.
     ; The saved CS is at +144 after the 15 general-purpose pushes.
     test byte [rsp + 144], 3
     jz .no_user_fpu_save
-    mov rax, [rel user_fpu_state]
+    mov rax, [gs:CPU_USER_FPU_STATE]
     test rax, rax
     jz .no_user_fpu_save
     fxsave [rax]
@@ -97,6 +108,7 @@ isr_common_stub:
     ; returns even if the handler itself uses XMM registers.
     sub rsp, 528
     mov [rsp + 512], rax
+    mov [rsp + 520], r10
     fxsave [rsp]
     call interrupt_handler
     cmp rax, 1
@@ -104,6 +116,10 @@ isr_common_stub:
     cmp rax, 2
     je .escape_user_fault
     fxrstor [rsp]
+    cmp qword [rsp + 520],0
+    je .gs_restored
+    swapgs
+.gs_restored:
     mov rsp, [rsp + 512]
     
     pop r15

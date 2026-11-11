@@ -26,9 +26,10 @@ SECTIONS {
 
     .data : ALIGN(4K) {
         *(.data .data.*)
+        *(.got .got.*)
     } :data
 
-    .bss : ALIGN(4K) {
+    .bss (NOLOAD) : ALIGN(4K) {
         *(COMMON)
         *(.bss .bss.*)
     } :data

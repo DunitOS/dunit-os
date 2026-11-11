@@ -51,6 +51,17 @@ static volatile struct limine_boot_time_request boot_time_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".limine_requests")))
+static volatile struct LIMINE_MP(request) mp_request = {
+#if LIMINE_API_REVISION >= 1
+    .id = LIMINE_MP_REQUEST,
+#else
+    .id = LIMINE_SMP_REQUEST,
+#endif
+    .revision = 0, .flags = 0
+};
+struct LIMINE_MP(response)*get_mp_response(void){return mp_request.response;}
+
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile LIMINE_REQUESTS_START_MARKER;
 

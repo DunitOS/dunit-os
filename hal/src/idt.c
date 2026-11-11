@@ -142,3 +142,6 @@ void hal_init_idt(void) {
 
     idt_flush((uint64_t)&idt_ptr);
 }
+
+/* IDT is immutable after BSP initialization; APs only load its register. */
+void hal_load_idt(void){idt_flush((uint64_t)&idt_ptr);}

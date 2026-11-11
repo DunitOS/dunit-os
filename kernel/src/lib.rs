@@ -739,6 +739,7 @@ pub extern "C" fn kernel_main(
     screen_log("[ OK ] Memory management subsystem operational", false);
 
     process::init_current_kernel_process();
+    cpu::prepare_multiprocessor();
     #[cfg(feature = "boot-smoke-tests")]
     process::run_process_address_space_smoke();
 
@@ -874,6 +875,8 @@ pub extern "C" fn kernel_main(
         screen_log("[ OK ] IRQ 12: PS/2 mouse wheel interrupt enabled", false);
     }
     screen_log("[ OK ] Hardware interrupts configured", false);
+
+    cpu::start_multiprocessor();
 
     #[cfg(feature = "boot-smoke-tests")]
     {

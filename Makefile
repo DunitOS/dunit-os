@@ -1,4 +1,4 @@
-.PHONY: all clean hal kernel userspace iso disk-image run run-gui run-dwm iso-dwm iso-minimal iso-release
+.PHONY: cpu-layout all clean hal kernel userspace iso disk-image run run-gui run-dwm iso-dwm iso-minimal iso-release
 
 CC = gcc
 AS = nasm
@@ -90,7 +90,7 @@ HAL_OBJS = $(BUILD_DIR)/boot.o $(BUILD_DIR)/boot_main.o $(BUILD_DIR)/limine.o $(
            $(BUILD_DIR)/gdt.o $(BUILD_DIR)/gdt_asm.o \
            $(BUILD_DIR)/idt.o $(BUILD_DIR)/idt_asm.o $(BUILD_DIR)/interrupts.o \
            $(BUILD_DIR)/context_switch.o $(BUILD_DIR)/syscall.o \
-           $(BUILD_DIR)/hal_test.o
+           $(BUILD_DIR)/hal_test.o $(BUILD_DIR)/cpu_local.o $(BUILD_DIR)/mp.o $(BUILD_DIR)/mp_asm.o
 
 CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
          -mcmodel=kernel -mno-sse -mno-sse2 -O2 -Wall -Wextra
@@ -110,13 +110,13 @@ $(BUILD_DIR)/boot_main.o: $(HAL_DIR)/src/boot_main.c | $(BUILD_DIR)
 $(BUILD_DIR)/limine.o: $(HAL_DIR)/src/limine.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/hal.o: $(HAL_DIR)/src/hal.c | $(BUILD_DIR)
+$(BUILD_DIR)/hal.o: $(HAL_DIR)/src/hal.c $(HAL_DIR)/src/cpu_local.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/ports.o: $(HAL_DIR)/src/ports.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/gdt.o: $(HAL_DIR)/src/gdt.c | $(BUILD_DIR)
+$(BUILD_DIR)/gdt.o: $(HAL_DIR)/src/gdt.c $(HAL_DIR)/src/cpu_local.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/gdt_asm.o: $(HAL_DIR)/src/gdt.asm | $(BUILD_DIR)
@@ -128,14 +128,23 @@ $(BUILD_DIR)/idt.o: $(HAL_DIR)/src/idt.c | $(BUILD_DIR)
 $(BUILD_DIR)/idt_asm.o: $(HAL_DIR)/src/idt.asm | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(BUILD_DIR)/interrupts.o: $(HAL_DIR)/src/interrupts.asm | $(BUILD_DIR)
+$(BUILD_DIR)/interrupts.o: $(HAL_DIR)/src/interrupts.asm $(HAL_DIR)/src/cpu_local.inc | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 $(BUILD_DIR)/context_switch.o: $(HAL_DIR)/src/context_switch.asm | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(BUILD_DIR)/syscall.o: $(HAL_DIR)/src/syscall.asm | $(BUILD_DIR)
+$(BUILD_DIR)/syscall.o: $(HAL_DIR)/src/syscall.asm $(HAL_DIR)/src/cpu_local.inc | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/mp.o: $(HAL_DIR)/src/mp.c $(HAL_DIR)/src/mp.h $(HAL_DIR)/src/cpu_local.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/mp_asm.o: $(HAL_DIR)/src/mp.asm | $(BUILD_DIR)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD_DIR)/cpu_local.o: $(HAL_DIR)/src/cpu_local.c $(HAL_DIR)/src/cpu_local.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/hal_test.o: $(HAL_DIR)/src/hal_test.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -148,8 +157,12 @@ $(BUILD_DIR)/kernel.o: hal userspace
 
 kernel: $(BUILD_DIR)/kernel.o
 
-$(BUILD_DIR)/kernel.elf: kernel
+cpu-layout:
+	python3 tools/gen_cpu_local.py --check
+
+$(BUILD_DIR)/kernel.elf: kernel cpu-layout
 	/usr/bin/ld.lld --gc-sections -T $(KERNEL_DIR)/linker.ld -o $@ $(HAL_OBJS) $(BUILD_DIR)/kernel.o
+	python3 tools/check_kernel_elf.py $@
 
 userspace:
 	mkdir -p $(USERSPACE_BUILD_DIR)

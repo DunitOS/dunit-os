@@ -1,5 +1,6 @@
 section .text
 bits 64
+%include "hal/src/cpu_local.inc"
 
 extern syscall_handler
 
@@ -8,39 +9,41 @@ extern syscall_handler
 
 global syscall_entry
 syscall_entry:
+    swapgs
+    lfence
     ; SYSCALL leaves the user return RIP in RCX and RFLAGS in R11.
     ; It does not switch stacks, so use the selected process kernel stack when
     ; the kernel has installed one, otherwise fall back to a private bootstrap
-    ; syscall stack. This is still a single-active-process policy until the
-    ; scheduler/TSS path can select stacks per running process.
-    mov [rel syscall_user_rsp], rsp
-    mov [rel syscall_saved_rax], rax
-    mov [rel syscall_saved_rbx], rbx
-    mov [rel syscall_saved_rcx], rcx
-    mov [rel syscall_saved_rdx], rdx
-    mov [rel syscall_saved_rsi], rsi
-    mov [rel syscall_saved_rdi], rdi
-    mov [rel syscall_saved_rbp], rbp
-    mov [rel syscall_saved_r8], r8
-    mov [rel syscall_saved_r9], r9
-    mov [rel syscall_saved_r10], r10
-    mov [rel syscall_saved_r11], r11
-    mov [rel syscall_saved_r12], r12
-    mov [rel syscall_saved_r13], r13
-    mov [rel syscall_saved_r14], r14
-    mov [rel syscall_saved_r15], r15
-    mov rax, [rel user_fpu_state]
+    ; syscall stack. Entry scratch and selected/escape stacks are CPU-local;
+    ; this mechanism does not itself enable parallel task dispatch.
+    mov [gs:CPU_SYSCALL_USER_RSP], rsp
+    mov [gs:CPU_SYSCALL_SAVED_RAX], rax
+    mov [gs:CPU_SYSCALL_SAVED_RBX], rbx
+    mov [gs:CPU_SYSCALL_SAVED_RCX], rcx
+    mov [gs:CPU_SYSCALL_SAVED_RDX], rdx
+    mov [gs:CPU_SYSCALL_SAVED_RSI], rsi
+    mov [gs:CPU_SYSCALL_SAVED_RDI], rdi
+    mov [gs:CPU_SYSCALL_SAVED_RBP], rbp
+    mov [gs:CPU_SYSCALL_SAVED_R8], r8
+    mov [gs:CPU_SYSCALL_SAVED_R9], r9
+    mov [gs:CPU_SYSCALL_SAVED_R10], r10
+    mov [gs:CPU_SYSCALL_SAVED_R11], r11
+    mov [gs:CPU_SYSCALL_SAVED_R12], r12
+    mov [gs:CPU_SYSCALL_SAVED_R13], r13
+    mov [gs:CPU_SYSCALL_SAVED_R14], r14
+    mov [gs:CPU_SYSCALL_SAVED_R15], r15
+    mov rax, [gs:CPU_USER_FPU_STATE]
     test rax, rax
     jz .fpu_saved
     fxsave [rax]
 .fpu_saved:
-    mov rsp, [rel syscall_selected_stack_top]
+    mov rsp, [gs:CPU_SYSCALL_SELECTED_STACK_TOP]
     test rsp, rsp
     jnz .stack_selected
-    lea rsp, [rel syscall_stack_top]
+    mov rsp, [gs:CPU_BOOTSTRAP_STACK_TOP]
 .stack_selected:
     and rsp, -16
-    mov rax, [rel syscall_saved_rax]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RAX]
 
     push rcx
     push r11
@@ -83,10 +86,10 @@ syscall_entry:
 
     cmp rax, [rel syscall_smoke_return_magic]
     jne .return_to_user
-    cmp qword [rel syscall_smoke_active], 1
+    cmp qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 1
     jne .return_to_user
-    mov qword [rel syscall_smoke_active], 0
-    mov rsp, [rel syscall_smoke_kernel_rsp]
+    mov qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 0
+    mov rsp, [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP]
     pop r15
     pop r14
     pop r13
@@ -101,22 +104,23 @@ syscall_entry:
     ; user code before user data, which is not compatible with SYSRET's fixed
     ; selector derivation rules.
     push qword USER_DATA_SELECTOR
-    push qword [rel syscall_user_rsp]
+    push qword [gs:CPU_SYSCALL_USER_RSP]
     push r11
     push qword USER_CODE_SELECTOR
     push rcx
     push rax
-    mov rax, [rel user_fpu_state]
+    mov rax, [gs:CPU_USER_FPU_STATE]
     test rax, rax
     jz .fpu_restored
     fxrstor [rax]
 .fpu_restored:
     pop rax
+    swapgs
     iretq
 
 global set_user_fpu_state
 set_user_fpu_state:
-    mov [rel user_fpu_state], rdi
+    mov [gs:CPU_USER_FPU_STATE], rdi
     ret
 
 global set_fs_base
@@ -171,28 +175,28 @@ syscall_init:
 global syscall_set_kernel_stack_top
 syscall_set_kernel_stack_top:
     and rdi, -16
-    mov [rel syscall_selected_stack_top], rdi
+    mov [gs:CPU_SYSCALL_SELECTED_STACK_TOP], rdi
     ret
 
 global syscall_reset_kernel_stack
 syscall_reset_kernel_stack:
-    mov qword [rel syscall_selected_stack_top], 0
+    mov qword [gs:CPU_SYSCALL_SELECTED_STACK_TOP], 0
     ret
 
 global syscall_get_escape_kernel_rsp
 syscall_get_escape_kernel_rsp:
-    mov rax, [rel syscall_smoke_kernel_rsp]
+    mov rax, [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP]
     ret
 
 global syscall_get_escape_active
 syscall_get_escape_active:
-    mov rax, [rel syscall_smoke_active]
+    mov rax, [gs:CPU_SYSCALL_SMOKE_ACTIVE]
     ret
 
 global syscall_restore_escape_state
 syscall_restore_escape_state:
-    mov [rel syscall_smoke_kernel_rsp], rdi
-    mov [rel syscall_smoke_active], rsi
+    mov [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP], rdi
+    mov [gs:CPU_SYSCALL_SMOKE_ACTIVE], rsi
     ret
 
 global syscall_capture_user_context
@@ -201,39 +205,39 @@ syscall_capture_user_context:
     ;   rdi = *mut CpuContext
     ;   rsi = resumed syscall return value
     mov [rdi + 0], rsi
-    mov rax, [rel syscall_saved_rbx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RBX]
     mov [rdi + 8], rax
-    mov rax, [rel syscall_saved_rcx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RCX]
     mov [rdi + 16], rax
-    mov rax, [rel syscall_saved_rdx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RDX]
     mov [rdi + 24], rax
-    mov rax, [rel syscall_saved_rsi]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RSI]
     mov [rdi + 32], rax
-    mov rax, [rel syscall_saved_rdi]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RDI]
     mov [rdi + 40], rax
-    mov rax, [rel syscall_saved_rbp]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RBP]
     mov [rdi + 48], rax
-    mov rax, [rel syscall_user_rsp]
+    mov rax, [gs:CPU_SYSCALL_USER_RSP]
     mov [rdi + 56], rax
-    mov rax, [rel syscall_saved_r8]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R8]
     mov [rdi + 64], rax
-    mov rax, [rel syscall_saved_r9]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R9]
     mov [rdi + 72], rax
-    mov rax, [rel syscall_saved_r10]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R10]
     mov [rdi + 80], rax
-    mov rax, [rel syscall_saved_r11]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R11]
     mov [rdi + 88], rax
-    mov rax, [rel syscall_saved_r12]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R12]
     mov [rdi + 96], rax
-    mov rax, [rel syscall_saved_r13]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R13]
     mov [rdi + 104], rax
-    mov rax, [rel syscall_saved_r14]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R14]
     mov [rdi + 112], rax
-    mov rax, [rel syscall_saved_r15]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R15]
     mov [rdi + 120], rax
-    mov rax, [rel syscall_saved_rcx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RCX]
     mov [rdi + 128], rax
-    mov rax, [rel syscall_saved_r11]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R11]
     mov [rdi + 136], rax
     ret
 
@@ -245,51 +249,51 @@ syscall_restart_user_context:
     ; rip = the `syscall` instruction itself (saved return rip - 2 bytes). Used
     ; by blocking syscalls (pipe read/write) that must re-run and recompute their
     ; result on wake, not return a value captured at block time.
-    mov rax, [rel syscall_saved_rax]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RAX]
     mov [rdi + 0], rax                 ; rax = original syscall number
-    mov rax, [rel syscall_saved_rbx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RBX]
     mov [rdi + 8], rax
-    mov rax, [rel syscall_saved_rcx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RCX]
     mov [rdi + 16], rax
-    mov rax, [rel syscall_saved_rdx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RDX]
     mov [rdi + 24], rax
-    mov rax, [rel syscall_saved_rsi]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RSI]
     mov [rdi + 32], rax
-    mov rax, [rel syscall_saved_rdi]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RDI]
     mov [rdi + 40], rax
-    mov rax, [rel syscall_saved_rbp]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RBP]
     mov [rdi + 48], rax
-    mov rax, [rel syscall_user_rsp]
+    mov rax, [gs:CPU_SYSCALL_USER_RSP]
     mov [rdi + 56], rax
-    mov rax, [rel syscall_saved_r8]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R8]
     mov [rdi + 64], rax
-    mov rax, [rel syscall_saved_r9]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R9]
     mov [rdi + 72], rax
-    mov rax, [rel syscall_saved_r10]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R10]
     mov [rdi + 80], rax
-    mov rax, [rel syscall_saved_r11]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R11]
     mov [rdi + 88], rax
-    mov rax, [rel syscall_saved_r12]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R12]
     mov [rdi + 96], rax
-    mov rax, [rel syscall_saved_r13]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R13]
     mov [rdi + 104], rax
-    mov rax, [rel syscall_saved_r14]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R14]
     mov [rdi + 112], rax
-    mov rax, [rel syscall_saved_r15]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R15]
     mov [rdi + 120], rax
-    mov rax, [rel syscall_saved_rcx]
+    mov rax, [gs:CPU_SYSCALL_SAVED_RCX]
     sub rax, 2                         ; rip = the 2-byte `syscall` instruction
     mov [rdi + 128], rax
-    mov rax, [rel syscall_saved_r11]
+    mov rax, [gs:CPU_SYSCALL_SAVED_R11]
     mov [rdi + 136], rax
     ret
 
 global syscall_escape_user_fault
 syscall_escape_user_fault:
-    cmp qword [rel syscall_smoke_active], 1
+    cmp qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 1
     jne .halt
-    mov qword [rel syscall_smoke_active], 0
-    mov rsp, [rel syscall_smoke_kernel_rsp]
+    mov qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 0
+    mov rsp, [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP]
     pop r15
     pop r14
     pop r13
@@ -314,8 +318,8 @@ run_user_syscall_smoke:
     push r13
     push r14
     push r15
-    mov [rel syscall_smoke_kernel_rsp], rsp
-    mov qword [rel syscall_smoke_active], 1
+    mov [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP], rsp
+    mov qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 1
     mov rax, rdi
     mov rbx, rsi
 
@@ -336,6 +340,7 @@ run_user_syscall_smoke:
     xor r9, r9
     xor r10, r10
     xor r11, r11
+    swapgs
     iretq
 
 global run_user_process
@@ -351,8 +356,8 @@ run_user_process:
     push r13
     push r14
     push r15
-    mov [rel syscall_smoke_kernel_rsp], rsp
-    mov qword [rel syscall_smoke_active], 1
+    mov [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP], rsp
+    mov qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 1
     mov rax, rdi
     mov rbx, rsi
     mov r12, rdx
@@ -379,6 +384,7 @@ run_user_process:
     xor r12, r12
     xor r13, r13
     xor r14, r14
+    swapgs
     iretq
 
 global run_user_context
@@ -391,10 +397,10 @@ run_user_context:
     push r13
     push r14
     push r15
-    mov [rel syscall_smoke_kernel_rsp], rsp
-    mov qword [rel syscall_smoke_active], 1
+    mov [gs:CPU_SYSCALL_SMOKE_KERNEL_RSP], rsp
+    mov qword [gs:CPU_SYSCALL_SMOKE_ACTIVE], 1
     mov rbx, rdi
-    mov rax, [rel user_fpu_state]
+    mov rax, [gs:CPU_USER_FPU_STATE]
     test rax, rax
     jz .no_user_fpu
     fxrstor [rax]
@@ -421,57 +427,10 @@ run_user_context:
     push qword USER_CODE_SELECTOR
     push qword [rbx + 128]
     mov rbx, [rbx + 8]
+    swapgs
     iretq
 
 section .rodata
 align 8
 syscall_smoke_return_magic:
     dq 0x0051595343414C4C
-
-section .bss
-alignb 16
-syscall_user_rsp:
-    resq 1
-syscall_selected_stack_top:
-    resq 1
-syscall_smoke_kernel_rsp:
-    resq 1
-syscall_smoke_active:
-    resq 1
-global user_fpu_state
-user_fpu_state:
-    resq 1
-syscall_saved_rax:
-    resq 1
-syscall_saved_rbx:
-    resq 1
-syscall_saved_rcx:
-    resq 1
-syscall_saved_rdx:
-    resq 1
-syscall_saved_rsi:
-    resq 1
-syscall_saved_rdi:
-    resq 1
-syscall_saved_rbp:
-    resq 1
-syscall_saved_r8:
-    resq 1
-syscall_saved_r9:
-    resq 1
-syscall_saved_r10:
-    resq 1
-syscall_saved_r11:
-    resq 1
-syscall_saved_r12:
-    resq 1
-syscall_saved_r13:
-    resq 1
-syscall_saved_r14:
-    resq 1
-syscall_saved_r15:
-    resq 1
-alignb 16
-syscall_stack:
-    resb 16384
-syscall_stack_top:

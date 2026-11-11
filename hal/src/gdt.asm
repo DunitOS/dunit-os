@@ -11,7 +11,7 @@ gdt_flush:
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
+    ; GS base anchors CPU-local data; do not reload its hidden base here.
     mov ss, ax
     
     pop rdi

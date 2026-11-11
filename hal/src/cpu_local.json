@@ -1,0 +1,28 @@
+{
+  "capacity": 64,
+  "fields": [
+    "self_ptr",
+    "index",
+    "bootstrap_stack_top",
+    "syscall_user_rsp",
+    "syscall_selected_stack_top",
+    "syscall_smoke_kernel_rsp",
+    "syscall_smoke_active",
+    "user_fpu_state",
+    "syscall_saved_rax",
+    "syscall_saved_rbx",
+    "syscall_saved_rcx",
+    "syscall_saved_rdx",
+    "syscall_saved_rsi",
+    "syscall_saved_rdi",
+    "syscall_saved_rbp",
+    "syscall_saved_r8",
+    "syscall_saved_r9",
+    "syscall_saved_r10",
+    "syscall_saved_r11",
+    "syscall_saved_r12",
+    "syscall_saved_r13",
+    "syscall_saved_r14",
+    "syscall_saved_r15"
+  ]
+}

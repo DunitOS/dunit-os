@@ -43,6 +43,10 @@ pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
 
     use crate::interrupts::*;
 
+    if frame.int_no>=240 {
+        extern "C"{fn hal_mp_interrupt(vector:u64)->i32;}
+        if unsafe{hal_mp_interrupt(frame.int_no)}!=0{return 0;}
+    }
     match frame.int_no {
         0 => handle_divide_by_zero(frame),
         1 => handle_debug(frame),

@@ -11,7 +11,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use core::cell::UnsafeCell;
 
 use crate::handle::{
@@ -117,16 +117,9 @@ fn alloc_shared_vm_object(length: usize) -> Result<u64, ProcessError> {
 struct ProcessTableCell(UnsafeCell<Option<Vec<ProcessRecord>>>);
 unsafe impl Sync for ProcessTableCell {}
 static PROCESS_TABLE: ProcessTableCell = ProcessTableCell(UnsafeCell::new(None));
-static CURRENT_PID: AtomicU64 = AtomicU64::new(0);
-static PROCESS_EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
-static PROCESS_YIELD_REQUESTED: AtomicBool = AtomicBool::new(false);
-static PROCESS_SCHEDULE_HINT: AtomicU64 = AtomicU64::new(0);
-static PROCESS_EXIT_CODE: AtomicI32 = AtomicI32::new(0);
-static PROCESS_EXIT_KIND: AtomicI32 = AtomicI32::new(0);
 static TERMINAL_FOREGROUND_PID: AtomicU64 = AtomicU64::new(0);
 static FOREGROUND_OUTPUT_SINK: AtomicU64 = AtomicU64::new(ProcessOutputSink::SerialOnly as u64);
 static TERMINAL_STDIN_WAITING_PID: AtomicU64 = AtomicU64::new(0);
-static PREEMPT_SWITCH_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// Count of committed timer-driven context switches. Only advanced when
 /// `timer_preempt_save_and_schedule` actually hands the CPU to another process,
 /// so a non-zero value is proof that preemption fired (see M1 [PREEMPT-TEST]).
@@ -174,7 +167,7 @@ pub const WAIT_KIND_SPAWN_PREPARED: i32 = -2;
 /// Prepared: process object exists and owns its address space, kernel stack,
 /// fd table, cwd and pid, but no executable image has run yet.
 /// Ready: executable context has been prepared and a future scheduler may run it.
-/// Running: CURRENT_PID points at the process table record while the CPU is in
+/// Running: crate::cpu::runtime().current_pid points at the process table record while the CPU is in
 /// user mode. The process object still lives inside PROCESS_TABLE.
 /// Dead: execution finished or faulted; wait observes the real status only when
 /// has_run is true. Prepared/not-started children keep an explicit wait status.
@@ -1521,7 +1514,7 @@ fn log_process_transition(pid: ProcessId, from: ProcessState, to: ProcessState, 
 }
 
 fn current_entity_id() -> Option<ProcessId> {
-    let pid = CURRENT_PID.load(Ordering::SeqCst);
+    let pid = crate::cpu::runtime().current_pid.load(Ordering::SeqCst);
     if pid == 0 {
         None
     } else {
@@ -2069,8 +2062,8 @@ pub fn save_current_user_context_for_yield(next_pid: ProcessId) -> Result<Proces
     let from = record.state;
     record.state = ProcessState::Ready;
     process.state = ProcessState::Ready;
-    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
-    PROCESS_SCHEDULE_HINT.store(next_pid.0, Ordering::SeqCst);
+    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().schedule_hint.store(next_pid.0, Ordering::SeqCst);
     if from != ProcessState::Ready {
         log_process_transition(pid, from, ProcessState::Ready, "yield");
     }
@@ -2101,8 +2094,8 @@ pub fn block_current(key_ipc: Option<ProcessId>, deadline: Option<u64>) -> Resul
         key: key_ipc.map(WaitKey::Ipc).unwrap_or(WaitKey::Timer),
         deadline,
     });
-    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
-    PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
+    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().schedule_hint.store(0, Ordering::SeqCst);
     Ok(())
 }
 
@@ -2174,8 +2167,8 @@ pub fn pipe_block_current(id: u64) -> Result<(), ProcessError> {
         key: WaitKey::Pipe(id),
         deadline: None,
     });
-    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
-    PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
+    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().schedule_hint.store(0, Ordering::SeqCst);
     Ok(())
 }
 
@@ -2203,8 +2196,8 @@ fn readiness_block_current(deadline_ns: u64, key: WaitKey) -> Result<(), Process
         Some(deadline_ns.saturating_add(tick_ns - 1) / tick_ns)
     };
     WAIT_QUEUE.lock().push(WaitEntry { entity, key, deadline });
-    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
-    PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
+    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().schedule_hint.store(0, Ordering::SeqCst);
     Ok(())
 }
 pub fn wake_poll_waiters() {
@@ -2379,8 +2372,8 @@ pub fn futex_wait(
         key: WaitKey::Word { owner, addr },
         deadline,
     });
-    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
-    PROCESS_SCHEDULE_HINT.store(0, Ordering::SeqCst);
+    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().schedule_hint.store(0, Ordering::SeqCst);
     Ok(FutexWaitOutcome::Parked)
 }
 
@@ -2493,9 +2486,9 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
         if process.is_kernel {
             return Err(ProcessError::InvalidUserContext);
         }
-        PROCESS_EXIT_CODE.store(code, Ordering::SeqCst);
-        PROCESS_EXIT_KIND.store(0, Ordering::SeqCst);
-        PROCESS_EXIT_REQUESTED.store(true, Ordering::SeqCst);
+        crate::cpu::runtime().exit_code.store(code, Ordering::SeqCst);
+        crate::cpu::runtime().exit_kind.store(0, Ordering::SeqCst);
+        crate::cpu::runtime().exit_requested.store(true, Ordering::SeqCst);
         return Ok(true);
     }
 
@@ -2707,7 +2700,7 @@ pub fn snapshot_processes(out: &mut Vec<ProcessSnapshot>) {
 }
 
 pub fn init_current_kernel_process() {
-    if CURRENT_PID.load(Ordering::SeqCst) != 0 {
+    if crate::cpu::runtime().current_pid.load(Ordering::SeqCst) != 0 {
         return;
     }
 
@@ -2723,7 +2716,7 @@ pub fn init_current_kernel_process() {
         true,
         Some(process),
     );
-    CURRENT_PID.store(pid.0, Ordering::SeqCst);
+    crate::cpu::runtime().current_pid.store(pid.0, Ordering::SeqCst);
 }
 
 pub fn current_process() -> Option<&'static Process> {
@@ -2794,9 +2787,9 @@ pub fn request_current_user_exit(code: i32) -> Option<ProcessId> {
     if process.is_kernel {
         return None;
     }
-    PROCESS_EXIT_CODE.store(code, Ordering::SeqCst);
-    PROCESS_EXIT_KIND.store(0, Ordering::SeqCst);
-    PROCESS_EXIT_REQUESTED.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().exit_code.store(code, Ordering::SeqCst);
+    crate::cpu::runtime().exit_kind.store(0, Ordering::SeqCst);
+    crate::cpu::runtime().exit_requested.store(true, Ordering::SeqCst);
     Some(process.pid)
 }
 
@@ -2805,22 +2798,22 @@ pub fn request_current_user_fault(fault: ProcessFault) -> Option<ProcessId> {
     if process.is_kernel {
         return None;
     }
-    PROCESS_EXIT_CODE.store(fault.exit_code(), Ordering::SeqCst);
-    PROCESS_EXIT_KIND.store(fault_kind_to_i32(fault), Ordering::SeqCst);
-    PROCESS_EXIT_REQUESTED.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().exit_code.store(fault.exit_code(), Ordering::SeqCst);
+    crate::cpu::runtime().exit_kind.store(fault_kind_to_i32(fault), Ordering::SeqCst);
+    crate::cpu::runtime().exit_requested.store(true, Ordering::SeqCst);
     Some(process.pid)
 }
 
 pub fn user_fault_escape_requested() -> bool {
-    PROCESS_EXIT_REQUESTED.load(Ordering::SeqCst) && PROCESS_EXIT_KIND.load(Ordering::SeqCst) != 0
+    crate::cpu::runtime().exit_requested.load(Ordering::SeqCst) && crate::cpu::runtime().exit_kind.load(Ordering::SeqCst) != 0
 }
 
 pub fn preempt_switch_requested() -> bool {
-    PREEMPT_SWITCH_REQUESTED.load(Ordering::SeqCst)
+    crate::cpu::runtime().preempt_switch_requested.load(Ordering::SeqCst)
 }
 
 pub fn clear_preempt_switch() {
-    PREEMPT_SWITCH_REQUESTED.store(false, Ordering::SeqCst);
+    crate::cpu::runtime().preempt_switch_requested.store(false, Ordering::SeqCst);
 }
 
 /// Runtime switch for diagnostics; normal operation is preemptive.
@@ -2903,9 +2896,9 @@ pub fn timer_preempt_save_and_schedule(frame: &crate::interrupts::InterruptFrame
     let _ = crate::process::scheduler::enqueue_ready(current);
 
     PREEMPTION_COUNT.fetch_add(1, Ordering::SeqCst);
-    PROCESS_YIELD_REQUESTED.store(true, Ordering::SeqCst);
-    PROCESS_SCHEDULE_HINT.store(next.0, Ordering::SeqCst);
-    PREEMPT_SWITCH_REQUESTED.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
+    crate::cpu::runtime().schedule_hint.store(next.0, Ordering::SeqCst);
+    crate::cpu::runtime().preempt_switch_requested.store(true, Ordering::SeqCst);
 }
 
 /// Number of timer-driven context switches committed so far.
@@ -2919,9 +2912,9 @@ pub fn reset_preemption_count() {
 }
 
 fn take_process_exit_request() -> Option<(i32, ProcessExitStatus)> {
-    if PROCESS_EXIT_REQUESTED.swap(false, Ordering::SeqCst) {
-        let code = PROCESS_EXIT_CODE.load(Ordering::SeqCst);
-        let kind = PROCESS_EXIT_KIND.swap(0, Ordering::SeqCst);
+    if crate::cpu::runtime().exit_requested.swap(false, Ordering::SeqCst) {
+        let code = crate::cpu::runtime().exit_code.load(Ordering::SeqCst);
+        let kind = crate::cpu::runtime().exit_kind.swap(0, Ordering::SeqCst);
         let status = match kind {
             0 => ProcessExitStatus::Exited(code),
             value => ProcessExitStatus::Fault(fault_kind_from_i32(value)),
@@ -2933,11 +2926,11 @@ fn take_process_exit_request() -> Option<(i32, ProcessExitStatus)> {
 }
 
 fn take_process_yield_request() -> bool {
-    PROCESS_YIELD_REQUESTED.swap(false, Ordering::SeqCst)
+    crate::cpu::runtime().yield_requested.swap(false, Ordering::SeqCst)
 }
 
 fn take_schedule_hint() -> Option<ProcessId> {
-    let pid = PROCESS_SCHEDULE_HINT.swap(0, Ordering::SeqCst);
+    let pid = crate::cpu::runtime().schedule_hint.swap(0, Ordering::SeqCst);
     if pid == 0 {
         None
     } else {
@@ -2946,7 +2939,7 @@ fn take_schedule_hint() -> Option<ProcessId> {
 }
 
 pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
-    let previous_pid = CURRENT_PID.load(Ordering::SeqCst);
+    let previous_pid = crate::cpu::runtime().current_pid.load(Ordering::SeqCst);
     let previous_root = unsafe { crate::memory::vmm::active_root_frame() };
     let root_pid = pid;
     let mut next_pid = pid;
@@ -2985,7 +2978,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
         })?;
 
         mark_process_started(next_pid);
-        CURRENT_PID.store(next_pid.0, Ordering::SeqCst);
+        crate::cpu::runtime().current_pid.store(next_pid.0, Ordering::SeqCst);
 
         let run_result = unsafe {
             match (current_thread(), current_process()) {
@@ -3066,7 +3059,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                 crate::memory::serial_write("\r\n");
             }
             if next_pid == root_pid {
-                CURRENT_PID.store(previous_pid, Ordering::SeqCst);
+                crate::cpu::runtime().current_pid.store(previous_pid, Ordering::SeqCst);
                 unsafe {
                     crate::memory::vmm::switch_to_root_frame(previous_root);
                     match current_process() {
@@ -3098,7 +3091,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
             }
             None => {
                 if next_pid == root_pid || is_pid_blocked(root_pid) {
-                    CURRENT_PID.store(previous_pid, Ordering::SeqCst);
+                    crate::cpu::runtime().current_pid.store(previous_pid, Ordering::SeqCst);
                     unsafe {
                         crate::memory::vmm::switch_to_root_frame(previous_root);
                         match current_process() {

@@ -1,6 +1,6 @@
 # Dunit OS — отдельный roadmap производительности и SMP
 
-Дата: 11 ноября 2026. Статус: **план; этапы не выполнены**.
+Дата: 11 ноября 2026. Статус: **в работе: OP0 baseline и OP1/OP2 foundation; SMP dispatch ещё нет**.
 Инициатива пользователя: максимальная практическая производительность,
 настоящая одновременная работа на нескольких ядрах и отзывчивый desktop/SDK.
 Основной [технический roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) сохраняется;
@@ -26,9 +26,9 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 измерения предела программного рендера. NUMA, CPU hotplug и real-time guarantees
 не входят в первый проход.
 
-## Подтверждённая исходная точка
+## Подтверждённая исходная точка до OP1/OP2
 
-| Область | Факт из текущего дерева | Следствие для плана |
+| Область | Факт до изменений OP1/OP2 | Следствие для плана |
 | --- | --- | --- |
 | Планировщик | `kernel/src/process/scheduler.rs`: UP round-robin, одна ready queue, `smp=off` | Параллельного dispatch пока нет |
 | Состояние процесса | `kernel/src/process/mod.rs`: глобальный `CURRENT_PID`, таблица с UP-инвариантами и выдачей долгоживущих mutable-ссылок | Нужны CPU-local current и новая модель владения/времени жизни |
@@ -80,6 +80,9 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 
 ### OP0 — воспроизводимый baseline и измерительные инструменты
 
+Первый TCG/UP baseline и стенд готовы: [результаты и ограничения](docs/performance/op0-baseline.md).
+KVM/reference и непокрытые метрики остаются открытыми.
+
 - [ ] Подготовить короткий набор сцен: idle, ввод/scroll/selection, pointer lock,
   text-heavy окно, несколько клиентов, boot/app startup, IPC ping-pong, CPU workers,
   allocator и I/O.
@@ -93,30 +96,37 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 
 ### OP1 — аудит SMP и CPU-local контекст
 
-- [ ] Составить реестр shared state, lock order, IRQ/preemption context и lifetime:
+- [x] Составить реестр shared state, lock order, IRQ/preemption context и lifetime:
   процессы/threads, PMM/VMM/heap, IPC, handles/fd, VFS, драйверы и serial.
+  [Реестр OP1](docs/performance/smp-audit.md); устранение перечисленных гонок — отдельная работа.
 - [ ] Заменить UP-зависимые mutable-ссылки безопасным владением/guard-периодами.
   Отключение IRQ на одном CPU не защищает данные от другого CPU; `Box` не
   устраняет aliasing, use-after-free и гонки изменения объекта.
-- [ ] Ввести CPU-local current task, syscall scratch/стек, scheduler flags,
+- [~] Ввести CPU-local current task, syscall scratch/стек, scheduler flags,
   GDT/TSS/IST, IRQ/preemption nesting, idle context и FPU state. Проверить
   FS/TLS и схему GS/SWAPGS на syscall, IRQ, exception и возврате в userspace.
+  CPU-local entry/flags/FPU pointers, private GDT/TSS/IST и AP idle stacks реализованы;
+  параллельный scheduler и ownership shared state не включены.
 - **Приёмка:** реестр с владельцами и инвариантами; UP регрессии зелёные,
   нет общих writable entry scratch/стеков. AP пока не исполняют рабочие задачи.
 
 ### OP2 — boot дополнительных CPU, APIC и межпроцессорные прерывания
 
-- [ ] Выбрать и документировать boot-контракт: основной кандидат — Limine MP
+- [x] Выбрать и документировать boot-контракт: основной кандидат — Limine MP
   handshake; отдельный SIPI trampoline только при подтверждённой необходимости.
-- [ ] Поднять AP с отдельными стеками/CPU-local данными, local interrupt state,
+- [x] Поднять AP с отдельными стеками/CPU-local данными, local interrupt state,
   IDT/TSS, syscall MSR и FPU. Реальные CPU IDs/topology не подменять индексами APIC.
-- [ ] Реализовать необходимый local APIC/IPI и маршрутизацию device IRQ с EOI,
+- [~] Реализовать необходимый local APIC/IPI и маршрутизацию device IRQ с EOI,
   spurious handling и совместимым BSP/UP fallback. Калибровать локальные timers;
   быстрый clocksource выбирать по проверенным CPUID/платформенным возможностям.
   Для TSC проверить межъядерную согласованность/монотонность и ordering чтений,
   иначе использовать подходящий fallback; timekeeping не равен timer interrupt.
+  APIC/IPI, BSP PIC routing и timer probes проверены на 1/2/4/8 vCPU TCG;
+  clocksource остаётся PIT, high-resolution/TSC validation не выполнены.
 - **Приёмка:** 1/2/4/8 CPU доходят до контролируемого park/idle; IPI ping/ack и
   локальные таймеры работают на каждом CPU. Это **ещё не готовый SMP scheduler**.
+
+[Отчёт bring-up и регрессии](docs/performance/smp-bringup.md).
 
 ### OP3 — память и синхронизация для одновременного исполнения
 
@@ -221,6 +231,9 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 ## Порядок и экономная проверка
 
 `OP0 → OP1 → OP2 → OP3 → OP4 → OP5 → OP9` — критический SMP-путь.
+Изолированный AP boot/park OP2 допускается после CPU-local entry и аудита OP1:
+он не обращается к process/VFS/heap shared paths. Полное ownership OP1 и
+remote-memory safety OP3 обязательны до любого AP userspace dispatch OP4.
 OP6 и последовательные оптимизации OP7/OP8 можно делать после OP0 по профилю,
 не дожидаясь SMP. Parallel worker pool OP7 требует OP4 и готовых SDK thread/sync;
 итог OP9 включает результаты OP6–OP8 для выбранных обязательных сцен.

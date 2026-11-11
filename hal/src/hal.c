@@ -1,4 +1,5 @@
 #include "hal.h"
+#include "cpu_local.h"
 
 extern void hal_init_gdt(void);
 extern void hal_init_idt(void);
@@ -13,6 +14,7 @@ void hal_disable_interrupts(void) {
 }
 
 void hal_init(void) {
+    hal_cpu_local_init(0);
     hal_init_gdt();
     hal_init_idt();
     syscall_init();
