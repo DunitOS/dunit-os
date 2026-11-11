@@ -13,7 +13,8 @@ gate, not a claim that shared state is now safe to execute on APs.
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | local invalidation and global roots | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
-| VFS_INSTANCE, ROOT_MEMFS and VFS_PATH_BUFFER | UnsafeCell and static mutable references | scoped serialization plus lifetime rules; path scratch must be per-call; shared fd offsets need consistent ownership |
+| VFS_INSTANCE and ROOT_MEMFS | UnsafeCell and static mutable references | scoped serialization plus lifetime rules; shared fd offsets need consistent ownership |
+| VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
 | DunitFS/block drivers | shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
 | Device IRQ, keyboard/pointer queues and display | INPUT_MASTER/DISPLAY_MASTER and IRQ-safe locks | one routed device IRQ owner initially; cross-CPU locks still needed for syscall readers; no desktop policy in kernel |
 | serial/framebuffer terminal and foreground state | shared sink and formatting/state | bounded critical sections, no per-event hot-path trace; console ownership is global policy, not CPU-local |

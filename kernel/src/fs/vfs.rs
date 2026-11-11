@@ -295,7 +295,8 @@ struct MountPoint {
 
 impl VirtualFileSystem {
     pub fn open_capability(&mut self, cwd: &str, path: &str, flags: OpenFlags) -> Result<alloc::sync::Arc<super::file_cap::FileCapability>> {
-        let (fs, relative) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative) = self.resolve_path(path, cwd, &mut path_buffer)?;
         let handle = unsafe { (&mut *fs).cap_open(relative, flags)? };
         Ok(alloc::sync::Arc::new(super::file_cap::FileCapability::new(fs, handle)))
     }
@@ -360,7 +361,8 @@ impl VirtualFileSystem {
     }
 
     pub fn open_at(&mut self, cwd: &str, path: &str, flags: OpenFlags) -> Result<FileDescriptor> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         let fs_flags = OpenFlags::from_bits(flags.bits() & !OpenFlags::APPEND.bits());
         let handle = unsafe { (&mut *fs).open(relative_path, fs_flags)? };
 
@@ -457,7 +459,8 @@ impl VirtualFileSystem {
     }
 
     pub fn readdir_at(&mut self, cwd: &str, path: &str) -> Result<Vec<DirEntry>> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).readdir(relative_path) }
     }
 
@@ -467,57 +470,56 @@ impl VirtualFileSystem {
         path: &str,
         entries: &mut [DirEntry],
     ) -> Result<usize> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).readdir_into(relative_path, entries) }
     }
 
     pub fn create_at(&mut self, cwd: &str, path: &str) -> Result<()> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).create(relative_path) }
     }
 
     pub fn mkdir_at(&mut self, cwd: &str, path: &str) -> Result<()> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).mkdir(relative_path) }
     }
 
     pub fn remove_at(&mut self, cwd: &str, path: &str) -> Result<()> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).remove(relative_path) }
     }
 
     pub fn remove_dir_at(&mut self, cwd: &str, path: &str) -> Result<()> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).remove_dir(relative_path) }
     }
 
     pub fn rename_at(&mut self, cwd: &str, old: &str, new: &str) -> Result<()> {
-        // Resolve both endpoints to (filesystem, relative path). The path
-        // buffer is shared, so copy each relative path out before the next
-        // resolve overwrites it. Cross-filesystem renames are unsupported.
-        let (old_fs, old_rel) = {
-            let (fs, rel) =
-                unsafe { self.resolve_path(old, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
-            (fs, String::from(rel))
-        };
-        let (new_fs, new_rel) = {
-            let (fs, rel) =
-                unsafe { self.resolve_path(new, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
-            (fs, String::from(rel))
-        };
+        // Independent buffers keep both endpoint paths valid without allocation.
+        let mut old_buffer = [0; 256];
+        let mut new_buffer = [0; 256];
+        let (old_fs, old_rel) = self.resolve_path(old, cwd, &mut old_buffer)?;
+        let (new_fs, new_rel) = self.resolve_path(new, cwd, &mut new_buffer)?;
         if old_fs as *const () != new_fs as *const () {
             return Err(VfsError::Unsupported);
         }
-        unsafe { (&mut *old_fs).rename(&old_rel, &new_rel) }
+        unsafe { (&mut *old_fs).rename(old_rel, new_rel) }
     }
 
     pub fn truncate_at(&mut self, cwd: &str, path: &str) -> Result<()> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).truncate(relative_path) }
     }
 
     pub fn stat_at(&mut self, cwd: &str, path: &str) -> Result<FileStat> {
-        let (fs, relative_path) = unsafe { self.resolve_path(path, cwd, &mut *VFS_PATH_BUFFER.0.get())? };
+        let mut path_buffer = [0; 256];
+        let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         unsafe { (&mut *fs).stat(relative_path) }
     }
 
@@ -599,8 +601,8 @@ fn pop_path_component(out: &[u8; 256], len: &mut usize) {
     *len = if idx == 0 { 1 } else { idx };
 }
 
-/// Синглтон VFS, корневая MemFs и переиспользуемый буфер для нормализации путей.
-/// Раньше три `static mut`; теперь `UnsafeCell`-newtype без `static mut`. Всё это
+/// Синглтон VFS и корневая MemFs.
+/// `UnsafeCell`-newtype без `static mut`. Всё это
 /// инициализируется на этапе загрузки и используется кооперативно на одном CPU;
 /// раздача `&'static mut` через `as_mut()`/`.get()` сохраняет прежнюю семантику
 /// (в т.ч. монтирование `&'static mut ROOT_MEMFS` в VFS).
@@ -611,10 +613,6 @@ static VFS_INSTANCE: VfsInstanceCell = VfsInstanceCell(UnsafeCell::new(None));
 struct RootMemFsCell(UnsafeCell<MemFs>);
 unsafe impl Sync for RootMemFsCell {}
 static ROOT_MEMFS: RootMemFsCell = RootMemFsCell(UnsafeCell::new(MemFs::empty()));
-
-struct VfsPathBufferCell(UnsafeCell<[u8; 256]>);
-unsafe impl Sync for VfsPathBufferCell {}
-static VFS_PATH_BUFFER: VfsPathBufferCell = VfsPathBufferCell(UnsafeCell::new([0; 256]));
 
 fn serial_log(msg: &str) {
     crate::serial::serial_write(msg);
