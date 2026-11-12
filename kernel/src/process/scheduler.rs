@@ -1,10 +1,18 @@
 use super::{ProcessError, ProcessId};
-use crate::sync::IrqSafeSpinLock;
+use crate::sync::{InterruptGuard, IrqSafeSpinLock};
 use alloc::vec::Vec;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Candidate {
+    pid: ProcessId,
+    generation: u64,
+}
+
+/// Queue storage only. Process-state lookup must never run under this lock.
 pub struct Scheduler {
-    ready_queue: Vec<ProcessId>,
+    ready_queue: Vec<Candidate>,
     cursor: usize,
+    generation: u64,
 }
 
 impl Scheduler {
@@ -12,74 +20,70 @@ impl Scheduler {
         Self {
             ready_queue: Vec::new(),
             cursor: 0,
+            generation: 0,
         }
     }
 
-    pub fn enqueue(&mut self, pid: ProcessId) -> Result<(), ProcessError> {
-        if !super::is_pid_runnable(pid) {
-            return Err(ProcessError::NotRunnable);
+    fn enqueue(&mut self, pid: ProcessId) {
+        if self.ready_queue.iter().any(|entry| entry.pid == pid) {
+            return;
         }
-        if !self.ready_queue.contains(&pid) {
-            self.ready_queue.push(pid);
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("scheduler generation exhausted");
+        self.ready_queue.push(Candidate {
+            pid,
+            generation: self.generation,
+        });
+    }
+
+    fn remove_candidate(&mut self, candidate: Candidate) {
+        if let Some(index) = self
+            .ready_queue
+            .iter()
+            .position(|entry| *entry == candidate)
+        {
+            self.ready_queue.remove(index);
+            // next_candidate already advanced past this entry; account for the
+            // shift so removing a stale entry does not skip its successor.
+            if index < self.cursor {
+                self.cursor -= 1;
+            }
         }
-        Ok(())
     }
 
     pub fn remove(&mut self, pid: ProcessId) {
-        self.ready_queue.retain(|queued| *queued != pid);
-        if self.cursor >= self.ready_queue.len() {
-            self.cursor = 0;
+        if let Some(candidate) = self
+            .ready_queue
+            .iter()
+            .find(|entry| entry.pid == pid)
+            .copied()
+        {
+            self.remove_candidate(candidate);
         }
     }
 
-    pub fn pick_next_excluding(&mut self, excluded: Option<ProcessId>) -> Option<ProcessId> {
+    fn next_candidate(&mut self) -> Option<Candidate> {
         if self.ready_queue.is_empty() {
             return None;
         }
-
-        let len = self.ready_queue.len();
-        let mut checked = 0;
-        while checked < len && !self.ready_queue.is_empty() {
-            if self.cursor >= self.ready_queue.len() {
-                self.cursor = 0;
-            }
-
-            let pid = self.ready_queue[self.cursor];
-            if Some(pid) == excluded {
-                // Exclusion is a choice for this dispatch, not a dequeue. A
-                // ready yielding thread must remain available for the next
-                // dispatch even when every peer is currently blocked.
-                if super::is_pid_runnable(pid) {
-                    self.cursor = (self.cursor + 1) % self.ready_queue.len();
-                } else { self.ready_queue.remove(self.cursor); }
-                checked += 1;
-                continue;
-            }
-            if super::is_pid_runnable(pid) {
-                self.cursor = (self.cursor + 1) % self.ready_queue.len();
-                return Some(pid);
-            }
-
-            self.ready_queue.remove(self.cursor);
-            checked += 1;
+        if self.cursor >= self.ready_queue.len() {
+            self.cursor = 0;
         }
-
-        None
+        let candidate = self.ready_queue[self.cursor];
+        self.cursor += 1;
+        Some(candidate)
     }
 
-    pub fn pick_next(&mut self) -> Option<ProcessId> {
-        self.pick_next_excluding(None)
+    fn contains(&self, candidate: Candidate) -> bool {
+        self.ready_queue.contains(&candidate)
     }
-
     pub fn len(&self) -> usize {
         self.ready_queue.len()
     }
 }
 
-/// Планировщик разделяется между кооперативными путями ядра и IRQ таймера
-/// (путь преемпшна вызывает `pick_next`/`enqueue`), поэтому он защищён
-/// IRQ-safe локом. Методы планировщика обращаются к таблице процессов, но
-/// никогда не берут этот же лок повторно, так что вложенных дедлоков нет.
 static SCHEDULER: IrqSafeSpinLock<Option<Scheduler>> = IrqSafeSpinLock::new(None);
 
 pub fn init() {
@@ -98,27 +102,65 @@ fn with_scheduler<R>(f: impl FnOnce(&Scheduler) -> R) -> Option<R> {
 }
 
 pub fn enqueue_ready(pid: ProcessId) -> Result<(), ProcessError> {
+    let _irq = InterruptGuard::new();
+    // Queue -> process-table acquisition is forbidden. Ready state may become
+    // stale later; dispatch validates it again before using a queue candidate.
+    if !super::is_pid_runnable(pid) {
+        return Err(ProcessError::NotRunnable);
+    }
     with_scheduler_mut(|scheduler| scheduler.enqueue(pid))
-        .unwrap_or(Err(ProcessError::SchedulerUnavailable))
+        .map(|_| ())
+        .ok_or(ProcessError::SchedulerUnavailable)
 }
 
 pub fn remove(pid: ProcessId) {
     let _ = with_scheduler_mut(|scheduler| scheduler.remove(pid));
 }
 
+fn pick_next(excluded: Option<ProcessId>) -> Option<ProcessId> {
+    let _irq = InterruptGuard::new();
+    // Bounded, allocation-free traversal. The IRQ guard preserves the current
+    // UP transaction; generations protect queue identity across unlocked checks.
+    let budget = ready_len();
+    for _ in 0..budget {
+        let candidate = with_scheduler_mut(|scheduler| scheduler.next_candidate()).flatten()?;
+        let runnable = super::is_pid_runnable(candidate.pid);
+        if !runnable {
+            let _ = with_scheduler_mut(|scheduler| scheduler.remove_candidate(candidate));
+        } else if Some(candidate.pid) != excluded
+            && with_scheduler(|scheduler| scheduler.contains(candidate)).unwrap_or(false)
+        {
+            return Some(candidate.pid);
+        }
+    }
+    None
+}
+
 pub fn pick_next_candidate() -> Option<ProcessId> {
-    with_scheduler_mut(|scheduler| scheduler.pick_next()).flatten()
+    pick_next(None)
 }
 
 pub fn pick_next_candidate_excluding(pid: ProcessId) -> Option<ProcessId> {
-    with_scheduler_mut(|scheduler| scheduler.pick_next_excluding(Some(pid))).flatten()
+    pick_next(Some(pid))
 }
 
 pub fn ready_len() -> usize {
     with_scheduler(|scheduler| scheduler.len()).unwrap_or(0)
 }
 
-/// True only when work can run; queue length can include stale state entries.
+/// A readiness observation, not an atomic SMP Ready -> Running claim.
 pub fn has_ready_tasks() -> bool {
-    with_scheduler(|scheduler| scheduler.ready_queue.iter().any(|pid| super::is_pid_runnable(*pid))).unwrap_or(false)
+    let _irq = InterruptGuard::new();
+    for index in 0..ready_len() {
+        let candidate =
+            with_scheduler(|scheduler| scheduler.ready_queue.get(index).copied()).flatten();
+        if let Some(candidate) = candidate {
+            if super::is_pid_runnable(candidate.pid)
+                && with_scheduler(|scheduler| scheduler.contains(candidate)).unwrap_or(false)
+            {
+                return true;
+            }
+        }
+    }
+    false
 }

@@ -9,7 +9,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | GDT/TSS/IST and initial syscall stack | shared BSP objects | private descriptors/stacks per CPU; immutable IDT may be shared after publication |
 | current PID, exit/yield/schedule/escape flags | global atomics describe one active task | CPU-local; aggregate counters and terminal ownership remain shared |
 | PROCESS_TABLE and returned static mutable Process/fd references | UP IRQ-off sections and stable Box allocation | scoped/owned access, lifecycle pins and exclusion; Box alone does not resolve Rust aliasing |
-| Scheduler ready Vec and process state | IRQ-safe global lock; nested process lookup | one explicit lock order; claim Ready→Running(cpu) before dropping scheduler ownership; no duplicate TID dispatch |
+| Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | local invalidation and global roots | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
@@ -56,3 +56,7 @@ The [process resource receipt](process-resources.md) records detached fd/VM/hand
 cleanup, transactional fd inheritance and owned fd snapshots. Resource release
 was moved out of lifecycle mutations; process-table/current-task pinning and
 scheduler/wait ownership remain open before AP dispatch.
+
+The [scheduler queue receipt](scheduler-queue.md) records removal of the queue ->
+process-table lock edge, generation-safe unlocked validation, deterministic
+reentry/ABA tests, native regressions and a coarse fixed-work before/after run.

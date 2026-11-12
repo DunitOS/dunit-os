@@ -147,6 +147,7 @@ KVM/reference и непокрытые метрики остаются откры
 
 В OP3 реализованы [владение backend и scoped VFS](docs/performance/vfs-ownership.md);
 а также [отделённая очистка ресурсов процессов](docs/performance/process-resources.md).
+Устранён [обратный захват queue → process table](docs/performance/scheduler-queue.md).
 Остальные process ownership, scheduler/wait и memory/TLB gates остаются открытыми.
 
 ### OP4 — настоящий SMP scheduler и потоки

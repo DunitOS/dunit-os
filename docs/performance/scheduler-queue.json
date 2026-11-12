@@ -1,0 +1,866 @@
+{
+  "date": "2026-11-12",
+  "scope": "queue lock order and candidate generations; UP application dispatch",
+  "clock_resolution_ms": 10,
+  "irq_off_undercount_possible": true,
+  "performance_claim": "No speedup established; coarse PIT values and five trials do not bound tail latency or KVM scaling.",
+  "series": {
+    "before": {
+      "started_utc": "2026-11-12T12:14:48.389472+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "15c461930c1d80f69752222e9c0107cf391735407c03adb019b3d46f041b8afa",
+        "bytes": 266412032,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/scheduler-before/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/scheduler-before/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "records": {
+        "cpu-1": [
+          {
+            "scene": "cpu-1",
+            "trial": 0,
+            "elapsed_ns": 80000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 1,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 2,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 4,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 5,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "cpu-2": [
+          {
+            "scene": "cpu-2",
+            "trial": 0,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 1,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 2,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 4,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 5,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "cpu-4": [
+          {
+            "scene": "cpu-4",
+            "trial": 0,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 1,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 2,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 4,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 5,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "cpu-8": [
+          {
+            "scene": "cpu-8",
+            "trial": 0,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 1,
+            "elapsed_ns": 70000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 2,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 4,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 5,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "allocator": [
+          {
+            "scene": "allocator",
+            "trial": 0,
+            "elapsed_ns": 240000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 1,
+            "elapsed_ns": 250000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 2,
+            "elapsed_ns": 240000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 3,
+            "elapsed_ns": 220000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 4,
+            "elapsed_ns": 240000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 5,
+            "elapsed_ns": 240000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          }
+        ],
+        "memfs-io": [
+          {
+            "scene": "memfs-io",
+            "trial": 0,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 1,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 2,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 3,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 4,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 5,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          }
+        ]
+      },
+      "median_coarse_ms": {
+        "cpu-1": 50.0,
+        "cpu-2": 50.0,
+        "cpu-4": 60.0,
+        "cpu-8": 50.0,
+        "allocator": 240.0,
+        "memfs-io": 30.0
+      },
+      "run_source": {
+        "commit": "9e9b4c6df8009077c567515a49355d32b50d3f5d",
+        "tracked_diff_sha256": "0f3777837986b0440bc76d477b19fa32c9395b414eaff92c24f012a494ca522c",
+        "untracked_sha256": {
+          "tools/test_scheduler_queue.py": "010b8d63f8119f41ac31152e6762d417ab60e5dd1cc0d39879efa5ef2b326245"
+        }
+      },
+      "image_build_provenance": {
+        "receipt": "process-resources.json",
+        "source": {
+          "commit": "b236fac2c1b0c7bb7db4a5de6f50dfcecd53f0a9",
+          "tracked_diff_sha256": "8a0d578d27d694e01c3ccd96a4d25f8a32d28582b555382f141613a42f0d6052",
+          "untracked_sha256": {
+            "kernel/src/process/resources.rs": "670141ea04b432b989f24aa291a38bcbc218efcdc7c81f0130de13f5792e4676",
+            "tools/test_process_resources.py": "13a2bf5814d21f3f80fbc52c8e41f7e86c78e47d1957ed6161c61ba711d04e8c"
+          }
+        }
+      }
+    },
+    "after": {
+      "started_utc": "2026-11-12T12:16:21.421194+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "8e026693a03bd28fc0c76dbf2ce7d1e7eb494f7bf892ed7854a522fef2e5ecc1",
+        "bytes": 266414080,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/scheduler-after/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/scheduler-after/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "records": {
+        "cpu-1": [
+          {
+            "scene": "cpu-1",
+            "trial": 0,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 1,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 2,
+            "elapsed_ns": 60000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 4,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-1",
+            "trial": 5,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "cpu-2": [
+          {
+            "scene": "cpu-2",
+            "trial": 0,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 1,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 2,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 4,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-2",
+            "trial": 5,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "cpu-4": [
+          {
+            "scene": "cpu-4",
+            "trial": 0,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 1,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 2,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 4,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-4",
+            "trial": 5,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "cpu-8": [
+          {
+            "scene": "cpu-8",
+            "trial": 0,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 1,
+            "elapsed_ns": 70000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 2,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 3,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 4,
+            "elapsed_ns": 40000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          },
+          {
+            "scene": "cpu-8",
+            "trial": 5,
+            "elapsed_ns": 50000000,
+            "work_units": 4194304,
+            "checksum": 9007160971231232
+          }
+        ],
+        "allocator": [
+          {
+            "scene": "allocator",
+            "trial": 0,
+            "elapsed_ns": 250000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 1,
+            "elapsed_ns": 240000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 2,
+            "elapsed_ns": 230000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 3,
+            "elapsed_ns": 230000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 4,
+            "elapsed_ns": 220000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          },
+          {
+            "scene": "allocator",
+            "trial": 5,
+            "elapsed_ns": 220000000,
+            "work_units": 16777216,
+            "checksum": 528482304
+          }
+        ],
+        "memfs-io": [
+          {
+            "scene": "memfs-io",
+            "trial": 0,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 1,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 2,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 3,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 4,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          },
+          {
+            "scene": "memfs-io",
+            "trial": 5,
+            "elapsed_ns": 30000000,
+            "work_units": 2097152,
+            "checksum": 7340032
+          }
+        ]
+      },
+      "median_coarse_ms": {
+        "cpu-1": 50.0,
+        "cpu-2": 50.0,
+        "cpu-4": 50.0,
+        "cpu-8": 50.0,
+        "allocator": 230.0,
+        "memfs-io": 30.0
+      },
+      "run_source": {
+        "commit": "9e9b4c6df8009077c567515a49355d32b50d3f5d",
+        "tracked_diff_sha256": "c8086280ea90fc7d7d658481479e2fa74f4d0c90a7a55d88e7720be5a3189b84",
+        "untracked_sha256": {
+          "tools/test_scheduler_queue.py": "010b8d63f8119f41ac31152e6762d417ab60e5dd1cc0d39879efa5ef2b326245"
+        }
+      }
+    }
+  },
+  "regressions": [
+    {
+      "name": "build/performance/scheduler-lifecycle/metadata.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/scheduler-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/scheduler-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "8e026693a03bd28fc0c76dbf2ce7d1e7eb494f7bf892ed7854a522fef2e5ecc1",
+        "bytes": 266414080,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/scheduler-lifecycle/thread-lifecycle/metadata.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/scheduler-lifecycle/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/scheduler-lifecycle/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "8e026693a03bd28fc0c76dbf2ce7d1e7eb494f7bf892ed7854a522fef2e5ecc1",
+        "bytes": 266414080,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/scheduler-gui.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "8e026693a03bd28fc0c76dbf2ce7d1e7eb494f7bf892ed7854a522fef2e5ecc1",
+        "bytes": 266414080,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/scheduler-pointer.json",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "8e026693a03bd28fc0c76dbf2ce7d1e7eb494f7bf892ed7854a522fef2e5ecc1",
+        "bytes": 266414080,
+        "profile": "full"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ]
+}
