@@ -550,7 +550,7 @@ impl Process {
         let refs = core::mem::take(&mut self.vfs_fd_refs);
         // Close each distinct VFS descriptor exactly once, even across dups.
         for (vfs_fd, _) in refs {
-            if let Some(vfs) = crate::fs::vfs::get_vfs() {
+            if let Some(mut vfs) = crate::fs::vfs::get_vfs() {
                 let _ = vfs.close(vfs_fd);
                 closed += 1;
             }

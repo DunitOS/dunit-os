@@ -40,7 +40,7 @@ pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
         Some(p) => p.cwd.clone(),
         None => return EINVAL,
     };
-    let file = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|v| {
+    let file = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut v| {
         v.open_capability(&cwd, &path, flags)
             .map_err(vfs_error_to_errno)
     }) {

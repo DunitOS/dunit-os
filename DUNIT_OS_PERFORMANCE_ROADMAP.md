@@ -145,6 +145,9 @@ KVM/reference и непокрытые метрики остаются откры
   mappings, двойного освобождения, deadlock или утечки прав. Нельзя разрешать
   общий userspace dispatch до проверки этих инвариантов.
 
+В OP3 реализованы [владение backend и scoped VFS](docs/performance/vfs-ownership.md);
+остальные memory/lifecycle/TLB gates остаются открытыми.
+
 ### OP4 — настоящий SMP scheduler и потоки
 
 - [ ] Разрешить несколько одновременно Running tasks; атомарно/под lock

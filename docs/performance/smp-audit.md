@@ -13,9 +13,9 @@ gate, not a claim that shared state is now safe to execute on APs.
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | local invalidation and global roots | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
-| VFS_INSTANCE and ROOT_MEMFS | UnsafeCell and static mutable references | scoped serialization plus lifetime rules; shared fd offsets need consistent ownership |
+| VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; integrate process cleanup and ProcFs snapshot lock order before AP dispatch |
 | VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
-| DunitFS/block drivers | shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
+| DunitFS/block drivers | owned/locked DunitFS backend; shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
 | Device IRQ, keyboard/pointer queues and display | INPUT_MASTER/DISPLAY_MASTER and IRQ-safe locks | one routed device IRQ owner initially; cross-CPU locks still needed for syscall readers; no desktop policy in kernel |
 | serial/framebuffer terminal and foreground state | shared sink and formatting/state | bounded critical sections, no per-event hot-path trace; console ownership is global policy, not CPU-local |
 | CPU clock/deadlines | PIT BSP ticks and SFMASK IRQ-off syscall entry | distinguish clocksource from per-CPU event timers; no cross-CPU TSC subtraction without synchronization checks |
@@ -27,7 +27,7 @@ paths until their ownership and remote invalidation invariants are implemented.
 An idle AP count is not parallel userspace or a scaling result.
 
 CPU-local entry/flags and private descriptors/stacks are now implemented and
-checked by the [bring-up receipt](smp-bringup.md). The process/VFS ownership,
+checked by the [bring-up receipt](smp-bringup.md). The process ownership and process/VFS lock-order,
 wait/wakeup and remote TLB gates in this table remain unresolved; AP application
 dispatch stays disabled.
 
@@ -47,3 +47,7 @@ successful try_lock operations, and OnceCell publication. Privileged IRQ paths
 are exercised by native boot/DF/IRQ and CPU/pthread, allocation and MemFS tests
 through `test_smp_boot.py --cpus 1 4` on TCG. These checks do not resolve the
 process/VFS lifetime, lock-order or TLB gates above.
+
+The [OP3 VFS ownership receipt](vfs-ownership.md) records removal of raw backend
+pointers and global mutable VFS references, pinned lifetime/close checks and
+native file/capability, persistence and GUI regressions.

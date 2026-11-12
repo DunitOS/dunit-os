@@ -37,7 +37,7 @@ pub fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, VfsError> {
     if !path.contains('/') {
         return Err(VfsError::NotFound);
     }
-    let vfs = vfs::get_vfs().ok_or(VfsError::IoError)?;
+    let mut vfs = vfs::get_vfs().ok_or(VfsError::IoError)?;
     let normalized = vfs.normalize_at(cwd, path)?;
     let stat = vfs.stat_at("/", &normalized)?;
     if stat.file_type == FileType::Directory {
@@ -47,7 +47,7 @@ pub fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, VfsError> {
 }
 
 pub fn read_vfs_file(cwd: &str, path: &str) -> Result<Vec<u8>, VfsError> {
-    let vfs = vfs::get_vfs().ok_or(VfsError::IoError)?;
+    let mut vfs = vfs::get_vfs().ok_or(VfsError::IoError)?;
     let fd = vfs.open_at(cwd, path, OpenFlags::READ)?;
     let mut data = Vec::new();
     let mut buf = [0u8; 512];

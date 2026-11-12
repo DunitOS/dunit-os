@@ -2,7 +2,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::UnsafeCell;
 
 use crate::clock;
 use crate::drivers::block::{self, BlockDeviceInfo};
@@ -55,15 +54,10 @@ const DEFAULT_DIR_MODE: u16 = 0o755;
 const SB_CRC_OFFSET: usize = 508;
 const NODE_CRC_OFFSET: usize = 252;
 
-/// Единственная смонтированная ФС DunitFS. `UnsafeCell`-newtype без `static mut`.
-/// Монтирование/размонтирование и доступ идут кооперативно на одном CPU.
-struct MountedFsCell(UnsafeCell<Option<DunitFs>>);
-unsafe impl Sync for MountedFsCell {}
-static MOUNTED_FS: MountedFsCell = MountedFsCell(UnsafeCell::new(None));
+/// Boot-published owned backend; VFS and open descriptions retain the same lock.
+static MOUNTED_FS: crate::sync::OnceCell<alloc::sync::Arc<crate::sync::IrqSafeSpinLock<DunitFs>>> = crate::sync::OnceCell::new();
 
-pub fn is_mounted() -> bool {
-    unsafe { (*MOUNTED_FS.0.get()).is_some() }
-}
+pub fn is_mounted() -> bool { MOUNTED_FS.get().is_some() }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DunitFsError {
@@ -264,7 +258,7 @@ pub fn format(
     partition_start: u64,
     partition_blocks: u64,
 ) -> core::result::Result<(), DunitFsError> {
-    if unsafe { (*MOUNTED_FS.0.get()).is_some() } {
+    if MOUNTED_FS.get().is_some() {
         return Err(DunitFsError::AlreadyMounted);
     }
     let geom = Geometry::derive(partition_blocks);
@@ -307,23 +301,16 @@ pub fn mount_global(
     partition_start: u64,
     partition_blocks: u64,
 ) -> core::result::Result<(), DunitFsError> {
-    unsafe {
-        let slot = MOUNTED_FS.0.get();
-        if (*slot).is_some() {
-            return Err(DunitFsError::AlreadyMounted);
-        }
-        *slot = Some(DunitFs::load(device, partition_start, partition_blocks)?);
-        let fs = (*slot).as_mut().ok_or(DunitFsError::Io)?;
-        if let Err(error) = vfs.mount(path, fs) {
-            *slot = None;
-            return Err(DunitFsError::Vfs(error));
-        }
-    }
+    if MOUNTED_FS.get().is_some() { return Err(DunitFsError::AlreadyMounted); }
+    let fs = alloc::sync::Arc::new(crate::sync::IrqSafeSpinLock::new(
+        DunitFs::load(device, partition_start, partition_blocks)?));
+    vfs.mount(path, fs.clone()).map_err(DunitFsError::Vfs)?;
+    MOUNTED_FS.set(fs).map_err(|_| DunitFsError::AlreadyMounted)?;
     Ok(())
 }
 
 pub fn auto_mount(vfs: &mut VirtualFileSystem) -> bool {
-    if unsafe { (*MOUNTED_FS.0.get()).is_some() } {
+    if MOUNTED_FS.get().is_some() {
         return true;
     }
 

@@ -98,12 +98,12 @@ fn apply(pid: crate::process::ProcessId, actions: &[Action]) -> Result<(), i64> 
                 entry.cloexec = bits & 128 != 0;
                 match crate::process::with_process_mut(pid, |child| child.place_open_vfs_fd(*fd, entry)) {
                     Ok(cleanup) => apply_fd_cleanup(cleanup),
-                    Err(error) => { let _ = crate::fs::vfs::get_vfs().map(|vfs| vfs.close(vfs_fd)); return Err(process_error_to_errno(error)); }
+                    Err(error) => { let _ = crate::fs::vfs::get_vfs().map(|mut vfs| vfs.close(vfs_fd)); return Err(process_error_to_errno(error)); }
                 }
             }
             Action::Chdir(path) => {
                 let cwd = crate::process::with_process_mut(pid, |child| Ok(child.cwd.clone())).map_err(process_error_to_errno)?;
-                let vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
+                let mut vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
                 if vfs.stat_at(&cwd, path).map_err(vfs_error_to_errno)?.file_type != crate::fs::vfs::FileType::Directory { return Err(ENOTDIR); }
                 let normalized = vfs.normalize_at(&cwd, path).map_err(vfs_error_to_errno)?;
                 crate::process::with_process_mut(pid, |child| { child.cwd = normalized; Ok(()) }).map_err(process_error_to_errno)?;

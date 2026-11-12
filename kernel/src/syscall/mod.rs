@@ -1094,7 +1094,7 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
     let mut kernel_buf = Vec::new();
     kernel_buf.resize(count, 0);
 
-    let bytes_read = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|vfs| {
+    let bytes_read = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut vfs| {
         vfs.read(vfs_fd, &mut kernel_buf)
             .map_err(vfs_error_to_errno)
     }) {
@@ -1227,7 +1227,7 @@ fn sys_fstat(fd: u32, stat: *mut UserFileStat) -> i64 {
     };
     let file_stat = match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.fstat(vfs_fd).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.fstat(vfs_fd).map_err(vfs_error_to_errno))
     {
         Ok(stat) => stat,
         Err(error) => return error,
@@ -1264,7 +1264,7 @@ fn sys_seek(fd: u32, offset: i64, whence: u32) -> i64 {
     };
     match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.seek(vfs_fd, offset, whence).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.seek(vfs_fd, offset, whence).map_err(vfs_error_to_errno))
     {
         Ok(pos) => pos as i64,
         Err(error) => error,
@@ -1290,7 +1290,7 @@ fn sys_truncate(fd: u32, length: i64) -> i64 {
     };
     match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.ftruncate(vfs_fd, length as u64).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.ftruncate(vfs_fd, length as u64).map_err(vfs_error_to_errno))
     {
         Ok(()) => 0,
         Err(error) => error,
@@ -1338,7 +1338,7 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
 
     match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.write(vfs_fd, &data).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.write(vfs_fd, &data).map_err(vfs_error_to_errno))
     {
         Ok(bytes_written) => bytes_written as i64,
         Err(error) => error,
@@ -1364,7 +1364,7 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
 
     let vfs_fd = match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.open_at(&cwd, &path, flags).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.open_at(&cwd, &path, flags).map_err(vfs_error_to_errno))
     {
         Ok(fd) => fd,
         Err(error) => return error,
@@ -1381,7 +1381,7 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
             fd as i64
         },
         Err(error) => {
-            if let Some(vfs) = crate::fs::vfs::get_vfs() {
+            if let Some(mut vfs) = crate::fs::vfs::get_vfs() {
                 let _ = vfs.close(vfs_fd);
             }
             process_error_to_errno(error)
@@ -1419,7 +1419,7 @@ fn sys_unlink(path: *const u8, path_len: usize) -> i64 {
         None => return EINVAL,
     };
 
-    let vfs = match crate::fs::vfs::get_vfs() {
+    let mut vfs = match crate::fs::vfs::get_vfs() {
         Some(vfs) => vfs,
         None => return EIO,
     };
@@ -1449,7 +1449,7 @@ fn sys_rmdir(path: *const u8, path_len: usize) -> i64 {
         None => return EINVAL,
     };
 
-    let vfs = match crate::fs::vfs::get_vfs() {
+    let mut vfs = match crate::fs::vfs::get_vfs() {
         Some(vfs) => vfs,
         None => return EIO,
     };
@@ -1524,7 +1524,7 @@ fn sys_mkdir(path: *const u8, path_len: usize) -> i64 {
         None => return EINVAL,
     };
 
-    let vfs = match crate::fs::vfs::get_vfs() {
+    let mut vfs = match crate::fs::vfs::get_vfs() {
         Some(vfs) => vfs,
         None => return EIO,
     };
@@ -1562,7 +1562,7 @@ fn sys_rename(
         None => return EINVAL,
     };
 
-    let vfs = match crate::fs::vfs::get_vfs() {
+    let mut vfs = match crate::fs::vfs::get_vfs() {
         Some(vfs) => vfs,
         None => return EIO,
     };
@@ -1598,7 +1598,7 @@ fn apply_fd_cleanup(cleanup: crate::process::FdCleanup) {
     match cleanup {
         crate::process::FdCleanup::None => {}
         crate::process::FdCleanup::CloseVfs(vfs_fd) => {
-            if let Some(vfs) = crate::fs::vfs::get_vfs() {
+            if let Some(mut vfs) = crate::fs::vfs::get_vfs() {
                 let _ = vfs.close(vfs_fd);
             }
         }
@@ -1626,7 +1626,7 @@ fn sys_fsync(fd: u32) -> i64 {
         crate::process::FdTarget::Vfs(vfs_fd) => {
             match crate::fs::vfs::get_vfs()
                 .ok_or(EIO)
-                .and_then(|vfs| vfs.fsync(vfs_fd).map_err(vfs_error_to_errno))
+                .and_then(|mut vfs| vfs.fsync(vfs_fd).map_err(vfs_error_to_errno))
             {
                 Ok(()) => 0,
                 Err(error) => error,
@@ -1713,7 +1713,7 @@ fn sys_readdir(
     };
 
     let mut kernel_entries = alloc::vec![crate::fs::vfs::DirEntry::empty(); capacity];
-    let count = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|vfs| {
+    let count = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut vfs| {
         vfs.readdir_into_at(&cwd, &path, &mut kernel_entries[..])
             .map_err(vfs_error_to_errno)
     }) {
@@ -1760,7 +1760,7 @@ fn sys_stat(path: *const u8, path_len: usize, stat: *mut UserFileStat) -> i64 {
 
     let file_stat = match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.stat_at(&cwd, &path).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.stat_at(&cwd, &path).map_err(vfs_error_to_errno))
     {
         Ok(stat) => stat,
         Err(error) => return error,
@@ -2772,7 +2772,7 @@ fn sys_chdir(path: *const u8, path_len: usize) -> i64 {
         None => return EINVAL,
     };
 
-    let normalized = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|vfs| {
+    let normalized = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut vfs| {
         let stat = vfs.stat_at(&cwd, &path).map_err(vfs_error_to_errno)?;
         if stat.file_type != crate::fs::vfs::FileType::Directory {
             return Err(ENOTDIR);
@@ -2816,7 +2816,7 @@ fn sys_kill_process(pid: u32) -> i64 {
 }
 
 fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, i64> {
-    let vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
+    let mut vfs = crate::fs::vfs::get_vfs().ok_or(EIO)?;
     let normalized = vfs.normalize_at(cwd, path).map_err(vfs_error_to_errno)?;
     let stat = vfs.stat_at("/", &normalized).map_err(vfs_error_to_errno)?;
     if stat.file_type == crate::fs::vfs::FileType::Directory {
@@ -2826,7 +2826,7 @@ fn resolve_exec_path(cwd: &str, path: &str) -> Result<String, i64> {
 }
 
 fn read_vfs_file(cwd: &str, path: &str) -> Result<Vec<u8>, crate::fs::vfs::VfsError> {
-    let vfs = crate::fs::vfs::get_vfs().ok_or(crate::fs::vfs::VfsError::IoError)?;
+    let mut vfs = crate::fs::vfs::get_vfs().ok_or(crate::fs::vfs::VfsError::IoError)?;
     let fd = vfs.open_at(cwd, path, crate::fs::vfs::OpenFlags::READ)?;
     let mut data = Vec::new();
     let mut buf = [0u8; 512];

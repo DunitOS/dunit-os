@@ -31,8 +31,8 @@ pub fn init() {
     // монтирует — следующий auto_mount поднимет её на /persist.
     #[cfg(feature = "boot-smoke-tests")]
     crate::storage::installer::installer_self_test();
-    if let Some(vfs) = crate::fs::vfs::get_vfs() {
-        crate::fs::dunitfs::auto_mount(vfs);
+    if let Some(mut vfs) = crate::fs::vfs::get_vfs() {
+        crate::fs::dunitfs::auto_mount(&mut vfs);
     }
     keyboard::init();
     mouse::init();

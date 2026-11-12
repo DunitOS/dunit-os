@@ -94,15 +94,15 @@ impl Drop for InterruptGuard {
 
 /// Простой test-and-set spinlock для данных, разделяемых только кооперативными
 /// путями ядра (не из контекста прерывания).
-pub struct SpinLock<T> {
+pub struct SpinLock<T: ?Sized> {
     locked: AtomicBool,
     data: UnsafeCell<T>,
 }
 
 // Лок обеспечивает эксклюзивный доступ, поэтому его можно безопасно делить между
 // потоками/ядрами, если сами данные допускают передачу между ними.
-unsafe impl<T: Send> Sync for SpinLock<T> {}
-unsafe impl<T: Send> Send for SpinLock<T> {}
+unsafe impl<T: Send + ?Sized> Sync for SpinLock<T> {}
+unsafe impl<T: Send + ?Sized> Send for SpinLock<T> {}
 
 impl<T> SpinLock<T> {
     pub const fn new(data: T) -> Self {
@@ -111,7 +111,9 @@ impl<T> SpinLock<T> {
             data: UnsafeCell::new(data),
         }
     }
+}
 
+impl<T: ?Sized> SpinLock<T> {
     /// Захватывает лок, крутясь до освобождения.
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         while self
@@ -151,29 +153,29 @@ impl<T> SpinLock<T> {
     }
 }
 
-pub struct SpinLockGuard<'a, T> {
+pub struct SpinLockGuard<'a, T: ?Sized> {
     lock: &'a SpinLock<T>,
     _cpu_bound: PhantomData<*mut ()>,
 }
 
 // A shared guard exposes &T, so sharing requires T: Sync even when the
 // protected value is merely Send. The guard itself cannot migrate.
-unsafe impl<T: Sync> Sync for SpinLockGuard<'_, T> {}
+unsafe impl<T: Sync + ?Sized> Sync for SpinLockGuard<'_, T> {}
 
-impl<T> Deref for SpinLockGuard<'_, T> {
+impl<T: ?Sized> Deref for SpinLockGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
         unsafe { &*self.lock.data.get() }
     }
 }
 
-impl<T> DerefMut for SpinLockGuard<'_, T> {
+impl<T: ?Sized> DerefMut for SpinLockGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.lock.data.get() }
     }
 }
 
-impl<T> Drop for SpinLockGuard<'_, T> {
+impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
         self.lock.release();
     }
@@ -186,12 +188,12 @@ impl<T> Drop for SpinLockGuard<'_, T> {
 /// таймера). Прерывания запрещаются ДО захвата лока и восстанавливаются ПОСЛЕ
 /// его освобождения, поэтому на одном ядре обработчик прерывания физически не
 /// может вклиниться в критическую секцию, а на SMP лок продолжает крутиться.
-pub struct IrqSafeSpinLock<T> {
+pub struct IrqSafeSpinLock<T: ?Sized> {
     inner: SpinLock<T>,
 }
 
-unsafe impl<T: Send> Sync for IrqSafeSpinLock<T> {}
-unsafe impl<T: Send> Send for IrqSafeSpinLock<T> {}
+unsafe impl<T: Send + ?Sized> Sync for IrqSafeSpinLock<T> {}
+unsafe impl<T: Send + ?Sized> Send for IrqSafeSpinLock<T> {}
 
 impl<T> IrqSafeSpinLock<T> {
     pub const fn new(data: T) -> Self {
@@ -199,7 +201,9 @@ impl<T> IrqSafeSpinLock<T> {
             inner: SpinLock::new(data),
         }
     }
+}
 
+impl<T: ?Sized> IrqSafeSpinLock<T> {
     /// Запрещает прерывания и захватывает лок.
     pub fn lock(&self) -> IrqSafeSpinLockGuard<'_, T> {
         let irq = InterruptGuard::new();
@@ -221,19 +225,19 @@ impl<T> IrqSafeSpinLock<T> {
 /// Порядок полей важен: `Drop` для структуры сначала освобождает лок (`guard`),
 /// и лишь затем уничтожается `_irq`, восстанавливая IF. Так прерывания снова
 /// включаются только после того, как лок отпущен.
-pub struct IrqSafeSpinLockGuard<'a, T> {
+pub struct IrqSafeSpinLockGuard<'a, T: ?Sized> {
     guard: SpinLockGuard<'a, T>,
     _irq: InterruptGuard,
 }
 
-impl<T> Deref for IrqSafeSpinLockGuard<'_, T> {
+impl<T: ?Sized> Deref for IrqSafeSpinLockGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
         &self.guard
     }
 }
 
-impl<T> DerefMut for IrqSafeSpinLockGuard<'_, T> {
+impl<T: ?Sized> DerefMut for IrqSafeSpinLockGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.guard
     }

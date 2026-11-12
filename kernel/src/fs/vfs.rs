@@ -1,7 +1,10 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cell::UnsafeCell;
+use alloc::sync::Arc;
+use crate::sync::{IrqSafeSpinLock, OnceCell};
+pub type Backend = Arc<IrqSafeSpinLock<dyn FileSystem>>;
+use core::ops::{Deref, DerefMut};
 use core::fmt;
 
 use super::memfs::MemFs;
@@ -238,51 +241,52 @@ pub trait FileSystem: Send {
 }
 
 pub struct OpenFile {
-    fs: *mut dyn FileSystem,
+    fs: Backend,
     handle: FileHandle,
     flags: OpenFlags,
     refs: usize,
 }
 
 impl OpenFile {
-    pub fn new(fs: *mut dyn FileSystem, handle: FileHandle, flags: OpenFlags) -> Self {
+    pub fn new(fs: Backend, handle: FileHandle, flags: OpenFlags) -> Self {
         Self { fs, handle, flags, refs: 1 }
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        unsafe { (&mut *self.fs).read(self.handle, buf) }
+        self.fs.lock().read(self.handle, buf)
     }
 
     pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        if self.flags.append() { self.seek(0, 2)?; }
-        unsafe { (&mut *self.fs).write(self.handle, buf) }
+        let mut fs = self.fs.lock();
+        if self.flags.append() { fs.seek(self.handle, 0, 2)?; }
+        fs.write(self.handle, buf)
     }
 
     pub fn seek(&mut self, offset: i64, whence: u32) -> Result<u64> {
-        unsafe { (&mut *self.fs).seek(self.handle, offset, whence) }
+        self.fs.lock().seek(self.handle, offset, whence)
     }
 
     pub fn stat(&mut self) -> Result<FileStat> {
-        unsafe { (&mut *self.fs).stat_handle(self.handle) }
+        self.fs.lock().stat_handle(self.handle)
     }
 
     pub fn fsync(&mut self) -> Result<()> {
-        unsafe { (&mut *self.fs).fsync(self.handle) }
+        self.fs.lock().fsync(self.handle)
     }
 
     pub fn ftruncate(&mut self, len: u64) -> Result<()> {
-        unsafe { (&mut *self.fs).ftruncate_handle(self.handle, len) }
+        self.fs.lock().ftruncate_handle(self.handle, len)
     }
 }
 
 impl Drop for OpenFile {
     fn drop(&mut self) {
-        let _ = unsafe { (&mut *self.fs).close(self.handle) };
+        let _ = self.fs.lock().close(self.handle);
     }
 }
 
 pub struct VirtualFileSystem {
-    root_fs: Option<*mut dyn FileSystem>,
+    root_fs: Option<Backend>,
     mounts: Vec<MountPoint>,
     open_files: BTreeMap<FileDescriptor, OpenFile>,
     next_fd: FileDescriptor,
@@ -290,14 +294,14 @@ pub struct VirtualFileSystem {
 
 struct MountPoint {
     path: String,
-    fs: *mut dyn FileSystem,
+    fs: Backend,
 }
 
 impl VirtualFileSystem {
     pub fn open_capability(&mut self, cwd: &str, path: &str, flags: OpenFlags) -> Result<alloc::sync::Arc<super::file_cap::FileCapability>> {
         let mut path_buffer = [0; 256];
         let (fs, relative) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        let handle = unsafe { (&mut *fs).cap_open(relative, flags)? };
+        let handle = fs.lock().cap_open(relative, flags)?;
         Ok(alloc::sync::Arc::new(super::file_cap::FileCapability::new(fs, handle)))
     }
     pub fn new() -> Self {
@@ -309,9 +313,9 @@ impl VirtualFileSystem {
         }
     }
 
-    pub fn mount(&mut self, path: &str, fs: &'static mut dyn FileSystem) -> Result<()> {
+    pub fn mount(&mut self, path: &str, fs: Backend) -> Result<()> {
         if path == "/" {
-            self.root_fs = Some(fs as *mut dyn FileSystem);
+            self.root_fs = Some(fs);
             return Ok(());
         }
         if !path.starts_with('/') || path.ends_with('/') || path.len() > 255 {
@@ -322,7 +326,7 @@ impl VirtualFileSystem {
         }
         self.mounts.push(MountPoint {
             path: String::from(path),
-            fs: fs as *mut dyn FileSystem,
+            fs,
         });
         Ok(())
     }
@@ -332,7 +336,7 @@ impl VirtualFileSystem {
         path: &str,
         cwd: &str,
         buffer: &'a mut [u8; 256],
-    ) -> Result<(*mut dyn FileSystem, &'a str)> {
+    ) -> Result<(Backend, &'a str)> {
         let normalized = normalize_path_into(path, cwd, buffer)?;
         let mut selected: Option<&MountPoint> = None;
         for mount in &self.mounts {
@@ -349,10 +353,10 @@ impl VirtualFileSystem {
         }
         let (fs, relative) = if let Some(mount) = selected {
             let relative = normalized[mount.path.len()..].trim_start_matches('/');
-            (mount.fs, relative)
+            (mount.fs.clone(), relative)
         } else {
             (
-                self.root_fs.ok_or(VfsError::NotFound)?,
+                self.root_fs.clone().ok_or(VfsError::NotFound)?,
                 normalized.trim_start_matches('/'),
             )
         };
@@ -364,7 +368,7 @@ impl VirtualFileSystem {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
         let fs_flags = OpenFlags::from_bits(flags.bits() & !OpenFlags::APPEND.bits());
-        let handle = unsafe { (&mut *fs).open(relative_path, fs_flags)? };
+        let handle = fs.lock().open(relative_path, fs_flags)?;
 
         let fd = self.next_fd;
         self.next_fd += 1;
@@ -432,10 +436,12 @@ impl VirtualFileSystem {
     /// the backing filesystem reports an error; no userspace-visible seek.
     pub fn read_at(&mut self, fd: FileDescriptor, offset: u64, buf: &mut [u8]) -> Result<usize> {
         if offset > i64::MAX as u64 { return Err(VfsError::InvalidPath); }
-        let saved = self.seek(fd, 0, 1)?;
-        self.seek(fd, offset as i64, 0)?;
-        let result = self.read(fd, buf);
-        self.seek(fd, saved as i64, 0)?;
+        let file = self.open_files.get_mut(&fd).ok_or(VfsError::InvalidDescriptor)?;
+        let mut fs = file.fs.lock();
+        let saved = fs.seek(file.handle, 0, 1)?;
+        fs.seek(file.handle, offset as i64, 0)?;
+        let result = fs.read(file.handle, buf);
+        fs.seek(file.handle, saved as i64, 0)?;
         result
     }
     pub fn fsync(&mut self, fd: FileDescriptor) -> Result<()> {
@@ -461,7 +467,7 @@ impl VirtualFileSystem {
     pub fn readdir_at(&mut self, cwd: &str, path: &str) -> Result<Vec<DirEntry>> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).readdir(relative_path) }
+        { let result = fs.lock().readdir(relative_path); result }
     }
 
     pub fn readdir_into_at(
@@ -472,31 +478,31 @@ impl VirtualFileSystem {
     ) -> Result<usize> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).readdir_into(relative_path, entries) }
+        { let result = fs.lock().readdir_into(relative_path, entries); result }
     }
 
     pub fn create_at(&mut self, cwd: &str, path: &str) -> Result<()> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).create(relative_path) }
+        { let result = fs.lock().create(relative_path); result }
     }
 
     pub fn mkdir_at(&mut self, cwd: &str, path: &str) -> Result<()> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).mkdir(relative_path) }
+        { let result = fs.lock().mkdir(relative_path); result }
     }
 
     pub fn remove_at(&mut self, cwd: &str, path: &str) -> Result<()> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).remove(relative_path) }
+        { let result = fs.lock().remove(relative_path); result }
     }
 
     pub fn remove_dir_at(&mut self, cwd: &str, path: &str) -> Result<()> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).remove_dir(relative_path) }
+        { let result = fs.lock().remove_dir(relative_path); result }
     }
 
     pub fn rename_at(&mut self, cwd: &str, old: &str, new: &str) -> Result<()> {
@@ -505,22 +511,22 @@ impl VirtualFileSystem {
         let mut new_buffer = [0; 256];
         let (old_fs, old_rel) = self.resolve_path(old, cwd, &mut old_buffer)?;
         let (new_fs, new_rel) = self.resolve_path(new, cwd, &mut new_buffer)?;
-        if old_fs as *const () != new_fs as *const () {
+        if !Arc::ptr_eq(&old_fs, &new_fs) {
             return Err(VfsError::Unsupported);
         }
-        unsafe { (&mut *old_fs).rename(old_rel, new_rel) }
+        { let result = old_fs.lock().rename(old_rel, new_rel); result }
     }
 
     pub fn truncate_at(&mut self, cwd: &str, path: &str) -> Result<()> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).truncate(relative_path) }
+        { let result = fs.lock().truncate(relative_path); result }
     }
 
     pub fn stat_at(&mut self, cwd: &str, path: &str) -> Result<FileStat> {
         let mut path_buffer = [0; 256];
         let (fs, relative_path) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        unsafe { (&mut *fs).stat(relative_path) }
+        { let result = fs.lock().stat(relative_path); result }
     }
 
     pub fn normalize_at(&self, cwd: &str, path: &str) -> Result<String> {
@@ -601,18 +607,20 @@ fn pop_path_component(out: &[u8; 256], len: &mut usize) {
     *len = if idx == 0 { 1 } else { idx };
 }
 
-/// Синглтон VFS и корневая MemFs.
-/// `UnsafeCell`-newtype без `static mut`. Всё это
-/// инициализируется на этапе загрузки и используется кооперативно на одном CPU;
-/// раздача `&'static mut` через `as_mut()`/`.get()` сохраняет прежнюю семантику
-/// (в т.ч. монтирование `&'static mut ROOT_MEMFS` в VFS).
-struct VfsInstanceCell(UnsafeCell<Option<VirtualFileSystem>>);
-unsafe impl Sync for VfsInstanceCell {}
-static VFS_INSTANCE: VfsInstanceCell = VfsInstanceCell(UnsafeCell::new(None));
+// Lock order: registry -> backend. Direct root/capability operations take only
+// the backend lock and never re-enter the registry. Process-table lock ordering
+// must be resolved before any AP enters these shared syscall paths.
+static VFS_INSTANCE: IrqSafeSpinLock<Option<VirtualFileSystem>> = IrqSafeSpinLock::new(None);
+pub struct VfsGuard(crate::sync::IrqSafeSpinLockGuard<'static, Option<VirtualFileSystem>>);
+impl Deref for VfsGuard {
+    type Target = VirtualFileSystem;
+    fn deref(&self) -> &Self::Target { self.0.as_ref().expect("initialized VFS") }
+}
+impl DerefMut for VfsGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target { self.0.as_mut().expect("initialized VFS") }
+}
 
-struct RootMemFsCell(UnsafeCell<MemFs>);
-unsafe impl Sync for RootMemFsCell {}
-static ROOT_MEMFS: RootMemFsCell = RootMemFsCell(UnsafeCell::new(MemFs::empty()));
+static ROOT_MEMFS: OnceCell<Arc<IrqSafeSpinLock<MemFs>>> = OnceCell::new();
 
 fn serial_log(msg: &str) {
     crate::serial::serial_write(msg);
@@ -639,9 +647,12 @@ fn ensure_parent_dirs(memfs: &mut MemFs, path: &str) {
 
 pub fn init() -> Result<()> {
     serial_log("[VFS] init START\r\n");
-    unsafe {
+    {
+        let mut registry = VFS_INSTANCE.lock();
+        if registry.is_some() { return Err(VfsError::AlreadyExists); }
         let mut vfs = VirtualFileSystem::new();
-        let memfs: &'static mut MemFs = &mut *ROOT_MEMFS.0.get();
+        let root = Arc::new(IrqSafeSpinLock::new(MemFs::empty()));
+        let mut memfs = root.lock();
 
         // Populate /app and /assets entirely from the Limine-loaded initrd
         // archive (kernel/src/initrd.rs). The kernel embeds no application
@@ -652,7 +663,7 @@ pub fn init() -> Result<()> {
         match crate::initrd::get_initrd() {
             Some(initrd) => {
                 for entry in initrd.entries() {
-                    ensure_parent_dirs(memfs, &entry.name);
+                    ensure_parent_dirs(&mut memfs, &entry.name);
                     if entry.name.starts_with("/assets/") {
                         memfs.add_static_file(&entry.name, entry.data);
                     } else {
@@ -666,32 +677,33 @@ pub fn init() -> Result<()> {
         // Kernel-seeded writable nodes that are not shipped in the archive.
         let _ = memfs.mkdir("/persist");
 
-        vfs.mount("/", memfs)?;
+        drop(memfs);
+        vfs.mount("/", root.clone())?;
+        ROOT_MEMFS.set(root).map_err(|_| VfsError::AlreadyExists)?;
         serial_log("[MEMFS] mounted as /\r\n");
 
-        *VFS_INSTANCE.0.get() = Some(vfs);
+        *registry = Some(vfs);
     }
 
     serial_log("[VFS] init OK\r\n");
     Ok(())
 }
 
-pub fn get_vfs() -> Option<&'static mut VirtualFileSystem> {
-    unsafe { (*VFS_INSTANCE.0.get()).as_mut() }
+pub fn get_vfs() -> Option<VfsGuard> {
+    let guard = VFS_INSTANCE.lock();
+    if guard.is_some() { Some(VfsGuard(guard)) } else { None }
 }
 
 pub fn static_file(path: &str) -> Option<&'static [u8]> {
-    unsafe { (*ROOT_MEMFS.0.get()).static_file(path) }
+    ROOT_MEMFS.get()?.lock().static_file(path)
 }
 
 pub fn register_device_node(path: &str) {
-    unsafe {
-        (*ROOT_MEMFS.0.get()).add_device(path);
-    }
+    if let Some(root) = ROOT_MEMFS.get() { root.lock().add_device(path); }
 }
 
 pub fn root_memfs_stats() -> crate::fs::memfs::MemFsStats {
-    unsafe { (*ROOT_MEMFS.0.get()).stats() }
+    ROOT_MEMFS.get().expect("root filesystem initialized").lock().stats()
 }
 
 /// Boot smoke test (feature `boot-smoke-tests`) exercising the M4 structural
@@ -710,7 +722,7 @@ pub fn run_fs_mutation_smoke() -> bool {
         cond
     }
 
-    let vfs = match get_vfs() {
+    let mut vfs = match get_vfs() {
         Some(vfs) => vfs,
         None => return false,
     };
@@ -768,5 +780,37 @@ pub fn run_fs_mutation_smoke() -> bool {
         "rename static asset -> PermissionDenied",
     );
 
+    ok &= expect(run_backend_ownership_smoke().is_ok(), "backend ownership/close lifetime");
+    if ok { serial_log("[VFS-OWNERSHIP] namespace drop, unlink, pinned I/O and final close OK\r\n"); }
+
     ok
+}
+
+/// Open descriptions must keep their backend alive after namespace destruction.
+#[cfg(feature = "boot-smoke-tests")]
+fn run_backend_ownership_smoke() -> Result<()> {
+    fn require_shared<T: Send + Sync>() {}
+    require_shared::<super::file_cap::FileCapability>();
+    require_shared::<VirtualFileSystem>();
+    let root = Arc::new(IrqSafeSpinLock::new(MemFs::empty()));
+    root.lock().add_file("/tmp/owned", alloc::vec![1, 2, 3, 4]);
+    let weak = Arc::downgrade(&root);
+    let mut namespace = VirtualFileSystem::new();
+    namespace.mount("/", root.clone())?;
+    let cap = namespace.open_capability("/", "/tmp/owned", OpenFlags::READ_WRITE)?;
+    let fd = namespace.open_at("/", "/tmp/owned", OpenFlags::READ)?;
+    let mut file = namespace.open_files.remove(&fd).ok_or(VfsError::IoError)?;
+    drop(namespace);
+    drop(root);
+    cap.remove()?;
+    if cap.write_at(0, b"live")? != 4 { return Err(VfsError::IoError); }
+    let mut bytes = [0; 4];
+    if file.read(&mut bytes)? != 4 || &bytes != b"live" { return Err(VfsError::IoError); }
+    drop(cap);
+    if weak.upgrade().ok_or(VfsError::IoError)?.lock().stats().open_handles != 1 {
+        return Err(VfsError::IoError);
+    }
+    drop(file);
+    if weak.upgrade().is_some() { return Err(VfsError::IoError); }
+    Ok(())
 }

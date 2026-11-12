@@ -528,12 +528,12 @@ fn cmd_mount_dunit(out: &mut dyn ShellSink, args: &str) {
             return;
         }
     };
-    let Some(vfs) = vfs::get_vfs() else {
+    let Some(mut vfs) = vfs::get_vfs() else {
         out.write_str("mount.dunit: VFS not initialized\n");
         return;
     };
     match crate::fs::dunitfs::mount_global(
-        vfs,
+        &mut vfs,
         "/persist",
         device,
         partition.first_lba,
@@ -562,7 +562,7 @@ fn cmd_install_dunit(out: &mut dyn ShellSink, args: &str) {
         out.write_str("install.dunit: device not found\n");
         return;
     };
-    let Some(vfs) = vfs::get_vfs() else {
+    let Some(mut vfs) = vfs::get_vfs() else {
         out.write_str("install.dunit: VFS not initialized\n");
         return;
     };
@@ -570,7 +570,7 @@ fn cmd_install_dunit(out: &mut dyn ShellSink, args: &str) {
     out.write_str("Installing Dunit OS to ");
     out.write_str(device.name);
     out.write_str(" (BIOS + UEFI)...\n");
-    match crate::storage::installer::install(device, vfs) {
+    match crate::storage::installer::install(device, &mut vfs) {
         Ok(()) => {
             out.write_str("Dunit OS installed successfully\n");
             out.write_str("Persistent filesystem mounted at /persist\n");
@@ -839,7 +839,7 @@ fn write_file(out: &mut dyn ShellSink, cwd: &str, path: &str, text: &str, append
         return;
     }
 
-    let Some(vfs) = vfs::get_vfs() else {
+    let Some(mut vfs) = vfs::get_vfs() else {
         out.write_str("echo: VFS not initialized\n");
         return;
     };
@@ -932,7 +932,7 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
     if trimmed == "ls" || trimmed.starts_with("ls ") {
         let path = trimmed.strip_prefix("ls").unwrap_or("").trim();
         let path = if path.is_empty() { "." } else { path };
-        if let Some(vfs) = vfs::get_vfs() {
+        if let Some(mut vfs) = vfs::get_vfs() {
             let mut entries = [DirEntry::empty(); 32];
             match vfs.readdir_into_at(cwd, path, &mut entries) {
                 Ok(count) => {
@@ -955,7 +955,7 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
     if trimmed == "cd" || trimmed.starts_with("cd ") {
         let path = trimmed.strip_prefix("cd").unwrap_or("").trim();
         let path = if path.is_empty() { "/" } else { path };
-        if let Some(vfs) = vfs::get_vfs() {
+        if let Some(mut vfs) = vfs::get_vfs() {
             match vfs.stat_at(cwd, path) {
                 Ok(stat) if stat.file_type == FileType::Directory => {
                     match vfs.normalize_at(cwd, path) {
@@ -976,7 +976,7 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
         let path = trimmed[6..].trim();
         if path.is_empty() {
             out.write_str("mkdir: missing operand\n");
-        } else if let Some(vfs) = vfs::get_vfs() {
+        } else if let Some(mut vfs) = vfs::get_vfs() {
             if let Err(error) = vfs.mkdir_at(cwd, path) {
                 write_vfs_error(out, "mkdir", error);
             }
@@ -990,7 +990,7 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
         let path = trimmed[6..].trim();
         if path.is_empty() {
             out.write_str("touch: missing operand\n");
-        } else if let Some(vfs) = vfs::get_vfs() {
+        } else if let Some(mut vfs) = vfs::get_vfs() {
             match vfs.stat_at(cwd, path) {
                 Ok(stat) if stat.file_type == FileType::File => {}
                 Ok(_) => out.write_str("touch: not a file\n"),
@@ -1011,7 +1011,7 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
         let path = trimmed[4..].trim();
         if path.is_empty() {
             out.write_str("cat: missing operand\n");
-        } else if let Some(vfs) = vfs::get_vfs() {
+        } else if let Some(mut vfs) = vfs::get_vfs() {
             match vfs.open_at(cwd, path, OpenFlags::READ) {
                 Ok(fd) => {
                     let mut buf = [0u8; 512];
@@ -1046,7 +1046,7 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
         let path = trimmed[3..].trim();
         if path.is_empty() {
             out.write_str("rm: missing operand\n");
-        } else if let Some(vfs) = vfs::get_vfs() {
+        } else if let Some(mut vfs) = vfs::get_vfs() {
             if let Err(error) = vfs.remove_at(cwd, path) {
                 write_vfs_error(out, "rm", error);
             }
@@ -1059,12 +1059,12 @@ fn handle_fs_command(out: &mut dyn ShellSink, cwd: &mut String, trimmed: &str) -
     if trimmed == "tree" || trimmed.starts_with("tree ") {
         let path = trimmed.strip_prefix("tree").unwrap_or("").trim();
         let path = if path.is_empty() { "." } else { path };
-        if let Some(vfs) = vfs::get_vfs() {
+        if let Some(mut vfs) = vfs::get_vfs() {
             match vfs.normalize_at(cwd, path) {
                 Ok(root) => {
                     out.write_str(&root);
                     out.write_str("\n");
-                    tree_path(out, vfs, &root, 1);
+                    tree_path(out, &mut vfs, &root, 1);
                 }
                 Err(error) => write_vfs_error(out, "tree", error),
             }

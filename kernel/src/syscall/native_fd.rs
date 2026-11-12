@@ -46,7 +46,7 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
             }
             let status = (entry.status() & (READ | WRITE)) | (arg as u32 & (APPEND | NONBLOCK));
             if let crate::process::FdTarget::Vfs(vfs_fd) = entry.target {
-                if let Err(error) = crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|vfs| {
+                if let Err(error) = crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut vfs| {
                     vfs.set_append(vfs_fd, status & APPEND != 0)
                         .map_err(vfs_error_to_errno)
                 }) {
@@ -207,7 +207,7 @@ pub(super) fn map_file(
     };
     let stat = match crate::fs::vfs::get_vfs()
         .ok_or(EIO)
-        .and_then(|vfs| vfs.fstat(vfs_fd).map_err(vfs_error_to_errno))
+        .and_then(|mut vfs| vfs.fstat(vfs_fd).map_err(vfs_error_to_errno))
     {
         Ok(stat) => stat,
         Err(error) => return error,
