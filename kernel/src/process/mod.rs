@@ -1,5 +1,7 @@
 pub mod scheduler;
 mod terminal_stdin;
+mod current_access;
+pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut};
 mod resources;
 pub use resources::inherit_process_fds;
 #[cfg(feature = "boot-smoke-tests")]
@@ -335,6 +337,7 @@ pub struct Process {
     pub entry_argv: usize,
     pub entry_envp: usize,
     fd_table: BTreeMap<ProcessFd, FdEntry>,
+    fd_wakeup_pending: bool,
     /// How many process fds reference each underlying VFS descriptor. dup/dup2
     /// make several process fds share one VFS open file (and its offset); the
     /// VFS close only fires when the last of them is closed.
@@ -404,6 +407,7 @@ impl Process {
             entry_argv: 0,
             entry_envp: 0,
             fd_table: BTreeMap::new(),
+            fd_wakeup_pending: false,
             vfs_fd_refs: BTreeMap::new(),
             next_mmap_addr: USER_MMAP_BASE,
             shared_owned: Vec::new(),
@@ -449,6 +453,7 @@ impl Process {
             entry_argv: 0,
             entry_envp: 0,
             fd_table: BTreeMap::new(),
+            fd_wakeup_pending: false,
             vfs_fd_refs: BTreeMap::new(),
             next_mmap_addr: USER_MMAP_BASE,
             shared_owned: Vec::new(),
@@ -562,7 +567,7 @@ impl Process {
     /// (close a VFS file whose last reference went away, or wake a pipe end).
     pub fn drop_fd(&mut self, fd: ProcessFd) -> Result<FdCleanup, ProcessError> {
         let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
-        wake_wait_set_waiters();
+        self.fd_wakeup_pending = true;
         Ok(self.release_target(entry.target))
     }
 
@@ -620,7 +625,7 @@ impl Process {
                 };
                 entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
                 self.fd_table.insert(nf, entry);
-                wake_wait_set_waiters();
+                self.fd_wakeup_pending = true;
                 Ok((nf, cleanup))
             }
             None => {
@@ -675,7 +680,7 @@ impl Process {
         let cleanup = self.fd_table.remove(&fd).map(|old| self.release_target(old.target)).unwrap_or(FdCleanup::None);
         entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
         self.fd_table.insert(fd, entry);
-        wake_wait_set_waiters();
+        self.fd_wakeup_pending = true;
         Ok(cleanup)
     }
     /// Adds a freshly opened VFS object at an exact descriptor, consuming its
@@ -689,7 +694,7 @@ impl Process {
 
     pub fn close_fd(&mut self, fd: ProcessFd) -> Result<FdEntry, ProcessError> {
         let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
-        wake_wait_set_waiters();
+        self.fd_wakeup_pending = true;
         Ok(entry)
     }
 
@@ -995,6 +1000,10 @@ impl Process {
         self.fs_base = base;
         unsafe { crate::hal::set_fs_base(base); }
         Ok(())
+    }
+
+    fn take_fd_wakeup(&mut self) -> bool {
+        core::mem::take(&mut self.fd_wakeup_pending)
     }
 
     pub fn fd_count(&self) -> usize {
@@ -1489,7 +1498,7 @@ fn current_thread() -> Option<&'static Process> {
     table[index].process.as_ref().map(|boxed| &**boxed)
 }
 
-pub fn current_thread_mut() -> Option<&'static mut Process> {
+fn current_thread_mut() -> Option<&'static mut Process> {
     let entity = current_entity_id()?;
     let table = process_table_mut();
     let index = process_record_index(table, entity)?;
@@ -1904,14 +1913,19 @@ pub fn with_process_mut<R>(
     // прерываниях, так что guard здесь обязателен. Замыкания короткие (мутация
     // записи), в userspace они не входят, так что рост latency несущественен.
     let _irq = InterruptGuard::new();
-    let table = process_table_mut();
-    let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
-    let record = &mut table[index];
-    let process = record
-        .process
-        .as_mut()
-        .ok_or(ProcessError::ProcessNotPrepared)?;
-    f(&mut **process)
+    let (result, wake) = {
+        let table = process_table_mut();
+        let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
+        let record = &mut table[index];
+        let process = record
+            .process
+            .as_mut()
+            .ok_or(ProcessError::ProcessNotPrepared)?;
+        let result = f(&mut **process);
+        (result, process.take_fd_wakeup())
+    };
+    if wake { wake_wait_set_waiters(); }
+    result
 }
 
 pub fn mark_process_prepared_as_ready(pid: ProcessId) -> Result<(), ProcessError> {
@@ -2647,14 +2661,14 @@ pub fn init_current_kernel_process() {
     crate::cpu::runtime().current_pid.store(pid.0, Ordering::SeqCst);
 }
 
-pub fn current_process() -> Option<&'static Process> {
+fn current_process() -> Option<&'static Process> {
     let pid = current_pid()?;
     let table = process_table_mut();
     let index = process_record_index(table, pid)?;
     table[index].process.as_ref().map(|boxed| &**boxed)
 }
 
-pub fn current_process_mut() -> Option<&'static mut Process> {
+fn current_process_mut() -> Option<&'static mut Process> {
     let pid = current_pid()?;
     let table = process_table_mut();
     let index = process_record_index(table, pid)?;
@@ -2680,18 +2694,14 @@ pub fn open_pipe_fd(id: u64, write: bool) -> Result<ProcessFd, ProcessError> {
 }
 
 pub fn drop_fd(fd: ProcessFd) -> Result<FdCleanup, ProcessError> {
-    current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .drop_fd(fd)
+    with_current_process_mut(|process| process.drop_fd(fd)).ok_or(ProcessError::NoCurrentProcess)?
 }
 
 pub fn dup_fd(
     oldfd: ProcessFd,
     newfd: Option<ProcessFd>,
 ) -> Result<(ProcessFd, FdCleanup), ProcessError> {
-    current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .dup_fd(oldfd, newfd)
+    with_current_process_mut(|process| process.dup_fd(oldfd, newfd)).ok_or(ProcessError::NoCurrentProcess)?
 }
 
 /// Owned snapshot; never expose an fd-table reference across a syscall stage.
@@ -2701,9 +2711,7 @@ pub fn get_fd(fd: ProcessFd) -> Option<FdEntry> {
 }
 
 pub fn close_fd(fd: ProcessFd) -> Result<FdEntry, ProcessError> {
-    current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .close_fd(fd)
+    with_current_process_mut(|process| process.close_fd(fd)).ok_or(ProcessError::NoCurrentProcess)?
 }
 
 pub fn exit_current_process(code: i32) -> Option<ProcessId> {

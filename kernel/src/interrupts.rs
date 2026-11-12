@@ -280,8 +280,7 @@ fn terminate_current_process(
     fault_addr: u64,
     fault: crate::process::ProcessFault,
 ) {
-    let pid = crate::process::current_process()
-        .map(|process| process.pid.0)
+    let pid = crate::process::with_current_process(|process| process.pid.0)
         .unwrap_or(0);
 
     crate::memory::serial_write("[USER-FAULT] pid=");

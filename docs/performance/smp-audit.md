@@ -8,7 +8,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | HAL syscall scratch, selected/escape stack, user FPU pointer | one global writable block in syscall.asm | CPU-local GS anchor and private entry state; symmetric user transitions and paranoid interrupt recovery |
 | GDT/TSS/IST and initial syscall stack | shared BSP objects | private descriptors/stacks per CPU; immutable IDT may be shared after publication |
 | current PID, exit/yield/schedule/escape flags | global atomics describe one active task | CPU-local; aggregate counters and terminal ownership remain shared |
-| PROCESS_TABLE and returned static mutable Process/fd references | UP IRQ-off sections and stable Box allocation | scoped/owned access, lifecycle pins and exclusion; Box alone does not resolve Rust aliasing |
+| PROCESS_TABLE and current process/thread access | external access uses non-escaping scopes; fd snapshots are owned; private table/dispatcher still UP-only | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
@@ -60,3 +60,7 @@ scheduler/wait ownership remain open before AP dispatch.
 The [scheduler queue receipt](scheduler-queue.md) records removal of the queue ->
 process-table lock edge, generation-safe unlocked validation, deterministic
 reentry/ABA tests, native regressions and a coarse fixed-work before/after run.
+
+The [current-process access receipt](process-access.md) records privatized legacy
+selectors, scoped reads/mutations across syscall/input/IPC paths and deferred fd
+wait-set notifications. It enforces a result-lifetime boundary, not SMP exclusion.

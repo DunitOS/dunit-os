@@ -816,22 +816,16 @@ fn handle_error_to_errno(error: crate::handle::HandleError) -> i64 {
 }
 
 fn sys_handle_create_memory(len: usize) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_create_memory(len)
             .map(|h| h as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_create_endpoint(target_pid: u64) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => {
+    crate::process::with_current_process_mut(|process| {
             process.handle_create_endpoint(crate::process::ProcessId(target_pid)) as i64
-        }
-        None => EINVAL,
-    }
+        }).unwrap_or(EINVAL)
 }
 
 fn sys_handle_read(handle: u32, user_buf: *mut u8, len: usize) -> i64 {
@@ -847,11 +841,9 @@ fn sys_handle_read(handle: u32, user_buf: *mut u8, len: usize) -> i64 {
     // усекается — объект физически не бывает больше cap.
     let cap = len.min(crate::handle::MAX_MEMORY_OBJECT);
     let mut scratch = alloc::vec![0u8; cap];
-    let copied = match crate::process::current_process_mut() {
-        Some(process) => match process.handle_memory_read(handle, &mut scratch) {
-            Ok(n) => n,
-            Err(error) => return handle_error_to_errno(error),
-        },
+    let copied = match crate::process::with_current_process_mut(|process| process.handle_memory_read(handle, &mut scratch)) {
+        Some(Ok(n)) => n,
+        Some(Err(error)) => return handle_error_to_errno(error),
         None => return EINVAL,
     };
     if let Err(error) = copy_buffer_to_user(user_buf, &scratch[..copied]) {
@@ -868,130 +860,92 @@ fn sys_handle_write(handle: u32, user_buf: *const u8, len: usize) -> i64 {
         Ok(data) => data,
         Err(error) => return error,
     };
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_memory_write(handle, &data)
             .map(|n| n as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_map(handle: u32, addr: usize, len: usize) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_map(handle, addr, len)
             .map(|mapped| mapped as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_shared_len(handle: u32) -> i64 {
-    match crate::process::current_process() {
-        Some(process) => process
-            .handle_shared_len(handle)
-            .map(|len| len as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+    crate::process::with_current_process(|process| process.handle_shared_len(handle)
+        .map(|len| len as i64).unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_dup(handle: u32, new_rights: u32) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_dup(handle, new_rights)
             .map(|h| h as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_rights(handle: u32) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_rights(handle)
             .map(|r| r as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_close(handle: u32) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_close(handle)
             .map(|_| 0)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_signal(handle: u32, value: u64) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_signal(handle, value)
             .map(|_| 0)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_take_signals() -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process.handle_take_signals() as i64,
-        None => EINVAL,
-    }
+    crate::process::with_current_process_mut(|process| process.handle_take_signals() as i64).unwrap_or(EINVAL)
 }
 
 fn sys_handle_display_acquire() -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_display_acquire()
             .map(|h| h as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_input_acquire() -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_input_acquire()
             .map(|h| h as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_create_shared(len: usize) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process
+    crate::process::with_current_process_mut(|process| process
             .handle_create_shared(len)
             .map(|h| h as i64)
-            .unwrap_or_else(handle_error_to_errno),
-        None => EINVAL,
-    }
+            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_handle_transfer(handle: u32, target_pid: u64) -> i64 {
     let target = crate::process::ProcessId(target_pid);
     // Проверяем существование цели ДО изъятия объекта из таблицы-источника,
     // чтобы неудачная передача не «съела» capability.
-    let process = match crate::process::current_process_mut() {
-        Some(process) => process,
+    let self_pid = match crate::process::with_current_process(|process| process.pid) {
+        Some(pid) => pid, None => return EINVAL,
+    };
+    if target != self_pid && !crate::process::process_exists(target) { return ENOENT; }
+    let (object, rights) = match crate::process::with_current_process_mut(|process| process.handle_take_for_transfer(handle)) {
+        Some(Ok(pair)) => pair,
+        Some(Err(error)) => return handle_error_to_errno(error),
         None => return EINVAL,
     };
-    let self_pid = process.pid;
-    if target != self_pid && !crate::process::process_exists(target) {
-        return ENOENT;
-    }
-    let (object, rights) = match process.handle_take_for_transfer(handle) {
-        Ok(pair) => pair,
-        Err(error) => return handle_error_to_errno(error),
-    };
     if target == self_pid {
-        return process.handle_receive(object, rights) as i64;
+        return crate::process::with_current_process_mut(|process| process.handle_receive(object, rights) as i64).unwrap_or(EINVAL);
     }
     match crate::process::with_process_mut(target, |t| Ok(t.handle_receive(object, rights))) {
         Ok(new_handle) => new_handle as i64,
@@ -1135,7 +1089,7 @@ fn sys_pipe(fds: *mut u32, flags: u32) -> i64 {
     };
     for fd in [read_fd, write_fd] {
         if let Some(entry) = crate::process::get_fd(fd) { entry.set_status(entry.status() | (flags & 64)); }
-        if flags & 128 != 0 { let _ = crate::process::current_process_mut().map(|process| process.set_cloexec(fd, true)); }
+        if flags & 128 != 0 { let _ = crate::process::with_current_process_mut(|process| process.set_cloexec(fd, true)); }
     }
     let out = [read_fd, write_fd];
     let bytes = unsafe {
@@ -1357,8 +1311,8 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
         Err(error) => return error,
     };
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1376,7 +1330,7 @@ fn sys_open(path: *const u8, path_len: usize, flags: u32) -> i64 {
                 entry.set_status((flags.bits() & (1 | 2 | 16)) | (descriptor_flags & 64));
             }
             if descriptor_flags & 128 != 0 {
-                let _ = crate::process::current_process_mut().map(|process| process.set_cloexec(fd, true));
+                let _ = crate::process::with_current_process_mut(|process| process.set_cloexec(fd, true));
             }
             fd as i64
         },
@@ -1414,8 +1368,8 @@ fn sys_unlink(path: *const u8, path_len: usize) -> i64 {
         Err(error) => return error,
     };
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1444,8 +1398,8 @@ fn sys_rmdir(path: *const u8, path_len: usize) -> i64 {
         Err(error) => return error,
     };
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1519,8 +1473,8 @@ fn sys_mkdir(path: *const u8, path_len: usize) -> i64 {
         Err(error) => return error,
     };
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1557,8 +1511,8 @@ fn sys_rename(
         Err(error) => return error,
     };
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1707,8 +1661,8 @@ fn sys_readdir(
         }
     }
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1753,8 +1707,8 @@ fn sys_stat(path: *const u8, path_len: usize, stat: *mut UserFileStat) -> i64 {
         return error;
     }
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -1823,20 +1777,14 @@ fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32, fd: i64, offset: 
     }
     // Anonymous legacy callers use only four arguments; fd/offset registers
     // are deliberately ignored rather than interpreting uninitialized values.
-    match crate::process::current_process_mut() {
-        Some(process) => process.map_anonymous(addr, length, prot & 2 != 0,
+    crate::process::with_current_process_mut(|process| process.map_anonymous(addr, length, prot & 2 != 0,
             prot & 4 != 0, flags & MAP_GUARD != 0, prot != 0)
-            .map(|mapped| mapped as i64).unwrap_or_else(process_error_to_errno),
-        None => EINVAL,
-    }
+            .map(|mapped| mapped as i64).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_munmap(addr: usize, length: usize) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process.unmap_range(addr, length)
-            .map(|_| 0).unwrap_or_else(process_error_to_errno),
-        None => EINVAL,
-    }
+    crate::process::with_current_process_mut(|process| process.unmap_range(addr, length)
+            .map(|_| 0).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_mprotect(addr: usize, length: usize, prot: u32) -> i64 {
@@ -1848,37 +1796,25 @@ fn sys_mprotect(addr: usize, length: usize, prot: u32) -> i64 {
     {
         return EINVAL;
     }
-    match crate::process::current_process_mut() {
-        Some(process) => process.protect_range(
+    crate::process::with_current_process_mut(|process| process.protect_range(
             addr, length, prot & PROT_WRITE != 0, prot & PROT_EXEC != 0, prot != 0,
-        ).map(|_| 0).unwrap_or_else(process_error_to_errno),
-        None => EINVAL,
-    }
+        ).map(|_| 0).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_shared_vm_create(length: usize) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process.create_shared_vm(length)
-            .map(|id| id as i64).unwrap_or_else(process_error_to_errno),
-        None => EINVAL,
-    }
+    crate::process::with_current_process_mut(|process| process.create_shared_vm(length)
+            .map(|id| id as i64).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_shared_vm_map(id: u64, addr: usize, prot: u32) -> i64 {
     if prot != 1 && prot != 3 { return EINVAL; }
-    match crate::process::current_process_mut() {
-        Some(process) => process.map_shared_vm(id, addr, prot & 2 != 0)
-            .map(|mapped| mapped as i64).unwrap_or_else(process_error_to_errno),
-        None => EINVAL,
-    }
+    crate::process::with_current_process_mut(|process| process.map_shared_vm(id, addr, prot & 2 != 0)
+            .map(|mapped| mapped as i64).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_shared_vm_close(id: u64) -> i64 {
-    match crate::process::current_process_mut() {
-        Some(process) => process.close_shared_vm(id)
-            .map(|_| 0).unwrap_or_else(process_error_to_errno),
-        None => EINVAL,
-    }
+    crate::process::with_current_process_mut(|process| process.close_shared_vm(id)
+            .map(|_| 0).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
 }
 
 fn sys_set_thread_pointer(base: u64) -> i64 {
@@ -2007,8 +1943,8 @@ fn sys_send_message(target_pid: u32, msg: *const u8, len: usize) -> i64 {
         Ok(data) => data,
         Err(error) => return error,
     };
-    let sender = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let sender = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let target = crate::process::ProcessId(target_pid as u64);
@@ -2030,8 +1966,8 @@ fn sys_receive_message(msg: *mut u8, len: usize) -> i64 {
     if len == 0 || len > crate::ipc::MAX_MESSAGE_SIZE {
         return EMSGSIZE;
     }
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let pid = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let mut buffer = [0u8; crate::ipc::MAX_MESSAGE_SIZE];
@@ -2056,8 +1992,8 @@ fn sys_receive_message_from(msg: *mut u8, len: usize, sender_out: *mut u32) -> i
     if len == 0 || len > crate::ipc::MAX_MESSAGE_SIZE {
         return EMSGSIZE;
     }
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let pid = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let mut buffer = [0u8; crate::ipc::MAX_MESSAGE_SIZE];
@@ -2118,8 +2054,8 @@ fn sys_get_framebuffer(info: *mut FbInfo) -> i64 {
     // userspace compositor, or a full-screen app that acquired the display.
     // Other processes must go through the compositor. Mirrors sys_fb_present so
     // there is one ownership rule for the framebuffer, not a back door.
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid.0,
+    let pid = match crate::process::with_current_process(|process| process.pid.0) {
+        Some(value) => value,
         None => return EINVAL,
     };
     if pid == 0 || crate::handle::display_owner() != pid {
@@ -2226,8 +2162,8 @@ fn sys_get_system_stats(info: *mut SystemStats) -> i64 {
 fn sys_draw_pixel(x: u32, y: u32, color: u32) -> i64 {
     // Same ownership rule as sys_get_framebuffer / sys_fb_present: only the
     // display-master owner may poke the raw framebuffer.
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid.0,
+    let pid = match crate::process::with_current_process(|process| process.pid.0) {
+        Some(value) => value,
         None => return EINVAL,
     };
     if pid == 0 || crate::handle::display_owner() != pid {
@@ -2252,8 +2188,8 @@ fn sys_draw_rect(x: u32, y: u32, w: u32, h: u32, color: u32) -> i64 {
     // Same display-owner gate as sys_draw_pixel / sys_fb_present: only the
     // display-master owner (the userspace compositor) may poke the raw
     // framebuffer. Without this a background app could scribble on the screen.
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid.0,
+    let pid = match crate::process::with_current_process(|process| process.pid.0) {
+        Some(value) => value,
         None => return EINVAL,
     };
     if pid == 0 || crate::handle::display_owner() != pid {
@@ -2284,8 +2220,8 @@ fn sys_fb_present(src: *const u8, width: u32, height: u32, dst_x: u32, dst_y: u3
     // Только владелец дисплея (compositor в userspace) может выводить в
     // фреймбуфер. Политика композитинга живёт в userspace — ядро даёт лишь
     // механизм блита. Владельца отслеживает глобальный DISPLAY_MASTER_OWNER.
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid.0,
+    let pid = match crate::process::with_current_process(|process| process.pid.0) {
+        Some(value) => value,
         None => return EINVAL,
     };
     if pid == 0 || crate::handle::display_owner() != pid {
@@ -2347,8 +2283,8 @@ fn sys_fb_present(src: *const u8, width: u32, height: u32, dst_x: u32, dst_y: u3
 /// режим (фиксированный фреймбуфер Limine/GOP), EINVAL при недопустимом размере,
 /// EIO при аппаратной ошибке.
 fn sys_set_video_mode(width: u32, height: u32) -> i64 {
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid.0,
+    let pid = match crate::process::with_current_process(|process| process.pid.0) {
+        Some(value) => value,
         None => return EINVAL,
     };
     if pid == 0 || crate::handle::display_owner() != pid {
@@ -2465,8 +2401,8 @@ fn spawn_process_from_user(
 ) -> Result<crate::process::ProcessId, i64> {
     let path = copy_string_from_user_len(path, path_len, MAX_USER_PATH)?;
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return Err(EINVAL),
     };
 
@@ -2517,8 +2453,8 @@ fn sys_spawn_process(path: *const u8, path_len: usize) -> i64 {
 /// Create a fresh PTY endpoint owned by the calling process (the master/terminal
 /// emulator). Returns the pty id (>= 1).
 fn sys_pty_create() -> i64 {
-    let pid = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let pid = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     crate::pty::create(pid) as i64
@@ -2541,8 +2477,8 @@ fn sys_pty_spawn(
     env_len: usize,
     argv_count: usize,
 ) -> i64 {
-    let master = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let master = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let argv_format = env_len & (1usize << 63) != 0;
@@ -2592,8 +2528,8 @@ fn sys_pty_read(id: u32, buf: *mut u8, count: usize) -> i64 {
     if let Err(error) = validate_user_range(buf as u64, count) {
         return error;
     }
-    let master = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let master = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let mut kernel_buf = Vec::new();
@@ -2619,8 +2555,8 @@ fn sys_pty_write(id: u32, buf: *const u8, count: usize) -> i64 {
         Ok(data) => data,
         Err(error) => return error,
     };
-    let master = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let master = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     match crate::pty::master_write(id, master, &data) {
@@ -2631,8 +2567,8 @@ fn sys_pty_write(id: u32, buf: *const u8, count: usize) -> i64 {
 
 /// Master side: destroy the pty. Its slave's next stdin read observes EOF.
 fn sys_pty_close(id: u32) -> i64 {
-    let master = match crate::process::current_process() {
-        Some(process) => process.pid,
+    let master = match crate::process::with_current_process(|process| process.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
     if crate::pty::close(id, master) {
@@ -2675,8 +2611,8 @@ fn sys_getcwd(buf: *mut u8, len: usize) -> i64 {
         return EINVAL;
     }
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -2767,8 +2703,8 @@ fn sys_chdir(path: *const u8, path_len: usize) -> i64 {
         Err(error) => return error,
     };
 
-    let cwd = match crate::process::current_process() {
-        Some(process) => process.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|process| process.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
 
@@ -2783,18 +2719,14 @@ fn sys_chdir(path: *const u8, path_len: usize) -> i64 {
         Err(error) => return error,
     };
 
-    match crate::process::current_process_mut() {
-        Some(process) => {
+    crate::process::with_current_process_mut(|process| {
             process.cwd = normalized;
             0
-        }
-        None => EINVAL,
-    }
+        }).unwrap_or(EINVAL)
 }
 
 fn sys_get_pid() -> i64 {
-    crate::process::current_process()
-        .map(|process| process.pid.0 as i64)
+    crate::process::with_current_process(|process| process.pid.0 as i64)
         .unwrap_or(0)
 }
 
@@ -2861,7 +2793,7 @@ fn sys_sleep(ms: u64) -> i64 {
 /// Wait for an IPC event addressed to this process, with optional timeout.
 /// Zero timeout means no deadline. The caller rechecks the queue on wake.
 fn sys_wait_event(timeout_ms: u64) -> i64 {
-    let Some(pid) = crate::process::current_process().map(|process| process.pid) else {
+    let Some(pid) = crate::process::with_current_process(|process| process.pid) else {
         return EINVAL;
     };
     if crate::ipc::get_ipc_manager().map(|manager| manager.has_messages(pid)).unwrap_or(false) {

@@ -5,9 +5,9 @@ pub(super) fn read(handle: u64, out: u64, len: u64) -> i64 {
     if handle > u32::MAX as u64 {
         return EACCES;
     }
-    let authorised = crate::process::current_process()
-        .map(|p| p.require_input_master(handle as u32).is_ok())
-        .unwrap_or(false);
+    let authorised =
+        crate::process::with_current_process(|p| p.require_input_master(handle as u32).is_ok())
+            .unwrap_or(false);
     if !authorised {
         return EACCES;
     }

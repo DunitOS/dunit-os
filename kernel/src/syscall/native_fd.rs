@@ -29,13 +29,9 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
             if arg & !1 != 0 {
                 return EINVAL;
             }
-            crate::process::current_process_mut()
+            crate::process::with_current_process_mut(|process| process.set_cloexec(fd, arg != 0))
                 .ok_or(EINVAL)
-                .and_then(|process| {
-                    process
-                        .set_cloexec(fd, arg != 0)
-                        .map_err(process_error_to_errno)
-                })
+                .and_then(|result| result.map_err(process_error_to_errno))
                 .map(|_| 0)
                 .unwrap_or_else(|error| error)
         }
@@ -62,15 +58,13 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
             if arg >= crate::process::MAX_PROCESS_FD as u64 {
                 return EINVAL;
             }
-            crate::process::current_process_mut()
-                .ok_or(EINVAL)
-                .and_then(|process| {
-                    process
-                        .duplicate_from(fd, arg as u32, command == 5)
-                        .map_err(process_error_to_errno)
-                })
-                .map(|fd| fd as i64)
-                .unwrap_or_else(|error| error)
+            crate::process::with_current_process_mut(|process| {
+                process.duplicate_from(fd, arg as u32, command == 5)
+            })
+            .ok_or(EINVAL)
+            .and_then(|result| result.map_err(process_error_to_errno))
+            .map(|fd| fd as i64)
+            .unwrap_or_else(|error| error)
         }
         _ => EOPNOTSUPP,
     }
@@ -105,7 +99,7 @@ pub(super) fn readiness(fd: i32, events: u16) -> u16 {
             }
         }
         FdTarget::Stdin => {
-            if crate::process::current_process().is_some() {
+            if crate::process::with_current_process(|_| ()).is_some() {
                 if let Some((readable, closed)) = entry
                     .terminal
                     .as_ref()
@@ -230,11 +224,11 @@ pub(super) fn map_file(
         Some(size) => size & !4095,
         None => return EINVAL,
     };
-    let mapped = match crate::process::current_process_mut() {
-        Some(process) => match process.map_anonymous(addr, length, true, false, false, true) {
-            Ok(mapped) => mapped,
-            Err(error) => return process_error_to_errno(error),
-        },
+    let mapped = match crate::process::with_current_process_mut(|process| {
+        process.map_anonymous(addr, length, true, false, false, true)
+    }) {
+        Some(Ok(mapped)) => mapped,
+        Some(Err(error)) => return process_error_to_errno(error),
         None => return EINVAL,
     };
     let result = (|| -> Result<(), i64> {
@@ -253,24 +247,25 @@ pub(super) fn map_file(
             copy_buffer_to_user((mapped + done) as *mut u8, &scratch[..read])?;
             done += read;
         }
-        crate::process::current_process_mut()
-            .ok_or(EINVAL)?
-            .protect_range(
+        crate::process::with_current_process_mut(|process| {
+            process.protect_range(
                 mapped,
                 rounded_length,
                 prot & 2 != 0,
                 prot & 4 != 0,
                 prot != 0,
             )
-            .map_err(process_error_to_errno)?;
+        })
+        .ok_or(EINVAL)?
+        .map_err(process_error_to_errno)?;
         Ok(())
     })();
     match result {
         Ok(()) => mapped as i64,
         Err(error) => {
-            if let Some(process) = crate::process::current_process_mut() {
-                let _ = process.unmap_range(mapped, rounded_length);
-            }
+            let _ = crate::process::with_current_process_mut(|process| {
+                process.unmap_range(mapped, rounded_length)
+            });
             error
         }
     }

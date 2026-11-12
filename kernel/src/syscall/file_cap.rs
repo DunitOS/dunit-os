@@ -21,9 +21,8 @@ fn owned(
     if handle > u32::MAX as u64 {
         return Err(EBADF);
     }
-    crate::process::current_process()
+    crate::process::with_current_process(|process| process.handle_file(handle as u32, rights))
         .ok_or(EINVAL)?
-        .handle_file(handle as u32, rights)
         .map_err(handle_error_to_errno)
 }
 pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
@@ -36,8 +35,8 @@ pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
         Ok(p) => p,
         Err(e) => return e,
     };
-    let cwd = match crate::process::current_process() {
-        Some(p) => p.cwd.clone(),
+    let cwd = match crate::process::with_current_process(|p| p.cwd.clone()) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let file = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut v| {
@@ -47,10 +46,8 @@ pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
         Ok(f) => f,
         Err(e) => return e,
     };
-    match crate::process::current_process_mut() {
-        Some(p) => p.handle_create_file(file, rights as u32) as i64,
-        None => EINVAL,
-    }
+    crate::process::with_current_process_mut(|p| p.handle_create_file(file, rights as u32) as i64)
+        .unwrap_or(EINVAL)
 }
 pub(super) fn operation(handle: u64, op: u64, ptr: u64, len: u64, offset: u64, rights: u64) -> i64 {
     let _irq = crate::sync::InterruptGuard::new();
@@ -189,9 +186,8 @@ fn child(
             rights as u32 & (RIGHT_READ | RIGHT_WRITE)
         },
     )?;
-    let held = crate::process::current_process()
+    let held = crate::process::with_current_process(|process| process.handle_rights(handle as u32))
         .ok_or(EINVAL)?
-        .handle_rights(handle as u32)
         .map_err(handle_error_to_errno)?;
     if rights as u32 & !held != 0 {
         return Err(EACCES);
@@ -208,9 +204,10 @@ fn child(
         parent.child(&name, access)
     }
     .map_err(vfs_error_to_errno)?;
-    Ok(crate::process::current_process_mut()
-        .ok_or(EINVAL)?
-        .handle_create_file(file, rights as u32) as i64)
+    Ok(crate::process::with_current_process_mut(|process| {
+        process.handle_create_file(file, rights as u32)
+    })
+    .ok_or(EINVAL)? as i64)
 }
 fn move_to(handle: u64, ptr: u64, len: u64, offset: u64, rights: u64) -> Result<i64, i64> {
     if offset | rights != 0 || len < 9 || len > MAX_USER_PATH as u64 + 8 {

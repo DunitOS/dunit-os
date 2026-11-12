@@ -55,7 +55,7 @@ pub(super) fn spawn(path: *const u8, path_len: usize, block: *const u8,
     }
     if argc == 0 || argc > 16 || argc > strings.len() || strings.len() - argc > 16 { return -7; }
     let actions = match parse_actions(&bytes[strings_end..]) { Ok(actions) => actions, Err(error) => return error };
-    let parent_fds = match crate::process::current_process() { Some(parent) => parent.snapshot_fds(), None => return EINVAL };
+    let parent_fds = match crate::process::with_current_process(|parent| parent.snapshot_fds()) { Some(value) => value, None => return EINVAL };
     let pid = match crate::process::create_user_process_record(requested.clone(), true, false) { Ok(pid) => pid, Err(error) => return process_error_to_errno(error) };
     let transaction = (|| -> Result<(), i64> {
         crate::process::inherit_process_fds(pid, &parent_fds).map_err(process_error_to_errno)?;

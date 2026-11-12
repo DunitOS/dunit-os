@@ -76,8 +76,8 @@ pub(super) fn wait(
     // A producer cannot run in the check/register gap. Restart retains absolute
     // deadlines and fd slot identities, including across spurious notifications.
     let _irq = crate::sync::InterruptGuard::new();
-    let saved = match crate::process::current_thread_mut() {
-        Some(thread) => thread.wait_set.take(),
+    let saved = match crate::process::with_current_thread_mut(|thread| thread.wait_set.take()) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let pending = match saved {
@@ -101,7 +101,7 @@ pub(super) fn wait(
         let mut data = 0;
         let events = match interest.kind {
             IPC => {
-                let pid = crate::process::current_process().unwrap().pid;
+                let pid = crate::process::with_current_process(|process| process.pid).unwrap();
                 if crate::ipc::get_ipc_manager()
                     .map(|ipc| ipc.has_messages(pid))
                     .unwrap_or(false)
@@ -157,11 +157,11 @@ pub(super) fn wait(
             Err(error) => error,
         };
     }
-    crate::process::current_thread_mut().unwrap().wait_set = Some(pending);
+    crate::process::with_current_thread_mut(|thread| thread.wait_set = Some(pending)).unwrap();
     match crate::process::wait_set_block_current(wake_deadline) {
         Ok(()) => USER_CONTEXT_RETURN_MAGIC,
         Err(error) => {
-            crate::process::current_thread_mut().unwrap().wait_set = None;
+            crate::process::with_current_thread_mut(|thread| thread.wait_set = None).unwrap();
             process_error_to_errno(error)
         }
     }

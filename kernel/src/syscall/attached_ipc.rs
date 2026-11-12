@@ -33,33 +33,33 @@ pub(super) fn send(
         Ok(false) => return EOPNOTSUPP,
         Err(_) => return ENOENT,
     }
-    let sender = match crate::process::current_process() {
-        Some(p) => p.pid,
+    let sender = match crate::process::with_current_process(|p| p.pid) {
+        Some(value) => value,
         None => return EINVAL,
     };
-    let object = {
-        let process = match crate::process::current_process_mut() {
-            Some(p) => p,
-            None => return EINVAL,
-        };
-        match process.handle_rights(handle as u32) {
-            Ok(r) if r & crate::handle::RIGHT_TRANSFER != 0 => {}
-            Ok(_) => return EACCES,
-            Err(e) => return handle_error_to_errno(e),
-        }
-        let duplicate = match process
-            .handle_dup(handle as u32, rights as u32 | crate::handle::RIGHT_TRANSFER)
-        {
-            Ok(h) => h,
-            Err(e) => return handle_error_to_errno(e),
-        };
-        match process.handle_take_for_transfer(duplicate) {
-            Ok((object, _)) => object,
-            Err(e) => {
-                let _ = process.handle_close(duplicate);
-                return handle_error_to_errno(e);
+    let object = match crate::process::with_current_process_mut(
+        |process| -> Result<crate::handle::HandleObject, i64> {
+            let held = process
+                .handle_rights(handle as u32)
+                .map_err(handle_error_to_errno)?;
+            if held & crate::handle::RIGHT_TRANSFER == 0 {
+                return Err(EACCES);
             }
-        }
+            let duplicate = process
+                .handle_dup(handle as u32, rights as u32 | crate::handle::RIGHT_TRANSFER)
+                .map_err(handle_error_to_errno)?;
+            match process.handle_take_for_transfer(duplicate) {
+                Ok((object, _)) => Ok(object),
+                Err(error) => {
+                    let _ = process.handle_close(duplicate);
+                    Err(handle_error_to_errno(error))
+                }
+            }
+        },
+    ) {
+        Some(Ok(object)) => object,
+        Some(Err(error)) => return error,
+        None => return EINVAL,
     };
     // Target existence was verified under the same IRQ guard, so insertion
     // cannot race teardown. The source's original handle is never moved.
@@ -93,11 +93,11 @@ pub(super) fn receive(message: u64, len: u64, sender: u64, handle: u64) -> i64 {
     }
     // Opt in only after every destination has been validated. Even EAGAIN
     // establishes support, allowing peers to send before the next poll.
-    let pid = match crate::process::current_process_mut() {
-        Some(p) => {
-            p.ipc_handles_enabled = true;
-            p.pid
-        }
+    let pid = match crate::process::with_current_process_mut(|p| {
+        p.ipc_handles_enabled = true;
+        p.pid
+    }) {
+        Some(value) => value,
         None => return EINVAL,
     };
     let packet = match crate::ipc::peek_attached(pid) {
