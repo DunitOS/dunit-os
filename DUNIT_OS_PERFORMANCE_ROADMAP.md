@@ -1,6 +1,7 @@
 # Dunit OS — отдельный roadmap производительности и SMP
 
-Дата: 11 ноября 2026. Статус: **в работе: OP0 baseline и OP1/OP2 foundation; SMP dispatch ещё нет**.
+Создан: 11 ноября 2026. Обновлён: **12 ноября 2026**, по реализации до `236e83d`.
+Статус: **OP0–OP3 выполнены частично; текущая работа — OP3; SMP dispatch ещё нет**.
 Инициатива пользователя: максимальная практическая производительность,
 настоящая одновременная работа на нескольких ядрах и отзывчивый desktop/SDK.
 Основной [технический roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) сохраняется;
@@ -25,6 +26,45 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 этого не доказывают. Базовый путь — CPU/SMP; GPU рассматривается отдельно после
 измерения предела программного рендера. NUMA, CPU hotplug и real-time guarantees
 не входят в первый проход.
+
+## Текущее состояние
+
+| Этап | Статус | Подтверждённый результат / оставшаяся работа |
+| --- | --- | --- |
+| OP0 | Частично | TCG/UP baseline, metadata и checked benchmarks готовы; KVM reference, IPC/часть сцен и точная телеметрия открыты |
+| OP1 | Частично | Аудит, CPU-local entry и публичные scopes готовы; внутреннее владение registry/task и preemption/nesting model открыты |
+| OP2 | Частично | Limine AP boot, APIC/IPI и timer probes: BIOS 1/2/4/8, UEFI 4; точные часы и расширенная платформенная проверка открыты |
+| OP3 | В работе | Владеющие VFS/backend, teardown, fd, queue и dispatch backing готовы; registry/task locks, wait/wake и TLB gates открыты |
+| OP4 | Не реализован | Нет атомарного Running(cpu), remote dispatch и параллельного исполнения приложений |
+| OP5 | Не начат в этом треке | Масштабирование и scheduling latency — после корректного SMP |
+| OP6–OP8 | Не закрыты | Новые оптимизации ввода/SDK/рендера/I/O требуют профиля; исторические GUI-правки входят в baseline |
+| OP9 | Не закрыт | Итоговая performance/scaling-матрица требует готового SMP и стабильного reference runner |
+
+**Фактический режим:** до 8 аппаратно запущенных vCPU в проверенной TCG-матрице,
+`scheduler=up dispatch_cpus=1 APs=parked`. AP обрабатывают изолированные probes;
+приложения и pthread workers всё ещё выполняются последовательно на одном CPU.
+KVM на стенде недоступен. Медианы PIT с шагом 10 мс и host/QMP stream time
+не доказывают ускорение, per-event tail latency или input-to-photon.
+
+Закрытая галочка означает завершённую узкую реализацию с отчётом, а не приёмку
+всего этапа. Смешанные пункты ниже разделены: закрытые подзадачи не снимают
+оставшиеся SMP safety/performance gates.
+
+## Ближайший порядок работ
+
+1. **OP3: registry/task ownership.** Заменить приватные UP-only `UnsafeCell` и
+   долгоживущие внутренние ссылки scoped-доступом, реальным исключением и
+   удержанием task metadata. Dispatch backing уже удерживается отдельно;
+   это не pin всего процесса и не атомарное право исполнения.
+2. Согласовать порядок process/task ↔ VFS/ProcFs, wait queues, IPC/handles,
+   PMM/VMM и драйверов. Закрыть оставшиеся reentry и lifecycle/cancellation пути.
+3. Обеспечить atomic check/block/wake, interruptible syscall boundaries и прогресс
+   IPI; внедрить active CPU masks и acknowledged TLB shootdown до reuse страниц.
+4. **OP4:** атомарный Ready → Running(cpu), remote wakeup/reschedule, idle и
+   миграция GPR/FPU/TLS; затем доказать overlapping execution и корректность
+   приложений/потоков на 1/2/4/8 CPU.
+5. Параллельно закрывать неполные измерения OP0; KVM scaling и численные
+   performance gates выполнять на подходящем reference runner после OP4.
 
 ## Подтверждённая исходная точка до OP1/OP2
 
@@ -80,79 +120,102 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 
 ### OP0 — воспроизводимый baseline и измерительные инструменты
 
-Первый TCG/UP baseline и стенд готовы: [результаты и ограничения](docs/performance/op0-baseline.md).
-KVM/reference и непокрытые метрики остаются открытыми.
+[Первый baseline и ограничения](docs/performance/op0-baseline.md), коммит `f1aae67`.
 
-- [ ] Подготовить короткий набор сцен: idle, ввод/scroll/selection, pointer lock,
-  text-heavy окно, несколько клиентов, boot/app startup, IPC ping-pong, CPU workers,
-  allocator и I/O.
-- [ ] Снять текущий UP baseline и стоимость отдельных стадий; сохранить сырые
-  данные и форму итогового JSON. Определить KVM reference machine и бюджеты.
-- [ ] Развести clocksource, timer events и host wall time. До точных часов не
-  публиковать «наносекундную» точность из PIT/serial/QMP polling.
+- [x] Стенд GUI wheel/short/long/drag с сохранением исходных correctness assertions,
+  warmup и пятью измеренными повторами; отдельный wheel-burst.
+- [x] Нативные CPU/pthread workers 1/2/4/8 с одинаковым объёмом работы и checksum,
+  allocator и MemFS I/O с проверкой данных; warmup + пять повторов.
+- [x] Opt-in metadata: source/image hashes, tools, QEMU command/accel, host limits,
+  requested/emulated/kernel-online CPU отдельно от dispatch CPU; результаты JSON.
+- [x] Разделить coarse PIT elapsed, host wall time и неизмеренные показатели в
+  отчётах. [Queue](docs/performance/scheduler-queue.md) и
+  [dispatch](docs/performance/dispatch-ownership.md) имеют checked до/после серии.
+- [ ] Завершить набор сцен: idle/startup, IPC ping-pong, loaded/multi-client и
+  фиксированная игровая нагрузка. Pointer/GUI correctness уже проверяется;
+  это не полноценный performance baseline этих сцен.
+- [ ] Зафиксировать KVM reference machine, шум/бюджеты и overhead профилирования;
+  измерить CPU accounting, per-event latency tails, очереди/ожидания и RSS.
 - **Приёмка:** одинаковые данные/пиксели/счётчики в повторах, явная оценка шума;
   одна команда воспроизводит сценарий через `qemu_test.py`. Если KVM недоступен,
   baseline TCG допустим, но KVM performance gate остаётся открытым.
 
 ### OP1 — аудит SMP и CPU-local контекст
 
-- [x] Составить реестр shared state, lock order, IRQ/preemption context и lifetime:
-  процессы/threads, PMM/VMM/heap, IPC, handles/fd, VFS, драйверы и serial.
-  [Реестр OP1](docs/performance/smp-audit.md); устранение перечисленных гонок — отдельная работа.
-- [ ] Заменить UP-зависимые mutable-ссылки безопасным владением/guard-периодами.
-  Отключение IRQ на одном CPU не защищает данные от другого CPU; `Box` не
-  устраняет aliasing, use-after-free и гонки изменения объекта.
-- [~] Ввести CPU-local current task, syscall scratch/стек, scheduler flags,
-  GDT/TSS/IST, IRQ/preemption nesting, idle context и FPU state. Проверить
-  FS/TLS и схему GS/SWAPGS на syscall, IRQ, exception и возврате в userspace.
-  CPU-local entry/flags/FPU pointers, private GDT/TSS/IST и AP idle stacks реализованы;
-  параллельный scheduler и ownership shared state не включены.
+- [x] [Реестр shared state, lock order и lifetime](docs/performance/smp-audit.md).
+  Устранение перечисленных гонок не считается завершённым самим аудитом.
+- [x] CPU-local current PID, syscall scratch/stack/escape pointers, scheduling
+  flags и user FPU pointer; private GDT/TSS/IST и AP stacks (`3ccaf6c`).
+  FS/TLS, SWAPGS, syscall/IRQ/exception и возврат проверены native/DF/FPU тестами.
+- [x] CPU-bound guards и корректный `Sync` bound разделяемого guard (`0142ba9`).
+- [x] Публичные current process/thread getters со static-ссылками заменены
+  [non-escaping scopes](docs/performance/process-access.md), `a6f0d06`.
+- [x] Dispatch передаёт в HAL скопированный контекст и владеющие resource pins,
+  [без Process-ссылки через userspace](docs/performance/dispatch-ownership.md), `236e83d`.
+- [ ] Завершить внутренние registry/task lifetimes и исключение, IRQ/preemption
+  nesting/idle model для SMP. Resource pins не заменяют task metadata ownership.
 - **Приёмка:** реестр с владельцами и инвариантами; UP регрессии зелёные,
-  нет общих writable entry scratch/стеков. AP пока не исполняют рабочие задачи.
+  нет общих writable entry scratch/стеков. Полная приёмка ждёт оставшихся ownership
+  gates; AP пока не исполняют рабочие задачи.
 
 ### OP2 — boot дополнительных CPU, APIC и межпроцессорные прерывания
 
-- [x] Выбрать и документировать boot-контракт: основной кандидат — Limine MP
-  handshake; отдельный SIPI trampoline только при подтверждённой необходимости.
-- [x] Поднять AP с отдельными стеками/CPU-local данными, local interrupt state,
-  IDT/TSS, syscall MSR и FPU. Реальные CPU IDs/topology не подменять индексами APIC.
-- [~] Реализовать необходимый local APIC/IPI и маршрутизацию device IRQ с EOI,
-  spurious handling и совместимым BSP/UP fallback. Калибровать локальные timers;
-  быстрый clocksource выбирать по проверенным CPUID/платформенным возможностям.
-  Для TSC проверить межъядерную согласованность/монотонность и ordering чтений,
-  иначе использовать подходящий fallback; timekeeping не равен timer interrupt.
-  APIC/IPI, BSP PIC routing и timer probes проверены на 1/2/4/8 vCPU TCG;
-  clocksource остаётся PIT, high-resolution/TSC validation не выполнены.
-- **Приёмка:** 1/2/4/8 CPU доходят до контролируемого park/idle; IPI ping/ack и
-  локальные таймеры работают на каждом CPU. Это **ещё не готовый SMP scheduler**.
+[Bring-up и матрица](docs/performance/smp-bringup.md), коммит `3ccaf6c`.
 
-[Отчёт bring-up и регрессии](docs/performance/smp-bringup.md).
+- [x] Limine MP handshake; AP с private stacks, GS/GDT/TSS/IST, IDT register,
+  syscall MSR и x87/SSE. Логические индексы отделены от APIC IDs.
+- [x] Изолированные xAPIC/IPI round trips, EOI/spurious handling, BSP PIC routing
+  и PIT-калиброванные local timer probes; после проверки AP паркуются без
+  постоянных timer wakeups. BIOS 1/2/4/8 и UEFI 4 vCPU TCG проверены.
+- [ ] Выбрать точный clocksource и timer event model по CPUID/платформе. Проверить
+  межъядерную согласованность TSC/ordering либо использовать корректный fallback.
+  Текущее timekeeping остаётся PIT 100 Hz.
+- [ ] Расширить платформенную проверку (включая x2APIC и KVM/железо);
+  xAPIC-матрица не считается доказательством всех APIC-режимов.
+- **Приёмка:** AP boot/park и реальные work/timer/IPI checks выполнены на стенде;
+  clock/platform gates остаются открытыми. Это ещё не SMP scheduler.
 
 ### OP3 — память и синхронизация для одновременного исполнения
 
-- [ ] Сделать shared kernel paths корректными при нескольких CPU: lock ranking,
-  CPU-local IRQ save/restore, preemption guards, atomics с обоснованным ordering.
-  Не спать под spinlock; не ожидать IPI-ack, удерживая нужный получателю lock.
-- [ ] Определить безопасные interruptible границы syscall после entry на свой
-  kernel stack. IPI/shootdown должны иметь гарантированный прогресс; нельзя
-  переносить на SMP бесконечные IRQ-off окна и циклические ожидания CPU.
-- [ ] Защитить process/thread lifecycle, allocator/PMM/page tables, IPC и handles.
-  Описать порядок публикации, последнего reader и освобождения объектов.
-- [ ] Реализовать tracking активных CPU адресного пространства и TLB shootdown
-  с завершённым ack до повторного использования страниц; покрыть unmap,
-  mprotect/W^X, shared mappings, миграцию, exit и гонку входа в address space.
-- **Приёмка:** cross-CPU memory/lifetime stress и fault-injection не дают stale
-  mappings, двойного освобождения, deadlock или утечки прав. Нельзя разрешать
-  общий userspace dispatch до проверки этих инвариантов.
+Выполненные части:
 
-В OP3 реализованы [владение backend и scoped VFS](docs/performance/vfs-ownership.md);
-а также [отделённая очистка ресурсов процессов](docs/performance/process-resources.md).
-Устранён [обратный захват queue → process table](docs/performance/scheduler-queue.md).
-Внешние обращения к current process/thread переведены на
-[non-escaping scopes и отложенные fd-уведомления](docs/performance/process-access.md).
-Диспетчер использует [владеющий frame и active-root scope](docs/performance/dispatch-ownership.md)
-без ссылки на Process через вход в userspace.
-Остальные process ownership, scheduler/wait и memory/TLB gates остаются открытыми.
+- [x] Per-operation VFS path buffers, включая оба endpoint rename (`2e5d0c6`).
+- [x] [Владеющие backend и scoped VFS](docs/performance/vfs-ownership.md), `b236fac`:
+  общий backend lock для mounts/open files/capabilities, lifetime/final-close proof,
+  удаление raw backend pointers и глобальной mutable VFS-ссылки.
+- [x] [Отделённая очистка process resources](docs/performance/process-resources.md),
+  `9e9b4c6`: fd/VM/capability batches, наследование fd с rollback, release вне
+  lifecycle mutation; kill закрывает fd/pipe до wait; fd snapshots владеющие.
+- [x] [Queue → process-table edge удалён](docs/performance/scheduler-queue.md),
+  `ea5720b`: state checks вне queue lock, generation-safe validation/requeue,
+  ограниченный обход без временных allocations на dispatch path.
+- [x] [Scoped current access и deferred fd notifications](docs/performance/process-access.md),
+  `a6f0d06`: внешние чтения/мутации и thread wait-set без escaping Process refs;
+  fd rescan после завершения borrow, включая callback error paths.
+- [x] [Dispatch backing и active-root lifetime](docs/performance/dispatch-ownership.md),
+  `236e83d`: Arc-owned stack/FPU/locked AddressSpace, copied HAL input,
+  удержание active root и восстановление caller PID/CR3/stack на ошибках.
+  Canonical kernel-half refresh сохранён; private-page/root lifetime проверен.
+
+Оставшиеся обязательные gates:
+
+- [ ] Scoped registry/task locking и lifetime pins для самих объектов/metadata
+  процессов; убрать приватный UP-only доступ к таблице и внутренние aliases.
+- [ ] Полный lock ranking/reentry audit для process/task, VFS/ProcFs, wait queues,
+  IPC/handles, heap/PMM/VMM и драйверов. Удалённые отдельные lock edges не закрывают
+  весь порядок. Не спать под spinlock и не ждать ack под lock получателя.
+- [ ] Безопасные interruptible syscall boundaries и гарантированный прогресс IPI
+  вместо переноса бесконечных IRQ-off окон на несколько CPU.
+- [ ] Atomic predicate/check/block/wake и lifecycle/cancellation для потоков,
+  futex, pipe/PTY, IPC и wait-set; remote notification и порядок освобождения.
+- [ ] Закрыть allocator/PMM/shared VM/handles/device shared paths и последний reader.
+  Pin AddressSpace не является pin каждой mapping или shared-frame bookkeeping.
+- [ ] Active CPU masks, generation/ack TLB shootdown до reuse страниц: unmap,
+  mprotect/W^X, shared mappings, exit, миграция и гонка входа в address space.
+- [ ] Выполнить cross-CPU memory/lifetime stress и fault injection после реализации
+  этих механизмов. Текущие UP/native регрессии не заменяют эту матрицу.
+- **Приёмка:** нет stale mappings, double free, deadlock и утечки прав;
+  общий AP userspace dispatch запрещён до проверки перечисленных инвариантов.
 
 ### OP4 — настоящий SMP scheduler и потоки
 
@@ -252,8 +315,9 @@ OP6 и последовательные оптимизации OP7/OP8 можн�
 `build/` сериализуются. Сначала host/unit и kernel compile check с флагами Makefile,
 затем минимальный native сценарий; расширять матрицу после успешного узкого прогона.
 Все OS builds/boots — через `tools/qemu_test.py`; один образ переиспользовать для
-нескольких совместимых проверок. CPU задавать явно через доступный harness
-(`--qemu-arg=-smp --qemu-arg=4`); это параметр эксперимента, не реализация SMP.
+нескольких совместимых проверок. CPU задавать явно через harness
+(`--cpus 4`; raw `-smp` оставлен для специальных конфигураций и не совмещается
+с `--cpus`); это параметр эксперимента, не реализация SMP.
 
 Для каждого закрытого пункта нужны commit, команда, raw result, correctness
 assertions и краткий вывод с ограничениями. Новые syscall/ABI, публичные stats,

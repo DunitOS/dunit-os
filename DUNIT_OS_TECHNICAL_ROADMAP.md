@@ -1228,11 +1228,14 @@ M7 + M8 + шрифты/декодеры --> M10 браузер
 
 ## 23. Приоритеты: must-have / should-have / later
 
-**Отдельный трек производительности/SMP, 11 ноября 2026:** по запросу пользователя
-создан [performance roadmap OP0–OP9](DUNIT_OS_PERFORMANCE_ROADMAP.md). Измерения и
-аудит UP — первые шаги; настоящая параллельная работа допускается после CPU-local
-контекста, AP/IPI, memory/lock audit и TLB shootdown. Это план, не статус готового
-SMP; функциональные долги M7 сохраняются.
+**Отдельный трек производительности/SMP, обновлено 12 ноября 2026:**
+[Performance roadmap OP0–OP9](DUNIT_OS_PERFORMANCE_ROADMAP.md) ведётся отдельно.
+По `236e83d` частично выполнены OP0–OP3: TCG baseline, CPU-local entry, AP/IPI
+bring-up, ownership VFS/resources, scoped current access и владеющий dispatch
+frame. Hardware boot/park проверен на 1/2/4/8 vCPU, но `dispatch_cpus=1`:
+приложения ещё UP. Следующий блок — registry/task locking и lifetimes, затем
+wait/wake, interruptible syscall и TLB shootdown до OP4. KVM scaling и численные
+performance gates открыты; функциональные долги M7 сохраняются.
 
 **Must-have:** M0; preemption/threads/wait queues/handles/shared VM; GUI protocol/server; DWM parity; DunitFS recovery + disk-root/init; persistence matrix.
 

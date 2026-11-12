@@ -1,19 +1,20 @@
 # SMP shared-state audit — OP1
 
-11 November 2026. Audit of the UP implementation; this inventory is a safety
+Initial audit: 11 November 2026. Updated through `236e83d` on 12 November 2026.
+Audit of the UP implementation; this inventory is a safety
 gate, not a claim that shared state is now safe to execute on APs.
 
 | State/path | Existing protection/assumption | Required ownership and gate |
 | --- | --- | --- |
-| HAL syscall scratch, selected/escape stack, user FPU pointer | one global writable block in syscall.asm | CPU-local GS anchor and private entry state; symmetric user transitions and paranoid interrupt recovery |
-| GDT/TSS/IST and initial syscall stack | shared BSP objects | private descriptors/stacks per CPU; immutable IDT may be shared after publication |
-| current PID, exit/yield/schedule/escape flags | global atomics describe one active task | CPU-local; aggregate counters and terminal ownership remain shared |
-| PROCESS_TABLE and current process/thread access | external access uses non-escaping scopes; fd snapshots are owned; private table/dispatcher still UP-only | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
+| HAL syscall scratch, selected/escape stack, user FPU pointer | CPU-local GS anchor and private entry state; native syscall/IRQ/DF checks | preserve entry invariants when enabling AP dispatch; no shared writable entry scratch |
+| GDT/TSS/IST and initial syscall stack | private per-CPU descriptors/stacks; shared published IDT | retain CPU-private ownership and publication during scheduler activation |
+| current PID, exit/yield/schedule/escape flags | CPU-local runtime fields; aggregate counters/terminal ownership remain shared | implement atomic task execution ownership and remote scheduling |
+| PROCESS_TABLE and current process/thread access | external access uses non-escaping scopes; fd snapshots are owned; private registry/selectors still UP-only; dispatch backing is independently owned | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
-| VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; integrate process cleanup and ProcFs snapshot lock order before AP dispatch |
+| VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; complete process/task and ProcFs snapshot lock order before AP dispatch |
 | VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
 | DunitFS/block drivers | owned/locked DunitFS backend; shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
 | Device IRQ, keyboard/pointer queues and display | INPUT_MASTER/DISPLAY_MASTER and IRQ-safe locks | one routed device IRQ owner initially; cross-CPU locks still needed for syscall readers; no desktop policy in kernel |
