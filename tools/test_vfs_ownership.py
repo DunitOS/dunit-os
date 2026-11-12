@@ -27,19 +27,19 @@ def contract():
     return result
 
 
-def main():
+def main(make_contract=contract, output_default=ROOT / 'build/performance/vfs-ownership'):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reuse-image', action='store_true')
     parser.add_argument('--accel', choices=('tcg', 'kvm'), default='tcg')
     parser.add_argument('--cpus', type=int, default=4)
-    parser.add_argument('--output', type=Path, default=ROOT / 'build/performance/vfs-ownership')
+    parser.add_argument('--output', type=Path, default=output_default)
     args = parser.parse_args()
     if not 1 <= args.cpus <= 64:
         parser.error("supported CPU range is 1..64")
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     markers = args.output / 'markers.json'
-    markers.write_text(json.dumps(contract(), indent=2) + '\n')
+    markers.write_text(json.dumps(make_contract(), indent=2) + '\n')
     if not args.reuse_image:
         subprocess.run([cargo(), 'check', '--release', '--features', 'boot-smoke-tests',
                         '-Z', 'build-std=core,alloc,compiler_builtins', '-Z',
@@ -50,6 +50,7 @@ def main():
                     '--accel', args.accel, '--cpus', str(args.cpus), '--timeout', '600',
                     '--cmd-timeout', '240', '--boot-timeout', '120', '--workdir', str(args.output),
                     '--performance-record', str(args.output / 'metadata.json')], cwd=ROOT, check=True)
+    return args
 
 
 if __name__ == '__main__':

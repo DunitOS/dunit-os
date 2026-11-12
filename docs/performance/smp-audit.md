@@ -51,3 +51,8 @@ process/VFS lifetime, lock-order or TLB gates above.
 The [OP3 VFS ownership receipt](vfs-ownership.md) records removal of raw backend
 pointers and global mutable VFS references, pinned lifetime/close checks and
 native file/capability, persistence and GUI regressions.
+
+The [process resource receipt](process-resources.md) records detached fd/VM/handle
+cleanup, transactional fd inheritance and owned fd snapshots. Resource release
+was moved out of lifecycle mutations; process-table/current-task pinning and
+scheduler/wait ownership remain open before AP dispatch.

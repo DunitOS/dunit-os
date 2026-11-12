@@ -58,7 +58,7 @@ pub(super) fn spawn(path: *const u8, path_len: usize, block: *const u8,
     let parent_fds = match crate::process::current_process() { Some(parent) => parent.snapshot_fds(), None => return EINVAL };
     let pid = match crate::process::create_user_process_record(requested.clone(), true, false) { Ok(pid) => pid, Err(error) => return process_error_to_errno(error) };
     let transaction = (|| -> Result<(), i64> {
-        crate::process::with_process_mut(pid, |child| child.inherit_fds(&parent_fds)).map_err(process_error_to_errno)?;
+        crate::process::inherit_process_fds(pid, &parent_fds).map_err(process_error_to_errno)?;
         apply(pid, &actions)?;
         // CLOEXEC is applied after actions so a dup2 action can deliberately
         // preserve an otherwise close-on-exec source descriptor.

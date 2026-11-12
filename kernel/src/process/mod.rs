@@ -1,5 +1,9 @@
 pub mod scheduler;
 mod terminal_stdin;
+mod resources;
+pub use resources::inherit_process_fds;
+#[cfg(feature = "boot-smoke-tests")]
+pub use resources::run_resource_cleanup_smoke;
 #[cfg(feature = "boot-smoke-tests")]
 mod fault_irq_smoke;
 
@@ -536,27 +540,6 @@ impl Process {
         self.terminate();
     }
 
-    pub fn cleanup_fds(&mut self) -> usize {
-        let fds = core::mem::take(&mut self.fd_table);
-        let mut closed = 0;
-        // Release pipe ends in the registry (no wake: on teardown any peer is in
-        // this same dying process; cross-process pipe wake-on-exit is a
-        // posix_spawn-file-actions concern that does not exist yet).
-        for (_, entry) in &fds {
-            if let FdTarget::Pipe { id, write } = entry.target {
-                if crate::pipe::release(id, write) { wake_pipe_waiters(id); }
-            }
-        }
-        let refs = core::mem::take(&mut self.vfs_fd_refs);
-        // Close each distinct VFS descriptor exactly once, even across dups.
-        for (vfs_fd, _) in refs {
-            if let Some(mut vfs) = crate::fs::vfs::get_vfs() {
-                let _ = vfs.close(vfs_fd);
-                closed += 1;
-            }
-        }
-        closed
-    }
 
     /// Register a freshly opened VFS descriptor as a new process fd and count a
     /// reference to it.
@@ -699,19 +682,6 @@ impl Process {
     /// existing global reference (unlike an inherited reference).
     pub fn place_open_vfs_fd(&mut self, fd: u32, entry: FdEntry) -> Result<FdCleanup, ProcessError> {
         self.install_fd(fd, entry)
-    }
-    pub fn inherit_fds(&mut self, entries: &[(u32, FdEntry)]) -> Result<(), ProcessError> {
-        self.cleanup_fds();
-        for (fd, entry) in entries {
-            if let FdTarget::Vfs(vfs_fd) = entry.target {
-                if !self.vfs_fd_refs.contains_key(&vfs_fd) {
-                    crate::fs::vfs::get_vfs().ok_or(ProcessError::InvalidFd)?
-                        .retain(vfs_fd).map_err(|_| ProcessError::InvalidFd)?;
-                }
-            }
-            self.install_fd(*fd, entry.clone())?;
-        }
-        Ok(())
     }
     pub fn get_fd(&self, fd: ProcessFd) -> Option<&FdEntry> {
         self.fd_table.get(&fd)
@@ -1027,35 +997,6 @@ impl Process {
         Ok(())
     }
 
-    /// Release heavyweight VM ownership at exit, independently of wait/reap.
-    /// The caller must have switched away from this address space first.
-    fn release_vm_resources(&mut self) {
-        self.address_space = None;
-        // Drop any PTY endpoints this process mastered (terminal emulator exit).
-        crate::pty::on_process_exit(self.pid);
-        for (_, id) in core::mem::take(&mut self.shared_pages) {
-            shared_vm_release(id, 1);
-        }
-        for id in core::mem::take(&mut self.shared_owned) {
-            shared_vm_release(id, 1);
-        }
-        self.guard_regions.clear();
-        self.tls_allocation = None;
-        // Освобождаем capability-ресурсы: если процесс держал мастер-право на
-        // дисплей, вернуть его системе; затем очистить таблицу хэндлов.
-        for object in self.handle_table.drain_objects() {
-            if matches!(object, crate::handle::HandleObject::Display) {
-                crate::handle::release_display(self.pid);
-            }
-            if matches!(object, crate::handle::HandleObject::Input) {
-                crate::handle::release_input(self.pid);
-            }
-            if let crate::handle::HandleObject::SharedFrames { id } = object {
-                shared_vm_release(id, 1);
-            }
-        }
-    }
-
     pub fn fd_count(&self) -> usize {
         self.fd_table.len()
     }
@@ -1333,7 +1274,8 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        self.release_vm_resources();
+        self.take_fd_resources().release();
+        drop(self.take_vm_resources());
     }
 }
 
@@ -1725,36 +1667,26 @@ pub fn insert_process_record(
     // Тяжёлый объект процесса переносится на кучу: ссылки, розданные из таблицы,
     // должны переживать реаллокацию буфера `Vec` при `push`.
     let process = process.map(Box::new);
-    // Прерывания запрещены на время структурной мутации таблицы: реаллокация
-    // буфера `Vec` не должна перекрыться с чтением таблицы из IRQ таймера
-    // (путь преемпшна).
-    let _irq = InterruptGuard::new();
-    let table = process_table_mut();
-    if let Some(index) = process_record_index(table, pid) {
-        let record = &mut table[index];
-        record.parent = parent;
-        record.owner = None;
-        record.path = path;
-        record.state = state;
-        record.waitable = waitable;
-        record.has_run = has_run;
-        record.status = None;
-        record.process = process;
-        return;
-    }
-
-    table.push(ProcessRecord {
-        pid,
-        owner: None,
-        thread_auto_reap: false,
-        parent,
-        state,
-        status: None,
-        has_run,
-        waitable,
-        path,
-        process,
-    });
+    let retired = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        if let Some(index) = process_record_index(table, pid) {
+            let record = &mut table[index];
+            record.parent = parent;
+            record.owner = None;
+            record.path = path;
+            record.state = state;
+            record.waitable = waitable;
+            record.has_run = has_run;
+            record.status = None;
+            core::mem::replace(&mut record.process, process)
+        } else {
+            table.push(ProcessRecord { pid, owner: None, thread_auto_reap: false,
+                parent, state, status: None, has_run, waitable, path, process });
+            None
+        }
+    };
+    drop(retired);
 }
 
 pub fn create_user_process_record(
@@ -1853,11 +1785,12 @@ pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<Thread
         });
     }
     if let Err(error) = crate::process::scheduler::enqueue_ready(ProcessId(tid.0)) {
-        let _irq = InterruptGuard::new();
-        let table = process_table_mut();
-        if let Some(index) = process_record_index(table, ProcessId(tid.0)) {
-            table.remove(index);
-        }
+        let retired = {
+            let _irq = InterruptGuard::new();
+            let table = process_table_mut();
+            process_record_index(table, ProcessId(tid.0)).map(|index| table.remove(index))
+        };
+        drop(retired);
         if tls_length != 0 {
             let _ = current_process_mut().map(|owner| owner.unmap_range(tls_base, tls_length));
         }
@@ -1897,17 +1830,16 @@ fn release_finished_thread(entity: ProcessId) -> Result<(), ProcessError> {
     if let Some((base, length)) = tls {
         with_process_mut(owner, |process| process.unmap_range(base, length))?;
     }
-    let finished = {
+    let (finished, auto_reap) = {
         let _irq = InterruptGuard::new();
         let table = process_table_mut();
         let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
         let finished = table[index].process.take();
-        if table[index].thread_auto_reap {
-            crate::process::scheduler::remove(entity);
-            table.remove(index);
-        }
-        finished
+        let auto_reap = table[index].thread_auto_reap;
+        if auto_reap { table.remove(index); } // metadata only: Process was detached above
+        (finished, auto_reap)
     };
+    if auto_reap { crate::process::scheduler::remove(entity); }
     drop(finished);
     Ok(())
 }
@@ -1917,20 +1849,23 @@ pub fn wait_thread(tid: ThreadId) -> Result<ProcessExitStatus, ProcessError> {
     if current_tid() == Some(tid) {
         return Err(ProcessError::NotChild);
     }
-    let table = process_table_mut();
-    let index = process_record_index(table, ProcessId(tid.0)).ok_or(ProcessError::NoSuchProcess)?;
-    let record = &table[index];
-    if record.owner != Some(owner) {
-        return Err(ProcessError::NotChild);
-    }
-    if record.state != ProcessState::Dead {
-        return Err(ProcessError::NotRunnable);
-    }
-    let status = record.status.ok_or(ProcessError::ProcessNotPrepared)?;
-    let tls = record.process.as_ref().and_then(|thread| thread.tls_allocation);
-    let _irq = InterruptGuard::new();
+    let (retired, status, tls) = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let index = process_record_index(table, ProcessId(tid.0)).ok_or(ProcessError::NoSuchProcess)?;
+        let record = &table[index];
+        if record.owner != Some(owner) {
+            return Err(ProcessError::NotChild);
+        }
+        if record.state != ProcessState::Dead {
+            return Err(ProcessError::NotRunnable);
+        }
+        let status = record.status.ok_or(ProcessError::ProcessNotPrepared)?;
+        let tls = record.process.as_ref().and_then(|thread| thread.tls_allocation);
+        (table.remove(index), status, tls)
+    };
     crate::process::scheduler::remove(ProcessId(tid.0));
-    table.remove(index);
+    drop(retired);
     if let Some((base, length)) = tls {
         if let Some(owner) = current_process_mut() {
             owner.unmap_range(base, length)?;
@@ -1940,17 +1875,21 @@ pub fn wait_thread(tid: ThreadId) -> Result<ProcessExitStatus, ProcessError> {
 }
 
 fn cleanup_owned_threads(owner: ProcessId) {
-    let _irq = InterruptGuard::new();
-    let table = process_table_mut();
-    let mut index = 0;
-    while index < table.len() {
-        if table[index].owner == Some(owner) {
-            remove_waiter(table[index].pid);
-            crate::process::scheduler::remove(table[index].pid);
-            table.remove(index);
-        } else {
-            index += 1;
+    let retired = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let mut retired = Vec::new();
+        let mut index = 0;
+        while index < table.len() {
+            if table[index].owner == Some(owner) { retired.push(table.remove(index)); }
+            else { index += 1; }
         }
+        retired
+    };
+    for record in retired {
+        remove_waiter(record.pid);
+        crate::process::scheduler::remove(record.pid);
+        drop(record);
     }
 }
 
@@ -2442,20 +2381,21 @@ pub fn mark_process_finished(exit: ProcessExit) {
 
 pub fn reap_process(pid: ProcessId) -> Result<(), ProcessError> {
     remove_waiter(pid);
-    let table = process_table_mut();
-    let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
-    let record = &mut table[index];
-    if record.state != ProcessState::Dead {
-        return Err(ProcessError::NotRunnable);
-    }
-    let from = record.state;
-    record.process = None;
-    record.state = ProcessState::Reaped;
-    record.waitable = false;
+    let (from, retired) = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
+        let record = &mut table[index];
+        if record.state != ProcessState::Dead { return Err(ProcessError::NotRunnable); }
+        let from = record.state;
+        let retired = record.process.take();
+        record.state = ProcessState::Reaped;
+        record.waitable = false;
+        (from, retired)
+    };
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() {
-        ipc.clear_messages(pid);
-    }
+    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    drop(retired);
     log_process_transition(pid, from, ProcessState::Reaped, "reap");
     Ok(())
 }
@@ -2492,7 +2432,8 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
         return Ok(true);
     }
 
-    {
+    let (fds, vm, from) = {
+        let _irq = InterruptGuard::new();
         let table = process_table_mut();
         let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
         let record = &mut table[index];
@@ -2513,16 +2454,18 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
         let status = ProcessExitStatus::Exited(code);
         let from = record.state;
         process.exit(code);
-        process.release_vm_resources();
+        let fds = process.take_fd_resources();
+        let vm = process.take_vm_resources();
         record.state = ProcessState::Dead;
         record.status = Some(status);
         record.has_run = true;
-        crate::process::scheduler::remove(pid);
-        if let Some(ipc) = crate::ipc::get_ipc_manager() {
-            ipc.clear_messages(pid);
-        }
-        log_process_transition(pid, from, ProcessState::Dead, "kill");
-    }
+        (fds, vm, from)
+    };
+    crate::process::scheduler::remove(pid);
+    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    log_process_transition(pid, from, ProcessState::Dead, "kill");
+    fds.release();
+    drop(vm);
     remove_waiter(pid);
     cleanup_owned_threads(pid);
     wake_wait_set_waiters();
@@ -2565,60 +2508,56 @@ pub(crate) fn child_exit_snapshot(pid: ProcessId) -> Result<Option<WaitRecord>, 
 
 pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessError> {
     let parent_pid = current_process().ok_or(ProcessError::NoCurrentProcess)?.pid;
-    let table = process_table_mut();
-    // Select a child that has already finished so a terminated child is reaped
-    // even when an earlier-listed sibling is still running (POSIX wait(-1)
-    // "any terminated child"). Report EAGAIN only when a matching child exists
-    // but none has finished; ECHILD (NotChild) when there is no matching child
-    // at all — including a specific pid that is not our child, which POSIX
-    // requires to be ECHILD rather than ENOENT.
-    let mut child_index = None;
-    let mut matched_any = false;
-    for (index, record) in table.iter().enumerate() {
-        if record.parent != Some(parent_pid) || !record.waitable {
-            continue;
+    let (mut record, kind, code) = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        // Select a child that has already finished so a terminated child is reaped
+        // even when an earlier-listed sibling is still running (POSIX wait(-1)
+        // "any terminated child"). Report EAGAIN only when a matching child exists
+        // but none has finished; ECHILD (NotChild) when there is no matching child
+        // at all — including a specific pid that is not our child, which POSIX
+        // requires to be ECHILD rather than ENOENT.
+        let mut child_index = None;
+        let mut matched_any = false;
+        for (index, record) in table.iter().enumerate() {
+            if record.parent != Some(parent_pid) || !record.waitable {
+                continue;
+            }
+            if requested_pid.0 != 0 && record.pid != requested_pid {
+                continue;
+            }
+            matched_any = true;
+            let finished = (record.status.is_some() && record.has_run)
+                || (record.state == ProcessState::Prepared && !record.has_run);
+            if finished {
+                child_index = Some(index);
+                break;
+            }
         }
-        if requested_pid.0 != 0 && record.pid != requested_pid {
-            continue;
-        }
-        matched_any = true;
-        let finished = (record.status.is_some() && record.has_run)
-            || (record.state == ProcessState::Prepared && !record.has_run);
-        if finished {
-            child_index = Some(index);
-            break;
-        }
-    }
 
-    let index = match child_index {
-        Some(index) => index,
-        None if matched_any => return Err(ProcessError::NotRunnable),
-        None => return Err(ProcessError::NotChild),
+        let index = match child_index {
+            Some(index) => index,
+            None if matched_any => return Err(ProcessError::NotRunnable),
+            None => return Err(ProcessError::NotChild),
+        };
+
+        let record = &table[index];
+        let (kind, code) = match record.status {
+            Some(status) if record.has_run => (status.kind_code(), status.exit_code()),
+            _ if record.state == ProcessState::Prepared && !record.has_run => {
+                (WAIT_KIND_SPAWN_PREPARED, 0)
+            }
+            _ => return Err(ProcessError::NotRunnable),
+        };
+
+        (table.remove(index), kind, code)
     };
-
-    let record = &table[index];
-    let (kind, code) = match record.status {
-        Some(status) if record.has_run => (status.kind_code(), status.exit_code()),
-        _ if record.state == ProcessState::Prepared && !record.has_run => {
-            (WAIT_KIND_SPAWN_PREPARED, 0)
-        }
-        _ => return Err(ProcessError::NotRunnable),
-    };
-
     let pid = record.pid;
-    let from = record.state;
-    log_process_transition(pid, from, ProcessState::Reaped, "wait");
+    log_process_transition(pid, record.state, ProcessState::Reaped, "wait");
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() {
-        ipc.clear_messages(pid);
-    }
-    // Удаление сдвигает буфер `Vec`: запрещаем прерывания, чтобы скан таблицы
-    // из IRQ таймера не увидел таблицу в промежуточном состоянии.
-    let irq = InterruptGuard::new();
-    let mut record = table.remove(index);
-    drop(irq);
+    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
     if let Some(mut process) = record.process.take() {
-        let closed = process.cleanup_fds();
+        let closed = process.take_fd_resources().release();
         if closed > 0 {
             crate::memory::serial_write("[PROCESS] reaped pid=");
             serial_write_u64(pid.0);
@@ -2633,50 +2572,39 @@ pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessErr
 }
 
 pub fn cleanup_prepared_children(parent_pid: ProcessId) -> usize {
-    let table = process_table_mut();
-    let mut removed = 0;
-    let mut index = 0;
-    while index < table.len() {
-        let should_remove = table[index].parent == Some(parent_pid)
-            && !table[index].has_run
-            && table[index].process.is_some();
-        if should_remove {
-            let pid = table[index].pid;
-            let from = table[index].state;
-            log_process_transition(pid, from, ProcessState::Reaped, "parent-exit");
-            let irq = InterruptGuard::new();
-            let mut record = table.remove(index);
-            drop(irq);
-            if let Some(mut process) = record.process.take() {
-                let _ = process.cleanup_fds();
-            }
-            crate::process::scheduler::remove(pid);
-            if let Some(ipc) = crate::ipc::get_ipc_manager() {
-                ipc.clear_messages(pid);
-            }
-            removed += 1;
-        } else {
-            index += 1;
+    let retired = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let mut retired = Vec::new();
+        let mut index = 0;
+        while index < table.len() {
+            if table[index].parent == Some(parent_pid) && !table[index].has_run
+                && table[index].process.is_some() { retired.push(table.remove(index)); }
+            else { index += 1; }
         }
+        retired
+    };
+    let removed = retired.len();
+    for record in retired {
+        log_process_transition(record.pid, record.state, ProcessState::Reaped, "parent-exit");
+        crate::process::scheduler::remove(record.pid);
+        if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(record.pid); }
+        drop(record);
     }
     removed
 }
 
 pub fn autoreap_process(pid: ProcessId, reason: &str) -> Result<(), ProcessError> {
-    let table = process_table_mut();
-    let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
-    let from = table[index].state;
-    log_process_transition(pid, from, ProcessState::Reaped, reason);
+    let record = {
+        let _irq = InterruptGuard::new();
+        let table = process_table_mut();
+        let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
+        table.remove(index)
+    };
+    log_process_transition(pid, record.state, ProcessState::Reaped, reason);
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() {
-        ipc.clear_messages(pid);
-    }
-    let irq = InterruptGuard::new();
-    let mut record = table.remove(index);
-    drop(irq);
-    if let Some(mut process) = record.process.take() {
-        let _ = process.cleanup_fds();
-    }
+    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    drop(record);
     Ok(())
 }
 
@@ -2766,8 +2694,10 @@ pub fn dup_fd(
         .dup_fd(oldfd, newfd)
 }
 
-pub fn get_fd(fd: ProcessFd) -> Option<&'static FdEntry> {
-    current_process()?.get_fd(fd)
+/// Owned snapshot; never expose an fd-table reference across a syscall stage.
+pub fn get_fd(fd: ProcessFd) -> Option<FdEntry> {
+    let _irq = InterruptGuard::new();
+    current_process()?.get_fd(fd).cloned()
 }
 
 pub fn close_fd(fd: ProcessFd) -> Result<FdEntry, ProcessError> {
@@ -3011,7 +2941,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
         } else {
             let mut status = ProcessExitStatus::Fault(ProcessFault::Unknown);
             let is_thread = owner_of(next_pid) != Some(next_pid);
-            let closed = with_process_mut(next_pid, |finished| {
+            let detached_fds = with_process_mut(next_pid, |finished| {
                 status = if let Some((_code, requested_status)) = take_process_exit_request() {
                     match requested_status {
                         ProcessExitStatus::Exited(code) => finished.exit(code),
@@ -3026,8 +2956,9 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                         .status
                         .unwrap_or(ProcessExitStatus::Fault(ProcessFault::Unknown))
                 };
-                Ok(if is_thread { 0 } else { finished.cleanup_fds() })
+                Ok(if is_thread { None } else { Some(finished.take_fd_resources()) })
             })?;
+            let closed = detached_fds.map(|fds| fds.release()).unwrap_or(0);
             if closed > 0 {
                 crate::memory::serial_write("[PROCESS-RUN] cleaned fds=");
                 serial_write_usize(closed);
@@ -3043,10 +2974,8 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
             } else {
                 cleanup_owned_threads(next_pid);
                 unsafe { crate::memory::vmm::switch_to_root_frame(previous_root); }
-                with_process_mut(next_pid, |finished| {
-                    finished.release_vm_resources();
-                    Ok(())
-                })?;
+                let resources = with_process_mut(next_pid, |finished| Ok(finished.take_vm_resources()))?;
+                drop(resources);
             }
             let reaped_children = if is_thread {
                 0

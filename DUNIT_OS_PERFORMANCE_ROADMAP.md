@@ -146,7 +146,8 @@ KVM/reference и непокрытые метрики остаются откры
   общий userspace dispatch до проверки этих инвариантов.
 
 В OP3 реализованы [владение backend и scoped VFS](docs/performance/vfs-ownership.md);
-остальные memory/lifecycle/TLB gates остаются открытыми.
+а также [отделённая очистка ресурсов процессов](docs/performance/process-resources.md).
+Остальные process ownership, scheduler/wait и memory/TLB gates остаются открытыми.
 
 ### OP4 — настоящий SMP scheduler и потоки
 

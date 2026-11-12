@@ -16,7 +16,7 @@ pub(super) fn ioctl(fd: u32, op: u32, record: *mut u8, len: usize) -> i64 {
     ) {
         return -25; // ENOTTY: a valid descriptor that is not a terminal.
     }
-    let pid = match crate::process::get_fd(fd).and_then(|entry| entry.terminal.as_ref()) {
+    let pid = match crate::process::get_fd(fd).and_then(|entry| entry.terminal) {
         Some(endpoint) => endpoint.id,
         None => return -25,
     };

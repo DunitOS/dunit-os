@@ -841,7 +841,7 @@ pub extern "C" fn kernel_main(
         }
 
         screen_log("[ .. ] Running FS mutation smoke test", false);
-        if fs::vfs::run_fs_mutation_smoke() {
+        if fs::vfs::run_fs_mutation_smoke() && process::run_resource_cleanup_smoke() {
             screen_log("[ OK ] FS mutation smoke passed", false);
         } else {
             screen_log("[FAIL] FS mutation smoke failed", true);

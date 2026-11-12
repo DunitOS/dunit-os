@@ -20,7 +20,7 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
         return sys_pipe(arg as *mut u32, fd);
     }
     let entry = match crate::process::get_fd(fd) {
-        Some(entry) => entry.clone(),
+        Some(entry) => entry,
         None => return EBADF,
     };
     match command {
@@ -195,7 +195,7 @@ pub(super) fn map_file(
         return EBADF;
     }
     let entry = match crate::process::get_fd(fd as u32) {
-        Some(entry) => entry.clone(),
+        Some(entry) => entry,
         None => return EBADF,
     };
     if entry.status() & READ == 0 {

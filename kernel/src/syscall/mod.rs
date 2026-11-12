@@ -1314,7 +1314,7 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
     match crate::process::get_fd(fd).map(|entry| entry.target) {
         Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => {
             let tag = if matches!(crate::process::get_fd(fd).map(|entry| entry.target), Some(crate::process::FdTarget::Stderr)) { "STDERR" } else { "STDOUT" };
-            let routed = crate::process::get_fd(fd).and_then(|entry| entry.terminal.as_ref()).and_then(|endpoint| crate::pty::slave_write_stdout(endpoint.id, &data));
+            let routed = crate::process::get_fd(fd).and_then(|entry| entry.terminal).and_then(|endpoint| crate::pty::slave_write_stdout(endpoint.id, &data));
             match routed {
                 Some(Ok(0)) => return EAGAIN,
                 Some(Ok(count)) => { write_stdio(tag, &data[..count]); return count as i64; }
@@ -1614,7 +1614,7 @@ fn sys_fsync(fd: u32) -> i64 {
     }
 
     let entry = match crate::process::get_fd(fd) {
-        Some(entry) => entry.clone(),
+        Some(entry) => entry,
         None => return EBADF,
     };
 
