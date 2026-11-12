@@ -12,7 +12,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
-| Page tables, CR3 and MMIO mappings | local invalidation and global roots | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
+| Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
 | VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; integrate process cleanup and ProcFs snapshot lock order before AP dispatch |
 | VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
 | DunitFS/block drivers | owned/locked DunitFS backend; shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
@@ -64,3 +64,8 @@ reentry/ABA tests, native regressions and a coarse fixed-work before/after run.
 The [current-process access receipt](process-access.md) records privatized legacy
 selectors, scoped reads/mutations across syscall/input/IPC paths and deferred fd
 wait-set notifications. It enforces a result-lifetime boundary, not SMP exclusion.
+
+The [dispatch ownership receipt](dispatch-ownership.md) records independent
+stack/FPU/address-space owners, copied HAL input and caller restoration on error.
+No Process reference or address-space guard spans userspace execution; registry
+ownership and cross-CPU mapping/reclamation gates remain open.

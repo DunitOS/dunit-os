@@ -11,6 +11,7 @@ def contract():
     result = vfs_contract()
     result['required'].append('[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK')
     result['forbidden'].append('[PROCESS-RESOURCES] FAIL')
+    result['required'].append('[DISPATCH-PIN] stack/FPU/address-space survive Process drop and reclaim after frame OK')
     for name in ('m6_reap', 'waitset', 'pty_args',
                  'm6_musl_spawn', 'm6_pipe', 'm6_cond'):
         scene = json.loads((ROOT / f'tools/{name}_markers.json').read_text())
@@ -27,7 +28,8 @@ if __name__ == '__main__':
     folder = args.output / 'thread-lifecycle'
     folder.mkdir(exist_ok=True)
     scene = json.loads((ROOT / 'tools/m6_thread_lifecycle_markers.json').read_text())
-    scene['required'] += ['[TERM-007] Starting main loop', '[DF-TEST] syscall+irq flags preserved']
+    scene['required'] += ['[TERM-007] Starting main loop', '[DF-TEST] syscall+irq flags preserved',
+                          '[DISPATCH-PIN] stack/FPU/address-space survive Process drop and reclaim after frame OK']
     markers = folder / 'markers.json'
     markers.write_text(json.dumps(scene, indent=2) + '\n')
     subprocess.run([sys.executable, str(ROOT / 'tools/qemu_test.py'), '--markers-file', str(markers),

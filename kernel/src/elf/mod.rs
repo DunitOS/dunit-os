@@ -553,7 +553,7 @@ fn load_into_process_address_space(
     parser: &ElfParser,
     process: &mut Process,
 ) -> Result<(), ElfError> {
-    let address_space = process
+    let mut address_space = process
         .address_space_mut()
         .ok_or(ElfError::InvalidProgramHeader)?;
 
@@ -561,7 +561,7 @@ fn load_into_process_address_space(
         if ph.p_type != PT_LOAD {
             continue;
         }
-        load_segment_process(parser.data, address_space, &ph)?;
+        load_segment_process(parser.data, &mut address_space, &ph)?;
     }
 
     // Stack: writable and non-executable (W^X). A classic missing-NX hole was
@@ -576,7 +576,7 @@ fn load_into_process_address_space(
     }
     for page in 1..=(USER_STACK_SIZE / PAGE_SIZE) {
         let virt = VirtualAddress::from_usize(USER_STACK_TOP - (page * PAGE_SIZE));
-        ensure_process_page(address_space, virt, stack_flags)?;
+        ensure_process_page(&mut address_space, virt, stack_flags)?;
     }
 
     Ok(())

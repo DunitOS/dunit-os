@@ -76,7 +76,7 @@ pub fn inherit_process_fds(pid: ProcessId, entries: &[(u32, FdEntry)]) -> Result
 
 pub(super) struct VmResources {
     pid: ProcessId,
-    address_space: Option<AddressSpace>,
+    address_space: Option<Arc<IrqSafeSpinLock<AddressSpace>>>,
     pages: BTreeMap<usize, u64>,
     owned: Vec<u64>,
     handles: Vec<HandleObject>,

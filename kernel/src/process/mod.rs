@@ -3,6 +3,10 @@ mod terminal_stdin;
 mod current_access;
 pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut};
 mod resources;
+mod dispatch;
+use dispatch::KernelStack;
+#[cfg(feature = "boot-smoke-tests")]
+pub use dispatch::run_dispatch_pin_smoke;
 pub use resources::inherit_process_fds;
 #[cfg(feature = "boot-smoke-tests")]
 pub use resources::run_resource_cleanup_smoke;
@@ -15,7 +19,6 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use core::cell::UnsafeCell;
@@ -25,7 +28,9 @@ use crate::handle::{
     RIGHT_READ, RIGHT_SIGNAL, RIGHT_TRANSFER, RIGHT_WRITE,
 };
 use crate::memory::pmm::{get_pmm, PhysicalAddress};
-use crate::memory::vmm::{ActiveAddressSpace, AddressSpace, PageFlags, VirtualAddress};
+use crate::memory::vmm::{AddressSpace, PageFlags, VirtualAddress};
+#[cfg(feature = "boot-smoke-tests")]
+use crate::memory::vmm::ActiveAddressSpace;
 use crate::sync::{InterruptGuard, IrqSafeSpinLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -93,33 +98,11 @@ fn alloc_shared_vm_object(length: usize) -> Result<u64, ProcessError> {
     SHARED_VM_OBJECTS.lock().insert(id, SharedVmObject { frames, refs: 1 });
     Ok(id)
 }
-/// Таблица процессов. Раньше `static mut Option<Vec<..>>`; теперь `UnsafeCell`-
-/// newtype без `static mut`. Единственная точка доступа — `process_table_mut`.
-///
-/// Безопасность на одном процессоре (UP). Таблица трогается с двух сторон:
-/// кооперативным путём ядра и таймерным IRQ (`wake_expired_waiters` ->
-/// `wake_entry`, interrupts.rs). Корректность держится на трёх инвариантах, а не
-/// на локе — на UP крутящийся лок свёлся бы ровно к тому же маскированию IF (его
-/// и делает `IrqSafeSpinLock::lock`), но создал бы ложное впечатление
-/// SMP-готовности, которой в ядре нет (единый syscall-стек, глобальные
-/// `syscall_saved_*`, в планировщике `smp=off`). Инварианты:
-///   1. Объект процесса лежит в `Box` (`record.process: Option<Box<Process>>`).
-///      Ссылка, выданная наружу (`current_process`/`current_thread`), указывает на
-///      кучу за `Box`, а не в буфер `Vec`, поэтому переживает реаллокацию таблицы.
-///   2. Любая СТРУКТУРНАЯ мутация (`push`/`remove`, меняющая длину/буфер) идёт при
-///      снятом IF — syscall-контекст (SFMASK маскирует IF, syscall.asm) либо явный
-///      `InterruptGuard` на каждом таком месте. Так реаллокация не перекроется с
-///      чтением таблицы из таймерного IRQ.
-///   3. Таймерный путь (`wake_entry`) мутирует запись ТОЛЬКО на месте и НИКОГДА не
-///      меняет длину таблицы, поэтому не инвалидирует индексы/ссылки, которые
-///      удерживает прерванный (Running) контекст; саму Running-запись он не трогает
-///      (будит лишь Blocked). Это позволяет планировщику читать таблицу при
-///      разрешённом IF на пути `enter_user_process` -> `run_user_context` (где IF
-///      обязан быть включён ради преемпшна userspace).
-/// Формально выдача `&'static mut` из таблицы нарушает noalias, но записи идут из
-/// асинхронного прерывания (невидимого оптимизатору) в непересекающуюся и
-/// стабильную (`Box`) память, так что мискомпиляции нет. Инвариант 3 проверяется
-/// в `wake_entry`.
+/// UP-only process metadata/objects. Stable Box addresses prevent relocation,
+/// not aliasing or concurrent reclamation. Scoped access remains IRQ-masked;
+/// a real registry/task locking model is still required before AP dispatch.
+/// Hardware entry uses independently owned stack/FPU/address-space pins and
+/// copied registers, so no Process reference needs to span userspace execution.
 struct ProcessTableCell(UnsafeCell<Option<Vec<ProcessRecord>>>);
 unsafe impl Sync for ProcessTableCell {}
 static PROCESS_TABLE: ProcessTableCell = ProcessTableCell(UnsafeCell::new(None));
@@ -201,12 +184,8 @@ pub struct ProcessRecord {
     pub has_run: bool,
     pub waitable: bool,
     pub path: String,
-    /// Тяжёлый объект процесса живёт в `Box`, а не прямо в `Vec`. Это важно:
-    /// `current_process()`/`with_process_mut()` раздают `&'static Process`,
-    /// указывающие внутрь этого объекта. Если бы `Process` лежал прямо в
-    /// элементе `Vec`, то `push` с реаллокацией буфера сделал бы такие ссылки
-    /// висячими (UB). Указатель в `Box` при реаллокации `Vec` перемещается, а
-    /// сам объект на куче остаётся на месте — ссылки остаются валидными.
+    /// Stable object storage for bounded internal access. Box alone is not a
+    /// task-lifetime pin; dispatch retains its hardware backing independently.
     process: Option<Box<Process>>,
 }
 
@@ -313,7 +292,7 @@ pub struct Process {
     pub state: ProcessState,
     pub context: CpuContext,
     /// 16-byte aligned legacy x87/MMX/SSE state (FXSAVE format).
-    pub fpu_state: FpuState,
+    pub fpu_state: Arc<FpuState>,
     /// x86_64 userspace thread pointer installed in IA32_FS_BASE.
     pub fs_base: u64,
     /// User word to zero + futex-wake when this thread exits (0 = none).
@@ -330,9 +309,8 @@ pub struct Process {
     pub is_kernel: bool,
     pub cwd: String,
     pub status: Option<ProcessExitStatus>,
-    address_space: Option<AddressSpace>,
-    kernel_stack: Option<Vec<u8>>,
-    pub kernel_stack_top: usize,
+    address_space: Option<Arc<IrqSafeSpinLock<AddressSpace>>>,
+    kernel_stack: Option<Arc<KernelStack>>,
     pub entry_argc: usize,
     pub entry_argv: usize,
     pub entry_envp: usize,
@@ -393,7 +371,7 @@ impl Process {
             pid,
             state: ProcessState::Ready,
             context: CpuContext::new(),
-            fpu_state: FpuState::new(),
+            fpu_state: Arc::new(FpuState::new()),
             fs_base: 0,
             clear_child_tid: 0,
             privileged: false,
@@ -402,7 +380,6 @@ impl Process {
             status: None,
             address_space: None,
             kernel_stack: None,
-            kernel_stack_top: 0,
             entry_argc: 0,
             entry_argv: 0,
             entry_envp: 0,
@@ -431,13 +408,12 @@ impl Process {
     }
 
     pub fn new_user(pid: ProcessId) -> Result<Self, ProcessError> {
-        let mut kernel_stack = vec![0u8; DEFAULT_KERNEL_STACK_SIZE];
-        let kernel_stack_top = (kernel_stack.as_mut_ptr() as usize + kernel_stack.len()) & !0xF;
+        let kernel_stack = Arc::new(KernelStack::new());
         let mut process = Self {
             pid,
             state: ProcessState::Ready,
             context: CpuContext::new(),
-            fpu_state: FpuState::new(),
+            fpu_state: Arc::new(FpuState::new()),
             fs_base: 0,
             clear_child_tid: 0,
             privileged: false,
@@ -445,10 +421,9 @@ impl Process {
             cwd: String::from("/"),
             status: None,
             address_space: Some(
-                AddressSpace::new().map_err(|_| ProcessError::AddressSpaceCreateFailed)?,
+                Arc::new(IrqSafeSpinLock::new(AddressSpace::new().map_err(|_| ProcessError::AddressSpaceCreateFailed)?)),
             ),
             kernel_stack: Some(kernel_stack),
-            kernel_stack_top,
             entry_argc: 0,
             entry_argv: 0,
             entry_envp: 0,
@@ -474,9 +449,7 @@ impl Process {
 
     fn new_user_thread(tid: ThreadId, entry: u64, stack_top: u64, arg: u64) -> Self {
         let mut thread = Self::new_without_address_space(ProcessId(tid.0), false);
-        let mut kernel_stack = vec![0u8; DEFAULT_KERNEL_STACK_SIZE];
-        thread.kernel_stack_top = (kernel_stack.as_mut_ptr() as usize + kernel_stack.len()) & !0xF;
-        thread.kernel_stack = Some(kernel_stack);
+        thread.kernel_stack = Some(Arc::new(KernelStack::new()));
         thread.fd_table.clear(); // Owned by the process, shared by its threads.
         thread.context.rip = entry;
         thread.context.rsp = stack_top;
@@ -485,26 +458,19 @@ impl Process {
         thread
     }
 
-    pub fn address_space(&self) -> Option<&AddressSpace> {
-        self.address_space.as_ref()
+    pub fn address_space(&self) -> Option<crate::sync::IrqSafeSpinLockGuard<'_, AddressSpace>> {
+        self.address_space.as_ref().map(|space| space.lock())
     }
 
-    pub fn address_space_mut(&mut self) -> Option<&mut AddressSpace> {
-        self.address_space.as_mut()
-    }
-
-    pub fn has_kernel_stack(&self) -> bool {
-        self.kernel_stack.is_some() && self.kernel_stack_top != 0
+    pub fn address_space_mut(&mut self) -> Option<crate::sync::IrqSafeSpinLockGuard<'_, AddressSpace>> {
+        self.address_space()
     }
 
     pub fn kernel_stack_top(&self) -> Option<usize> {
-        if self.has_kernel_stack() {
-            Some(self.kernel_stack_top)
-        } else {
-            None
-        }
+        self.kernel_stack.as_ref().map(|stack| stack.top())
     }
 
+    #[cfg(feature = "boot-smoke-tests")]
     pub unsafe fn install_syscall_stack(&self) -> Result<(), ProcessError> {
         let stack_top = self.kernel_stack_top().ok_or(ProcessError::NoKernelStack)?;
         crate::hal::syscall_set_kernel_stack_top(stack_top as u64);
@@ -515,20 +481,11 @@ impl Process {
         crate::hal::syscall_reset_kernel_stack();
     }
 
+    #[cfg(feature = "boot-smoke-tests")]
     pub unsafe fn activate_address_space(&self) -> Result<ActiveAddressSpace, ProcessError> {
         self.address_space()
             .ok_or(ProcessError::NoAddressSpace)
             .map(|address_space| address_space.activate())
-    }
-
-    pub unsafe fn switch_to_address_space(&self) -> Result<(), ProcessError> {
-        let root_frame = self
-            .address_space()
-            .ok_or(ProcessError::NoAddressSpace)?
-            .root_frame()
-            .as_usize();
-        crate::memory::vmm::switch_to_root_frame(root_frame);
-        Ok(())
     }
 
     pub fn terminate(&mut self) {
@@ -737,7 +694,7 @@ impl Process {
             return Err(ProcessError::InvalidMemoryRange);
         }
 
-        let address_space = self
+        let mut address_space = self
             .address_space_mut()
             .ok_or(ProcessError::NoAddressSpace)?;
         let mut page = start;
@@ -780,13 +737,14 @@ impl Process {
             mapped_end += USER_PAGE_SIZE;
         }
 
+        drop(address_space);
         if requested_addr == 0 {
             self.next_mmap_addr = end;
         }
         if !accessible {
             let accessible_start = if guarded { start + USER_PAGE_SIZE } else { start };
             let accessible_end = if guarded { end - USER_PAGE_SIZE } else { end };
-            let address_space = self.address_space_mut().unwrap();
+            let mut address_space = self.address_space_mut().unwrap();
             for page in (accessible_start..accessible_end).step_by(USER_PAGE_SIZE) {
                 address_space.protect_user_page(
                     VirtualAddress(page), PageFlags::NO_EXECUTE, false,
@@ -794,12 +752,13 @@ impl Process {
             }
         }
         if guarded {
-            let address_space = self.address_space_mut().unwrap();
+            let mut address_space = self.address_space_mut().unwrap();
             let guard_flags = PageFlags::NO_EXECUTE;
             address_space.protect_user_page(VirtualAddress(start), guard_flags, false)
                 .map_err(|_| ProcessError::InvalidMemoryRange)?;
             address_space.protect_user_page(VirtualAddress(end - USER_PAGE_SIZE), guard_flags, false)
                 .map_err(|_| ProcessError::InvalidMemoryRange)?;
+            drop(address_space);
             self.guard_regions.insert(start + USER_PAGE_SIZE, map_length);
             Ok(start + USER_PAGE_SIZE)
         } else {
@@ -842,7 +801,7 @@ impl Process {
             return Err(ProcessError::InvalidMemoryRange);
         }
         let end = end.unwrap();
-        let Some(address_space) = self.address_space_mut() else {
+        let Some(mut address_space) = self.address_space_mut() else {
             shared_vm_release(id, frames.len());
             return Err(ProcessError::NoAddressSpace);
         };
@@ -863,6 +822,7 @@ impl Process {
             }
             mapped += 1;
         }
+        drop(address_space);
         for index in 0..frames.len() {
             self.shared_pages.insert(start + index * USER_PAGE_SIZE, id);
         }
@@ -897,9 +857,10 @@ impl Process {
             if let Some(id) = self.shared_pages.remove(&page) { shared_vm_release(id, 1); }
         }
         if let Some((usable, len)) = guard {
-            let address_space = self.address_space_mut().unwrap();
+            let mut address_space = self.address_space_mut().unwrap();
             address_space.unmap_user_page(VirtualAddress(usable - USER_PAGE_SIZE)).unwrap();
             address_space.unmap_user_page(VirtualAddress(usable + len)).unwrap();
+            drop(address_space);
             self.guard_regions.remove(&usable);
         }
         Ok(())
@@ -916,7 +877,7 @@ impl Process {
                 return Err(ProcessError::InvalidMemoryRange);
             }
         }
-        let address_space = self.address_space_mut().ok_or(ProcessError::NoAddressSpace)?;
+        let mut address_space = self.address_space_mut().ok_or(ProcessError::NoAddressSpace)?;
         for page in (start..end).step_by(USER_PAGE_SIZE) {
             if address_space.translate_user_page(VirtualAddress(page)).ok().flatten().is_none() {
                 return Err(ProcessError::InvalidMemoryRange);
@@ -2054,11 +2015,8 @@ pub fn block_current(key_ipc: Option<ProcessId>, deadline: Option<u64>) -> Resul
 
 fn wake_entry(entry: WaitEntry) {
     let table = process_table_mut();
-    // Инвариант 3 таблицы процессов (см. ProcessTableCell): пробуждение мутирует
-    // запись только на месте и не меняет длину таблицы, иначе удерживаемые при
-    // включённом IF ссылки планировщика повиснут. Длина фиксируется здесь и
-    // сверяется в конце (debug-сборка): страховка от будущей правки, которая
-    // добавит push/remove на путь пробуждения.
+    // Timer wakeup changes metadata in place only. Structural changes still
+    // require the UP IRQ boundary; dispatch backing now has independent pins.
     let len_before = table.len();
     if let Some(index) = process_record_index(table, entry.entity) {
         let record = &mut table[index];
@@ -2073,7 +2031,7 @@ fn wake_entry(entry: WaitEntry) {
     debug_assert_eq!(
         process_table_mut().len(),
         len_before,
-        "wake_entry изменил длину таблицы процессов — нарушен инвариант 3"
+        "wake_entry changed process-table size on the IRQ path"
     );
 }
 
@@ -2877,8 +2835,7 @@ fn take_schedule_hint() -> Option<ProcessId> {
 }
 
 pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
-    let previous_pid = crate::cpu::runtime().current_pid.load(Ordering::SeqCst);
-    let previous_root = unsafe { crate::memory::vmm::active_root_frame() };
+    let mut scope = dispatch::DispatchScope::new();
     let root_pid = pid;
     let mut next_pid = pid;
     loop {
@@ -2886,61 +2843,13 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
             next_pid = crate::process::scheduler::pick_next_candidate()
                 .ok_or(ProcessError::SchedulerUnavailable)?;
         }
-        let address_space_ready = {
-            // Разделяемое чтение таблицы под маской IRQ; ссылки не покидают блок.
-            let _irq = InterruptGuard::new();
-            owner_of(next_pid)
-                .and_then(|owner| process_table_mut()
-                    .iter()
-                    .find(|record| record.pid == owner)
-                    .and_then(|record| record.process.as_ref())
-                    .and_then(|p| p.address_space()))
-                .is_some()
-        };
-        let context = with_process_mut(next_pid, |process| {
-            if process.is_kernel {
-                return Err(ProcessError::InvalidUserContext);
-            }
-            if process.context.rip == 0 || process.context.rsp == 0 {
-                return Err(ProcessError::InvalidUserContext);
-            }
-            if !address_space_ready {
-                return Err(ProcessError::NoAddressSpace);
-            }
-            if process.kernel_stack_top().is_none() {
-                return Err(ProcessError::NoKernelStack);
-            }
-
-            process.state = ProcessState::Running;
-            Ok(process.context)
-        })?;
+        let frame = dispatch::prepare(next_pid)?;
 
         mark_process_started(next_pid);
         crate::cpu::runtime().current_pid.store(next_pid.0, Ordering::SeqCst);
 
-        let run_result = unsafe {
-            match (current_thread(), current_process()) {
-                (Some(thread), Some(owner)) => match thread.install_syscall_stack() {
-                    Ok(()) => match owner.switch_to_address_space() {
-                        Ok(()) => {
-                            crate::hal::set_user_fpu_state(thread.fpu_state.0.get().cast::<u8>());
-                            crate::hal::set_fs_base(thread.fs_base);
-                            crate::hal::run_user_context(&context as *const CpuContext);
-                            crate::hal::set_fs_base(0);
-                            crate::hal::set_user_fpu_state(core::ptr::null_mut());
-                            Ok(())
-                        }
-                        Err(error) => Err(error),
-                    },
-                    Err(error) => Err(error),
-                },
-                _ => Err(ProcessError::NoCurrentProcess),
-            }
-        };
-
-        unsafe {
-            Process::reset_syscall_stack_policy();
-        }
+        unsafe { frame.run(&mut scope); }
+        drop(frame);
 
         #[cfg(feature = "boot-smoke-tests")]
         fault_irq_smoke::verify();
@@ -2981,7 +2890,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                 release_finished_thread(next_pid)?;
             } else {
                 cleanup_owned_threads(next_pid);
-                unsafe { crate::memory::vmm::switch_to_root_frame(previous_root); }
+                scope.restore_root();
                 let resources = with_process_mut(next_pid, |finished| Ok(finished.take_vm_resources()))?;
                 drop(resources);
             }
@@ -2996,25 +2905,10 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                 crate::memory::serial_write("\r\n");
             }
             if next_pid == root_pid {
-                crate::cpu::runtime().current_pid.store(previous_pid, Ordering::SeqCst);
-                unsafe {
-                    crate::memory::vmm::switch_to_root_frame(previous_root);
-                    match current_process() {
-                        Some(current)
-                            if !current.is_kernel && current.kernel_stack_top().is_some() =>
-                        {
-                            let _ = current.install_syscall_stack();
-                        }
-                        _ => Process::reset_syscall_stack_policy(),
-                    }
-                }
-                return run_result.map(|_| exit);
+                return Ok(exit);
             }
         }
 
-        if let Err(error) = run_result {
-            return Err(error);
-        }
         let hinted = take_schedule_hint()
             .filter(|candidate| *candidate != next_pid && is_pid_runnable(*candidate));
         let preferred_root =
@@ -3028,18 +2922,6 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
             }
             None => {
                 if next_pid == root_pid || is_pid_blocked(root_pid) {
-                    crate::cpu::runtime().current_pid.store(previous_pid, Ordering::SeqCst);
-                    unsafe {
-                        crate::memory::vmm::switch_to_root_frame(previous_root);
-                        match current_process() {
-                            Some(current)
-                                if !current.is_kernel && current.kernel_stack_top().is_some() =>
-                            {
-                                let _ = current.install_syscall_stack();
-                            }
-                            _ => Process::reset_syscall_stack_policy(),
-                        }
-                    }
                     return Err(ProcessError::SchedulerUnavailable);
                 }
                 next_pid = root_pid;
@@ -3081,7 +2963,7 @@ pub fn run_process_address_space_smoke() -> bool {
         }
     };
 
-    let address_space = match process.address_space.as_mut() {
+    let mut address_space = match process.address_space_mut() {
         Some(address_space) => address_space,
         None => {
             crate::memory::serial_write("[PROCESS-ADDRSPACE-TEST] no address space\r\n");
@@ -3098,6 +2980,7 @@ pub fn run_process_address_space_smoke() -> bool {
         return false;
     }
 
+    drop(address_space);
     unsafe {
         let _active = process.activate_address_space().ok();
         if _active.is_none() {

@@ -150,6 +150,8 @@ KVM/reference и непокрытые метрики остаются откры
 Устранён [обратный захват queue → process table](docs/performance/scheduler-queue.md).
 Внешние обращения к current process/thread переведены на
 [non-escaping scopes и отложенные fd-уведомления](docs/performance/process-access.md).
+Диспетчер использует [владеющий frame и active-root scope](docs/performance/dispatch-ownership.md)
+без ссылки на Process через вход в userspace.
 Остальные process ownership, scheduler/wait и memory/TLB gates остаются открытыми.
 
 ### OP4 — настоящий SMP scheduler и потоки
