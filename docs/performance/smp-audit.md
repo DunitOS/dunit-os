@@ -1,6 +1,6 @@
 # SMP shared-state audit — OP1
 
-Initial audit: 11 November 2026. Updated through `236e83d` on 12 November 2026.
+Initial audit: 11 November 2026. Updated on 12 November 2026; implementation receipts below.
 Audit of the UP implementation; this inventory is a safety
 gate, not a claim that shared state is now safe to execute on APs.
 
@@ -11,7 +11,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | current PID, exit/yield/schedule/escape flags | CPU-local runtime fields; aggregate counters/terminal ownership remain shared | implement atomic task execution ownership and remote scheduling |
 | PROCESS_TABLE and current process/thread access | external access uses non-escaping scopes; fd snapshots are owned; private registry/selectors still UP-only; dispatch backing is independently owned | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
-| Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; several independent locks | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
+| Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; generation-bounded wake selection; callbacks outside queue lock; futex admission still accesses process state under queue lock | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
 | VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; complete process/task and ProcFs snapshot lock order before AP dispatch |
@@ -70,3 +70,9 @@ The [dispatch ownership receipt](dispatch-ownership.md) records independent
 stack/FPU/address-space owners, copied HAL input and caller restoration on error.
 No Process reference or address-space guard spans userspace execution; registry
 ownership and cross-CPU mapping/reclamation gates remain open.
+
+The [wait queue receipt](wait-queue.md) records callbacks outside registration
+storage locks, generation-bounded FIFO selection and scheduler admission after
+the mutable process-table borrow. Futex compare/register still accesses process
+state while holding the queue lock; this is not a completed lock order or an
+atomic cross-CPU block/wake protocol. Registry/task exclusion remains open.

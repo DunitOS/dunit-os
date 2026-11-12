@@ -1,5 +1,7 @@
 pub mod scheduler;
 mod terminal_stdin;
+mod wait_queue;
+use wait_queue::{wake_matching, WaitEntry, WaitKey, WaitQueue};
 mod current_access;
 pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut};
 mod resources;
@@ -116,29 +118,8 @@ static PREEMPTION_COUNT: AtomicU64 = AtomicU64::new(0);
 // UP round-robin is the default. A child may finish before its parent's first wait.
 static PREEMPTION_ENABLED: AtomicBool = AtomicBool::new(true);
 /// IRQ-safe wait queue; check/block is covered by the caller's IRQ guard.
-static WAIT_QUEUE: IrqSafeSpinLock<Vec<WaitEntry>> = IrqSafeSpinLock::new(Vec::new());
+static WAIT_QUEUE: IrqSafeSpinLock<WaitQueue> = IrqSafeSpinLock::new(WaitQueue::new());
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WaitKey {
-    Timer,
-    Ipc(ProcessId),
-    /// Dunit-native futex key: threads share their owner's address space, so
-    /// (owner, user virtual address of the word) uniquely names a futex word.
-    Word { owner: ProcessId, addr: u64 },
-    /// A pipe end, named by the global pipe-object id. Readers block here when
-    /// the pipe is empty with writers still open; writers block when it is full
-    /// with readers still open.
-    Pipe(u64),
-    Poll,
-    WaitSet,
-}
-
-#[derive(Clone, Copy)]
-struct WaitEntry {
-    entity: ProcessId,
-    key: WaitKey,
-    deadline: Option<u64>,
-}
 /// Буфер строки stdin терминала для процесса, ожидающего ввод. Раньше три
 /// `static mut`; теперь одна структура за `UnsafeCell`-newtype. Доступ идёт
 /// кооперативно (подача из оболочки и чтение из syscall на одном CPU); какой
@@ -2014,39 +1995,31 @@ pub fn block_current(key_ipc: Option<ProcessId>, deadline: Option<u64>) -> Resul
 }
 
 fn wake_entry(entry: WaitEntry) {
-    let table = process_table_mut();
-    // Timer wakeup changes metadata in place only. Structural changes still
-    // require the UP IRQ boundary; dispatch backing now has independent pins.
-    let len_before = table.len();
-    if let Some(index) = process_record_index(table, entry.entity) {
-        let record = &mut table[index];
-        if record.state == ProcessState::Blocked {
+    // End the table/Process borrow before scheduler admission rechecks state.
+    // The caller's IRQ boundary still serializes this UP state transition.
+    let became_ready = {
+        let table = process_table_mut();
+        process_record_index(table, entry.entity).map(|index| {
+            let record = &mut table[index];
+            if record.state != ProcessState::Blocked {
+                return false;
+            }
             record.state = ProcessState::Ready;
             if let Some(process) = record.process.as_mut() {
                 process.state = ProcessState::Ready;
             }
-            let _ = scheduler::enqueue_ready(entry.entity);
-        }
+            true
+        }).unwrap_or(false)
+    };
+    if became_ready {
+        let _ = scheduler::enqueue_ready(entry.entity);
     }
-    debug_assert_eq!(
-        process_table_mut().len(),
-        len_before,
-        "wake_entry changed process-table size on the IRQ path"
-    );
 }
 
 pub fn wake_ipc_waiters(pid: ProcessId) {
     wake_wait_set_waiters();
     let _irq = InterruptGuard::new();
-    let mut queue = WAIT_QUEUE.lock();
-    let mut index = 0;
-    while index < queue.len() {
-        if queue[index].key == WaitKey::Ipc(pid) {
-            wake_entry(queue.remove(index));
-        } else {
-            index += 1;
-        }
-    }
+    wake_matching(&WAIT_QUEUE, |entry| entry.key == WaitKey::Ipc(pid), 0, wake_entry);
 }
 
 /// Block the current process on a pipe end so that its read/write syscall
@@ -2113,23 +2086,13 @@ fn readiness_block_current(deadline_ns: u64, key: WaitKey) -> Result<(), Process
 }
 pub fn wake_poll_waiters() {
     let _irq = InterruptGuard::new();
-    let mut queue = WAIT_QUEUE.lock();
-    let mut index = 0;
-    while index < queue.len() {
-        if matches!(queue[index].key, WaitKey::Poll | WaitKey::WaitSet) { wake_entry(queue.remove(index)); }
-        else { index += 1; }
-    }
+    wake_matching(&WAIT_QUEUE, |entry| matches!(entry.key, WaitKey::Poll | WaitKey::WaitSet), 0, wake_entry);
 }
 /// Event-driven rescan of call-scoped sets. Unrelated producers may cause a
 /// spurious rescan; the original snapshot/deadline is preserved across restart.
 pub(crate) fn wake_wait_set_waiters() {
     let _irq = InterruptGuard::new();
-    let mut queue = WAIT_QUEUE.lock();
-    let mut index = 0;
-    while index < queue.len() {
-        if queue[index].key == WaitKey::WaitSet { wake_entry(queue.remove(index)); }
-        else { index += 1; }
-    }
+    wake_matching(&WAIT_QUEUE, |entry| entry.key == WaitKey::WaitSet, 0, wake_entry);
 }
 pub fn terminal_input_ready() -> bool {
     let owner = TERMINAL_STDIN_WAITING_PID.load(Ordering::SeqCst);
@@ -2141,29 +2104,15 @@ pub fn terminal_input_ready() -> bool {
 pub fn wake_pipe_waiters(id: u64) {
     wake_poll_waiters();
     let _irq = InterruptGuard::new();
-    let mut queue = WAIT_QUEUE.lock();
-    let mut index = 0;
-    while index < queue.len() {
-        if queue[index].key == WaitKey::Pipe(id) {
-            wake_entry(queue.remove(index));
-        } else {
-            index += 1;
-        }
-    }
+    wake_matching(&WAIT_QUEUE, |entry| entry.key == WaitKey::Pipe(id), 0, wake_entry);
 }
 
 pub fn wake_expired_waiters() {
     let _irq = InterruptGuard::new();
-    let mut queue = WAIT_QUEUE.lock();
     let now = crate::clock::monotonic_ticks();
-    let mut index = 0;
-    while index < queue.len() {
-        if queue[index].deadline.map(|deadline| now >= deadline).unwrap_or(false) {
-            wake_entry(queue.remove(index));
-        } else {
-            index += 1;
-        }
-    }
+    wake_matching(&WAIT_QUEUE, |entry| {
+        entry.deadline.map(|deadline| now >= deadline).unwrap_or(false)
+    }, 0, wake_entry);
 }
 
 /// Outcome of a futex-style compare-and-block attempt.
@@ -2244,8 +2193,9 @@ pub fn run_clear_child_tid_on_exit() {
 }
 
 /// Compare-and-block on a futex word. Under a single IRQ guard + WAIT_QUEUE
-/// lock (same ordering as `block_current` / the wake path) so the compare is
-/// atomic w.r.t. `futex_wake`. Returns Parked when the caller was blocked,
+/// lock so wake selection cannot slip between the compare and registration.
+/// Process-state transitions remain UP-only; this is not an SMP block protocol.
+/// Returns Parked when the caller was blocked,
 /// ValueMismatch when the word differs from `expected` (map to EAGAIN), or an
 /// error (an unmapped word yields InvalidMemoryRange -> EFAULT at the syscall).
 pub fn futex_wait(
@@ -2294,22 +2244,7 @@ pub fn futex_wake(addr: u64, max: usize) -> usize {
     let _irq = InterruptGuard::new();
     let Some(owner) = current_pid() else { return 0; };
     let target = WaitKey::Word { owner, addr };
-    let mut queue = WAIT_QUEUE.lock();
-    let wake_all = max == 0;
-    let mut woken = 0;
-    let mut index = 0;
-    while index < queue.len() {
-        if queue[index].key == target {
-            if !wake_all && woken >= max {
-                break;
-            }
-            wake_entry(queue.remove(index));
-            woken += 1;
-        } else {
-            index += 1;
-        }
-    }
-    woken
+    wake_matching(&WAIT_QUEUE, |entry| entry.key == target, max, wake_entry)
 }
 
 pub fn is_pid_blocked(pid: ProcessId) -> bool {
@@ -2322,7 +2257,7 @@ pub fn is_pid_blocked(pid: ProcessId) -> bool {
 
 fn remove_waiter(entity: ProcessId) {
     let _irq = InterruptGuard::new();
-    WAIT_QUEUE.lock().retain(|entry| entry.entity != entity);
+    WAIT_QUEUE.lock().remove_entity(entity);
     if let Some(index) = process_record_index(process_table_mut(), entity) {
         if let Some(process) = process_table_mut()[index].process.as_mut() {
             process.wait_set = None;

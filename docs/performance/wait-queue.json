@@ -1,0 +1,253 @@
+{
+  "date": "2026-11-12",
+  "scope": "wait wake callbacks outside registration lock; UP process dispatch",
+  "source": {
+    "base_commit": "f1eaa98076d22ab3979bd0f1c20b1cf10bd4df27",
+    "files_sha256": {
+      "kernel/src/process/mod.rs": "28c44b67ebeafafe40afe80ce8ef8ffdeb68f9f0ff2c78833614d4d00c8f8589",
+      "kernel/src/process/wait_queue.rs": "00998abfc1b7d90d6dfe5a5a747fd9e0d03c22bb60f5034384d7b5e58f145df6",
+      "tools/test_wait_queue.py": "ef9d66398e6999094a413ebf1e84877e59a09a4c20f6a9c8abb4801b9d6e1411"
+    }
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0"
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "host_limits_note": "Docker-visible cgroup metadata; enclosing host quotas may differ. No KVM available.",
+  "host_assertions": {
+    "concurrent_registrations": 8000,
+    "callbacks": 8000,
+    "wake_callback_queue_try_lock": "succeeds",
+    "same_pid_replacement": "deferred to next pass",
+    "temporary_wake_batch_allocation": false
+  },
+  "commands": [
+    "python3 tools/test_wait_queue.py",
+    "python3 tools/test_scheduler_queue.py",
+    "python3 tools/test_process_resources.py --accel tcg --cpus 4 --output build/performance/wait-queue-final",
+    "python3 tools/qemu_test.py --markers-file tools/boot_markers.json --cpus 1 --accel tcg --timeout 360 --cmd-timeout 180 --workdir build/performance/wait-queue-boot --performance-record build/performance/wait-queue-boot.json",
+    "python3 tools/qemu_test.py --markers-file /workspace/scratch/pointer-gui-terminal.json --cpus 4 --accel tcg --timeout 360 --cmd-timeout 120 --performance-record build/performance/wait-queue-gui.json"
+  ],
+  "runs": [
+    {
+      "name": "build/performance/wait-queue-final/metadata.json",
+      "started_utc": "2026-11-12T18:55:17.429659+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/wait-queue-final/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/wait-queue-final/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "158c86aa7e38db5e5ff7e9c1da84d2e49d2be982567246f5292dd06849b8c450",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 61795.35068599216,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/wait-queue-final/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-12T18:56:19.575330+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/wait-queue-final/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/wait-queue-final/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "158c86aa7e38db5e5ff7e9c1da84d2e49d2be982567246f5292dd06849b8c450",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 10556.755626996164,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/wait-queue-boot.json",
+      "started_utc": "2026-11-12T18:57:04.551847+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/wait-queue-boot/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/wait-queue-boot/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "158c86aa7e38db5e5ff7e9c1da84d2e49d2be982567246f5292dd06849b8c450",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 13017.481659990153,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/wait-queue-gui.json",
+      "started_utc": "2026-11-12T18:57:46.543078+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "158c86aa7e38db5e5ff7e9c1da84d2e49d2be982567246f5292dd06849b8c450",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 24245.616255997447,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "limits": [
+    "Wake selection storage is tested concurrently on the host; process state transitions remain UP-only.",
+    "Futex compare/register still touches task state under the wait queue lock.",
+    "Run wall times below measure complete test invocations, not scheduling/input latency or speedup.",
+    "No cross-CPU block/wake/cancel, task execution claim or TLB shootdown acceptance."
+  ]
+}

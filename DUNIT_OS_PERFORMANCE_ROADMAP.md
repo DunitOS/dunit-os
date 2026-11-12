@@ -1,6 +1,6 @@
 # Dunit OS — отдельный roadmap производительности и SMP
 
-Создан: 11 ноября 2026. Обновлён: **12 ноября 2026**, по реализации до `236e83d`.
+Создан: 11 ноября 2026. Обновлён: **12 ноября 2026**; реализации и результаты привязаны к отчётам ниже.
 Статус: **OP0–OP3 выполнены частично; текущая работа — OP3; SMP dispatch ещё нет**.
 Инициатива пользователя: максимальная практическая производительность,
 настоящая одновременная работа на нескольких ядрах и отзывчивый desktop/SDK.
@@ -196,6 +196,10 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   `236e83d`: Arc-owned stack/FPU/locked AddressSpace, copied HAL input,
   удержание active root и восстановление caller PID/CR3/stack на ошибках.
   Canonical kernel-half refresh сохранён; private-page/root lifetime проверен.
+- [x] [Wake callbacks вне wait queue lock](docs/performance/wait-queue.md):
+  IPC/pipe/futex/poll/wait-set/timer снимают регистрацию до обращения к task и
+  scheduler; generation cutoff исключает новые регистрации из текущего прохода.
+  Scheduler admission выполняется после завершения mutable table borrow.
 
 Оставшиеся обязательные gates:
 
