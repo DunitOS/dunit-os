@@ -30,3 +30,20 @@ CPU-local entry/flags and private descriptors/stacks are now implemented and
 checked by the [bring-up receipt](smp-bringup.md). The process/VFS ownership,
 wait/wakeup and remote TLB gates in this table remain unresolved; AP application
 dispatch stays disabled.
+
+## Guard type guarantees (12 November 2026)
+
+`InterruptGuard` is CPU-bound (`!Send`/`!Sync`): restoring its saved IF on a
+second CPU would corrupt both CPUs' interrupt state. Lock guards are `!Send`
+so critical sections cannot migrate implicitly. A shared `SpinLockGuard<T>`
+requires `T: Sync`; deriving that property from `SpinLock<T>: Sync` alone would
+incorrectly allow sharing `Cell<T>` through a guard. IRQ-safe lock guards inherit
+the CPU-bound IRQ guard. Zero-sized markers enforce these rules at compile time.
+
+`tools/test_sync_guards.py` compiles the actual kernel module: invalid Send and
+Sync bounds must fail, while a shared guard for u64 must compile. Its host-safe
+runtime test uses eight threads for 80,000 invariant-checked updates, failed and
+successful try_lock operations, and OnceCell publication. Privileged IRQ paths
+are exercised by native boot/DF/IRQ and CPU/pthread, allocation and MemFS tests
+through `test_smp_boot.py --cpus 1 4` on TCG. These checks do not resolve the
+process/VFS lifetime, lock-order or TLB gates above.

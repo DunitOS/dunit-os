@@ -24,6 +24,7 @@
 //! переход на userspace поверх libc.
 
 use core::cell::UnsafeCell;
+use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -59,6 +60,8 @@ pub fn enable_interrupts() {
 /// не включит прерывания раньше внешнего.
 pub struct InterruptGuard {
     were_enabled: bool,
+    // IF belongs to the acquiring CPU; this guard must never migrate.
+    _cpu_bound: PhantomData<*mut ()>,
 }
 
 impl InterruptGuard {
@@ -66,7 +69,10 @@ impl InterruptGuard {
     pub fn new() -> Self {
         let were_enabled = interrupts_enabled();
         disable_interrupts();
-        Self { were_enabled }
+        Self {
+            were_enabled,
+            _cpu_bound: PhantomData,
+        }
     }
 }
 
@@ -117,7 +123,10 @@ impl<T> SpinLock<T> {
                 core::hint::spin_loop();
             }
         }
-        SpinLockGuard { lock: self }
+        SpinLockGuard {
+            lock: self,
+            _cpu_bound: PhantomData,
+        }
     }
 
     /// Пытается захватить лок без ожидания. Возвращает `None`, если он занят.
@@ -127,7 +136,10 @@ impl<T> SpinLock<T> {
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            Some(SpinLockGuard { lock: self })
+            Some(SpinLockGuard {
+                lock: self,
+                _cpu_bound: PhantomData,
+            })
         } else {
             None
         }
@@ -141,7 +153,12 @@ impl<T> SpinLock<T> {
 
 pub struct SpinLockGuard<'a, T> {
     lock: &'a SpinLock<T>,
+    _cpu_bound: PhantomData<*mut ()>,
 }
+
+// A shared guard exposes &T, so sharing requires T: Sync even when the
+// protected value is merely Send. The guard itself cannot migrate.
+unsafe impl<T: Sync> Sync for SpinLockGuard<'_, T> {}
 
 impl<T> Deref for SpinLockGuard<'_, T> {
     type Target = T;
