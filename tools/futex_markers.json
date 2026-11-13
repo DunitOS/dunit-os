@@ -1,0 +1,13 @@
+{
+  "description": "Native futex mapping validation, mismatch, timeout, bounded wake and final drain",
+  "run": {"config": "limine_test_terminal.conf", "cmd": ["exec /app/futex_test"]},
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[DF-TEST] syscall+irq flags preserved",
+    "futex_test: mapping permissions and errno OK",
+    "futex_test: bounded wake and final drain OK",
+    "futex_test: OK",
+    "[EXEC] /app/futex_test returned code=0"
+  ],
+  "forbidden": ["[PANIC]", "futex_test: FAIL", {"marker":"[USER-FAULT]", "after":"[TERM-007] Starting main loop"}]
+}

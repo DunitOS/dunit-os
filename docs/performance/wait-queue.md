@@ -64,8 +64,10 @@ fault/join fixture stays in its separate VM. No forbidden markers are relaxed.
 
 ## Remaining gates
 
-`futex_wait` still accesses process/address-space state while holding the wait
-queue lock for its compare/register transaction. Other check/block paths still
+At this 12 November checkpoint, `futex_wait` still looked up process state and
+acquired AddressSpace under the queue lock. The subsequent
+[futex admission change](futex-admission.md) removes those reverse acquisitions;
+the original receipt here remains tied to its tested image. Other check/block paths still
 rely on UP, non-preemptible kernel execution and local IRQ masking. Therefore
 this change removes wake callback lock nesting, not every queue→task edge.
 Registry/task ownership and a single cross-CPU predicate/block/wake/cancel

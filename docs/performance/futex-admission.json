@@ -1,0 +1,272 @@
+{
+  "date": "2026-11-13",
+  "scope": "futex admission lock order and atomic user-word access; UP dispatch",
+  "source": {
+    "base_commit": "ef41c4d4705c73f80f927b76b22891872c05960d",
+    "files_sha256": {
+      "kernel/src/process/mod.rs": "56b7753b798c04f6a439d7baaf679fea2d94ce3cf1841f91227a3213711f6272",
+      "kernel/src/process/dispatch.rs": "2fb1a0e140ce87dd1b82795139bee0aa8bf56072b29541506bab521905d655d1",
+      "kernel/src/process/futex.rs": "c54f937bcfbcb9ccb85a412fa5c00b8b0222ae9be08c76076a373b6c8c021155",
+      "kernel/src/process/user_word.rs": "558a7c308c91d759bec634e7642bf7bb7cc135be279505d4faa9b003ad749af6",
+      "userspace/system_apps/futex_test/src/main.rs": "80bfe04c698dad131cf9b1eb7d7924228e5f3826ec668a13b24766a2fb8e825c",
+      "tools/futex_markers.json": "006b6be35ab093baa5579a1a9473f7aff7605b9c41e4a4297a4e5972b915b08d",
+      "tools/test_user_word.py": "2dac47cf5d2f76375c644b240ed91b37d0aaed3765841aee26132ae201f2ed51",
+      "tools/test_futex_admission.py": "0faf2f42167b6852b7010ea0beca15c64bec8c869089784ab96b5c75341d71d9"
+    }
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0"
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "commands": [
+    "python3 tools/test_user_word.py",
+    "python3 tools/test_wait_queue.py",
+    "python3 tools/test_scheduler_queue.py",
+    "python3 tools/qemu_test.py --build --markers-file tools/futex_markers.json --accel tcg --cpus 1 --timeout 360 --cmd-timeout 180 --workdir build/performance/futex-admission --performance-record build/performance/futex-admission/metadata.json",
+    "python3 tools/test_futex_admission.py --reuse-image --accel tcg --cpus 4",
+    "python3 tools/test_process_resources.py --reuse-image --accel tcg --cpus 4 --output build/performance/futex-resources"
+  ],
+  "correctness": {
+    "host": "actual admission/word/queue/SpinLock with explicit registry/VMM/IRQ/HAL doubles",
+    "queue_to_task_or_mapping_lookup": "must fail host assertions",
+    "context_capture": "must hold mapping and queue locks",
+    "clear_child_tid_wake_callback": "must observe mapping lock released",
+    "escaping_word_view": "must fail compile E0515",
+    "native_wake_counts": [
+      1,
+      1,
+      0
+    ],
+    "native_mutex_total": 10000,
+    "native_mutex_thread_returns": [
+      5000,
+      5000
+    ],
+    "native_barrier_generations": 100,
+    "native_join_cycles": 1000,
+    "native_detached_cycles": 1000
+  },
+  "runs": [
+    {
+      "name": "build/performance/futex-admission/metadata.json",
+      "started_utc": "2026-11-13T05:04:20.478953+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/futex-admission/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/futex-admission/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "99248e457a52872f89157d598e4287225689183b3566b0785be9e19b8e008b75",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 9991.288919999988,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/futex-admission-matrix/metadata.json",
+      "started_utc": "2026-11-13T05:05:08.453846+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/futex-admission-matrix/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/futex-admission-matrix/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "99248e457a52872f89157d598e4287225689183b3566b0785be9e19b8e008b75",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 27688.44846799999,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/futex-resources/metadata.json",
+      "started_utc": "2026-11-13T05:06:21.250045+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/futex-resources/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/futex-resources/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "99248e457a52872f89157d598e4287225689183b3566b0785be9e19b8e008b75",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 61815.59217799998,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/futex-resources/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-13T05:07:23.443817+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/futex-resources/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/futex-resources/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "99248e457a52872f89157d598e4287225689183b3566b0785be9e19b8e008b75",
+        "bytes": 266436608,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 10473.232859000063,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "limits": [
+    "No process registry/task exclusion or cross-CPU block/cancel protocol; local IRQ serialization remains.",
+    "AddressSpace locking is not shared-frame ownership or acknowledged remote TLB invalidation.",
+    "AP application dispatch remains disabled; no SMP application execution/scaling claim.",
+    "Validation wall times measure complete test invocations, not wake latency or CPU time.",
+    "Docker host metadata may not expose enclosing quotas; KVM unavailable."
+  ]
+}

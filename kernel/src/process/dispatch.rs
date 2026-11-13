@@ -129,15 +129,7 @@ impl DispatchFrame {
 pub(super) fn prepare(pid: ProcessId) -> Result<DispatchFrame, ProcessError> {
     let _irq = InterruptGuard::new();
     let owner = owner_of(pid).ok_or(ProcessError::NoSuchProcess)?;
-    let address_space = {
-        let table = process_table_mut();
-        let index = process_record_index(table, owner).ok_or(ProcessError::NoSuchProcess)?;
-        table[index]
-            .process
-            .as_ref()
-            .and_then(|p| p.address_space.clone())
-            .ok_or(ProcessError::NoAddressSpace)?
-    };
+    let address_space = process_address_space(owner)?;
     with_process_mut(pid, |process| DispatchFrame::new(process, address_space))
 }
 

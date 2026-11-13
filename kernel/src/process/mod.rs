@@ -1,6 +1,9 @@
 pub mod scheduler;
 mod terminal_stdin;
 mod wait_queue;
+mod futex;
+mod user_word;
+pub use futex::{futex_wait, futex_wake, run_clear_child_tid_on_exit, set_current_clear_child_tid, FutexWaitOutcome};
 use wait_queue::{wake_matching, WaitEntry, WaitKey, WaitQueue};
 mod current_access;
 pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut};
@@ -1382,6 +1385,16 @@ fn process_table_mut() -> &'static mut Vec<ProcessRecord> {
     }
 }
 
+/// Own the AddressSpace object outside the registry lookup. Mapping access
+/// still requires its lock; shared-frame lifetime and remote TLB gates are open.
+fn process_address_space(pid: ProcessId) -> Result<Arc<IrqSafeSpinLock<AddressSpace>>, ProcessError> {
+    let _irq = InterruptGuard::new();
+    let table = process_table_mut();
+    let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
+    table[index].process.as_ref().and_then(|process| process.address_space.clone())
+        .ok_or(ProcessError::NoAddressSpace)
+}
+
 fn process_record_index(table: &[ProcessRecord], pid: ProcessId) -> Option<usize> {
     table.iter().position(|record| record.pid == pid)
 }
@@ -2115,137 +2128,6 @@ pub fn wake_expired_waiters() {
     }, 0, wake_entry);
 }
 
-/// Outcome of a futex-style compare-and-block attempt.
-pub enum FutexWaitOutcome {
-    /// The word matched `expected`; the caller was parked and must return the
-    /// user-context-return sentinel (it will resume on wake).
-    Parked,
-    /// The word did not match `expected`; the caller should report EAGAIN.
-    ValueMismatch,
-}
-
-/// Read a `u32` at `addr` from `owner`'s address space, or None if the page is
-/// not a present, user-accessible mapping. Checking PRESENT|USER (not just a
-/// non-zero page-table entry) keeps this sound once COW/lazy/swapped pages
-/// exist: a non-present entry must never be dereferenced through phys_to_virt.
-fn read_user_u32(owner: ProcessId, addr: u64) -> Option<u32> {
-    use crate::memory::vmm::PageFlags;
-    let table = process_table_mut();
-    let index = process_record_index(table, owner)?;
-    let process = table[index].process.as_ref()?;
-    let address_space = process.address_space()?;
-    let (phys, flags) = address_space
-        .user_page_mapping(VirtualAddress(addr as usize))
-        .ok()??;
-    if !flags.contains(PageFlags::PRESENT | PageFlags::USER) {
-        return None;
-    }
-    // addr is 4-byte aligned and 4 bytes never cross a page boundary.
-    let virt = crate::memory::vmm::phys_to_virt(phys.as_usize()) as *const u32;
-    Some(unsafe { virt.read_unaligned() })
-}
-
-fn write_user_u32(owner: ProcessId, addr: u64, value: u32) -> bool {
-    use crate::memory::vmm::PageFlags;
-    let table = process_table_mut();
-    let Some(index) = process_record_index(table, owner) else { return false; };
-    let Some(process) = table[index].process.as_ref() else { return false; };
-    let Some(address_space) = process.address_space() else { return false; };
-    let Ok(Some((phys, flags))) =
-        address_space.user_page_mapping(VirtualAddress(addr as usize))
-    else {
-        return false;
-    };
-    if !flags.contains(PageFlags::PRESENT | PageFlags::USER | PageFlags::WRITABLE) {
-        return false;
-    }
-    // addr is 4-byte aligned and 4 bytes never cross a page boundary.
-    let virt = crate::memory::vmm::phys_to_virt(phys.as_usize()) as *mut u32;
-    unsafe { virt.write_unaligned(value); }
-    true
-}
-
-/// Record the calling thread's clear-child-tid word (0 clears it).
-pub fn set_current_clear_child_tid(addr: u64) {
-    if let Some(thread) = current_thread_mut() {
-        thread.clear_child_tid = addr;
-    }
-}
-
-/// On thread exit: if a clear-child-tid word was registered, zero it in the
-/// owner's address space and wake futex waiters on it. Called from sys_exit
-/// before teardown while the exiting thread is still current.
-pub fn run_clear_child_tid_on_exit() {
-    let addr = match current_thread() {
-        Some(thread) => thread.clear_child_tid,
-        None => return,
-    };
-    if addr == 0 {
-        return;
-    }
-    let owner = match current_pid() {
-        Some(owner) => owner,
-        None => return,
-    };
-    if write_user_u32(owner, addr, 0) {
-        futex_wake(addr, 0); // wake all waiters on the word
-    }
-}
-
-/// Compare-and-block on a futex word. Under a single IRQ guard + WAIT_QUEUE
-/// lock so wake selection cannot slip between the compare and registration.
-/// Process-state transitions remain UP-only; this is not an SMP block protocol.
-/// Returns Parked when the caller was blocked,
-/// ValueMismatch when the word differs from `expected` (map to EAGAIN), or an
-/// error (an unmapped word yields InvalidMemoryRange -> EFAULT at the syscall).
-pub fn futex_wait(
-    addr: u64,
-    expected: u32,
-    deadline: Option<u64>,
-) -> Result<FutexWaitOutcome, ProcessError> {
-    let _irq = InterruptGuard::new();
-    let entity = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
-    let owner = owner_of(entity).ok_or(ProcessError::NoSuchProcess)?;
-    // Hold the wait queue lock across the compare so a concurrent wake cannot
-    // slip in between the value check and the enqueue.
-    let mut queue = WAIT_QUEUE.lock();
-    let current = read_user_u32(owner, addr).ok_or(ProcessError::InvalidMemoryRange)?;
-    if current != expected {
-        return Ok(FutexWaitOutcome::ValueMismatch);
-    }
-    let table = process_table_mut();
-    let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
-    let record = &mut table[index];
-    if record.state != ProcessState::Running {
-        return Err(ProcessError::NotRunnable);
-    }
-    let process = record.process.as_mut().ok_or(ProcessError::ProcessNotPrepared)?;
-    if process.is_kernel {
-        return Err(ProcessError::InvalidUserContext);
-    }
-    unsafe {
-        crate::hal::syscall_capture_user_context(&mut process.context, 0);
-    }
-    record.state = ProcessState::Blocked;
-    process.state = ProcessState::Blocked;
-    queue.push(WaitEntry {
-        entity,
-        key: WaitKey::Word { owner, addr },
-        deadline,
-    });
-    crate::cpu::runtime().yield_requested.store(true, Ordering::SeqCst);
-    crate::cpu::runtime().schedule_hint.store(0, Ordering::SeqCst);
-    Ok(FutexWaitOutcome::Parked)
-}
-
-/// Wake up to `max` waiters parked on the futex word at `addr` in the current
-/// address space. `max == 0` means wake all waiters. Returns the count woken.
-pub fn futex_wake(addr: u64, max: usize) -> usize {
-    let _irq = InterruptGuard::new();
-    let Some(owner) = current_pid() else { return 0; };
-    let target = WaitKey::Word { owner, addr };
-    wake_matching(&WAIT_QUEUE, |entry| entry.key == target, max, wake_entry)
-}
 
 pub fn is_pid_blocked(pid: ProcessId) -> bool {
     // Короткое чтение таблицы: маскируем IRQ, чтобы таймер не мутировал Vec под нами.
