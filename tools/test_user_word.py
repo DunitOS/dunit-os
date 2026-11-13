@@ -85,8 +85,8 @@ mod hal {
         assert_queue_unlocked();unsafe { &mut *TABLE.0.get() }
     }
     fn process_record_index(_: &[Record],pid:ProcessId)->Option<usize> { assert_queue_unlocked();(pid.0==1).then_some(0) }
-    fn current_thread()->Option<&'static Process> { process_table_mut()[0].process.as_deref() }
-    fn current_thread_mut()->Option<&'static mut Process> { process_table_mut()[0].process.as_deref_mut() }
+    fn with_current_thread<R>(read:impl for<'a> FnOnce(&'a Process)->R)->Option<R> { process_table_mut()[0].process.as_deref().map(read) }
+    fn with_current_thread_mut<R>(write:impl for<'a> FnOnce(&'a mut Process)->R)->Option<R> { process_table_mut()[0].process.as_deref_mut().map(write) }
     fn wake_entry(_:WaitEntry) { assert_queue_unlocked();assert!(SPACE.get().unwrap().try_lock().is_some()); }
     pub fn run() {
         use futex::{futex_wait,futex_wake,FutexWaitOutcome::*};

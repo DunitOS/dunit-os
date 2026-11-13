@@ -36,6 +36,21 @@ fn fail(reason: &str) -> ! {
 #[no_mangle]
 pub extern "C" fn _start(argc:usize,argv:*const *const u8,envp:*const *const u8) -> ! {
     libdunit::init_runtime(argc,argv,envp);
+    if libdunit::arg(1)==Some("--signal-peer") {
+        let mut received=0u64;
+        for _ in 0..10000 {
+            let value=libdunit::handle_take_signals();
+            if value<0 {fail("signal peer take");}
+            received=received.saturating_add(value as u64);
+            if received==10 {
+                libdunit::println("[HANDLE-SIGNAL] cross-task sum=10 OK");
+                libdunit::exit(0);
+            }
+            if received>10 {fail("signal peer total");}
+            libdunit::yield_now();
+        }
+        fail("signal peer timeout");
+    }
     if libdunit::arg(1)==Some("--cap-peer"){file_caps::peer();}
     if libdunit::arg(1)==Some("--persist-prepare"){file_caps::persistent(false);}
     if libdunit::arg(1)==Some("--persist-verify"){file_caps::persistent(true);}
@@ -129,6 +144,32 @@ pub extern "C" fn _start(argc:usize,argv:*const *const u8,envp:*const *const u8)
     if libdunit::handle_signal(hmem, 1) != libdunit::EPERM {
         fail("signal should be denied");
     }
+
+    // Signal an independent task, then verify a reaped target is rejected.
+    let child=libdunit::process::spawn_args("/app/handle_test", &["/app/handle_test", "--signal-peer"]);
+    if child<=0 {fail("signal peer spawn");}
+    let remote=libdunit::handle_create_endpoint(child as u32);
+    if remote<=0 {fail("signal peer endpoint");}
+    let remote=remote as u32;
+    if libdunit::handle_signal(remote,7)!=0 || libdunit::handle_signal(remote,3)!=0 {
+        fail("cross-task signal");
+    }
+    let mut status=libdunit::WaitStatus::empty();
+    let mut reaped=false;
+    for _ in 0..10000 {
+        let result=libdunit::wait(child as u32,&mut status);
+        if result==child {
+            if !status.exited() || status.code!=0 {fail("signal peer status");}
+            reaped=true;
+            break;
+        }
+        if result!=libdunit::EAGAIN {fail("signal peer wait");}
+        libdunit::yield_now();
+    }
+    if !reaped {fail("signal peer join timeout");}
+    if libdunit::handle_signal(remote,1)!=libdunit::ENOENT {fail("reaped signal target");}
+    if libdunit::handle_close(remote)!=0 {fail("signal endpoint close");}
+    libdunit::println("[HANDLE-SIGNAL] self/cross-task/rights/reaped target OK");
 
     // 10) DISPLAY_MASTER: захват эксклюзивного дисплея.
     let hd = libdunit::handle_display_acquire();

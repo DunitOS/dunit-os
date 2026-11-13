@@ -35,8 +35,8 @@ impl DispatchScope {
         Self {
             previous_root: unsafe { crate::memory::vmm::active_root_frame() },
             previous_pid: crate::cpu::runtime().current_pid.load(Ordering::SeqCst),
-            previous_stack: current_thread().and_then(|p| p.kernel_stack.clone()),
-            _previous_space: current_process().and_then(|p| p.address_space.clone()),
+            previous_stack: with_current_thread(|p| p.kernel_stack.clone()).flatten(),
+            _previous_space: with_current_process(|p| p.address_space.clone()).flatten(),
             active: None,
         }
     }

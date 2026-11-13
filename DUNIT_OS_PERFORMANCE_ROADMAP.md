@@ -150,6 +150,10 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 - [x] CPU-bound guards и корректный `Sync` bound разделяемого guard (`0142ba9`).
 - [x] Публичные current process/thread getters со static-ссылками заменены
   [non-escaping scopes](docs/performance/process-access.md), `a6f0d06`.
+- [x] [Приватные current getters удалены](docs/performance/task-scopes.md):
+  внутренние FD/TLS/futex/dispatch/lifecycle paths используют scopes; мутации
+  current и explicit PID имеют общий fd notification boundary. Signal delivery
+  отделена от borrow отправителя; реальный registry/task mutex ещё открыт.
 - [x] Dispatch передаёт в HAL скопированный контекст и владеющие resource pins,
   [без Process-ссылки через userspace](docs/performance/dispatch-ownership.md), `236e83d`.
 - [ ] Завершить внутренние registry/task lifetimes и исключение, IRQ/preemption

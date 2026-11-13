@@ -900,10 +900,9 @@ fn sys_handle_close(handle: u32) -> i64 {
 }
 
 fn sys_handle_signal(handle: u32, value: u64) -> i64 {
-    crate::process::with_current_process_mut(|process| process
-            .handle_signal(handle, value)
-            .map(|_| 0)
-            .unwrap_or_else(handle_error_to_errno)).unwrap_or(EINVAL)
+    crate::process::signal_current_handle(handle, value)
+        .map(|result| result.map(|_| 0).unwrap_or_else(handle_error_to_errno))
+        .unwrap_or(EINVAL)
 }
 
 fn sys_handle_take_signals() -> i64 {

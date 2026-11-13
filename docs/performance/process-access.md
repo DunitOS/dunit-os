@@ -59,8 +59,10 @@ and outcomes. Host guard/queue and generated ABI/layout checks also pass.
 
 ## Remaining ownership work
 
-The underlying process table still has UP-only UnsafeCell access. Private legacy
-references remain in process internals and the userspace dispatcher. Process
+At this checkpoint, the underlying process table still had UP-only UnsafeCell
+access and private legacy current selectors. Later [dispatch ownership](dispatch-ownership.md)
+removed Process borrows across HAL, and [internal task scopes](task-scopes.md)
+removed those current selectors. The private mutable registry reference remains UP-only. Process
 pinning, a real registry/task locking model, alias-safe internal callbacks,
 atomic Ready -> Running and wait/wakeup, memory lifetimes and remote TLB shootdown
 are still required before AP dispatch. IRQ masking alone protects no other CPU.

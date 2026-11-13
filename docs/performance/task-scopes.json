@@ -1,0 +1,330 @@
+{
+  "date": "2026-11-13",
+  "scope": "remove private static Process current selectors; sequential source/target signal scopes; UP dispatch",
+  "source": {
+    "base_commit": "69b68421e72439a016c8b45fa6c026c7a2880ae0",
+    "files_sha256": {
+      "kernel/src/process/mod.rs": "faccb913ff3963e98d8b001370cc015706d49e3aa4e8208d853adb412626a9f5",
+      "kernel/src/process/current_access.rs": "2d485dbc6fd2bbe0e1bd3d0941136300a1045aed6f116adb30383e5779ddc802",
+      "kernel/src/process/dispatch.rs": "6c24518e7a9e6b5088a33eee358d210f04fa53fecb4cd55d908700ffce9d0cdf",
+      "kernel/src/process/futex.rs": "f447199dc1fcfee26a11a9f4cbfce92daea61922e3d4c8d54b32a278a12b2c2f",
+      "kernel/src/syscall/mod.rs": "563a14a44f1b922c140cd65bef381bcc2bdd5cca7e1a9f4d63967a16601ce76a",
+      "userspace/system_apps/handle_test/src/main.rs": "3c6fd8f24569b052b804db56641e1645768af6f8266110e6787bd703b7ceb438",
+      "tools/m6_handle_markers.json": "dece186d44a2c4ede74ec9ba72c08dbe3e83dd9dfcce4a14e72ce3a1f0511e15",
+      "tools/test_process_access.py": "c3701d14e37051c26ae6322a245c6a311b39a831012d1cdea98612ced04067db",
+      "tools/test_user_word.py": "20d4c35c52b59c4b82a7a1f9bc5aee8a0da106dda71fa42b89bf9d8b21bb4126"
+    }
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0"
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "host_assertions": [
+    "Original Process/field borrow escapes and static-argument callbacks rejected",
+    "Explicit-PID mutation and read-only current-thread borrow escapes rejected",
+    "Owner/thread selection and missing/unprepared records distinguished",
+    "Deferred fd notifications flush after callback Err; nested Result payload retained",
+    "Self/remote signal counters and rights/type/missing-target errors retained"
+  ],
+  "commands": [
+    "python3 tools/test_process_access.py",
+    "python3 tools/test_user_word.py",
+    "python3 tools/test_process_resources.py --accel tcg --cpus 4 --output build/performance/task-scopes-final",
+    "python3 tools/qemu_test.py --markers-file tools/boot_markers.json --cpus 1 --accel tcg --timeout 360 --cmd-timeout 180 --workdir build/performance/task-scopes-boot --performance-record build/performance/task-scopes-boot.json",
+    "python3 tools/qemu_test.py --markers-file /workspace/scratch/pointer-gui-terminal.json --cpus 4 --accel tcg --timeout 360 --cmd-timeout 120 --performance-record build/performance/task-scopes-gui.json"
+  ],
+  "initial_fixture_failure": {
+    "name": "build/performance/task-scopes/metadata.json",
+    "image_sha256": "0661633afcd8f9f4d726da7236ecd4527e963842b9b898ce4014705eef1c3078",
+    "result": {
+      "ok": false,
+      "reason": "marker budget failed: 7 missing, 1 forbidden",
+      "missing": [
+        "[HANDLE-SIGNAL] cross-task sum=10 OK",
+        "[HANDLE-SIGNAL] self/cross-task/rights/reaped target OK",
+        "handle_test: OK",
+        "[FILE-CAPS] rights/confinement/atomic-rollback ok",
+        "[FILE-CAPS] cross-process/identity/move/readdir ok",
+        "[FILE-CAPS] recursive-copy/no-overwrite/self-copy/fsync ok",
+        "[FILE-CAPS] bounded-copy/cancel/cleanup ok"
+      ],
+      "forbidden": [
+        "handle_test: FAIL"
+      ]
+    },
+    "cause": "New signal fixture assumed wait blocked instead of retrying EAGAIN; fixed fixture with bounded wait/yield, retained assertions and reran final budgets."
+  },
+  "runs": [
+    {
+      "name": "build/performance/task-signal/metadata.json",
+      "started_utc": "2026-11-13T07:24:32.478292+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/task-signal/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/task-signal/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "aa81dc7ccb1c438a43fde6594d65ca116bbc9204109bc3689ba32c7e35e962a7",
+        "bytes": 266471424,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 9950.127105999854,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/task-scopes-final/metadata.json",
+      "started_utc": "2026-11-13T07:25:02.303859+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/task-scopes-final/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/task-scopes-final/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "aa81dc7ccb1c438a43fde6594d65ca116bbc9204109bc3689ba32c7e35e962a7",
+        "bytes": 266471424,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 61135.824046999915,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/task-scopes-final/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-13T07:26:03.826488+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/task-scopes-final/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/task-scopes-final/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "aa81dc7ccb1c438a43fde6594d65ca116bbc9204109bc3689ba32c7e35e962a7",
+        "bytes": 266471424,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 10054.117776999192,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/task-scopes-boot.json",
+      "started_utc": "2026-11-13T07:26:31.688470+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/task-scopes-boot/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/task-scopes-boot/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "aa81dc7ccb1c438a43fde6594d65ca116bbc9204109bc3689ba32c7e35e962a7",
+        "bytes": 266471424,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 13090.786994000155,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/task-scopes-gui.json",
+      "started_utc": "2026-11-13T07:26:58.569807+00:00",
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "aa81dc7ccb1c438a43fde6594d65ca116bbc9204109bc3689ba32c7e35e962a7",
+        "bytes": 266471424,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 29194.401246999405,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "limits": [
+    "Private UP-only mutable registry Vec remains; no task pin/exclusion or arbitrary callback reentry guarantee.",
+    "IRQ masking serializes only the current CPU. AP application dispatch is disabled.",
+    "No atomic Running(cpu), remote wait/cancel or acknowledged TLB lifetime gate is closed.",
+    "Validation run wall times are whole test lengths, not syscall latency, CPU time or scaling evidence.",
+    "Self-signal takes common target lookup; no latency/throughput improvement is claimed.",
+    "Docker metadata can omit enclosing host quotas; KVM unavailable."
+  ]
+}

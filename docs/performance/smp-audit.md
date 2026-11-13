@@ -9,7 +9,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | HAL syscall scratch, selected/escape stack, user FPU pointer | CPU-local GS anchor and private entry state; native syscall/IRQ/DF checks | preserve entry invariants when enabling AP dispatch; no shared writable entry scratch |
 | GDT/TSS/IST and initial syscall stack | private per-CPU descriptors/stacks; shared published IDT | retain CPU-private ownership and publication during scheduler activation |
 | current PID, exit/yield/schedule/escape flags | CPU-local runtime fields; aggregate counters/terminal ownership remain shared | implement atomic task execution ownership and remote scheduling |
-| PROCESS_TABLE and current process/thread access | external access uses non-escaping scopes; fd snapshots are owned; private registry/selectors still UP-only; dispatch backing is independently owned | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
+| PROCESS_TABLE and current process/thread access | current owner/thread and explicit-PID mutation use common scopes; no static Process getters; private registry Vec remains UP-only; dispatch backing is independently owned | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
@@ -78,3 +78,9 @@ moves task lookup and AddressSpace acquisition before queue locking, keeps the
 word view borrowed from the mapping guard and uses Acquire/Release word access.
 This does not provide registry/task exclusion or the cross-CPU block/wake/cancel
 protocol; task state transitions still rely on the outer UP IRQ boundary.
+
+The [internal task scopes receipt](task-scopes.md) removes the four private
+current Process/thread getters, centralizes PID/current mutation notifications
+and splits signal authorization from target mutation. This closes that specific
+cross-task nesting path, not arbitrary callback reentry or registry exclusion.
+The private table getter still returns an UP-only mutable registry reference.

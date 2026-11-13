@@ -7,6 +7,8 @@
     ]
   },
   "required": [
+    "[HANDLE-SIGNAL] cross-task sum=10 OK",
+    "[HANDLE-SIGNAL] self/cross-task/rights/reaped target OK",
     {
       "marker": "[TERM-007] Starting main loop",
       "claim": "booted to terminal",

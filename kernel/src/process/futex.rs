@@ -13,17 +13,15 @@ pub enum FutexWaitOutcome {
 
 /// Record the calling thread's clear-child-tid word (0 clears it).
 pub fn set_current_clear_child_tid(addr: u64) {
-    if let Some(thread) = current_thread_mut() {
-        thread.clear_child_tid = addr;
-    }
+    with_current_thread_mut(|thread| thread.clear_child_tid = addr);
 }
 
 /// On thread exit: if a clear-child-tid word was registered, zero it in the
 /// owner's address space and wake futex waiters on it. Called from sys_exit
 /// before teardown while the exiting thread is still current.
 pub fn run_clear_child_tid_on_exit() {
-    let addr = match current_thread() {
-        Some(thread) => thread.clear_child_tid,
+    let addr = match with_current_thread(|thread| thread.clear_child_tid) {
+        Some(addr) => addr,
         None => return,
     };
     if addr == 0 {

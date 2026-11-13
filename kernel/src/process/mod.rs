@@ -6,7 +6,9 @@ mod user_word;
 pub use futex::{futex_wait, futex_wake, run_clear_child_tid_on_exit, set_current_clear_child_tid, FutexWaitOutcome};
 use wait_queue::{wake_matching, WaitEntry, WaitKey, WaitQueue};
 mod current_access;
-pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut};
+pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut, with_process_mut};
+pub(crate) use current_access::signal_current_handle;
+use current_access::with_current_thread;
 mod resources;
 mod dispatch;
 use dispatch::KernelStack;
@@ -1144,23 +1146,13 @@ impl Process {
     }
 
 
-    pub fn handle_signal(&mut self, handle: Handle, value: u64) -> Result<(), HandleError> {
+    /// Validate authority and copy the target; delivery happens after this borrow.
+    fn signal_target(&self, handle: Handle) -> Result<ProcessId, HandleError> {
         let entry = self.handle_table.require(handle, RIGHT_SIGNAL)?;
-        let target = match &entry.object {
-            HandleObject::Endpoint(pid) => *pid,
-            _ => return Err(HandleError::WrongType),
-        };
-        if target == self.pid {
-            // Доставка самому себе: мутируем напрямую, без повторного взятия
-            // &mut на этот же процесс через таблицу процессов (иначе алиасинг).
-            self.add_pending_signal(value);
-            return Ok(());
+        match &entry.object {
+            HandleObject::Endpoint(pid) => Ok(*pid),
+            _ => Err(HandleError::WrongType),
         }
-        with_process_mut(target, |process| {
-            process.add_pending_signal(value);
-            Ok(())
-        })
-        .map_err(|_| HandleError::NoSuchTarget)
     }
 
     /// Забирает и обнуляет счётчик доставленных сигналов процесса.
@@ -1446,28 +1438,13 @@ pub fn current_tid() -> Option<ThreadId> {
     current_entity_id().map(|id| ThreadId(id.0))
 }
 
-fn current_thread() -> Option<&'static Process> {
-    let entity = current_entity_id()?;
-    let table = process_table_mut();
-    let index = process_record_index(table, entity)?;
-    table[index].process.as_ref().map(|boxed| &**boxed)
-}
-
-fn current_thread_mut() -> Option<&'static mut Process> {
-    let entity = current_entity_id()?;
-    let table = process_table_mut();
-    let index = process_record_index(table, entity)?;
-    table[index].process.as_mut().map(|boxed| &mut **boxed)
-}
-
 pub fn current_thread_pointer() -> Option<u64> {
-    current_thread().map(|thread| thread.fs_base)
+    with_current_thread(|thread| thread.fs_base)
 }
 
 pub fn set_current_thread_pointer(base: u64) -> Result<(), ProcessError> {
-    current_thread_mut()
+    with_current_thread_mut(|thread| thread.set_thread_pointer(base))
         .ok_or(ProcessError::NoCurrentProcess)?
-        .set_thread_pointer(base)
 }
 
 pub fn set_terminal_foreground_process(pid: Option<ProcessId>) {
@@ -1663,8 +1640,8 @@ pub fn create_user_process_record(
     let mut process = Process::new_user(pid)?;
     process.state = ProcessState::Prepared;
     process.privileged = privileged;
-    if let Some(current) = current_process() {
-        process.cwd = current.cwd.clone();
+    if let Some(cwd) = with_current_process(|current| current.cwd.clone()) {
+        process.cwd = cwd;
     }
 
     insert_process_record(
@@ -1695,7 +1672,7 @@ pub fn create_user_process_record(
 
 /// Whether the current process holds the privileged (system-control) capability.
 pub fn current_is_privileged() -> bool {
-    current_process().map(|process| process.privileged).unwrap_or(false)
+    with_current_process(|process| process.privileged).unwrap_or(false)
 }
 
 /// Authorization for killing `target`: a privileged process (init and the
@@ -1716,13 +1693,12 @@ pub fn current_may_kill(target: ProcessId) -> bool {
 }
 pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<ThreadId, ProcessError> {
     let owner = current_pid().ok_or(ProcessError::NoCurrentProcess)?;
-    if current_process().map(|p| p.is_kernel).unwrap_or(true) {
+    if with_current_process(|p| p.is_kernel).unwrap_or(true) {
         return Err(ProcessError::InvalidUserContext);
     }
     let tid = ThreadId(allocate_pid().0);
-    let (tls_base, tls_length, thread_pointer) = current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .allocate_tls_instance()?;
+    let (tls_base, tls_length, thread_pointer) = with_current_process_mut(|process| process.allocate_tls_instance())
+        .ok_or(ProcessError::NoCurrentProcess)??;
     let mut thread = Box::new(Process::new_user_thread(tid, entry, stack_top, arg));
     thread.fs_base = thread_pointer as u64;
     if tls_length != 0 {
@@ -1756,7 +1732,7 @@ pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<Thread
         };
         drop(retired);
         if tls_length != 0 {
-            let _ = current_process_mut().map(|owner| owner.unmap_range(tls_base, tls_length));
+            let _ = with_current_process_mut(|owner| owner.unmap_range(tls_base, tls_length));
         }
         return Err(error);
     }
@@ -1831,8 +1807,8 @@ pub fn wait_thread(tid: ThreadId) -> Result<ProcessExitStatus, ProcessError> {
     crate::process::scheduler::remove(ProcessId(tid.0));
     drop(retired);
     if let Some((base, length)) = tls {
-        if let Some(owner) = current_process_mut() {
-            owner.unmap_range(base, length)?;
+        if let Some(result) = with_current_process_mut(|owner| owner.unmap_range(base, length)) {
+            result?;
         }
     }
     Ok(status)
@@ -1855,32 +1831,6 @@ fn cleanup_owned_threads(owner: ProcessId) {
         crate::process::scheduler::remove(record.pid);
         drop(record);
     }
-}
-
-pub fn with_process_mut<R>(
-    pid: ProcessId,
-    f: impl FnOnce(&mut Process) -> Result<R, ProcessError>,
-) -> Result<R, ProcessError> {
-    // Держим &mut в таблицу процессов, поэтому маскируем прерывания на всё время
-    // заимствования: иначе таймерный IRQ (wake_expired_waiters → wake_entry)
-    // возьмёт второй &mut на тот же Vec, пока этот жив, что является UB
-    // (нарушение noalias). Scheduler-loop вызывает нас при разрешённых
-    // прерываниях, так что guard здесь обязателен. Замыкания короткие (мутация
-    // записи), в userspace они не входят, так что рост latency несущественен.
-    let _irq = InterruptGuard::new();
-    let (result, wake) = {
-        let table = process_table_mut();
-        let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
-        let record = &mut table[index];
-        let process = record
-            .process
-            .as_mut()
-            .ok_or(ProcessError::ProcessNotPrepared)?;
-        let result = f(&mut **process);
-        (result, process.take_fd_wakeup())
-    };
-    if wake { wake_wait_set_waiters(); }
-    result
 }
 
 pub fn mark_process_prepared_as_ready(pid: ProcessId) -> Result<(), ProcessError> {
@@ -2211,8 +2161,9 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
         if current_entity_id() != Some(pid) {
             return Err(ProcessError::InvalidUserContext);
         }
-        let process = current_process().ok_or(ProcessError::NoCurrentProcess)?;
-        if process.is_kernel {
+        let is_kernel = with_current_process(|process| process.is_kernel)
+            .ok_or(ProcessError::NoCurrentProcess)?;
+        if is_kernel {
             return Err(ProcessError::InvalidUserContext);
         }
         crate::cpu::runtime().exit_code.store(code, Ordering::SeqCst);
@@ -2286,7 +2237,7 @@ pub fn is_pid_runnable(pid: ProcessId) -> bool {
 
 /// Non-consuming observation, with exactly the existing child-wait authority.
 pub(crate) fn child_exit_snapshot(pid: ProcessId) -> Result<Option<WaitRecord>, ProcessError> {
-    let parent = current_process().ok_or(ProcessError::NoCurrentProcess)?.pid;
+    let parent = with_current_process(|process| process.pid).ok_or(ProcessError::NoCurrentProcess)?;
     let table = process_table_mut();
     let record = table.iter().find(|record| record.pid == pid && record.parent == Some(parent)
         && record.waitable && record.owner.is_none()).ok_or(ProcessError::NotChild)?;
@@ -2296,7 +2247,7 @@ pub(crate) fn child_exit_snapshot(pid: ProcessId) -> Result<Option<WaitRecord>, 
 }
 
 pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessError> {
-    let parent_pid = current_process().ok_or(ProcessError::NoCurrentProcess)?.pid;
+    let parent_pid = with_current_process(|process| process.pid).ok_or(ProcessError::NoCurrentProcess)?;
     let (mut record, kind, code) = {
         let _irq = InterruptGuard::new();
         let table = process_table_mut();
@@ -2436,36 +2387,16 @@ pub fn init_current_kernel_process() {
     crate::cpu::runtime().current_pid.store(pid.0, Ordering::SeqCst);
 }
 
-fn current_process() -> Option<&'static Process> {
-    let pid = current_pid()?;
-    let table = process_table_mut();
-    let index = process_record_index(table, pid)?;
-    table[index].process.as_ref().map(|boxed| &**boxed)
-}
-
-fn current_process_mut() -> Option<&'static mut Process> {
-    let pid = current_pid()?;
-    let table = process_table_mut();
-    let index = process_record_index(table, pid)?;
-    table[index].process.as_mut().map(|boxed| &mut **boxed)
-}
-
 pub fn allocate_fd(entry: FdEntry) -> Result<ProcessFd, ProcessError> {
-    current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .allocate_fd(entry)
+    with_current_process_mut(|process| process.allocate_fd(entry)).ok_or(ProcessError::NoCurrentProcess)?
 }
 
 pub fn open_vfs_fd(vfs_fd: crate::fs::vfs::FileDescriptor) -> Result<ProcessFd, ProcessError> {
-    current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .open_vfs_fd(vfs_fd)
+    with_current_process_mut(|process| process.open_vfs_fd(vfs_fd)).ok_or(ProcessError::NoCurrentProcess)?
 }
 
 pub fn open_pipe_fd(id: u64, write: bool) -> Result<ProcessFd, ProcessError> {
-    current_process_mut()
-        .ok_or(ProcessError::NoCurrentProcess)?
-        .install_pipe_fd(id, write)
+    with_current_process_mut(|process| process.install_pipe_fd(id, write)).ok_or(ProcessError::NoCurrentProcess)?
 }
 
 pub fn drop_fd(fd: ProcessFd) -> Result<FdCleanup, ProcessError> {
@@ -2481,8 +2412,7 @@ pub fn dup_fd(
 
 /// Owned snapshot; never expose an fd-table reference across a syscall stage.
 pub fn get_fd(fd: ProcessFd) -> Option<FdEntry> {
-    let _irq = InterruptGuard::new();
-    current_process()?.get_fd(fd).cloned()
+    with_current_process(|process| process.get_fd(fd).cloned()).flatten()
 }
 
 pub fn close_fd(fd: ProcessFd) -> Result<FdEntry, ProcessError> {
@@ -2490,31 +2420,26 @@ pub fn close_fd(fd: ProcessFd) -> Result<FdEntry, ProcessError> {
 }
 
 pub fn exit_current_process(code: i32) -> Option<ProcessId> {
-    let process = current_process_mut()?;
-    process.exit(code);
-    Some(process.pid)
+    with_current_process_mut(|process| {
+        process.exit(code);
+        process.pid
+    })
 }
 
 pub fn request_current_user_exit(code: i32) -> Option<ProcessId> {
-    let process = current_process()?;
-    if process.is_kernel {
-        return None;
-    }
+    let pid = with_current_process(|process| (!process.is_kernel).then_some(process.pid)).flatten()?;
     crate::cpu::runtime().exit_code.store(code, Ordering::SeqCst);
     crate::cpu::runtime().exit_kind.store(0, Ordering::SeqCst);
     crate::cpu::runtime().exit_requested.store(true, Ordering::SeqCst);
-    Some(process.pid)
+    Some(pid)
 }
 
 pub fn request_current_user_fault(fault: ProcessFault) -> Option<ProcessId> {
-    let process = current_process()?;
-    if process.is_kernel {
-        return None;
-    }
+    let pid = with_current_process(|process| (!process.is_kernel).then_some(process.pid)).flatten()?;
     crate::cpu::runtime().exit_code.store(fault.exit_code(), Ordering::SeqCst);
     crate::cpu::runtime().exit_kind.store(fault_kind_to_i32(fault), Ordering::SeqCst);
     crate::cpu::runtime().exit_requested.store(true, Ordering::SeqCst);
-    Some(process.pid)
+    Some(pid)
 }
 
 pub fn user_fault_escape_requested() -> bool {
