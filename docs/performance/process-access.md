@@ -68,3 +68,8 @@ atomic Ready -> Running and wait/wakeup, memory lifetimes and remote TLB shootdo
 are still required before AP dispatch. IRQ masking alone protects no other CPU.
 This step narrows the public kernel API and removes FD rescan reentry from its
 mutation scopes; it does not claim general reentrant or SMP-safe Process access.
+
+Later [registry/task ownership](process-registry.md) replaces the private UP-only
+Vec with a scoped real lock and independently owned locked task objects. The
+historical receipt here remains attached to its original image; execution,
+remote cancellation and mapping/TLB gates are still separate.

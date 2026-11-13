@@ -13,6 +13,7 @@ SOURCE = r'''
 extern crate alloc;
 #[allow(dead_code)] #[path=@SYNC@] mod actual_sync;
 mod sync {
+    pub type IrqSafeSpinLockGuard<'a,T> = crate::actual_sync::SpinLockGuard<'a,T>;
     pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
     pub struct InterruptGuard;
     impl InterruptGuard { pub fn new() -> Self { Self } }
@@ -62,9 +63,8 @@ mod hal {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)] enum ProcessState { Running,Blocked }
     #[derive(Debug,PartialEq,Eq)] enum ProcessError { NoCurrentProcess,NoSuchProcess,ProcessNotPrepared,InvalidMemoryRange,NotRunnable,InvalidUserContext }
     struct Process { state:ProcessState,is_kernel:bool,context:u64,clear_child_tid:u64 }
-    struct Record { state:ProcessState, process:Option<Box<Process>> }
-    struct Table(core::cell::UnsafeCell<Vec<Record>>); unsafe impl Sync for Table {}
-    static TABLE:Table=Table(core::cell::UnsafeCell::new(Vec::new()));
+    pub struct ProcessRecord {pid:ProcessId,state:ProcessState,process:Option<Arc<IrqSafeSpinLock<Process>>>}
+    #[path=@REGISTRY@] mod registry;
     static SPACE:OnceLock<Arc<IrqSafeSpinLock<AddressSpace>>>=OnceLock::new();
     #[path=@WAIT@] mod wait_queue;
     use wait_queue::{wake_matching,WaitQueue,WaitKey,WaitEntry};
@@ -81,18 +81,22 @@ mod hal {
     fn process_address_space(_:ProcessId)->Result<Arc<IrqSafeSpinLock<AddressSpace>>,ProcessError> {
         assert_queue_unlocked();Ok(SPACE.get().unwrap().clone())
     }
-    fn process_table_mut()->&'static mut Vec<Record> {
-        assert_queue_unlocked();unsafe { &mut *TABLE.0.get() }
+    fn process_table()->crate::sync::IrqSafeSpinLockGuard<'static,Vec<ProcessRecord>> {
+        assert_queue_unlocked();registry::table()
     }
-    fn process_record_index(_: &[Record],pid:ProcessId)->Option<usize> { assert_queue_unlocked();(pid.0==1).then_some(0) }
-    fn with_current_thread<R>(read:impl for<'a> FnOnce(&'a Process)->R)->Option<R> { process_table_mut()[0].process.as_deref().map(read) }
-    fn with_current_thread_mut<R>(write:impl for<'a> FnOnce(&'a mut Process)->R)->Option<R> { process_table_mut()[0].process.as_deref_mut().map(write) }
+    fn process_record_index(_: &[ProcessRecord],pid:ProcessId)->Option<usize> { assert_queue_unlocked();(pid.0==1).then_some(0) }
+    fn with_current_thread<R>(read:impl for<'a> FnOnce(&'a Process)->R)->Option<R> {
+        let task=registry::task(ProcessId(1)).ok()?;let p=task.lock();Some(read(&p))
+    }
+    fn with_current_thread_mut<R>(write:impl for<'a> FnOnce(&'a mut Process)->R)->Option<R> {
+        let task=registry::task(ProcessId(1)).ok()?;let mut p=task.lock();Some(write(&mut p))
+    }
     fn wake_entry(_:WaitEntry) { assert_queue_unlocked();assert!(SPACE.get().unwrap().try_lock().is_some()); }
     pub fn run() {
         use futex::{futex_wait,futex_wake,FutexWaitOutcome::*};
         SPACE.set(Arc::new(IrqSafeSpinLock::new(AddressSpace))).ok().unwrap();
-        process_table_mut().push(Record {state:ProcessState::Running,process:Some(Box::new(Process {
-            state:ProcessState::Running,is_kernel:false,context:0,clear_child_tid:0 }))});
+        process_table().push(ProcessRecord {pid:ProcessId(1),state:ProcessState::Running,process:Some(Arc::new(IrqSafeSpinLock::new(Process {
+            state:ProcessState::Running,is_kernel:false,context:0,clear_child_tid:0 })))});
         for flags in [0,1,2,4,5,6] {
             FLAGS.store(flags,Ordering::SeqCst);
             assert_eq!(futex_wait(4092,7,None).err(),Some(ProcessError::InvalidMemoryRange));
@@ -104,7 +108,7 @@ mod hal {
             assert_eq!(futex_wait(addr,7,None).err(),Some(ProcessError::InvalidMemoryRange));
         }
         assert!(matches!(futex_wait(4092,7,Some(10)),Ok(Parked)));
-        assert_eq!(process_table_mut()[0].state,ProcessState::Blocked);
+        assert_eq!(process_table()[0].state,ProcessState::Blocked);
         assert_eq!(futex_wake(4092,1),1); assert_eq!(futex_wake(4092,0),0);
         let space=SPACE.get().unwrap().lock();
         let word=user_word::UserWord::new(&space,4092).unwrap();assert_eq!(word.load(),7);
@@ -131,7 +135,7 @@ class UserWordTest(unittest.TestCase):
     def compile_run(self, extra='', expect_ok=True):
         source = SOURCE
         for key, path in {'SYNC':'kernel/src/sync.rs', 'WAIT':'kernel/src/process/wait_queue.rs',
-                          'WORD':'kernel/src/process/user_word.rs', 'FUTEX':'kernel/src/process/futex.rs'}.items():
+                          'REGISTRY':'kernel/src/process/registry.rs', 'WORD':'kernel/src/process/user_word.rs', 'FUTEX':'kernel/src/process/futex.rs'}.items():
             source = source.replace('@'+key+'@', json.dumps(str(ROOT/path)))
         source = source.replace('@EXTRA@',extra)
         with tempfile.TemporaryDirectory() as folder:

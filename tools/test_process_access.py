@@ -13,7 +13,12 @@ class Access(unittest.TestCase):
     def compile(self, body, run=False):
         source = r'''
 #![allow(dead_code)]
+extern crate alloc;
+#[path=@SYNC@] mod actual_sync;
 mod sync {
+    use crate::actual_sync;
+    pub use actual_sync::SpinLock as IrqSafeSpinLock;
+    pub type IrqSafeSpinLockGuard<'a,T> = actual_sync::SpinLockGuard<'a,T>;
     pub struct InterruptGuard;
     impl InterruptGuard { pub fn new() -> Self { Self } }
 }
@@ -31,23 +36,88 @@ mod process {
         }
         fn add_pending_signal(&mut self,value:u64) { self.signals=self.signals.saturating_add(value); }
     }
-    struct Record {pid:ProcessId,process:Option<Box<Process>>}
-    struct Table(std::cell::UnsafeCell<Vec<Record>>);unsafe impl Sync for Table {}
-    static TABLE:Table=Table(std::cell::UnsafeCell::new(Vec::new()));
+    pub struct ProcessRecord {pid:ProcessId,process:Option<std::sync::Arc<crate::sync::IrqSafeSpinLock<Process>>>}
+    #[path=@REGISTRY@] pub mod registry;
+    use registry::table as process_table;
+    pub static DROPS:AtomicU64=AtomicU64::new(0);
+    impl Drop for Process {
+        fn drop(&mut self) {
+            if self.pid>=4 {
+                let _metadata=registry::table(); // catches destructor under registry lock
+                DROPS.fetch_add(1,Ordering::SeqCst);
+            }
+        }
+    }
+    pub fn probe_registry() {
+        use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+        fn object() -> registry::Task {
+            Arc::new(crate::sync::IrqSafeSpinLock::new(Process {pid:4,cwd:String::new(),
+                cap:Arc::new(4),pending:false,signals:0}))
+        }
+        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        let pin=registry::task(ProcessId(4)).unwrap();let weak=Arc::downgrade(&pin);
+        let retired={registry::table().pop().unwrap()};
+        assert_eq!(registry::validate(ProcessId(4),&pin),Err(ProcessError::NoSuchProcess));
+        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        assert_eq!(registry::validate(ProcessId(4),&pin),Err(ProcessError::ProcessNotPrepared));
+        drop(retired);assert!(weak.upgrade().is_some());drop(pin);assert!(weak.upgrade().is_none());
+        assert_eq!(DROPS.load(Ordering::SeqCst),1);
+        let workers:Vec<_>=(0..8).map(|_|std::thread::spawn(|| {
+            for _ in 0..1000 {
+                with_process_mut(ProcessId(4),|process| {
+                    assert_eq!(registry::table().len(),4); // callback runs without registry guard
+                    process.signals+=1;Ok(())
+                }).unwrap();
+            }
+        })).collect();
+        for worker in workers {worker.join().unwrap();}
+        assert_eq!(current_access::with_process(ProcessId(4),|p|p.signals),Ok(8000));
+        registry::with_record(ProcessId(4),|process,record| {
+            assert_eq!(record.pid,ProcessId(4));process.signals+=1;Ok(())
+        }).unwrap();
+        let entered=Arc::new(AtomicBool::new(false));let finish=Arc::new(AtomicBool::new(false));
+        let weak={Arc::downgrade(&registry::task(ProcessId(4)).unwrap())};
+        let worker={let entered=entered.clone();let finish=finish.clone();std::thread::spawn(move|| {
+            with_process_mut(ProcessId(4),|p| {
+                entered.store(true,Ordering::SeqCst);
+                while !finish.load(Ordering::SeqCst) {std::thread::yield_now();}
+                p.signals+=1;Ok(p.signals)
+            }).unwrap()
+        })};
+        while !entered.load(Ordering::SeqCst) {std::thread::yield_now();}
+        let retired={registry::table().pop().unwrap()};drop(retired);
+        assert!(weak.upgrade().is_some());assert_eq!(DROPS.load(Ordering::SeqCst),1);
+        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        with_process_mut(ProcessId(4),|p| {p.signals=100;Ok(())}).unwrap();
+        finish.store(true,Ordering::SeqCst);assert_eq!(worker.join().unwrap(),8002);
+        assert!(weak.upgrade().is_none());assert_eq!(DROPS.load(Ordering::SeqCst),2);
+        assert_eq!(current_access::with_process(ProcessId(4),|p|p.signals),Ok(100));
+        // Hold the object lock while another lookup obtains the old Arc. The
+        // registry must stay available; after replacement the blocked operation
+        // must reject its old lease instead of touching the replacement.
+        let pin=registry::task(ProcessId(4)).unwrap();let guard=pin.lock();
+        let waiter=std::thread::spawn(||with_process_mut(ProcessId(4),|p| {p.signals=999;Ok(())}));
+        while Arc::strong_count(&pin)<3 {std::thread::yield_now();}
+        let retired={registry::table().pop().unwrap()};
+        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        drop(retired);drop(guard);
+        assert_eq!(waiter.join().unwrap(),Err(ProcessError::ProcessNotPrepared));
+        assert_eq!(current_access::with_process(ProcessId(4),|p|p.signals),Ok(0));
+        drop(pin);
+        println!("registry: real locks, 8000 mutations, reentry, pinned retirement and blocked stale lease rejected OK");
+    }
     pub static CURRENT:AtomicU64=AtomicU64::new(2);
     pub static WAKES:AtomicU64=AtomicU64::new(0);
     fn current_pid()->Option<ProcessId> { (CURRENT.load(Ordering::SeqCst)!=0).then_some(ProcessId(1)) }
     fn current_entity_id()->Option<ProcessId> { let n=CURRENT.load(Ordering::SeqCst);(n!=0).then_some(ProcessId(n)) }
-    fn process_table_mut()->&'static mut Vec<Record> { unsafe { &mut *TABLE.0.get() } }
-    fn process_record_index(table:&[Record],pid:ProcessId)->Option<usize> { table.iter().position(|r|r.pid==pid) }
     fn wake_wait_set_waiters() {
         WAKES.fetch_add(1,Ordering::SeqCst);
         assert_eq!(current_access::with_current_process(|p|p.pending),Some(false));
     }
     pub fn init() {
-        for n in 1..=2 { process_table_mut().push(Record {pid:ProcessId(n),process:Some(Box::new(Process {
-            pid:n,cwd:format!("task{n}"),cap:std::sync::Arc::new(n),pending:false,signals:0 }))}); }
-        process_table_mut().push(Record {pid:ProcessId(3),process:None});
+        for n in 1..=2 { process_table().push(ProcessRecord {pid:ProcessId(n),process:Some(std::sync::Arc::new(crate::sync::IrqSafeSpinLock::new(Process {
+            pid:n,cwd:format!("task{n}"),cap:std::sync::Arc::new(n),pending:false,signals:0 })))}); }
+        process_table().push(ProcessRecord {pid:ProcessId(3),process:None});
     }
     #[path=@ACCESS@] pub mod current_access;
     pub use current_access::*;
@@ -56,7 +126,7 @@ fn main() {
 process::init();
 @BODY@
 }
-'''.replace('@ACCESS@', json.dumps(str(ROOT / 'kernel/src/process/current_access.rs'))).replace('@BODY@', body)
+'''.replace('@SYNC@', json.dumps(str(ROOT / 'kernel/src/sync.rs'))).replace('@REGISTRY@', json.dumps(str(ROOT / 'kernel/src/process/registry.rs'))).replace('@ACCESS@', json.dumps(str(ROOT / 'kernel/src/process/current_access.rs'))).replace('@BODY@', body)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'access.rs'
             path.write_text(source)
@@ -120,6 +190,10 @@ assert_eq!(with_current_thread_mut(|p|p.pid),None);
 assert_eq!(signal_current_handle(1,1),None);
 println!("task scopes: owner/thread routing, error notifications, self/cross-target signal and missing tasks OK");
 """,run=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_registry_pins_exclusion_reentry_and_retirement(self):
+        result=self.compile('process::probe_registry();',run=True)
         self.assertEqual(result.returncode,0,result.stderr)
 
     def test_static_argument_callback_is_rejected(self):

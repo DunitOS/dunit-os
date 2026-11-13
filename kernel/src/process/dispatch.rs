@@ -79,6 +79,7 @@ impl Drop for DispatchScope {
 
 pub(super) struct DispatchFrame {
     context: CpuContext,
+    task: Option<registry::Task>,
     fs_base: u64,
     stack: Arc<KernelStack>,
     fpu: Arc<FpuState>,
@@ -87,7 +88,7 @@ pub(super) struct DispatchFrame {
 impl DispatchFrame {
     fn new(
         process: &mut Process,
-        address_space: Arc<IrqSafeSpinLock<AddressSpace>>,
+        address_space: &Arc<IrqSafeSpinLock<AddressSpace>>,
     ) -> Result<Self, ProcessError> {
         if process.is_kernel || process.context.rip == 0 || process.context.rsp == 0 {
             return Err(ProcessError::InvalidUserContext);
@@ -99,10 +100,11 @@ impl DispatchFrame {
         process.state = ProcessState::Running;
         Ok(Self {
             context: process.context,
+            task: None,
             fs_base: process.fs_base,
             stack,
             fpu: process.fpu_state.clone(),
-            address_space,
+            address_space: address_space.clone(),
         })
     }
 
@@ -130,7 +132,11 @@ pub(super) fn prepare(pid: ProcessId) -> Result<DispatchFrame, ProcessError> {
     let _irq = InterruptGuard::new();
     let owner = owner_of(pid).ok_or(ProcessError::NoSuchProcess)?;
     let address_space = process_address_space(owner)?;
-    with_process_mut(pid, |process| DispatchFrame::new(process, address_space))
+    with_task_record(pid, |process, record| {
+        let mut frame = DispatchFrame::new(process, &address_space)?;
+        frame.task = record.process.clone();
+        Ok(frame)
+    })
 }
 
 #[cfg(feature = "boot-smoke-tests")]
@@ -153,7 +159,8 @@ pub fn run_dispatch_pin_smoke() -> bool {
                 .ok_or(ProcessError::NoKernelStack)?,
         );
         let weak_fpu = Arc::downgrade(&process.fpu_state);
-        let frame = DispatchFrame::new(&mut process, space)?;
+        let frame = DispatchFrame::new(&mut process, &space)?;
+        drop(space);
         drop(process);
         if weak_stack.upgrade().is_none()
             || weak_fpu.upgrade().is_none()

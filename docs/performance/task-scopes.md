@@ -71,3 +71,8 @@ registry/task lock order. Atomic execution claims, cross-CPU wait/cancel and rem
 TLB lifetime gates remain open. Self-signal delivery now uses the common target
 lookup; no latency/throughput improvement is claimed or inferred from test wall
 times. AP application dispatch remains disabled (`dispatch_cpus=1`).
+
+Later [registry/task ownership](process-registry.md) replaces the private UP-only
+Vec with a scoped real lock and independently owned locked task objects. The
+historical receipt here remains attached to its original image; execution,
+remote cancellation and mapping/TLB gates are still separate.

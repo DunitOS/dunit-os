@@ -1,17 +1,21 @@
 //! Non-escaping task scopes. No current selector returns a Process reference.
 use super::{
-    current_entity_id, current_pid, process_record_index, process_table_mut, wake_wait_set_waiters,
-    Handle, HandleError, Process, ProcessError, ProcessId,
+    current_entity_id, current_pid, registry, wake_wait_set_waiters, Handle, HandleError, Process,
+    ProcessError, ProcessId,
 };
 use crate::sync::InterruptGuard;
 
 // HRTB binds all Process/field borrows to the callback. IRQ masking serializes
-// current UP access; this is not registry/task exclusion on multiple CPUs.
-fn with_process<R>(pid: ProcessId, read: impl for<'a> FnOnce(&'a Process) -> R) -> Option<R> {
+// current selection; each lookup also pins/locks the task independently.
+pub(super) fn with_process<R>(
+    pid: ProcessId,
+    read: impl for<'a> FnOnce(&'a Process) -> R,
+) -> Result<R, ProcessError> {
     let _irq = InterruptGuard::new();
-    let table = process_table_mut();
-    let index = process_record_index(table, pid)?;
-    table[index].process.as_deref().map(read)
+    let task = registry::task(pid)?;
+    let process = task.lock();
+    registry::validate(pid, &task)?;
+    Ok(read(&process))
 }
 
 /// Shared by current owner, current thread and explicit-PID mutation paths.
@@ -21,14 +25,11 @@ pub fn with_process_mut<R>(
     write: impl for<'a> FnOnce(&'a mut Process) -> Result<R, ProcessError>,
 ) -> Result<R, ProcessError> {
     let _irq = InterruptGuard::new();
+    let task = registry::task(pid)?;
     let (result, wake) = {
-        let table = process_table_mut();
-        let index = process_record_index(table, pid).ok_or(ProcessError::NoSuchProcess)?;
-        let process = table[index]
-            .process
-            .as_deref_mut()
-            .ok_or(ProcessError::ProcessNotPrepared)?;
-        let result = write(process);
+        let mut process = task.lock();
+        registry::validate(pid, &task)?;
+        let result = write(&mut process);
         (result, process.take_fd_wakeup())
     };
     if wake {
@@ -40,7 +41,7 @@ pub fn with_process_mut<R>(
 #[inline]
 pub fn with_current_process<R>(read: impl for<'a> FnOnce(&'a Process) -> R) -> Option<R> {
     let _irq = InterruptGuard::new();
-    with_process(current_pid()?, read)
+    with_process(current_pid()?, read).ok()
 }
 
 #[inline]
@@ -52,7 +53,7 @@ pub fn with_current_process_mut<R>(write: impl for<'a> FnOnce(&'a mut Process) -
 #[inline]
 pub(crate) fn with_current_thread<R>(read: impl for<'a> FnOnce(&'a Process) -> R) -> Option<R> {
     let _irq = InterruptGuard::new();
-    with_process(current_entity_id()?, read)
+    with_process(current_entity_id()?, read).ok()
 }
 
 #[inline]

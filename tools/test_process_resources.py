@@ -12,6 +12,8 @@ def contract():
     result['required'].append('[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK')
     result['forbidden'].append('[PROCESS-RESOURCES] FAIL')
     result['required'].append('[DISPATCH-PIN] stack/FPU/address-space survive Process drop and reclaim after frame OK')
+    result['required'].append('[TASK-REGISTRY] callback pin, detached cleanup, dispatch pin and reentry OK')
+    result['forbidden'].append('[TASK-REGISTRY] FAIL')
     for name in ('m6_reap', 'waitset', 'pty_args',
                  'm6_musl_spawn', 'm6_pipe', 'm6_cond'):
         scene = json.loads((ROOT / f'tools/{name}_markers.json').read_text())

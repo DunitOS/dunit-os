@@ -1228,14 +1228,15 @@ M7 + M8 + шрифты/декодеры --> M10 браузер
 
 ## 23. Приоритеты: must-have / should-have / later
 
-**Отдельный трек производительности/SMP, обновлено 12 ноября 2026:**
+**Отдельный трек производительности/SMP, обновлено 13 ноября 2026:**
 [Performance roadmap OP0–OP9](DUNIT_OS_PERFORMANCE_ROADMAP.md) ведётся отдельно.
-По `236e83d` частично выполнены OP0–OP3: TCG baseline, CPU-local entry, AP/IPI
-bring-up, ownership VFS/resources, scoped current access и владеющий dispatch
-frame. Hardware boot/park проверен на 1/2/4/8 vCPU, но `dispatch_cpus=1`:
-приложения ещё UP. Следующий блок — registry/task locking и lifetimes, затем
-wait/wake, interruptible syscall и TLB shootdown до OP4. KVM scaling и численные
-performance gates открыты; функциональные долги M7 сохраняются.
+Частично выполнены OP0–OP3: TCG baseline, CPU-local entry, AP/IPI bring-up,
+ownership VFS/resources, PMM leaf lock и проверка выделений на BSP/AP 1/4/8,
+[настоящие registry/task locks и task pins](docs/performance/process-registry.md).
+Hardware boot/park проверен до 8 vCPU, но `dispatch_cpus=1`: приложения ещё UP.
+Следующий блок — execution/lifecycle/cancel и IRQ progress, затем полный lock
+ranking и TLB shootdown до OP4. Task pin не является Running(cpu) claim или
+mapping pin. KVM scaling и численные performance gates открыты; долги M7 сохраняются.
 
 **Must-have:** M0; preemption/threads/wait queues/handles/shared VM; GUI protocol/server; DWM parity; DunitFS recovery + disk-root/init; persistence matrix.
 

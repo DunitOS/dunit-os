@@ -56,16 +56,15 @@ pub fn futex_wait(
     let entity = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
     let owner = owner_of(entity).ok_or(ProcessError::NoSuchProcess)?;
     let space = process_address_space(owner)?;
-    let table = process_table_mut();
-    let index = process_record_index(table, entity).ok_or(ProcessError::NoSuchProcess)?;
-    let record = &mut table[index];
-    let process = record
-        .process
-        .as_mut()
-        .ok_or(ProcessError::ProcessNotPrepared)?;
+    let task = registry::task(entity)?;
+    let mut process = task.lock();
     let address_space = space.lock();
+    let mut table = process_table();
+    let index = process_record_index(&table, entity).ok_or(ProcessError::NoSuchProcess)?;
+    let record = &mut table[index];
+    registry::verify(record, &task)?;
     let word = UserWord::new(&address_space, addr).ok_or(ProcessError::InvalidMemoryRange)?;
-    // Lock order: task state -> AddressSpace -> wait registrations. The mapping
+    // Lock order: task -> AddressSpace -> registry -> wait registrations. The mapping
     // guard protects translation/backing through the final compare and enqueue.
     let mut queue = WAIT_QUEUE.lock();
     if word.load() != expected {

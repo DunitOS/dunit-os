@@ -1,0 +1,1152 @@
+{
+  "date": "2026-11-13",
+  "scope": "Real process registry exclusion, independently owned task locks, identity validation and retirement/dispatch pins; apps remain UP",
+  "source": {
+    "base_commit": "847f1ca8bbc0c8c62ea8e56ecffa35482f2ca3c1",
+    "files_sha256": {
+      "kernel/src/lib.rs": "5aab79eb5108bcf0a07a26eb9ba96e3caa5d4ac6515032240cc14ccbbab3d5d9",
+      "kernel/src/process/current_access.rs": "958243751ba56f4cf7b591c0736fa0a38b79a995660840c9d41f6f21df3d9c7c",
+      "kernel/src/process/dispatch.rs": "f6c75ec5579c507a0a2d2c93bf4a9093253415f81ba3a56338157f3c9f2563f9",
+      "kernel/src/process/futex.rs": "6b87849c98bfceb92b6f17dbc9a5dfb0e0765026a2060d3d7732d0f8e273a760",
+      "kernel/src/process/mod.rs": "93f8c3365736bec1e1228f830dc43a48647ad51b97b07867395be9a98fb87447",
+      "tools/test_process_access.py": "5ba29ecfc5b1de9d1fdcdff09078905cdd012ddc9c6a32d57d9a8e40f6f76439",
+      "tools/test_process_resources.py": "d811b9c41f859a39f317fbe78c6e9182b64b453286a154d78c6729a22b0f1936",
+      "tools/test_user_word.py": "22b77a78ae7ecc122c2d790799b1262b02bd0f44d6a16506c638a6530d480179",
+      "kernel/src/process/registry.rs": "16bfc90955920e1102c6a9768b2b872d42ce939a2d05ded21aac95acb1af60d0",
+      "kernel/src/process/registry_smoke.rs": "04998424a9282a0351b115658d62da66480230f35a8a44b1a1b463a5168a6936",
+      "kernel/src/process/transitions.rs": "f421969dbd341bf35b66c27d3cc303c44c49f69f24a1f2e58b797f098152754a",
+      "tools/test_process_registry.py": "793cdd92eea6772fbc5c0d91ee8ee114fb2de15646c5ea12f74e89f74dc4f1b1",
+      "tools/registry_production_markers.json": "90f6ca1754c2a16c5e37100f0f4822c18d76731fab627a12c1f3f38ff369c062"
+    }
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "host_checks": {
+    "process_access_tests": 6,
+    "user_word_tests": 2,
+    "registry_contention_threads": 8,
+    "registry_mutations": 8000,
+    "stale_lease_and_admitted_retirement": "passed",
+    "qemu_harness_unit_tests": 19,
+    "abi_and_cpu_local_generation": "passed"
+  },
+  "native_runs": [
+    {
+      "receipt": "build/performance/registry-final/metadata.json",
+      "started_utc": "2026-11-13T18:48:56.519527+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/registry-final/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/registry-final/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-final/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-13T18:49:59.927911+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/registry-final/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/registry-final/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-core-final/1/metadata.json",
+      "started_utc": "2026-11-13T18:54:33.258219+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/registry-core-final/1/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/registry-core-final/1/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-core-final/4/metadata.json",
+      "started_utc": "2026-11-13T18:54:52.008335+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/registry-core-final/4/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/registry-core-final/4/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-core-final/8/metadata.json",
+      "started_utc": "2026-11-13T18:55:11.382208+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/registry-core-final/8/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/registry-core-final/8/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-gui-final.json",
+      "started_utc": "2026-11-13T18:57:00.771982+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-pointer-final.json",
+      "started_utc": "2026-11-13T18:57:27.665181+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "5ba247edf2b2f0468ccc84f5162d2793464c707809ac646eabc50186b0d62aea",
+        "bytes": 266536960,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/registry-after/metadata.json",
+      "started_utc": "2026-11-13T19:07:33.522062+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "d4f11cb7da31f624d0163e0dcc1340bb632551314c1d1155357d88cadd66aedd",
+        "bytes": 266442752,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/registry-after/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/registry-after/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "native_marker": "[TASK-REGISTRY] callback pin, detached cleanup, dispatch pin and reentry OK",
+  "pointer_pixel_verification": "visible -> hidden -> restored -> restored after exit at 350,220",
+  "production_comparison": {
+    "before": {
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "659f898f1a47741fb1b2183f3f1d445e8cba0cdbe74b97ffc3c1d528e3a14dd1",
+        "bytes": 266403840,
+        "profile": "full"
+      },
+      "host": {
+        "system": "Linux",
+        "release": "6.18.57",
+        "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+        "logical_cpus": 3,
+        "affinity": [
+          0,
+          1,
+          2
+        ],
+        "cgroup": {
+          "cpu.max": "max 100000",
+          "cpuset.cpus.effective": "0-2",
+          "memory.max": "max"
+        },
+        "kvm_accessible": false
+      },
+      "measurements": {
+        "launch_to_ready_wall_ms": 4575.07245799934,
+        "run_wall_ms": 17731.76689200045,
+        "cpu_time_ms": null,
+        "rss_bytes": null
+      },
+      "scenes": {
+        "cpu-1": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            50000000,
+            50000000,
+            40000000,
+            40000000,
+            50000000
+          ],
+          "median_ns": 50000000
+        },
+        "cpu-2": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            40000000,
+            50000000,
+            40000000,
+            40000000,
+            40000000
+          ],
+          "median_ns": 40000000
+        },
+        "cpu-4": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            50000000,
+            50000000,
+            50000000,
+            50000000,
+            40000000
+          ],
+          "median_ns": 50000000
+        },
+        "cpu-8": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            70000000,
+            40000000,
+            50000000,
+            50000000,
+            70000000
+          ],
+          "median_ns": 50000000
+        },
+        "allocator": {
+          "work_units": 16777216,
+          "checksum": 528482304,
+          "elapsed_ns_trials_1_to_5": [
+            240000000,
+            260000000,
+            270000000,
+            260000000,
+            230000000
+          ],
+          "median_ns": 260000000
+        },
+        "memfs-io": {
+          "work_units": 2097152,
+          "checksum": 7340032,
+          "elapsed_ns_trials_1_to_5": [
+            30000000,
+            20000000,
+            20000000,
+            30000000,
+            30000000
+          ],
+          "median_ns": 30000000
+        }
+      },
+      "raw_samples": [
+        {
+          "scene": "cpu-1",
+          "trial": 0,
+          "elapsed_ns": 60000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 1,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 3,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 4,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 5,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 0,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 1,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 3,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 4,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 5,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 1,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 3,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 5,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 1,
+          "elapsed_ns": 70000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 2,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 3,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 5,
+          "elapsed_ns": 70000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "allocator",
+          "trial": 0,
+          "elapsed_ns": 240000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 1,
+          "elapsed_ns": 240000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 2,
+          "elapsed_ns": 260000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 3,
+          "elapsed_ns": 270000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 4,
+          "elapsed_ns": 260000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 5,
+          "elapsed_ns": 230000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 0,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 1,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 2,
+          "elapsed_ns": 20000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 3,
+          "elapsed_ns": 20000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 4,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 5,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        }
+      ]
+    },
+    "after": {
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "d4f11cb7da31f624d0163e0dcc1340bb632551314c1d1155357d88cadd66aedd",
+        "bytes": 266442752,
+        "profile": "full"
+      },
+      "host": {
+        "system": "Linux",
+        "release": "6.18.57",
+        "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+        "logical_cpus": 3,
+        "affinity": [
+          0,
+          1,
+          2
+        ],
+        "cgroup": {
+          "cpu.max": "max 100000",
+          "cpuset.cpus.effective": "0-2",
+          "memory.max": "max"
+        },
+        "kvm_accessible": false
+      },
+      "measurements": {
+        "launch_to_ready_wall_ms": 4420.883128994319,
+        "run_wall_ms": 17550.84501899546,
+        "cpu_time_ms": null,
+        "rss_bytes": null
+      },
+      "scenes": {
+        "cpu-1": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            50000000,
+            50000000,
+            50000000,
+            50000000,
+            60000000
+          ],
+          "median_ns": 50000000
+        },
+        "cpu-2": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            40000000,
+            40000000,
+            40000000,
+            40000000,
+            40000000
+          ],
+          "median_ns": 40000000
+        },
+        "cpu-4": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            50000000,
+            50000000,
+            40000000,
+            60000000,
+            50000000
+          ],
+          "median_ns": 50000000
+        },
+        "cpu-8": {
+          "work_units": 4194304,
+          "checksum": 9007160971231232,
+          "elapsed_ns_trials_1_to_5": [
+            80000000,
+            50000000,
+            50000000,
+            50000000,
+            50000000
+          ],
+          "median_ns": 50000000
+        },
+        "allocator": {
+          "work_units": 16777216,
+          "checksum": 528482304,
+          "elapsed_ns_trials_1_to_5": [
+            230000000,
+            230000000,
+            240000000,
+            220000000,
+            210000000
+          ],
+          "median_ns": 230000000
+        },
+        "memfs-io": {
+          "work_units": 2097152,
+          "checksum": 7340032,
+          "elapsed_ns_trials_1_to_5": [
+            30000000,
+            20000000,
+            30000000,
+            30000000,
+            20000000
+          ],
+          "median_ns": 30000000
+        }
+      },
+      "raw_samples": [
+        {
+          "scene": "cpu-1",
+          "trial": 0,
+          "elapsed_ns": 70000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 1,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 3,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-1",
+          "trial": 5,
+          "elapsed_ns": 60000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 1,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 2,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 3,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 4,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-2",
+          "trial": 5,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 1,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 3,
+          "elapsed_ns": 40000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 4,
+          "elapsed_ns": 60000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-4",
+          "trial": 5,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 0,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 1,
+          "elapsed_ns": 80000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 2,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 3,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 4,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "cpu-8",
+          "trial": 5,
+          "elapsed_ns": 50000000,
+          "work_units": 4194304,
+          "checksum": 9007160971231232
+        },
+        {
+          "scene": "allocator",
+          "trial": 0,
+          "elapsed_ns": 240000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 1,
+          "elapsed_ns": 230000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 2,
+          "elapsed_ns": 230000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 3,
+          "elapsed_ns": 240000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 4,
+          "elapsed_ns": 220000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "allocator",
+          "trial": 5,
+          "elapsed_ns": 210000000,
+          "work_units": 16777216,
+          "checksum": 528482304
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 0,
+          "elapsed_ns": 40000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 1,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 2,
+          "elapsed_ns": 20000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 3,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 4,
+          "elapsed_ns": 30000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        },
+        {
+          "scene": "memfs-io",
+          "trial": 5,
+          "elapsed_ns": 20000000,
+          "work_units": 2097152,
+          "checksum": 7340032
+        }
+      ]
+    }
+  },
+  "before_provenance": "Reused image hash verified against the committed docs/performance/pmm-concurrency.json receipt from base 847f1ca; dirty worktree recorded by the runner is not its build provenance.",
+  "limitations": [
+    "Environment restarted between before and after; these are diagnostic fixed-work samples, not a controlled speedup comparison.",
+    "TCG only, no KVM. Shared host/quota and PIT 10 ms resolution with interrupt-disabled undercount.",
+    "No per-input latency, CPU time, physical scanout or application SMP scaling measured.",
+    "Hardware/PMM AP probes only; scheduler=up dispatch_cpus=1 and APs park.",
+    "Execution ownership/cancellation, block/wake handoff, IRQ progress, full lock ranking and acknowledged TLB shootdown remain open."
+  ]
+}

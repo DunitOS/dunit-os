@@ -32,9 +32,9 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 | Этап | Статус | Подтверждённый результат / оставшаяся работа |
 | --- | --- | --- |
 | OP0 | Частично | TCG/UP baseline, metadata и checked benchmarks готовы; KVM reference, IPC/часть сцен и точная телеметрия открыты |
-| OP1 | Частично | Аудит, CPU-local entry и публичные scopes готовы; внутреннее владение registry/task и preemption/nesting model открыты |
+| OP1 | Частично | Аудит, CPU-local entry, scoped registry/task locks и object pins готовы; execution/IRQ/preemption model ещё не закрыт |
 | OP2 | Частично | Limine AP boot, APIC/IPI и timer probes: BIOS 1/2/4/8, UEFI 4; точные часы и расширенная платформенная проверка открыты |
-| OP3 | В работе | Владеющие VFS/backend, teardown, fd, queue и dispatch backing готовы; registry/task locks, wait/wake и TLB gates открыты |
+| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; полный lifecycle/wait/wake, IRQ progress и TLB gates открыты |
 | OP4 | Не реализован | Нет атомарного Running(cpu), remote dispatch и параллельного исполнения приложений |
 | OP5 | Не начат в этом треке | Масштабирование и scheduling latency — после корректного SMP |
 | OP6–OP8 | Не закрыты | Новые оптимизации ввода/SDK/рендера/I/O требуют профиля; исторические GUI-правки входят в baseline |
@@ -52,10 +52,11 @@ KVM на стенде недоступен. Медианы PIT с шагом 10 
 
 ## Ближайший порядок работ
 
-1. **OP3: registry/task ownership.** Заменить приватные UP-only `UnsafeCell` и
-   долгоживущие внутренние ссылки scoped-доступом, реальным исключением и
-   удержанием task metadata. Dispatch backing уже удерживается отдельно;
-   это не pin всего процесса и не атомарное право исполнения.
+1. **OP3: execution/lifecycle и IRQ progress.** Registry и task уже имеют
+   реальные locks и владеющие pins; нет приватного static mutable Vec.
+   Теперь закрыть отмену/удаление при активном исполнении, handoff block/wake
+   вокруг HAL return и безопасные interruptible syscall boundaries.
+   Pin процесса не является атомарным правом исполнения или защитой mapping.
 2. Согласовать порядок process/task ↔ VFS/ProcFs, wait queues, IPC/handles,
    PMM/VMM и драйверов. Закрыть оставшиеся reentry и lifecycle/cancellation пути.
 3. Обеспечить atomic check/block/wake, interruptible syscall boundaries и прогресс
@@ -156,8 +157,11 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   отделена от borrow отправителя; реальный registry/task mutex ещё открыт.
 - [x] Dispatch передаёт в HAL скопированный контекст и владеющие resource pins,
   [без Process-ссылки через userspace](docs/performance/dispatch-ownership.md), `236e83d`.
-- [ ] Завершить внутренние registry/task lifetimes и исключение, IRQ/preemption
-  nesting/idle model для SMP. Resource pins не заменяют task metadata ownership.
+- [x] [Registry/task ownership и настоящие locks](docs/performance/process-registry.md):
+  scoped metadata guard, Arc-owned Process mutex, revalidation после lock и task
+  pin через dispatch; retire/destructors вне guards, без static mutable Vec.
+- [ ] Завершить execution/cancellation и IRQ/preemption nesting/idle model для SMP.
+  Task pin не является Running(cpu) claim или правом запустить retired frame.
 - **Приёмка:** реестр с владельцами и инвариантами; UP регрессии зелёные,
   нет общих writable entry scratch/стеков. Полная приёмка ждёт оставшихся ownership
   gates; AP пока не исполняют рабочие задачи.
@@ -214,10 +218,13 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   host 80 000 смешанных транзакций и реальные BSP/AP cohorts на 1/4/8 CPU.
   AP выполняют только этот boot probe и снова паркуются; task dispatch остаётся UP.
 
+- [x] [Scoped registry/task locking и pins](docs/performance/process-registry.md):
+  lookup копирует Arc до task lock, проверяет identity после ожидания; current,
+  explicit PID, TLS/join/reap/kill, preemption и futex переведены совместно.
+  Dispatch frame удерживает весь task, без mutex guard через HAL/IRET.
+
 Оставшиеся обязательные gates:
 
-- [ ] Scoped registry/task locking и lifetime pins для самих объектов/metadata
-  процессов; убрать приватный UP-only доступ к таблице и внутренние aliases.
 - [ ] Полный lock ranking/reentry audit для process/task, VFS/ProcFs, wait queues,
   IPC/handles, heap/PMM/VMM и драйверов. Удалённые отдельные lock edges не закрывают
   весь порядок. Не спать под spinlock и не ждать ack под lock получателя.

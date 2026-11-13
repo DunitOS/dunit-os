@@ -1,0 +1,24 @@
+{
+  "run": {
+    "config": "limine_sdk_terminal.conf",
+    "cmd": [
+      "exec /system/bin/tcc /assets/tcc/performance.c -o /tmp/performance",
+      "exec /tmp/performance"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[SMP] hardware_online=4 scheduler=up dispatch_cpus=1 APs=parked",
+    "[PERF-CORE] all checks passed"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[PMM-SMP]",
+    "tcc: error",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop"
+    },
+    "[TASK-REGISTRY]"
+  ]
+}

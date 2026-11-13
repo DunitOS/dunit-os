@@ -9,12 +9,12 @@ gate, not a claim that shared state is now safe to execute on APs.
 | HAL syscall scratch, selected/escape stack, user FPU pointer | CPU-local GS anchor and private entry state; native syscall/IRQ/DF checks | preserve entry invariants when enabling AP dispatch; no shared writable entry scratch |
 | GDT/TSS/IST and initial syscall stack | private per-CPU descriptors/stacks; shared published IDT | retain CPU-private ownership and publication during scheduler activation |
 | current PID, exit/yield/schedule/escape flags | CPU-local runtime fields; aggregate counters/terminal ownership remain shared | implement atomic task execution ownership and remote scheduling |
-| PROCESS_TABLE and current process/thread access | current owner/thread and explicit-PID mutation use common scopes; no static Process getters; private registry Vec remains UP-only; dispatch backing is independently owned | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
+| PROCESS_TABLE and current process/thread access | IRQ-safe metadata registry; independently Arc-owned locked Process; membership revalidated after task lock; pins across callback/HAL; retired cleanup outside guards | preserve task/registry lock order; atomic execution/lifecycle/cancel and mapping lifetime remain open |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | PMM bitmap/accounting share an IRQ-safe leaf lock; one-shot bitmap publication; isolated BSP/AP allocation cohorts tested; heap/shared VM have separate owners | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
-| VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; complete process/task and ProcFs snapshot lock order before AP dispatch |
+| VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | process registry is released before task/VFS callbacks; ProcFs reads metadata only; complete device/IRQ/lifecycle ranking before AP dispatch |
 | VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
 | DunitFS/block drivers | owned/locked DunitFS backend; shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
 | Device IRQ, keyboard/pointer queues and display | INPUT_MASTER/DISPLAY_MASTER and IRQ-safe locks | one routed device IRQ owner initially; cross-CPU locks still needed for syscall readers; no desktop policy in kernel |
@@ -83,7 +83,10 @@ The [internal task scopes receipt](task-scopes.md) removes the four private
 current Process/thread getters, centralizes PID/current mutation notifications
 and splits signal authorization from target mutation. This closes that specific
 cross-task nesting path, not arbitrary callback reentry or registry exclusion.
-The private table getter still returns an UP-only mutable registry reference.
+The subsequent [registry/task ownership change](process-registry.md) removes the
+private mutable Vec getter, installs real metadata and task locks and retains
+task leases through callbacks/dispatch. State transitions, cleanup and futex
+admission use that same ownership; this still does not authorize AP execution.
 
 The [PMM concurrency receipt](pmm-concurrency.md) removes unsynchronized runtime
 bitmap access and the manual manager Sync assertion, unifies frame accounting
@@ -91,3 +94,21 @@ under one leaf lock and protects the one-time static bitmap handoff. Actual APs
 join the BSP for 128 boot allocation cohorts on 1/4/8 CPUs, then park again.
 This tests the physical allocator, not task scheduling, mapped-page reclamation
 or the complete allocator/VM/device lock order.
+
+## Registry/task lock boundary
+
+Lookup clones the task Arc under the registry guard, releases it, then waits for
+the task mutex. Membership/Arc identity is checked again under a short metadata
+guard after acquiring the task lock. Metadata snapshots never take task locks.
+State/context publication follows task → registry; futex admission uses task →
+AddressSpace → registry → wait registrations. No task/AS/VFS lock acquisition or
+resource destructor is allowed under the registry guard. Wait registration
+storage and heap/PMM leaf operations are the explicit short commit exceptions.
+
+Task callbacks may read metadata (including through VFS/ProcFs) after lookup has
+released the registry. fd/wait-set notifications, scheduler admission, object
+retirement/destructors and source/target delivery run after the relevant task
+mutation guard ends. The [receipt](process-registry.md) includes actual host
+contention/retirement and native weak-owner/fd/HAL-frame checks. Pins protect
+object lifetime, not atomic execution rights, unmap/TLB readers or cancellation
+handoff when a CPU is still returning from HAL.
