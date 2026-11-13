@@ -12,7 +12,13 @@ uint64_t hal_mp_stack_tops[HAL_CPU_CAPACITY];
 extern uint64_t kernel_cpu_alloc(uint64_t size, uint64_t alignment);
 extern int hal_cpu_local_prepare(uint64_t index);
 extern int hal_gdt_prepare(uint64_t index);
-enum { PROBE = 241, TIMER = 242, REPLY = 243, SPURIOUS = 255 };
+enum { PROBE = 241, TIMER = 242, REPLY = 243, PMM_PROBE = 244, SPURIOUS = 255 };
+/* Present only in boot-smoke kernels. No process/VFS/heap entry is permitted. */
+extern void kernel_pmm_probe_worker(uint64_t index) __attribute__((weak));
+typedef struct { uint64_t ready, done; uint8_t padding[48]; }
+  __attribute__((aligned(64))) pmm_probe_slot;
+static pmm_probe_slot pmm_slots[HAL_CPU_CAPACITY];
+static uint32_t pmm_requested, pmm_gate; /* gate: 0 rendezvous, 1 run, 2 abort */
 typedef struct {
   uint64_t apic, ready, request, ack, ticks, work;
   uint8_t padding[16];
@@ -158,11 +164,25 @@ int hal_mp_interrupt(uint64_t vector) {
   if (!__atomic_load_n(&prepared, __ATOMIC_ACQUIRE))
     return 0;
   if (vector != PROBE && vector != TIMER && vector != REPLY &&
-      vector != SPURIOUS)
+      vector != PMM_PROBE && vector != SPURIOUS)
     return 0;
   uint64_t i = hal_cpu_index();
   if (i >= count)
     return 0;
+  if (vector == PMM_PROBE) {
+    if (i && kernel_pmm_probe_worker &&
+        __atomic_load_n(&pmm_requested, __ATOMIC_ACQUIRE) &&
+        !__atomic_exchange_n(&pmm_slots[i].ready, 1, __ATOMIC_ACQ_REL)) {
+      uint32_t gate;
+      while (!(gate = __atomic_load_n(&pmm_gate, __ATOMIC_ACQUIRE)))
+        pause_cpu();
+      if (gate == 1)
+        kernel_pmm_probe_worker(i);
+      __atomic_store_n(&pmm_slots[i].done, 1, __ATOMIC_RELEASE);
+    }
+    store(0xb0, 0);
+    return 1;
+  }
   if (vector == TIMER) {
     uint64_t ticks = __atomic_add_fetch(&slots[i].ticks, 1, __ATOMIC_RELAXED);
     /* A parked AP has no runnable tasks. Once its timer has been proved,
@@ -260,4 +280,49 @@ void hal_mp_snapshot(uint64_t i, uint64_t *out) {
   out[2] = __atomic_load_n(&slots[i].ack, __ATOMIC_ACQUIRE);
   out[3] = __atomic_load_n(&slots[i].ticks, __ATOMIC_RELAXED);
   out[4] = __atomic_load_n(&slots[i].work, __ATOMIC_RELAXED);
+}
+
+/* One bounded boot rendezvous. No allocator/recipient lock may span this call.
+ * APs enter only after every target has acknowledged the rendezvous; failed
+ * delivery/entry aborts before any Rust allocation/barrier job can begin. */
+int hal_mp_run_pmm_probe(void) {
+  uint64_t flags;
+  __asm__ volatile("pushfq;pop %0" : "=r"(flags));
+  if (!kernel_pmm_probe_worker || hal_cpu_index() != 0 || !(flags & (1ull << 9)) ||
+      __atomic_exchange_n(&pmm_requested, 1, __ATOMIC_ACQ_REL))
+    return 0;
+  for (uint64_t i = 1; i < count; i++) {
+    if (!send((uint32_t)slots[i].apic, PMM_PROBE)) {
+      __atomic_store_n(&pmm_gate, 2, __ATOMIC_RELEASE);
+      return 0;
+    }
+  }
+  uint64_t start = kernel_mp_ticks();
+  for (uint64_t spins = 0;; spins++) {
+    int all = 1;
+    for (uint64_t i = 1; i < count; i++)
+      if (!__atomic_load_n(&pmm_slots[i].ready, __ATOMIC_ACQUIRE))
+        all = 0;
+    if (all)
+      break;
+    if (elapsed(start, 1000) || spins == 500000000) {
+      __atomic_store_n(&pmm_gate, 2, __ATOMIC_RELEASE);
+      return 0;
+    }
+    pause_cpu();
+  }
+  __atomic_store_n(&pmm_gate, 1, __ATOMIC_RELEASE);
+  kernel_pmm_probe_worker(0);
+  start = kernel_mp_ticks();
+  for (uint64_t spins = 0;; spins++) {
+    int all = 1;
+    for (uint64_t i = 1; i < count; i++)
+      if (!__atomic_load_n(&pmm_slots[i].done, __ATOMIC_ACQUIRE))
+        all = 0;
+    if (all)
+      return 1;
+    if (elapsed(start, 1000) || spins == 500000000)
+      return 0;
+    pause_cpu();
+  }
 }

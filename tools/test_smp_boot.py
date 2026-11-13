@@ -62,12 +62,12 @@ def verify(serial, cpus):
     }
 
 
-def main():
+def main(make_manifest=manifest, output_default=ROOT / "build/performance/smp-boot"):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cpus", type=int, nargs="+", default=[1, 2, 4, 8])
     p.add_argument("--accel", choices=("tcg", "kvm"), default="tcg")
     p.add_argument("--reuse-image", action="store_true")
-    p.add_argument("--output", type=Path, default=ROOT / "build/performance/smp-boot")
+    p.add_argument("--output", type=Path, default=output_default)
     a = p.parse_args()
     if any(n < 1 or n > 64 for n in a.cpus):
         p.error("supported hardware-probe range is 1..64")
@@ -77,7 +77,7 @@ def main():
         folder = a.output / str(cpus)
         folder.mkdir(exist_ok=True)
         markers = folder / "markers.json"
-        markers.write_text(json.dumps(manifest(cpus), indent=2) + "\n")
+        markers.write_text(json.dumps(make_manifest(cpus), indent=2) + "\n")
         build = index == 0 and not a.reuse_image
         if build:
             subprocess.run(

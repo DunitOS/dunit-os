@@ -1,0 +1,630 @@
+{
+  "date": "2026-11-13",
+  "scope": "PMM reservation/accounting lock and bounded BSP/AP boot allocation cohorts; application dispatch remains UP",
+  "source": {
+    "base_commit": "67940c6fcca370693b91fb695fdaf482e496650a",
+    "files_sha256": {
+      "hal/src/mp.c": "34ed644045ca7d97a83a24745422d660847f844ee3c547f801e00407ee8aa6cf",
+      "hal/src/mp.h": "089b651a07a389893cb4b4bb72b2bb57e62f60e715cb410320c74ae883e592bd",
+      "kernel/src/lib.rs": "dc3cf6b1ac6961c91f7fe51eba4c9835a754f95727a549404c07024930418120",
+      "kernel/src/memory/pmm.rs": "75090e0c93dce52c31d4d07178a9a807ee78ff19e8820ad69d54910726b8820f",
+      "kernel/src/memory/pmm_smoke.rs": "74e36ad150f2d44cb6dd24b058f2665c14df3543841929aee4da386da98d2c3d",
+      "tools/test_pmm_concurrency.py": "326644f18e4e097f85e1561145f94d6e5659dbc6a0b88de68bd2e64b62962891",
+      "tools/test_pmm_smp.py": "cdd57262ed38f7b39503bc283384e121e847fc15a487b06975b7ce7628d27740",
+      "tools/test_smp_boot.py": "6b84a90cf3c1d274e3f9897a5489b0e1e6320541d9f18e4e40a52232e8528f52",
+      "tools/pmm_production_markers.json": "668a0e7f688a15de9781e46d7aac51e7825bdfd0adc998131f0a1230e9ed8d85"
+    }
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0"
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "comparison": {
+    "reference_commit": "67940c6fcca370693b91fb695fdaf482e496650a",
+    "results": [
+      {
+        "name": "before",
+        "module_sha256": "11403fd03b80c4c740144d13c6ab851556b18b57c8231a0ae19e9bf3ae1f285e",
+        "probe_sha256": "b761442dfc63578bcb423a072bc5e826d292e89d3b7fb3ce6dd68cf25cff7457",
+        "returncode": 101,
+        "stdout": "",
+        "stderr_sha256": "3cdb2bf8614617366a0d5e8f43ab7cc8e829bfd7eabc42facb8470a3d5caa028",
+        "observed_error": "duplicate live physical frame"
+      },
+      {
+        "name": "after",
+        "module_sha256": "75090e0c93dce52c31d4d07178a9a807ee78ff19e8820ad69d54910726b8820f",
+        "probe_sha256": "838f6046e67a9d79526468c8399d86ce28019bc930c183aa31dd722ae134868f",
+        "returncode": 0,
+        "stdout": "PMM ownership-only: 80000 mixed transactions, 239984 frames unique/reclaimed OK\n",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "observed_error": null
+      }
+    ],
+    "scope": "Concurrent ownership-only body from test_pmm_concurrency.SOURCE; unchanged public total/available getters for both revisions; no boot/bounds tests in this comparison.",
+    "construction": {
+      "template": "tools/test_pmm_concurrency.py::SOURCE",
+      "prefix": "before fn main() {",
+      "body": "from use std::sync::{Arc,atomic to end",
+      "snapshot_replacement": "p.stats_bytes() -> (p.total_memory() as u64,p.available_memory() as u64)",
+      "stdout_prefix": "PMM ownership-only:",
+      "other_changes": "Only module path differs for before and after; same concurrent ownership assertions."
+    }
+  },
+  "host_stress": {
+    "workers": 8,
+    "requested_transactions": 80000,
+    "completed_transactions": 80000,
+    "allocated_and_returned_frames": 239984,
+    "duplicate_live_frames": 0,
+    "final_free_pool_restored": true,
+    "other_checks": [
+      "capacity/tail/alignment/OOM",
+      "whole-run reservation and malformed frees",
+      "usable map holes and partial region edges",
+      "concurrent reinitialization preserves outstanding allocations"
+    ]
+  },
+  "commands": [
+    "python3 tools/test_pmm_concurrency.py",
+    "python3 tools/test_pmm_smp.py --cpus 1 4 8 --accel tcg",
+    "python3 tools/test_process_resources.py --reuse-image --cpus 4 --accel tcg --output build/performance/pmm-resources",
+    "python3 tools/qemu_test.py --markers-file /workspace/scratch/pointer-gui-terminal.json --cpus 4 --accel tcg --timeout 360 --cmd-timeout 120 --performance-record build/performance/pmm-gui.json",
+    "python3 tools/qemu_test.py --build --markers-file tools/pmm_production_markers.json --cpus 4 --accel tcg --timeout 360 --cmd-timeout 180 --workdir build/performance/pmm-production --performance-record build/performance/pmm-production/metadata.json"
+  ],
+  "production_worker_symbol": "0000000000000000 NOTYPE WEAK DEFAULT UND kernel_pmm_probe_worker",
+  "runs": [
+    {
+      "name": "build/performance/pmm-smp/1/metadata.json",
+      "started_utc": "2026-11-13T11:24:05.457733+00:00",
+      "boot_smoke_feature": true,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/pmm-smp/1/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/pmm-smp/1/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "9a6b9ae04fe4b6a8e28b3cd5eec4c4f00e8a9526aaabdbfbfb9fe3122a914c73",
+        "bytes": 266489856,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 18025.89006999915,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "pmm_assertions": {
+        "per_cpu_completed_rounds": [
+          [
+            0,
+            128
+          ]
+        ],
+        "cohort_width": 4,
+        "frames_allocated_and_returned": 512,
+        "all_frame_identities_unique_while_cohort_live": true,
+        "free_and_total_bytes_restored": true,
+        "stats_bytes_not_printed": "Equality checked inside kernel; no numeric before/after bytes emitted."
+      },
+      "fixed_work_fixture": {
+        "records": 36,
+        "scenes": [
+          "allocator",
+          "cpu-1",
+          "cpu-2",
+          "cpu-4",
+          "cpu-8",
+          "memfs-io"
+        ],
+        "checksum_sets": {
+          "allocator": [
+            528482304
+          ],
+          "cpu-1": [
+            9007160971231232
+          ],
+          "cpu-2": [
+            9007160971231232
+          ],
+          "cpu-4": [
+            9007160971231232
+          ],
+          "cpu-8": [
+            9007160971231232
+          ],
+          "memfs-io": [
+            7340032
+          ]
+        },
+        "serial_sha256": "3994c5a036550a88c4fe967f2b325ad85db39bce3775edb2e09f3701bcb01ca0"
+      }
+    },
+    {
+      "name": "build/performance/pmm-smp/4/metadata.json",
+      "started_utc": "2026-11-13T11:24:24.119812+00:00",
+      "boot_smoke_feature": true,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/pmm-smp/4/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/pmm-smp/4/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "9a6b9ae04fe4b6a8e28b3cd5eec4c4f00e8a9526aaabdbfbfb9fe3122a914c73",
+        "bytes": 266489856,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 18789.18601999976,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "pmm_assertions": {
+        "per_cpu_completed_rounds": [
+          [
+            0,
+            128
+          ],
+          [
+            1,
+            128
+          ],
+          [
+            2,
+            128
+          ],
+          [
+            3,
+            128
+          ]
+        ],
+        "cohort_width": 4,
+        "frames_allocated_and_returned": 2048,
+        "all_frame_identities_unique_while_cohort_live": true,
+        "free_and_total_bytes_restored": true,
+        "stats_bytes_not_printed": "Equality checked inside kernel; no numeric before/after bytes emitted."
+      },
+      "fixed_work_fixture": {
+        "records": 36,
+        "scenes": [
+          "allocator",
+          "cpu-1",
+          "cpu-2",
+          "cpu-4",
+          "cpu-8",
+          "memfs-io"
+        ],
+        "checksum_sets": {
+          "allocator": [
+            528482304
+          ],
+          "cpu-1": [
+            9007160971231232
+          ],
+          "cpu-2": [
+            9007160971231232
+          ],
+          "cpu-4": [
+            9007160971231232
+          ],
+          "cpu-8": [
+            9007160971231232
+          ],
+          "memfs-io": [
+            7340032
+          ]
+        },
+        "serial_sha256": "7931db8c6d771c8c7545cf5c26a7b5c2c54ae350f07a56e79aaaa252ccb335d5"
+      }
+    },
+    {
+      "name": "build/performance/pmm-smp/8/metadata.json",
+      "started_utc": "2026-11-13T11:24:43.261745+00:00",
+      "boot_smoke_feature": true,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/pmm-smp/8/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/pmm-smp/8/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "9a6b9ae04fe4b6a8e28b3cd5eec4c4f00e8a9526aaabdbfbfb9fe3122a914c73",
+        "bytes": 266489856,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 18974.376406999,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "pmm_assertions": {
+        "per_cpu_completed_rounds": [
+          [
+            0,
+            128
+          ],
+          [
+            1,
+            128
+          ],
+          [
+            2,
+            128
+          ],
+          [
+            3,
+            128
+          ],
+          [
+            4,
+            128
+          ],
+          [
+            5,
+            128
+          ],
+          [
+            6,
+            128
+          ],
+          [
+            7,
+            128
+          ]
+        ],
+        "cohort_width": 4,
+        "frames_allocated_and_returned": 4096,
+        "all_frame_identities_unique_while_cohort_live": true,
+        "free_and_total_bytes_restored": true,
+        "stats_bytes_not_printed": "Equality checked inside kernel; no numeric before/after bytes emitted."
+      },
+      "fixed_work_fixture": {
+        "records": 36,
+        "scenes": [
+          "allocator",
+          "cpu-1",
+          "cpu-2",
+          "cpu-4",
+          "cpu-8",
+          "memfs-io"
+        ],
+        "checksum_sets": {
+          "allocator": [
+            528482304
+          ],
+          "cpu-1": [
+            9007160971231232
+          ],
+          "cpu-2": [
+            9007160971231232
+          ],
+          "cpu-4": [
+            9007160971231232
+          ],
+          "cpu-8": [
+            9007160971231232
+          ],
+          "memfs-io": [
+            7340032
+          ]
+        },
+        "serial_sha256": "0922f8dd7d766e42fcfac5fa70309ec56ced0d63b8039df18f413259a11b1070"
+      }
+    },
+    {
+      "name": "build/performance/pmm-resources/metadata.json",
+      "started_utc": "2026-11-13T11:25:52.944265+00:00",
+      "boot_smoke_feature": true,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/pmm-resources/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/pmm-resources/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "9a6b9ae04fe4b6a8e28b3cd5eec4c4f00e8a9526aaabdbfbfb9fe3122a914c73",
+        "bytes": 266489856,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 62501.47046099846,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/pmm-resources/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-13T11:26:55.917287+00:00",
+      "boot_smoke_feature": true,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/pmm-resources/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/pmm-resources/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "9a6b9ae04fe4b6a8e28b3cd5eec4c4f00e8a9526aaabdbfbfb9fe3122a914c73",
+        "bytes": 266489856,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 10518.60108999972,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/pmm-gui.json",
+      "started_utc": "2026-11-13T11:32:35.068893+00:00",
+      "boot_smoke_feature": true,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "9a6b9ae04fe4b6a8e28b3cd5eec4c4f00e8a9526aaabdbfbfb9fe3122a914c73",
+        "bytes": 266489856,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 24414.301049999267,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "build/performance/pmm-production/metadata.json",
+      "started_utc": "2026-11-13T11:36:40.431755+00:00",
+      "boot_smoke_feature": false,
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/pmm-production/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/pmm-production/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "659f898f1a47741fb1b2183f3f1d445e8cba0cdbe74b97ffc3c1d528e3a14dd1",
+        "bytes": 266403840,
+        "profile": "full"
+      },
+      "validation_run_wall_ms": 17639.775278999878,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "limits": [
+    "Reservation/accounting exclusion only; caller must own and retire a frame before returning it.",
+    "No shared-mapping/TLB/DMA lifetime proof or complete heap/VMM/device lock order.",
+    "No registry/task lock, atomic Running(cpu), remote wake/cancel or parallel applications.",
+    "Native AP test uses bounded boot IRQ work; this is not a production interrupt-latency benchmark.",
+    "Wall times below cover complete tests; PIT resolution/IRQ-off undercount and shared TCG host prevent speedup/scaling conclusions.",
+    "Docker host cgroup metadata may omit enclosing quotas; KVM unavailable."
+  ],
+  "workspace_image_after_validation": "production limine_sdk_terminal.conf (boot-smoke worker absent); rebuild a test config for subsequent smoke-marker budgets"
+}

@@ -41,7 +41,7 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 | OP9 | Не закрыт | Итоговая performance/scaling-матрица требует готового SMP и стабильного reference runner |
 
 **Фактический режим:** до 8 аппаратно запущенных vCPU в проверенной TCG-матрице,
-`scheduler=up dispatch_cpus=1 APs=parked`. AP обрабатывают изолированные probes;
+`scheduler=up dispatch_cpus=1 APs=parked`. AP обрабатывают изолированные hardware/PMM probes;
 приложения и pthread workers всё ещё выполняются последовательно на одном CPU.
 KVM на стенде недоступен. Медианы PIT с шагом 10 мс и host/QMP stream time
 не доказывают ускорение, per-event tail latency или input-to-photon.
@@ -209,6 +209,11 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   с регистрацией, clear-child-tid публикуется через Release; borrowed word view
   не переживает guard. Это не межъядерное владение task или cancellation.
 
+- [x] [PMM bitmap/accounting под настоящим leaf lock](docs/performance/pmm-concurrency.md):
+  единая транзакция alloc/contiguous/free/stats, однократный handoff boot bitmap;
+  host 80 000 смешанных транзакций и реальные BSP/AP cohorts на 1/4/8 CPU.
+  AP выполняют только этот boot probe и снова паркуются; task dispatch остаётся UP.
+
 Оставшиеся обязательные gates:
 
 - [ ] Scoped registry/task locking и lifetime pins для самих объектов/metadata
@@ -220,7 +225,8 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   вместо переноса бесконечных IRQ-off окон на несколько CPU.
 - [ ] Atomic predicate/check/block/wake и lifecycle/cancellation для потоков,
   futex, pipe/PTY, IPC и wait-set; remote notification и порядок освобождения.
-- [ ] Закрыть allocator/PMM/shared VM/handles/device shared paths и последний reader.
+- [ ] Закрыть общий heap/PMM/shared VM/handles/device lock order и последний reader.
+  PMM операции защищены отдельно; это не доказательство всей цепочки allocator/VM.
   Pin AddressSpace не является pin каждой mapping или shared-frame bookkeeping.
 - [ ] Active CPU masks, generation/ack TLB shootdown до reuse страниц: unmap,
   mprotect/W^X, shared mappings, exit, миграция и гонка входа в address space.

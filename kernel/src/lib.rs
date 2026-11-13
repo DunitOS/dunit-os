@@ -878,6 +878,8 @@ pub extern "C" fn kernel_main(
     screen_log("[ OK ] Hardware interrupts configured", false);
 
     cpu::start_multiprocessor();
+    #[cfg(feature = "boot-smoke-tests")]
+    assert!(memory::pmm::run_concurrent_smoke(), "concurrent PMM allocation/reclaim");
 
     #[cfg(feature = "boot-smoke-tests")]
     {

@@ -12,7 +12,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | PROCESS_TABLE and current process/thread access | current owner/thread and explicit-PID mutation use common scopes; no static Process getters; private registry Vec remains UP-only; dispatch backing is independently owned | registry/task pinning and exclusion; remove remaining internal aliases and preserve owned dispatch lifetime |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
-| PMM bitmap, heap and shared VM objects | separate locks/atomics, UP callers | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
+| PMM bitmap, heap and shared VM objects | PMM bitmap/accounting share an IRQ-safe leaf lock; one-shot bitmap publication; isolated BSP/AP allocation cohorts tested; heap/shared VM have separate owners | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
 | VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | coarse registry scope; complete process/task and ProcFs snapshot lock order before AP dispatch |
 | VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
@@ -23,7 +23,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 
 Sequence: first validate CPU-local entry on one CPU with the full boot/DF/IRQ,
 TLS/FPU and syscall contracts. Then APs may initialize private hardware state and
-park, handling only isolated APIC probes. They must not access process/VFS/heap
+park, handling isolated APIC probes and the bounded PMM allocation test after its leaf lock is installed. They must not access process/VFS/heap
 paths until their ownership and remote invalidation invariants are implemented.
 An idle AP count is not parallel userspace or a scaling result.
 
@@ -84,3 +84,10 @@ current Process/thread getters, centralizes PID/current mutation notifications
 and splits signal authorization from target mutation. This closes that specific
 cross-task nesting path, not arbitrary callback reentry or registry exclusion.
 The private table getter still returns an UP-only mutable registry reference.
+
+The [PMM concurrency receipt](pmm-concurrency.md) removes unsynchronized runtime
+bitmap access and the manual manager Sync assertion, unifies frame accounting
+under one leaf lock and protects the one-time static bitmap handoff. Actual APs
+join the BSP for 128 boot allocation cohorts on 1/4/8 CPUs, then park again.
+This tests the physical allocator, not task scheduling, mapped-page reclamation
+or the complete allocator/VM/device lock order.
