@@ -459,182 +459,14 @@ fn validate_user_mapping(ptr: u64, size: usize, writable: bool) -> Result<(), i6
     validate_user_pages(ptr, size, writable)
 }
 
-/// Verify every page spanned by `[ptr, ptr+size)` is present, user-accessible
-/// and (optionally) writable. Unlike [`validate_user_mapping`] this does NOT
-/// impose the small [`MAX_USER_COPY`] cap, so it suits large bulk transfers
-/// (e.g. `fb_present`) whose own upper bound is enforced by the caller. The
-/// caller MUST still range-check the pointer (see [`is_valid_user_pointer`]).
-fn validate_user_pages(ptr: u64, size: usize, writable: bool) -> Result<(), i64> {
-    if size == 0 {
-        return Ok(());
-    }
-
-    const PAGE_SIZE: u64 = 4096;
-    let first_page = ptr & !(PAGE_SIZE - 1);
-    let last_byte = ptr.checked_add(size as u64 - 1).ok_or(EFAULT)?;
-    let last_page = last_byte & !(PAGE_SIZE - 1);
-    let mut page = first_page;
-
-    loop {
-        let flags = crate::memory::vmm::active_user_page_flags(
-            crate::memory::vmm::VirtualAddress::from_usize(page as usize),
-        )
-        .map_err(|_| EFAULT)?
-        .ok_or(EFAULT)?;
-        let required = crate::memory::vmm::PageFlags::PRESENT | crate::memory::vmm::PageFlags::USER;
-        if !flags.contains(required)
-            || (writable && !flags.contains(crate::memory::vmm::PageFlags::WRITABLE))
-        {
-            return Err(EFAULT);
-        }
-        if page == last_page {
-            break;
-        }
-        page = page.checked_add(PAGE_SIZE).ok_or(EFAULT)?;
-    }
-
-    Ok(())
-}
-
-pub fn user_copy_is_range_checked_only() -> bool {
-    false
-}
-
 fn is_valid_fd_number(fd: u32) -> bool {
     fd < MAX_FD
 }
 
-fn is_valid_string_pointer(ptr: *const u8) -> bool {
-    if ptr.is_null() {
-        return false;
-    }
-
-    let addr = ptr as u64;
-    is_valid_user_pointer(addr, 1)
-}
-
-pub fn copy_string_from_user(ptr: *const u8, max_len: usize) -> Result<String, i64> {
-    if max_len == 0 || max_len > MAX_USER_COPY {
-        syscall_log!("[SYSCALL] invalid user string max_len={}\r\n", max_len);
-        return Err(EINVAL);
-    }
-
-    validate_user_mapping(ptr as u64, max_len, false)?;
-
-    let mut bytes = Vec::new();
-    for offset in 0..max_len {
-        let byte = unsafe { core::ptr::read_volatile(ptr.add(offset)) };
-        if byte == 0 {
-            return String::from_utf8(bytes).map_err(|_| EINVAL);
-        }
-        bytes.push(byte);
-    }
-
-    syscall_log!(
-        "[SYSCALL] unterminated user string: ptr={:#x}, max_len={}\r\n",
-        ptr as u64,
-        max_len
-    );
-    Err(ENAMETOOLONG)
-}
-
-pub fn copy_string_from_user_len(
-    ptr: *const u8,
-    len: usize,
-    max_len: usize,
-) -> Result<String, i64> {
-    if max_len == 0 || max_len > MAX_USER_COPY {
-        syscall_log!("[SYSCALL] invalid user string max_len={}\r\n", max_len);
-        return Err(EINVAL);
-    }
-
-    if len > max_len {
-        syscall_log!(
-            "[SYSCALL] user string too large: len={}, max={}\r\n",
-            len,
-            max_len
-        );
-        return Err(ENAMETOOLONG);
-    }
-
-    validate_user_mapping(ptr as u64, len, false)?;
-
-    let mut bytes = Vec::new();
-    for offset in 0..len {
-        let byte = unsafe { core::ptr::read_volatile(ptr.add(offset)) };
-        if byte == 0 {
-            return Err(EINVAL);
-        }
-        bytes.push(byte);
-    }
-
-    String::from_utf8(bytes).map_err(|_| EINVAL)
-}
-
-pub fn copy_buffer_from_user(ptr: *const u8, len: usize) -> Result<Vec<u8>, i64> {
-    if len == 0 {
-        return Ok(Vec::new());
-    }
-
-    validate_user_mapping(ptr as u64, len, false)?;
-
-    let mut out = Vec::new();
-    out.reserve(len);
-    for offset in 0..len {
-        let byte = unsafe { core::ptr::read_volatile(ptr.add(offset)) };
-        out.push(byte);
-    }
-
-    Ok(out)
-}
-
-/// Like [`copy_buffer_from_user`] but for bulk transfers larger than
-/// [`MAX_USER_COPY`]. The caller supplies its own `max` upper bound (fb_present
-/// caps at the framebuffer size); the source pages are still fully validated as
-/// present + user-readable, only the small generic cap is lifted.
-#[allow(dead_code)] // retained utility: bulk user copy above MAX_USER_COPY
-pub fn copy_buffer_from_user_bounded(
-    ptr: *const u8,
-    len: usize,
-    max: usize,
-) -> Result<Vec<u8>, i64> {
-    if len == 0 {
-        return Ok(Vec::new());
-    }
-    if len > max {
-        syscall_log!("[SYSCALL] bounded user copy too large: len={}, max={}\r\n", len, max);
-        return Err(EINVAL);
-    }
-    if !is_valid_user_pointer(ptr as u64, len) {
-        return Err(EFAULT);
-    }
-    validate_user_pages(ptr as u64, len, false)?;
-
-    let mut out = Vec::new();
-    out.reserve(len);
-    for offset in 0..len {
-        let byte = unsafe { core::ptr::read_volatile(ptr.add(offset)) };
-        out.push(byte);
-    }
-
-    Ok(out)
-}
-
-pub fn copy_buffer_to_user(ptr: *mut u8, data: &[u8]) -> Result<(), i64> {
-    if data.is_empty() {
-        return Ok(());
-    }
-
-    validate_user_mapping(ptr as u64, data.len(), true)?;
-
-    for (offset, byte) in data.iter().enumerate() {
-        unsafe {
-            core::ptr::write_volatile(ptr.add(offset), *byte);
-        }
-    }
-
-    Ok(())
-}
+mod user_memory;
+pub use user_memory::user_copy_is_range_checked_only;
+pub(crate) use user_memory::{copy_string_from_user_len,copy_buffer_from_user,copy_buffer_to_user};
+use user_memory::validate_user_pages;
 
 #[no_mangle]
 pub extern "C" fn syscall_handler(
@@ -2247,32 +2079,23 @@ fn sys_fb_present(src: *const u8, width: u32, height: u32, dst_x: u32, dst_y: u3
     // frame every tick, so the old copy-into-a-Vec path allocated and byte-copied
     // several MiB per frame; reading the source in place removes that per-frame
     // allocation and halves the memory traffic.
-    if let Err(error) = validate_user_pages(src as u64, bytes, false) {
-        return error;
-    }
+    let copied=user_memory::with_mapping(src as u64,bytes,false,|mapping| {
     let fb = KERNEL_FB_ADDR.load(Ordering::Relaxed) as *mut u8;
     let fb_w = KERNEL_FB_WIDTH.load(Ordering::Relaxed) as usize;
     let fb_h = KERNEL_FB_HEIGHT.load(Ordering::Relaxed) as usize;
     let pitch = KERNEL_FB_PITCH.load(Ordering::Relaxed) as usize;
     let (dx, dy) = (dst_x as usize, dst_y as usize);
-    let src32 = src as *const u32;
-    for row in 0..h {
-        let py = dy + row;
-        if py >= fb_h {
-            break;
-        }
-        for col in 0..w {
-            let px = dx + col;
-            if px >= fb_w {
-                continue;
-            }
-            let color = unsafe { core::ptr::read_volatile(src32.add(row * w + col)) };
-            unsafe {
-                let dst = fb.add(py * pitch + px * 4) as *mut u32;
-                core::ptr::write_volatile(dst, color);
-            }
+    let copy_width=w.min(fb_w.saturating_sub(dx));
+    let copy_height=h.min(fb_h.saturating_sub(dy));
+    if copy_width!=0 {
+        for row in 0..copy_height {
+            let destination=unsafe {fb.add((dy+row)*pitch+dx*4)} as *mut u32;
+            unsafe {mapping.copy_words_volatile(row*w*4,destination,copy_width);}
         }
     }
+    Ok(())
+    });
+    if let Err(error)=copied {return error;}
     // Вытолкнуть кадр на физический дисплей. Для сканаут-прямых бэкендов
     // (Limine/Bochs) — no-op; для virtio-gpu — TRANSFER_TO_HOST_2D + FLUSH.
     let _ = crate::drivers::display::present(None);
@@ -2658,18 +2481,14 @@ fn sys_thread_create(entry: u64, stack_top: u64, arg: u64) -> i64 {
     if let Err(error) = validate_user_mapping(entry, 1, false) {
         return error;
     }
-    let entry_flags = crate::memory::vmm::active_user_page_flags(
-        crate::memory::vmm::VirtualAddress::from_usize((entry & !0xfff) as usize),
-    );
-    match entry_flags {
-        Ok(Some(flags)) if !flags.contains(crate::memory::vmm::PageFlags::NO_EXECUTE) => {}
-        _ => return EACCES,
+    match user_memory::with_mapping(entry,1,false,|mapping|Ok(mapping.executable())) {
+        Ok(true)=>{},Ok(false)=>return EACCES,Err(error)=>return error,
     }
+    if let Err(error)=copy_buffer_to_user(return_slot as *mut u8,&0u64.to_le_bytes()) {return error;}
     match crate::process::create_user_thread(entry, return_slot, arg) {
         Ok(tid) => {
             // A thread entry has the regular x86_64 call-frame alignment.
             // Returning without ThreadExit faults only this thread.
-            unsafe { core::ptr::write(return_slot as *mut u64, 0); }
             tid.0 as i64
         }
         Err(error) => process_error_to_errno(error),
@@ -2693,7 +2512,8 @@ fn sys_thread_join(tid: u64, status: *mut WaitStatus) -> i64 {
         kind: exit.kind_code(),
         code: exit.exit_code(),
     };
-    unsafe { core::ptr::write_unaligned(status, result); }
+    let bytes=unsafe {core::slice::from_raw_parts(&result as *const WaitStatus as *const u8,core::mem::size_of::<WaitStatus>())};
+    if let Err(error)=copy_buffer_to_user(status as *mut u8,bytes) {return error;}
     syscall_log!("[THREAD] joined tid={} kind={} code={}\r\n", tid, result.kind, result.code);
     tid as i64
 }

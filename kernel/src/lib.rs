@@ -884,6 +884,8 @@ pub extern "C" fn kernel_main(
     clock::run_clock_probe();
     #[cfg(feature = "boot-smoke-tests")]
     assert!(memory::pmm::run_concurrent_smoke(), "concurrent PMM allocation/reclaim");
+    #[cfg(feature = "boot-smoke-tests")]
+    assert!(memory::run_tlb_smoke(), "cross-CPU mapping invalidation and reclaim");
 
     #[cfg(feature = "boot-smoke-tests")]
     {

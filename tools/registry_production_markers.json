@@ -39,6 +39,8 @@
     {
       "marker": "[USER-FAULT]",
       "after": "[TERM-007] Starting main loop"
-    }
+    },
+    "[TLB-SMP]",
+    "[USER-MAPPING]"
   ]
 }

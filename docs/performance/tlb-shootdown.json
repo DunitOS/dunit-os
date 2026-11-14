@@ -1,0 +1,557 @@
+{
+  "date": "2026-11-14",
+  "scope": "OP3 acknowledged TLB, atomic PTE access and scoped user mapping copies; application scheduler remains UP.",
+  "source": {
+    "base_commit": "1e7fe00b82feefe41cbbfebec2dd6ac29c7cdb72",
+    "files_sha256": {
+      "hal/src/mp.c": "b849f766ebefbe80a5b175bebd6ad320f1c8ddbd269fcf60c114f686bb63a087",
+      "kernel/src/cpu.rs": "2bfa3aa27e10f03fe810ed3edff05f2ec7c8d313ab9d9838ff2947e98e704e8b",
+      "kernel/src/hal.rs": "14b3ae32533db86eff32e7619e0d1ac179f70863b4f76d95dad71455854baf56",
+      "kernel/src/lib.rs": "2cbabf6983fbdd257972000bed5c9cfd2dedc7631033f9d05d82f39cfc693609",
+      "kernel/src/memory/mod.rs": "2af52640bf29a4aee6ae027f95288d0c8dbbeeba1cac6e0f7c70fdffcc40b2db",
+      "kernel/src/memory/vmm.rs": "652b8b2971a1132609ebae1697375258a5c007cd1ea7650f20781e6db5c266ff",
+      "kernel/src/memory/tlb.rs": "9720636d2ad854c60461c6c3f93457c36721f5f595e470615ced1db845334a65",
+      "kernel/src/memory/tlb_smoke.rs": "0db0864075e64770367ccc9c0d5963529550bcf22e42e5258f78bf3b5136bf06",
+      "kernel/src/process/dispatch.rs": "96e62bd92804cab5ac8abc21dba3e11280f630af1f016e9b938c1c62528c7eb0",
+      "kernel/src/process/mod.rs": "6b0c637bb323f01500a0249f423800a93617dcff4208a35d26c3fc4161fb71bb",
+      "kernel/src/syscall/mod.rs": "979711c5b23014fb13cdaaebdaaffa77c528177918afd6ea0d2a747dcb4f4d03",
+      "kernel/src/syscall/user_memory.rs": "b8f76703dd63c805e674cbc9ffe046aae91c5d8eb66a17d566ef4a1a8c9e59e8",
+      "tools/test_page_tables.py": "541ed720c6baf7397b08266ad899cb5511b31e71eb323b91ab19d49348fb7e22",
+      "tools/test_page_tables_host.rs.in": "9c3c6adfb764625ca4bc3352ff9eb0797a43ede03f05cf65d04be019bcb4a575",
+      "tools/test_tlb.py": "b8074da2c96f8581ffda4add5dfbb237f96d6d293cad191e56366035288785f8",
+      "tools/test_tlb_host.rs.in": "68e7f8cb1f986b782e63c0a630af35d56750848c1bb14e4c47824d9956294ff6",
+      "tools/test_tlb_native.py": "388bcf9abd879d70480b179555ec17623024d0b6baeb9fe69bb2254aec564644",
+      "tools/test_user_memory.py": "10542a5ad72a2b499f48805140a90a16e809166b6f6d23149cf0ffec97a71e57",
+      "tools/test_user_memory_host.rs.in": "976deb12daa9846ee2ef7b56d05ed7cd35cc15fb1597e5c074089a537a493976",
+      "tools/test_process_resources.py": "b5eeedc4d87b57c64702ed36da5be7518660dc43f01929a11a77a3c85a5dc745",
+      "tools/registry_production_markers.json": "a7631db02b9c7c4437f406f2a7700b425bf600fe4f6900ef3517d30cdb53e3ed"
+    }
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "native_runs": [
+    {
+      "receipt": "build/performance/tlb-atomic-resources/metadata.json",
+      "started_utc": "2026-11-14T11:01:46.408191+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/tlb-atomic-resources/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/tlb-atomic-resources/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "47f6db7a9ebc57c4790eeacd8eec5e778f01ee7417a066647c6d4e846136cbce",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=4 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] [PERF-IPC] all checks passed"
+      ]
+    },
+    {
+      "receipt": "build/performance/tlb-atomic-resources/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-14T11:03:03.124098+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/tlb-atomic-resources/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/tlb-atomic-resources/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "10b00e8c7757cb19dbb9ee3a292dafefa4f887757ea2510a900892c4ff0e58f0",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=4 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated"
+      ]
+    },
+    {
+      "receipt": "build/performance/tlb-atomic-core/1/metadata.json",
+      "started_utc": "2026-11-14T11:03:13.920987+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/tlb-atomic-core/1/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/tlb-atomic-core/1/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "cd1bb1b34ad2986fa2f21680793fce9f063eaa8c0427e4828620c87d5c7aedff",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=1 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] [PERF-CORE] all checks passed"
+      ]
+    },
+    {
+      "receipt": "build/performance/tlb-atomic-core/4/metadata.json",
+      "started_utc": "2026-11-14T11:03:32.028808+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/tlb-atomic-core/4/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/tlb-atomic-core/4/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "b9f1d0b62532bbae9c7d46f7112a31d241f04d071022bd8a9f90293b6178f644",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=4 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] [PERF-CORE] all checks passed"
+      ]
+    },
+    {
+      "receipt": "build/performance/tlb-atomic-core/8/metadata.json",
+      "started_utc": "2026-11-14T11:03:50.711243+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/tlb-atomic-core/8/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/tlb-atomic-core/8/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "cf4c8490f1fb3c0e4031f58e7f925791b243ab659710d1d801543f9ae6dd140c",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=8 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] [PERF-CORE] all checks passed"
+      ]
+    },
+    {
+      "receipt": "build/performance/tlb-atomic-gui/metadata.json",
+      "started_utc": "2026-11-14T11:04:10.869375+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/tlb-atomic-gui/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/tlb-atomic-gui/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "a0deb3d8c7c1c4ed895be1fd6e2e6c8eb5c86ca135357492be38802b51fa2837",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=4 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated"
+      ]
+    },
+    {
+      "receipt": "build/performance/tlb-atomic-pointer/metadata.json",
+      "started_utc": "2026-11-14T11:04:39.656401+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "0a53c475954eab84291ffd6ba5cbd5bfa7c508abc2ee545c01dacdad4fc0b4bc",
+        "bytes": 266588160,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/tlb-atomic-pointer/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/tlb-atomic-pointer/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "f960a91c4fecdb4dfe6026951acd9fbef767a1f6673df5c4b97ae8ff20d78109",
+      "serial_assertions": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[USER-MAPPING] source pin and task-scope copy survive object drop OK",
+        "[TLB-SMP] cpus=8 rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated"
+      ]
+    }
+  ],
+  "host_tests": {
+    "tlb": {
+      "passed": true,
+      "contended_transactions": 8000,
+      "exact_acknowledgements": 56007,
+      "missing_ack": "actual timeout panic caught; reclaim callback refused"
+    },
+    "user_memory": {
+      "passed": 3,
+      "checks": [
+        "mapping held against unmap",
+        "permissions",
+        "owned bytes",
+        "aligned/unaligned volatile words",
+        "no-context EFAULT",
+        "compile-negative escaping/migration"
+      ]
+    },
+    "page_tables": {
+      "passed": true,
+      "writers": 4,
+      "stores": 1000000,
+      "snapshots": 1000000,
+      "canonical_copies": 2000
+    },
+    "regressions_passed": [
+      "process_access",
+      "execution_ownership",
+      "parking",
+      "wait_queue",
+      "user_word",
+      "clock",
+      "ipc_lock",
+      "qemu_marker_phases",
+      "performance_baseline",
+      "image_profiles"
+    ]
+  },
+  "compile_checks": {
+    "boot_smoke_tests": "passed",
+    "no_default_features": "passed; production boot not repeated for this source"
+  },
+  "pointer_pixels": {
+    "verified": true,
+    "anchor": [
+      350,
+      220
+    ],
+    "states": [
+      "visible",
+      "hidden",
+      "restored",
+      "restored after exit"
+    ]
+  },
+  "unmeasured_or_open": [
+    "production boot / UEFI / HPET-off not repeated on this new slice",
+    "remote CPL3 W^X faults",
+    "concurrent process-group cancel/exit/migration",
+    "full shared VM/driver/DMA last-reader audit",
+    "interruptible syscall boundaries",
+    "AP application dispatch",
+    "KVM/reference scaling and per-event latency tails"
+  ]
+}

@@ -1,0 +1,136 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
+
+@CONSTANTS@
+
+#[derive(Clone, Copy)]
+pub struct PhysicalAddress(usize);
+impl PhysicalAddress {
+    fn as_usize(self) -> usize {
+        self.0
+    }
+}
+// The wrapper mirrors the declared flag bits; the actual PTE implementation
+// must still mask physical address bits separately from these flags.
+#[derive(Clone, Copy)]
+pub struct PageFlags(u64);
+impl PageFlags {
+    fn from_bits_truncate(value: u64) -> Self {
+        Self(value & 0x8000_0000_0000_01ff)
+    }
+    fn bits(self) -> u64 {
+        self.0
+    }
+}
+
+@DEFINITIONS@
+
+#[derive(Debug, PartialEq, Eq)]
+enum AddressSpaceError {
+    KernelRootNotInitialized,
+}
+static KERNEL_ROOT_FRAME: AtomicUsize = AtomicUsize::new(UNINITIALIZED_ROOT);
+// Tables live in aligned host allocations owned for the whole test.
+fn phys_to_virt(address: usize) -> usize {
+    address
+}
+
+@CANONICAL_COPY@
+
+fn main() {
+    assert_eq!(core::mem::size_of::<PageTableEntry>(), 8);
+    assert_eq!(core::mem::align_of::<PageTableEntry>(), 8);
+    assert_eq!(core::mem::size_of::<PageTable>(), 4096);
+    assert_eq!(core::mem::align_of::<PageTable>(), 4096);
+    let table = Arc::new(PageTable::new());
+    assert!(table.entries.iter().all(|entry| entry.is_unused()));
+    let entry = table.get_entry(123);
+    entry.set(PhysicalAddress(0x1234_5000), PageFlags(0x8000_0000_0000_0007));
+    assert_eq!(entry.addr().0, 0x1234_5000);
+    assert_eq!(entry.flags().bits(), 0x8000_0000_0000_0007);
+    entry.set_unused();
+    assert!(entry.is_unused());
+
+    // Independent software writers model concurrent hardware/software entry
+    // updates. Each snapshot must be a whole old/new PTE, never mixed halves.
+    let barrier = Arc::new(Barrier::new(5));
+    let writers: Vec<_> = (0..4)
+        .map(|_| {
+            let table = table.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                for i in 0..250_000 {
+                    let (address, flags) = if i % 2 == 0 {
+                        (0x1234_5000, 7)
+                    } else {
+                        (0xabcd_e000, 0x8000_0000_0000_0005)
+                    };
+                    table.get_entry(123).set(PhysicalAddress(address), PageFlags(flags));
+                }
+            })
+        })
+        .collect();
+    barrier.wait();
+    for _ in 0..1_000_000 {
+        assert!(matches!(entry.load(), 0 | 0x1234_5007 | 0x8000_0000_abcd_e005));
+    }
+    for writer in writers {
+        writer.join().unwrap();
+    }
+    table.zero();
+    assert!(table.entries.iter().all(|entry| entry.is_unused()));
+
+    let root = Box::new(PageTable::new());
+    let root_address = &*root as *const PageTable as usize;
+    assert_eq!(
+        unsafe { sync_kernel_half_locked(root_address) },
+        Err(AddressSpaceError::KernelRootNotInitialized)
+    );
+    for index in 0..PML4_KERNEL_START {
+        root.get_entry(index).store(((index as u64 + 1) << 12) | 7);
+    }
+    for index in PML4_KERNEL_START..512 {
+        table.get_entry(index).store(((index as u64 + 1) << 12) | 3);
+    }
+    let kernel_address = Arc::as_ptr(&table) as usize;
+    KERNEL_ROOT_FRAME.store(kernel_address, Ordering::Release);
+    assert_eq!(unsafe { sync_kernel_half_locked(root_address) }, Ok(()));
+    assert_eq!(unsafe { sync_kernel_half_locked(kernel_address) }, Ok(()));
+    for index in 0..512 {
+        let expected = ((index as u64 + 1) << 12) | if index < PML4_KERNEL_START { 7 } else { 3 };
+        assert_eq!(root.get_entry(index).load(), expected);
+    }
+
+    // Copy the actual canonical half while another CPU mutates one shared
+    // entry; user-half mappings must remain untouched through every refresh.
+    const SLOT: usize = 400;
+    const FIRST: u64 = 0x1234_5003;
+    const SECOND: u64 = 0x8000_0000_abcd_e003;
+    table.get_entry(SLOT).store(FIRST);
+    let stop = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(Barrier::new(2));
+    let writer = {
+        let table = table.clone();
+        let stop = stop.clone();
+        let started = started.clone();
+        std::thread::spawn(move || {
+            started.wait();
+            while !stop.load(Ordering::Acquire) {
+                table.get_entry(SLOT).store(SECOND);
+                table.get_entry(SLOT).store(FIRST);
+            }
+        })
+    };
+    started.wait();
+    for _ in 0..2_000 {
+        unsafe { sync_kernel_half_locked(root_address).unwrap(); }
+        assert!(matches!(root.get_entry(SLOT).load(), FIRST | SECOND));
+        for index in 0..PML4_KERNEL_START {
+            assert_eq!(root.get_entry(index).load(), ((index as u64 + 1) << 12) | 7);
+        }
+    }
+    stop.store(true, Ordering::Release);
+    writer.join().unwrap();
+    println!("page tables: 8-byte PTE/4KiB table, 1M contended stores/snapshots, 2000 actual canonical copies and shared mutation OK");
+}

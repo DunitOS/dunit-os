@@ -30,6 +30,7 @@ use current_access::with_current_thread;
 mod resources;
 mod dispatch;
 use dispatch::KernelStack;
+pub(crate) use dispatch::active_address_space_pin;
 #[cfg(feature = "boot-smoke-tests")]
 pub use dispatch::run_dispatch_pin_smoke;
 pub use resources::inherit_process_fds;

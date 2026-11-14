@@ -22,6 +22,7 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64};
 #[repr(align(64))]
 pub struct Runtime {
     pub current_pid: AtomicU64,
+    pub active_space:core::sync::atomic::AtomicUsize,
     pub exit_requested: AtomicBool,
     pub yield_requested: AtomicBool,
     pub schedule_hint: AtomicU64,
@@ -33,6 +34,7 @@ impl Runtime {
     const fn new() -> Self {
         Self {
             current_pid: AtomicU64::new(0),
+            active_space:core::sync::atomic::AtomicUsize::new(0),
             exit_requested: AtomicBool::new(false),
             yield_requested: AtomicBool::new(false),
             schedule_hint: AtomicU64::new(0),
@@ -100,6 +102,7 @@ pub fn start_multiprocessor() {
     }
     assert_ne!(result, 0, "AP startup/timer/IPI/clock handshake");
     assert_eq!(unsafe {hal_mp_clock_verified()},count,"cross-CPU clock brackets");
+    crate::memory::tlb::online(count as usize);
     let mut clock_line=crate::FmtBuf::new();
     clock_line.push_str("[CLOCK-SMP] bracketed_cpus=");clock_line.push_u64(count);clock_line.push_str("\r\n");
     crate::memory::serial_write(clock_line.as_str());

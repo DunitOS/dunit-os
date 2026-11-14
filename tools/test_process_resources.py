@@ -20,6 +20,9 @@ def contract():
     result['forbidden'].append('[PARKING] FAIL')
     result['required'].append('[IPC-LOCK] bounded FIFO, attachment identity and cleanup OK')
     result['forbidden'].append('[IPC-LOCK] FAIL')
+    result['required'].append('[USER-MAPPING] source pin and task-scope copy survive object drop OK')
+    result['required'].append('rounds=32 AP retarget, IRQ-off NMI acks and final reclaim OK')
+    result['forbidden'].append('[TLB-SMP] FAIL')
     for name in ('m6_reap', 'waitset', 'pty_args',
                  'm6_musl_spawn', 'm6_pipe', 'm6_cond', 'ipc_performance'):
         scene = json.loads((ROOT / f'tools/{name}_markers.json').read_text())

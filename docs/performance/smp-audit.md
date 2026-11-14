@@ -13,7 +13,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | exclusive CPU/generation reservation and Running claim installed; return/cleanup retains ownership; remote cancellation/scheduling remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | notification checkpoint and generation-checked task registration; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | preserve checkpoint/register ordering; remote cancellation/runqueue notification and IRQ progress remain open |
 | PMM bitmap, heap and shared VM objects | PMM bitmap/accounting share an IRQ-safe leaf lock; one-shot bitmap publication; isolated BSP/AP allocation cohorts tested; heap/shared VM have separate owners | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
-| Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
+| Page tables, CR3 and MMIO mappings | locked AddressSpace and active-root pin; atomic PTEs, shared references; active-root masks, generation/ack NMI shootdown before reuse; real MMIO guard | remote CPL3 faults, shared-VM/application exit/migration stress and complete driver/readers audit |
 | VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | process registry is released before task/VFS callbacks; ProcFs reads metadata only; complete device/IRQ/lifecycle ranking before AP dispatch |
 | VFS path scratch | previously one shared UnsafeCell buffer | per-operation stack buffers; rename keeps both paths alive without heap copies |
 | DunitFS/block drivers | owned/locked DunitFS backend; shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
@@ -129,3 +129,9 @@ fallback and IRQ-off/AP proofs, and real IPC exclusion/packet identity. IPC
 send uses target task -> IPC -> metadata validation; retirement releases metadata
 before IPC clearing. Notifications run after the task/IPC guards. These additions
 do not close remote stop, kernel IRQ progress or active mappings/TLB reclamation.
+
+The [acknowledged TLB/mapping receipt](tlb-shootdown.md) adds lock-free NMI
+acknowledgements before user-frame/kernel-alias reuse, guarded address-space
+entry, atomic PTE access and a CPU-bound active mapping pin across user copies.
+Isolated AP IRQ-off retarget/reentry/reclaim and host missing-ACK checks do not
+close remote CPL3 cancellation or the remaining shared-device/IRQ lock orders.

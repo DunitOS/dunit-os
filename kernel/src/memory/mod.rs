@@ -1,5 +1,6 @@
 pub mod pmm;
 pub mod vmm;
+pub(crate) mod tlb;
 
 pub use pmm::MemRegion;
 
@@ -18,3 +19,8 @@ pub fn init() -> bool {
     vmm::run_address_space_smoke();
     true
 }
+
+#[cfg(feature="boot-smoke-tests")]
+mod tlb_smoke;
+#[cfg(feature="boot-smoke-tests")]
+pub use tlb_smoke::run_tlb_smoke;

@@ -1,0 +1,90 @@
+#![allow(dead_code)]
+extern crate alloc;
+#[path=@SYNC@]mod actual_sync;
+mod sync {pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;}
+mod cpu {
+    pub const CPU_CAPACITY:usize=64;
+    std::thread_local! {pub static CPU:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
+    pub fn index()->usize {CPU.with(|cpu|cpu.get())}
+}
+mod clock {
+    pub fn monotonic_ns()->u64 {
+        static START:std::sync::OnceLock<std::time::Instant>=std::sync::OnceLock::new();
+        START.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+    }
+}
+mod memory {
+    use std::sync::{Arc,atomic::{AtomicUsize,AtomicBool,Ordering}};
+    pub mod vmm {
+        use super::*;
+        pub static COUNT:[AtomicUsize;64]=[const{AtomicUsize::new(0)};64];
+        pub unsafe fn invalidate_if_active(_:usize,_:usize) {
+            // Real INVLPG/CR3/IST behavior is covered by native AP tests.
+            COUNT[crate::cpu::index()].fetch_add(1,Ordering::SeqCst);
+        }
+    }
+    #[path=@TLB@]mod tlb;
+    pub fn receive() {assert!(tlb::handle_nmi());}
+    pub fn run() {
+        const CPUS:usize=8;
+        tlb::online(CPUS);
+        let ready=Arc::new(std::sync::Barrier::new(CPUS+1));
+        let mut channels=Vec::new();let mut receivers=Vec::new();
+        for cpu in 0..CPUS {
+            let (tx,rx)=std::sync::mpsc::channel();channels.push(tx);
+            let ready=ready.clone();receivers.push(std::thread::spawn(move|| {
+                crate::cpu::CPU.with(|slot|slot.set(cpu));tlb::publish_root(0x1000);ready.wait();
+                while let Ok(())=rx.recv() {
+                    if super::DELAY_CPU.load(Ordering::Acquire)==cpu {
+                        while !super::ALLOW_ACK.load(Ordering::Acquire) {std::thread::yield_now();}
+                    }
+                    receive();
+                }
+            }));
+        }
+        super::CHANNELS.set(channels).unwrap();ready.wait();
+        assert_eq!(tlb::active_mask(0x1000),255);
+        // Delivery alone is insufficient: sender must wait for actual receiver
+        // invalidation and its exact generation acknowledgement.
+        super::DELAY_CPU.store(1,Ordering::Release);super::ALLOW_ACK.store(false,Ordering::Release);
+        let started=Arc::new(AtomicBool::new(false));let finish=Arc::new(AtomicBool::new(false));
+        let sender={let started=started.clone();let finish=finish.clone();std::thread::spawn(move|| {
+            started.store(true,Ordering::SeqCst);tlb::invalidate(0x1000,0x40000000);finish.store(true,Ordering::SeqCst);
+        })};
+        while !started.load(Ordering::SeqCst) {std::thread::yield_now();}
+        while super::SENDS.load(Ordering::SeqCst)<7 {std::thread::yield_now();}
+        assert!(!finish.load(Ordering::SeqCst));super::ALLOW_ACK.store(true,Ordering::Release);sender.join().unwrap();
+        super::DELAY_CPU.store(usize::MAX,Ordering::Release);
+        let writers:Vec<_>=(0..CPUS).map(|cpu|std::thread::spawn(move|| {
+            crate::cpu::CPU.with(|slot|slot.set(cpu));
+            for i in 0..1000 {tlb::invalidate(0x1000,0x40000000+i*4096);}
+        })).collect();
+        for writer in writers {writer.join().unwrap();}
+        assert_eq!(tlb::remote_acks(),56007);
+        assert_eq!(vmm::COUNT.iter().map(|n|n.load(Ordering::SeqCst)).sum::<usize>(),56007);
+        assert_eq!(super::SENDS.load(Ordering::SeqCst),56007);
+        super::DROP_ACK.store(true,Ordering::Release);
+        let reclaimed=AtomicBool::new(false);
+        let failed=std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tlb::invalidate(0x1000,0x40000000);
+            reclaimed.store(true,Ordering::Release);
+        }));
+        assert!(failed.is_err());assert!(!reclaimed.load(Ordering::Acquire));
+        println!("TLB: 8000 contended shootdowns, 56007 exact acknowledgements and missing-ack reclaim refusal OK");
+        // Receiver threads intentionally live until process exit; the static
+        // platform transport mirrors persistent online CPU mailboxes.
+    }
+}
+use std::sync::atomic::{AtomicUsize,AtomicBool,Ordering};
+static CHANNELS:std::sync::OnceLock<Vec<std::sync::mpsc::Sender<()>>>=std::sync::OnceLock::new();
+static SENDS:AtomicUsize=AtomicUsize::new(0);
+static DELAY_CPU:AtomicUsize=AtomicUsize::new(usize::MAX);
+static DROP_ACK:AtomicBool=AtomicBool::new(false);
+static ALLOW_ACK:AtomicBool=AtomicBool::new(true);
+#[no_mangle]
+extern "C" fn hal_mp_send_nmi(cpu:u64)->i32 {
+    SENDS.fetch_add(1,Ordering::SeqCst);
+    if DROP_ACK.load(Ordering::Acquire) && cpu==1 {return 1;}
+    if CHANNELS.get().unwrap()[cpu as usize].send(()).is_ok() {1} else {0}
+}
+fn main() {memory::run();}

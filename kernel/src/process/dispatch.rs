@@ -28,6 +28,7 @@ pub(super) struct DispatchScope {
     previous_stack: Option<Arc<KernelStack>>,
     _previous_space: Option<Arc<IrqSafeSpinLock<AddressSpace>>>,
     active: Option<Arc<IrqSafeSpinLock<AddressSpace>>>,
+    _cpu_bound: core::marker::PhantomData<*mut ()>,
 }
 impl DispatchScope {
     pub(super) fn new() -> Self {
@@ -36,15 +37,19 @@ impl DispatchScope {
             previous_root: unsafe { crate::memory::vmm::active_root_frame() },
             previous_pid: crate::cpu::runtime().current_pid.load(Ordering::SeqCst),
             previous_stack: with_current_thread(|p| p.kernel_stack.clone()).flatten(),
-            _previous_space: with_current_process(|p| p.address_space.clone()).flatten(),
+            _previous_space: active_address_space_pin().or_else(||with_current_process(|p| p.address_space.clone()).flatten()),
             active: None,
+            _cpu_bound: core::marker::PhantomData,
         }
     }
     unsafe fn enter(&mut self, space: &Arc<IrqSafeSpinLock<AddressSpace>>) {
-        let root = space.lock().root_frame().as_usize();
+        let _irq=InterruptGuard::new();
+        let mapped=space.lock();
+        let root = mapped.root_frame().as_usize();
         // This also refreshes the canonical kernel half, even for the same
         // CR3. Do not bypass VMM synchronization with a raw equality shortcut.
         crate::memory::vmm::switch_to_root_frame(root);
+        drop(mapped);
         if !self
             .active
             .as_ref()
@@ -53,11 +58,15 @@ impl DispatchScope {
         {
             self.active = Some(space.clone()); // retire old root only after switching
         }
+        crate::cpu::runtime().active_space.store(Arc::as_ptr(space) as usize,Ordering::Release);
     }
     pub(super) fn restore_root(&mut self) {
+        let _irq=InterruptGuard::new();
+        let _previous_guard=self._previous_space.as_ref().map(|space|space.lock());
         unsafe {
             crate::memory::vmm::switch_to_root_frame(self.previous_root);
         }
+        crate::cpu::runtime().active_space.store(self._previous_space.as_ref().map(|space|Arc::as_ptr(space) as usize).unwrap_or(0),Ordering::Release);
         self.active = None;
     }
 }
@@ -187,8 +196,10 @@ pub fn run_dispatch_pin_smoke() -> bool {
         let _irq = InterruptGuard::new();
         let previous_root = unsafe { crate::memory::vmm::active_root_frame() };
         let previous_pid = crate::cpu::runtime().current_pid.load(Ordering::SeqCst);
+        let previous_space_pointer=crate::cpu::runtime().active_space.load(Ordering::Acquire);
         fn abort_with_active_root(
             frame: DispatchFrame,
+            page:usize,
             weak_stack: &alloc::sync::Weak<KernelStack>,
             weak_fpu: &alloc::sync::Weak<FpuState>,
             weak_space: &alloc::sync::Weak<IrqSafeSpinLock<AddressSpace>>,
@@ -197,6 +208,7 @@ pub fn run_dispatch_pin_smoke() -> bool {
             unsafe {
                 scope.enter(&frame.address_space);
             }
+            let caller=ProcessId(crate::cpu::runtime().current_pid.load(Ordering::SeqCst));
             crate::cpu::runtime().current_pid.store(0, Ordering::SeqCst);
             drop(frame);
             if weak_stack.upgrade().is_some()
@@ -205,13 +217,22 @@ pub fn run_dispatch_pin_smoke() -> bool {
             {
                 return Err(ProcessError::NoSuchProcess);
             }
+            // Task lookup under this callback would deadlock on the held task
+            // mutex. The CPU-owned AS lease must suffice even after Frame drop.
+            with_process_mut(caller,|_| {
+                crate::syscall::copy_buffer_to_user(page as *mut u8,b"mapping-pin").map_err(|_|ProcessError::InvalidMemoryRange)?;
+                let data=crate::syscall::copy_buffer_from_user(page as *const u8,11).map_err(|_|ProcessError::InvalidMemoryRange)?;
+                if data.as_slice()!=b"mapping-pin" {return Err(ProcessError::InvalidMemoryRange);}
+                Ok(())
+            })?;
             Err(ProcessError::NotRunnable) // Scope must restore before retiring the root.
         }
-        if abort_with_active_root(frame, &weak_stack, &weak_fpu, &weak_space)
+        if abort_with_active_root(frame, page, &weak_stack, &weak_fpu, &weak_space)
             != Err(ProcessError::NotRunnable)
             || unsafe { crate::memory::vmm::active_root_frame() } != previous_root
             || crate::cpu::runtime().current_pid.load(Ordering::SeqCst) != previous_pid
             || weak_space.upgrade().is_some()
+            || crate::cpu::runtime().active_space.load(Ordering::Acquire)!=previous_space_pointer
         {
             return Err(ProcessError::NoSuchProcess);
         }
@@ -219,8 +240,19 @@ pub fn run_dispatch_pin_smoke() -> bool {
     }
     if check().is_ok() {
         crate::memory::serial_write("[DISPATCH-PIN] stack/FPU/address-space survive Process drop and reclaim after frame OK\r\n");
+        crate::memory::serial_write("[USER-MAPPING] source pin and task-scope copy survive object drop OK\r\n");
         true
     } else {
         false
     }
+}
+
+/// The CPU-bound dispatch scope owns this Arc until root/pointer restoration.
+/// IRQ masking makes selection/refcount acquisition indivisible on this CPU;
+/// no task lookup is needed, so user copy can run inside an owner task scope.
+pub(crate) fn active_address_space_pin()->Option<Arc<IrqSafeSpinLock<AddressSpace>>> {
+    let _irq=InterruptGuard::new();
+    let ptr=crate::cpu::runtime().active_space.load(Ordering::Acquire) as *const IrqSafeSpinLock<AddressSpace>;
+    if ptr.is_null() {return None;}
+    unsafe {Arc::increment_strong_count(ptr);Some(Arc::from_raw(ptr))}
 }

@@ -1,0 +1,77 @@
+#![allow(dead_code)]
+extern crate alloc;
+#[path=@SYNC@]mod actual_sync;
+mod sync {pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;}
+mod memory {pub mod vmm {
+    #[derive(Clone,Copy)]pub struct VirtualAddress(pub usize);
+    impl VirtualAddress {pub fn from_usize(value:usize)->Self {Self(value)}}
+    #[derive(Clone,Copy)]pub struct PageFlags(pub u64);
+    impl PageFlags {
+        pub const PRESENT:Self=Self(1);pub const USER:Self=Self(2);pub const WRITABLE:Self=Self(4);pub const NO_EXECUTE:Self=Self(8);
+        pub fn contains(self,other:Self)->bool {self.0&other.0==other.0}
+    }
+    impl core::ops::BitOr for PageFlags {type Output=Self;fn bitor(self,other:Self)->Self {Self(self.0|other.0)}}
+    pub struct Buffer {pub address:usize,pub length:usize}
+    impl Buffer {
+        pub fn new()->Self {let layout=std::alloc::Layout::from_size_align(8192,4096).unwrap();let address=unsafe{std::alloc::alloc_zeroed(layout)} as usize;
+            assert_ne!(address,0);for i in 0..8192 {unsafe {*(address as *mut u8).add(i)=(i%253) as u8;}}Self{address,length:8192}}
+    }
+    impl Drop for Buffer {fn drop(&mut self) {unsafe {std::alloc::dealloc(self.address as *mut u8,std::alloc::Layout::from_size_align(self.length,4096).unwrap());}}}
+    pub struct AddressSpace {pub buffer:Option<Buffer>,pub flags:PageFlags}
+    impl AddressSpace {pub fn user_page_flags(&self,address:VirtualAddress)->Result<Option<PageFlags>,()> {
+        let Some(buffer)=self.buffer.as_ref() else {return Ok(None)};
+        Ok((address.0>=buffer.address && address.0<buffer.address+buffer.length).then_some(self.flags))
+    }}
+}}
+mod process {
+    use std::sync::Arc;use crate::sync::IrqSafeSpinLock;use crate::memory::vmm::AddressSpace;
+    pub static SPACE:std::sync::OnceLock<Arc<IrqSafeSpinLock<AddressSpace>>>=std::sync::OnceLock::new();
+    pub static SELECTED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(true);
+    pub fn active_address_space_pin()->Option<Arc<IrqSafeSpinLock<AddressSpace>>> {
+        SELECTED.load(std::sync::atomic::Ordering::Acquire).then(||SPACE.get().unwrap().clone())
+    }
+}
+mod syscall {
+    use alloc::{vec::Vec,string::String};
+    const EFAULT:i64=-14;const EINVAL:i64=-22;const ENAMETOOLONG:i64=-36;const MAX_USER_COPY:usize=65536;
+    macro_rules! syscall_log {($($arg:tt)*)=>{()};}
+    fn is_valid_user_pointer(ptr:u64,size:usize)->bool {size==0 || (ptr>=4096 && ptr.checked_add(size as u64).is_some_and(|end|end<=0x800000000000))}
+    fn validate_user_range(ptr:u64,size:usize)->Result<(),i64> {if size>MAX_USER_COPY {Err(EINVAL)} else if !is_valid_user_pointer(ptr,size) {Err(EFAULT)} else {Ok(())}}
+    #[path=@MEMORY@]pub mod user_memory;
+    pub fn run() {
+        use user_memory::*;use crate::memory::vmm::*;use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
+        let space=Arc::new(crate::sync::IrqSafeSpinLock::new(AddressSpace{buffer:Some(Buffer::new()),flags:PageFlags(7)}));
+        crate::process::SPACE.set(space.clone()).ok().unwrap();let ptr=space.lock().buffer.as_ref().unwrap().address as *mut u8;
+        @NEGATIVE@
+        assert_eq!(copy_buffer_from_user(ptr,64).unwrap(),(0..64u8).collect::<Vec<_>>());
+        copy_buffer_to_user(ptr,b"hello").unwrap();assert_eq!(copy_string_from_user_len(ptr,5,32),Ok(String::from("hello")));
+        assert_eq!(copy_string_from_user_len(ptr,33,32),Err(ENAMETOOLONG));
+        copy_buffer_to_user(unsafe{ptr.add(5)},&[0]).unwrap();assert_eq!(copy_string_from_user_len(ptr,6,32),Err(EINVAL));
+        assert_eq!(validate_user_pages(ptr as u64+8192,1,false),Err(EFAULT));
+        space.lock().flags=PageFlags(3);assert_eq!(copy_buffer_to_user(ptr,b"x"),Err(EFAULT));assert!(copy_buffer_from_user(ptr,1).is_ok());
+        space.lock().flags=PageFlags(7|8);assert!(!with_mapping(ptr as u64,1,false,|mapping|Ok(mapping.executable())).unwrap());
+        space.lock().flags=PageFlags(7);assert!(with_mapping(ptr as u64,1,false,|mapping|Ok(mapping.executable())).unwrap());
+        for flags in [0,1,2,4,5,6] {space.lock().flags=PageFlags(flags);assert_eq!(copy_buffer_from_user(ptr,1),Err(EFAULT));}
+        space.lock().flags=PageFlags(7);
+        let mut unaligned=0u32;with_mapping(ptr as u64+7,4,false,|mapping| {unsafe {mapping.copy_words_volatile(0,&mut unaligned,1);}Ok(())}).unwrap();assert_eq!(unaligned,u32::from_le_bytes([7,8,9,10]));
+        let mut aligned=[0u32;32];with_mapping(ptr as u64+256,aligned.len()*4,false,|mapping| {unsafe {mapping.copy_words_volatile(0,aligned.as_mut_ptr(),aligned.len());}Ok(())}).unwrap();
+        for (i,word) in aligned.iter().enumerate() {assert_eq!(*word,u32::from_le_bytes(core::array::from_fn(|b|((256+i*4+b)%253) as u8)));}
+        // A concurrent unmap must wait until the last validated byte is read.
+        let entered=Arc::new(AtomicBool::new(false));let attempted=Arc::new(AtomicBool::new(false));let unmapped=Arc::new(AtomicBool::new(false));
+        let writer={let space=space.clone();let entered=entered.clone();let attempted=attempted.clone();let unmapped=unmapped.clone();std::thread::spawn(move|| {
+            while !entered.load(Ordering::Acquire) {std::thread::yield_now();}
+            attempted.store(true,Ordering::Release);space.lock().buffer.take();unmapped.store(true,Ordering::Release);
+        })};
+        let snapshot=with_mapping(ptr as u64+4090,32,false,|mapping| {
+            entered.store(true,Ordering::Release);while !attempted.load(Ordering::Acquire) {std::thread::yield_now();}
+            assert!(!unmapped.load(Ordering::Acquire));
+            Ok((0..32).map(|i|mapping.read_byte(i)).collect::<Vec<_>>())
+        }).unwrap();writer.join().unwrap();assert!(unmapped.load(Ordering::Acquire));
+        assert_eq!(snapshot,(4090..4122).map(|i|(i%253) as u8).collect::<Vec<_>>());
+        assert_eq!(copy_buffer_from_user(ptr,1),Err(EFAULT));
+        crate::process::SELECTED.store(false,Ordering::Release);assert_eq!(copy_buffer_from_user(ptr,1),Err(EFAULT));
+        assert_eq!(copy_buffer_from_user(core::ptr::null(),0),Ok(Vec::new()));assert_eq!(copy_buffer_to_user(core::ptr::null_mut(),b""),Ok(()));
+        println!("user memory: mapping held across copy/unmap, permissions, owned snapshots, unaligned pixels and production no-context refusal OK");
+    }
+}
+fn main() {syscall::run();}

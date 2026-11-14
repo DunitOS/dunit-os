@@ -41,6 +41,8 @@ pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
         USER_DF_IRQ.store(true, core::sync::atomic::Ordering::Relaxed);
     }
 
+    if frame.int_no==2 && crate::memory::tlb::handle_nmi() {return 0;}
+
     use crate::interrupts::*;
 
     if frame.int_no>=240 {
