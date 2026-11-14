@@ -19,6 +19,7 @@
       "marker": "[USER-FAULT]",
       "after": "[TERM-007] Starting main loop"
     },
-    "[TASK-REGISTRY]"
+    "[TASK-REGISTRY]",
+    "[TASK-EXECUTION]"
   ]
 }

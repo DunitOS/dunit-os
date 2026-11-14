@@ -49,10 +49,29 @@ pub(super) fn with_record<R>(
     pid: ProcessId,
     update: impl for<'a, 'b> FnOnce(&'a mut Process, &'b mut ProcessRecord) -> Result<R, ProcessError>,
 ) -> Result<R, ProcessError> {
+    with_record_checked(pid, false, update)
+}
+
+/// Kill/teardown must close group admission in the same metadata transaction
+/// that checks existing HAL owners. No AS/fd extraction while a CPU owns it.
+pub(super) fn with_quiescent_group<R>(
+    pid: ProcessId,
+    update: impl for<'a, 'b> FnOnce(&'a mut Process, &'b mut ProcessRecord) -> Result<R, ProcessError>,
+) -> Result<R, ProcessError> {
+    with_record_checked(pid, true, update)
+}
+fn with_record_checked<R>(
+    pid: ProcessId,
+    quiescent_group: bool,
+    update: impl for<'a, 'b> FnOnce(&'a mut Process, &'b mut ProcessRecord) -> Result<R, ProcessError>,
+) -> Result<R, ProcessError> {
     let _irq = InterruptGuard::new();
     let task = task(pid)?;
     let mut process = task.lock();
     let mut records = table();
+    if quiescent_group && super::execution::group_entered(&records, pid) {
+        return Err(ProcessError::NotRunnable);
+    }
     let record = records
         .iter_mut()
         .find(|record| record.pid == pid)

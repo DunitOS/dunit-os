@@ -1,6 +1,6 @@
 # SMP shared-state audit — OP1
 
-Initial audit: 11 November 2026. Updated on 13 November 2026; implementation receipts below.
+Initial audit: 11 November 2026. Updated on 14 November 2026; implementation receipts below.
 Audit of the UP implementation; this inventory is a safety
 gate, not a claim that shared state is now safe to execute on APs.
 
@@ -10,7 +10,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | GDT/TSS/IST and initial syscall stack | private per-CPU descriptors/stacks; shared published IDT | retain CPU-private ownership and publication during scheduler activation |
 | current PID, exit/yield/schedule/escape flags | CPU-local runtime fields; aggregate counters/terminal ownership remain shared | implement atomic task execution ownership and remote scheduling |
 | PROCESS_TABLE and current process/thread access | IRQ-safe metadata registry; independently Arc-owned locked Process; membership revalidated after task lock; pins across callback/HAL; retired cleanup outside guards | preserve task/registry lock order; atomic execution/lifecycle/cancel and mapping lifetime remain open |
-| Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | atomic Ready→Running(cpu) claim and process/scheduler lifecycle ownership remain open |
+| Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | exclusive CPU/generation reservation and Running claim installed; return/cleanup retains ownership; remote cancellation/scheduling remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
 | PMM bitmap, heap and shared VM objects | PMM bitmap/accounting share an IRQ-safe leaf lock; one-shot bitmap publication; isolated BSP/AP allocation cohorts tested; heap/shared VM have separate owners | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
@@ -112,3 +112,13 @@ mutation guard ends. The [receipt](process-registry.md) includes actual host
 contention/retirement and native weak-owner/fd/HAL-frame checks. Pins protect
 object lifetime, not atomic execution rights, unmap/TLB readers or cancellation
 handoff when a CPU is still returning from HAL.
+
+## Execution admission and HAL return (14 November 2026)
+
+The [execution receipt](task-execution.md) adds exclusive CPU/ticket admission
+and task identity revalidation before HAL entry. Ready after yield/wake does not
+permit a second entry until the prior HAL/FPU/TLS return and dispatcher cleanup
+finish. Group retirement checks reject entered tasks; reserved frames can be
+revoked without gaining access to a replacement or dead owner. Remote stop and
+cancellation acknowledgements, predicate/check/register, IRQ/IPI progress and
+mapping/TLB lifetime remain mandatory before AP application dispatch.

@@ -1,6 +1,11 @@
 pub mod scheduler;
 mod transitions;
-pub use transitions::{mark_process_prepared_as_ready, mark_process_ready, mark_process_started,
+mod execution;
+#[cfg(feature = "boot-smoke-tests")]
+mod execution_smoke;
+#[cfg(feature = "boot-smoke-tests")]
+pub use execution_smoke::run_execution_ownership_smoke;
+pub use transitions::{mark_process_prepared_as_ready, mark_process_ready,
     save_current_user_context_for_yield, block_current, pipe_block_current, poll_block_current,
     mark_process_finished, timer_preempt_save_and_schedule};
 pub(crate) use transitions::wait_set_block_current;
@@ -176,6 +181,7 @@ pub struct ProcessRecord {
     pub path: String,
     /// Independently owned task object; registry guards never span its mutex.
     process: Option<registry::Task>,
+    execution: execution::State,
 }
 
 #[derive(Debug, Clone)]
@@ -1600,6 +1606,8 @@ pub fn insert_process_record(
         let mut table = process_table();
         if let Some(index) = process_record_index(&table, pid) {
             let record = &mut table[index];
+            assert!(!record.execution.entered(), "replace entered task");
+            record.execution = execution::State::default();
             record.parent = parent;
             record.owner = None;
             record.path = path;
@@ -1610,7 +1618,8 @@ pub fn insert_process_record(
             core::mem::replace(&mut record.process, process)
         } else {
             table.push(ProcessRecord { pid, owner: None, thread_auto_reap: false,
-                parent, state, status: None, has_run, waitable, path, process });
+                parent, state, status: None, has_run, waitable, path, process,
+                execution: execution::State::default() });
             None
         }
     };
@@ -1709,6 +1718,7 @@ pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<Thread
             waitable: false,
             path: String::from("[thread]"),
             process: Some(Arc::new(IrqSafeSpinLock::new(thread))),
+            execution: execution::State::default(),
         });
     }
     if let Err(error) = crate::process::scheduler::enqueue_ready(ProcessId(tid.0)) {
@@ -1758,6 +1768,9 @@ fn release_finished_thread(entity: ProcessId) -> Result<(), ProcessError> {
     let (finished, auto_reap) = {
         let mut table = process_table();
         let index = process_record_index(&table, entity).ok_or(ProcessError::NoSuchProcess)?;
+        if !table[index].execution.retire_returned(crate::cpu::index()) {
+            return Err(ProcessError::NotRunnable);
+        }
         let finished = table[index].process.take();
         let auto_reap = table[index].thread_auto_reap;
         if auto_reap { table.remove(index); } // no task remains in this metadata
@@ -1777,7 +1790,7 @@ pub fn wait_thread(tid: ThreadId) -> Result<ProcessExitStatus, ProcessError> {
         let index = process_record_index(&table, ProcessId(tid.0)).ok_or(ProcessError::NoSuchProcess)?;
         let record = &table[index];
         if record.owner != Some(owner) { return Err(ProcessError::NotChild); }
-        if record.state != ProcessState::Dead { return Err(ProcessError::NotRunnable); }
+        if record.state != ProcessState::Dead || record.execution.busy() { return Err(ProcessError::NotRunnable); }
         let status = record.status.ok_or(ProcessError::ProcessNotPrepared)?;
         (table.remove(index), status)
     };
@@ -1790,10 +1803,13 @@ pub fn wait_thread(tid: ThreadId) -> Result<ProcessExitStatus, ProcessError> {
     Ok(status)
 }
 
-fn cleanup_owned_threads(owner: ProcessId) {
+fn cleanup_owned_threads(owner: ProcessId) -> Result<(), ProcessError> {
     let retired = {
         let _irq = InterruptGuard::new();
         let mut table = process_table();
+        if table.iter().any(|record| record.owner == Some(owner) && record.execution.entered()) {
+            return Err(ProcessError::NotRunnable);
+        }
         let mut retired = Vec::new();
         let mut index = 0;
         while index < table.len() {
@@ -1807,6 +1823,7 @@ fn cleanup_owned_threads(owner: ProcessId) {
         crate::process::scheduler::remove(record.pid);
         drop(record);
     }
+    Ok(())
 }
 
 pub fn wake_ipc_waiters(pid: ProcessId) {
@@ -1868,7 +1885,9 @@ pub fn reap_process(pid: ProcessId) -> Result<(), ProcessError> {
         let mut table = process_table();
         let index = process_record_index(&table, pid).ok_or(ProcessError::NoSuchProcess)?;
         let record = &mut table[index];
-        if record.state != ProcessState::Dead { return Err(ProcessError::NotRunnable); }
+        if record.state != ProcessState::Dead || record.execution.busy() { return Err(ProcessError::NotRunnable); }
+        if execution::group_entered(&table, pid) { return Err(ProcessError::NotRunnable); }
+        let record = &mut table[index];
         let from = record.state;
         let retired = record.process.take();
         record.state = ProcessState::Reaped;
@@ -1915,7 +1934,7 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
         return Ok(true);
     }
 
-    let (fds, vm, from) = with_task_record(pid, |process, record| {
+    let (fds, vm, from) = registry::with_quiescent_group(pid, |process, record| {
         if record.owner.is_some() { return Err(ProcessError::NoSuchProcess); }
         if process.is_kernel { return Err(ProcessError::InvalidUserContext); }
         if matches!(record.state, ProcessState::Dead | ProcessState::Reaped) {
@@ -1936,7 +1955,7 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
     fds.release();
     drop(vm);
     remove_waiter(pid);
-    cleanup_owned_threads(pid);
+    cleanup_owned_threads(pid)?;
     wake_wait_set_waiters();
     Ok(false)
 }
@@ -1948,7 +1967,7 @@ pub fn is_pid_runnable(pid: ProcessId) -> bool {
         let table = process_table();
         let Some(index) = process_record_index(&table, pid) else { return false; };
         let record = &table[index];
-        if record.state != ProcessState::Ready { return false; }
+        if record.state != ProcessState::Ready || record.execution.busy() { return false; }
         let Some(task) = record.process.clone() else { return false; };
         let owner = if let Some(owner) = record.owner {
             process_record_index(&table, owner).and_then(|index| table[index].process.clone())
@@ -1966,7 +1985,7 @@ pub fn is_pid_runnable(pid: ProcessId) -> bool {
     if !has_space { return false; }
     let table = process_table();
     process_record_index(&table, pid).map(|index| {
-        table[index].state == ProcessState::Ready && registry::verify(&table[index], &task).is_ok()
+        table[index].state == ProcessState::Ready && !table[index].execution.busy() && registry::verify(&table[index], &task).is_ok()
     }).unwrap_or(false)
 }
 
@@ -2002,8 +2021,9 @@ pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessErr
                 continue;
             }
             matched_any = true;
-            let finished = (record.status.is_some() && record.has_run)
-                || (record.state == ProcessState::Prepared && !record.has_run);
+            let finished = !record.execution.busy() && !execution::group_entered(&table, record.pid)
+                && ((record.status.is_some() && record.has_run)
+                || (record.state == ProcessState::Prepared && !record.has_run));
             if finished {
                 child_index = Some(index);
                 break;
@@ -2075,6 +2095,8 @@ pub fn autoreap_process(pid: ProcessId, reason: &str) -> Result<(), ProcessError
         let _irq = InterruptGuard::new();
         let mut table = process_table();
         let index = process_record_index(&table, pid).ok_or(ProcessError::NoSuchProcess)?;
+        let owner = table[index].owner.unwrap_or(pid);
+        if execution::group_entered(&table, owner) { return Err(ProcessError::NotRunnable); }
         table.remove(index)
     };
     log_process_transition(pid, record.state, ProcessState::Reaped, reason);
@@ -2245,13 +2267,10 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
             next_pid = crate::process::scheduler::pick_next_candidate()
                 .ok_or(ProcessError::SchedulerUnavailable)?;
         }
-        let frame = dispatch::prepare(next_pid)?;
-
-        mark_process_started(next_pid);
+        let mut frame = dispatch::prepare(next_pid)?;
         crate::cpu::runtime().current_pid.store(next_pid.0, Ordering::SeqCst);
 
-        unsafe { frame.run(&mut scope); }
-        drop(frame);
+        unsafe { frame.run(&mut scope)?; }
 
         #[cfg(feature = "boot-smoke-tests")]
         fault_irq_smoke::verify();
@@ -2291,7 +2310,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
             if is_thread {
                 release_finished_thread(next_pid)?;
             } else {
-                cleanup_owned_threads(next_pid);
+                cleanup_owned_threads(next_pid)?;
                 scope.restore_root();
                 let resources = with_process_mut(next_pid, |finished| Ok(finished.take_vm_resources()))?;
                 drop(resources);
@@ -2310,6 +2329,8 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                 return Ok(exit);
             }
         }
+
+        drop(frame); // release execution only after HAL return and exit bookkeeping
 
         let hinted = take_schedule_hint()
             .filter(|candidate| *candidate != next_pid && is_pid_runnable(*candidate));

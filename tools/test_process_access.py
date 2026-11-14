@@ -37,6 +37,8 @@ mod process {
         fn add_pending_signal(&mut self,value:u64) { self.signals=self.signals.saturating_add(value); }
     }
     pub struct ProcessRecord {pid:ProcessId,process:Option<std::sync::Arc<crate::sync::IrqSafeSpinLock<Process>>>}
+    // This fixture exercises access/futex scopes, not dispatch/teardown.
+    mod execution { pub fn group_entered(_: &[super::ProcessRecord],_:super::ProcessId)->bool { false } }
     #[path=@REGISTRY@] pub mod registry;
     use registry::table as process_table;
     pub static DROPS:AtomicU64=AtomicU64::new(0);

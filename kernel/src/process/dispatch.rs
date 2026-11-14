@@ -79,7 +79,7 @@ impl Drop for DispatchScope {
 
 pub(super) struct DispatchFrame {
     context: CpuContext,
-    task: Option<registry::Task>,
+    lease: Option<execution::Lease>,
     fs_base: u64,
     stack: Arc<KernelStack>,
     fpu: Arc<FpuState>,
@@ -97,10 +97,9 @@ impl DispatchFrame {
             .kernel_stack
             .clone()
             .ok_or(ProcessError::NoKernelStack)?;
-        process.state = ProcessState::Running;
         Ok(Self {
             context: process.context,
-            task: None,
+            lease: None,
             fs_base: process.fs_base,
             stack,
             fpu: process.fpu_state.clone(),
@@ -108,13 +107,13 @@ impl DispatchFrame {
         })
     }
 
-    /// Caller selects a single task on this CPU; parallel Running claims remain
-    /// disabled until the process/scheduler ownership and TLB gates are complete.
-    pub(super) unsafe fn run(&self, scope: &mut DispatchScope) {
+    /// Exclusive admission is revalidated immediately before touching hardware.
+    pub(super) unsafe fn run(&mut self, scope: &mut DispatchScope) -> Result<(), ProcessError> {
         assert!(
             crate::sync::interrupts_enabled(),
             "IRQ masking held across userspace dispatch"
         );
+        self.lease.as_mut().ok_or(ProcessError::NotRunnable)?.start()?;
         scope.enter(&self.address_space);
         crate::hal::syscall_set_kernel_stack_top(self.stack.top() as u64);
         crate::hal::set_user_fpu_state(self.fpu.0.get().cast::<u8>());
@@ -123,8 +122,10 @@ impl DispatchFrame {
         crate::hal::set_fs_base(0);
         crate::hal::set_user_fpu_state(core::ptr::null_mut());
         Process::reset_syscall_stack_policy();
+        self.lease.as_mut().expect("dispatch lease").returned();
         // Scope retains the active root after this frame is released. It
         // switches away before dropping the last root owner, including errors.
+        Ok(())
     }
 }
 
@@ -133,8 +134,9 @@ pub(super) fn prepare(pid: ProcessId) -> Result<DispatchFrame, ProcessError> {
     let owner = owner_of(pid).ok_or(ProcessError::NoSuchProcess)?;
     let address_space = process_address_space(owner)?;
     with_task_record(pid, |process, record| {
+        if record.state != ProcessState::Ready { return Err(ProcessError::NotRunnable); }
         let mut frame = DispatchFrame::new(process, &address_space)?;
-        frame.task = record.process.clone();
+        frame.lease = Some(execution::Lease::reserve(pid, record)?);
         Ok(frame)
     })
 }

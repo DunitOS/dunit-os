@@ -111,3 +111,8 @@ masks, acknowledged TLB shootdown and final shared-frame/DMA readers are require
 Terminal/global driver and other shared paths still need the full SMP audit.
 APs perform isolated hardware/PMM probes and park; apps/pthreads remain UP.
 No syscall/rights/GUI wire/filesystem format changes or SMP speedup are claimed.
+
+Follow-up (14 November 2026): [exclusive execution leases](task-execution.md)
+add CPU/ticket admission and return/retirement gates. The remaining-work section
+above records this change's original boundary, not a claim that later admission
+work closes cancellation, remote scheduling or mapping/TLB lifetime.

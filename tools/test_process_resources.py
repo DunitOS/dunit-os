@@ -14,6 +14,8 @@ def contract():
     result['required'].append('[DISPATCH-PIN] stack/FPU/address-space survive Process drop and reclaim after frame OK')
     result['required'].append('[TASK-REGISTRY] callback pin, detached cleanup, dispatch pin and reentry OK')
     result['forbidden'].append('[TASK-REGISTRY] FAIL')
+    result['required'].append('[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK')
+    result['forbidden'].append('[TASK-EXECUTION] FAIL')
     for name in ('m6_reap', 'waitset', 'pty_args',
                  'm6_musl_spawn', 'm6_pipe', 'm6_cond'):
         scene = json.loads((ROOT / f'tools/{name}_markers.json').read_text())

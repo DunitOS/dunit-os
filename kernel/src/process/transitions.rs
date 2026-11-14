@@ -29,23 +29,6 @@ pub fn mark_process_prepared_as_ready(pid: ProcessId) -> Result<(), ProcessError
 pub fn mark_process_ready(pid: ProcessId) {
     let _ = make_ready(pid, "elf-ready");
 }
-pub fn mark_process_started(pid: ProcessId) {
-    let _irq = InterruptGuard::new();
-    let from = {
-        let mut table = process_table();
-        process_record_index(&table, pid).map(|index| {
-            let record = &mut table[index];
-            let from = record.state;
-            record.state = ProcessState::Running;
-            record.has_run = true;
-            from
-        })
-    };
-    if let Some(from) = from {
-        scheduler::remove(pid);
-        log_process_transition(pid, from, ProcessState::Running, "enter-user");
-    }
-}
 pub fn save_current_user_context_for_yield(next: ProcessId) -> Result<ProcessId, ProcessError> {
     let _irq = InterruptGuard::new();
     let pid = current_entity_id().ok_or(ProcessError::NoCurrentProcess)?;
@@ -69,7 +52,7 @@ pub fn save_current_user_context_for_yield(next: ProcessId) -> Result<ProcessId,
     crate::cpu::runtime()
         .schedule_hint
         .store(next.0, Ordering::SeqCst);
-    scheduler::enqueue_ready(pid)?;
+    // The dispatch lease publishes queue admission after HAL/FPU return.
     Ok(pid)
 }
 

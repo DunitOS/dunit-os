@@ -1,0 +1,101 @@
+//! Host shims isolate privileged IRQ/HAL; registry, task locks and leases are real.
+#![allow(dead_code)]
+extern crate alloc;
+#[path = @SYNC@] mod actual_sync;
+mod sync {
+    pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
+    pub type IrqSafeSpinLockGuard<'a,T> = crate::actual_sync::SpinLockGuard<'a,T>;
+    pub struct InterruptGuard;
+    impl InterruptGuard { pub fn new()->Self { Self } }
+}
+mod cpu {
+    std::thread_local! { pub static INDEX:std::cell::Cell<usize>=const {std::cell::Cell::new(0)}; }
+    pub fn index()->usize { INDEX.with(|index|index.get()) }
+}
+mod process {
+    use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+    use crate::sync::{InterruptGuard,IrqSafeSpinLock};
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub struct ProcessId(pub u64);
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub enum ProcessState { Ready,Running,Blocked,Dead,Reaped }
+    #[derive(Debug,PartialEq,Eq)] pub enum ProcessError { NoSuchProcess,ProcessNotPrepared,NotRunnable }
+    pub struct Process {state:ProcessState}
+    pub struct ProcessRecord {
+        pid:ProcessId,owner:Option<ProcessId>,state:ProcessState,has_run:bool,
+        process:Option<registry::Task>,execution:execution::State,
+    }
+    #[path = @REGISTRY@] mod registry;
+    #[path = @EXECUTION@] mod execution;
+    use registry::table as process_table;
+    fn process_record_index(table:&[ProcessRecord],pid:ProcessId)->Option<usize> { table.iter().position(|r|r.pid==pid) }
+    fn log_process_transition(_:ProcessId,_:ProcessState,_:ProcessState,_:&str) {}
+    mod scheduler {
+        use super::*;
+        pub static ENQUEUES:AtomicUsize=AtomicUsize::new(0);
+        pub fn remove(_:ProcessId) { assert!(registry::table().len()>0); }
+        pub fn enqueue_ready(pid:ProcessId)->Result<(),ProcessError> {
+            let table=registry::table(); // must run outside metadata guard
+            let record=table.iter().find(|r|r.pid==pid).unwrap();
+            // The next CPU may already have reserved/started after lease release.
+            // Production enqueue_ready rechecks and rejects that stale observation.
+            if record.state!=ProcessState::Ready || record.execution.busy() { return Err(ProcessError::NotRunnable); }
+            ENQUEUES.fetch_add(1,Ordering::SeqCst);Ok(())
+        }
+    }
+    fn object()->registry::Task { Arc::new(IrqSafeSpinLock::new(Process {state:ProcessState::Ready})) }
+    fn record(task:registry::Task)->ProcessRecord { ProcessRecord {pid:ProcessId(1),owner:None,
+        state:ProcessState::Ready,has_run:false,process:Some(task),execution:execution::State::default()} }
+    fn reserve()->Result<execution::Lease,ProcessError> {
+        registry::with_record(ProcessId(1),|_,record|execution::Lease::reserve(ProcessId(1),record))
+    }
+    pub fn run() {
+        use std::sync::Barrier;
+        registry::table().push(record(object()));
+        let active=Arc::new(AtomicUsize::new(0));let completed=Arc::new(AtomicUsize::new(0));
+        let barrier=Arc::new(Barrier::new(8));
+        let threads:Vec<_>=(0..8).map(|cpu| {
+            let active=active.clone();let completed=completed.clone();let barrier=barrier.clone();
+            std::thread::spawn(move|| {
+                crate::cpu::INDEX.with(|index|index.set(cpu));barrier.wait();
+                for _ in 0..1000 {
+                    let mut lease=loop {if let Ok(lease)=reserve() {break lease;}std::thread::yield_now();};
+                    lease.start().unwrap();assert_eq!(active.fetch_add(1,Ordering::SeqCst),0);
+                    assert_eq!(registry::with_quiescent_group(ProcessId(1),|_,_|Ok(())),Err(ProcessError::NotRunnable));
+                    registry::with_record(ProcessId(1),|process,record| {
+                        process.state=ProcessState::Ready;record.state=ProcessState::Ready;Ok(())
+                    }).unwrap(); // wake wins, but does not release HAL ownership
+                    assert!(reserve().is_err());
+                    std::thread::yield_now();assert_eq!(active.fetch_sub(1,Ordering::SeqCst),1);
+                    lease.returned();assert!(reserve().is_err());
+                    drop(lease);completed.fetch_add(1,Ordering::SeqCst);
+                }
+            })
+        }).collect();
+        for thread in threads {thread.join().unwrap();}
+        assert_eq!(completed.load(Ordering::SeqCst),8000);
+        // Scheduler callback can race a new reservation after unlock. Our shim
+        // below counts admissions; production rechecks readiness on enqueue.
+        assert!(scheduler::ENQUEUES.load(Ordering::SeqCst)>0);
+        let mut stale=reserve().unwrap();
+        let retired={registry::table().pop().unwrap()};drop(retired);
+        registry::table().push(record(object()));let fresh=reserve().unwrap();
+        assert_eq!(stale.start(),Err(ProcessError::ProcessNotPrepared));
+        drop(stale);assert!(reserve().is_err());drop(fresh);
+        assert!(registry::with_quiescent_group(ProcessId(1),|_,_|Ok(())).is_ok());
+        // A sibling's hardware ownership also excludes teardown of its owner.
+        let mut child=record(object());child.pid=ProcessId(2);child.owner=Some(ProcessId(1));
+        registry::table().push(child);
+        let mut sibling=registry::with_record(ProcessId(2),|_,r|execution::Lease::reserve(ProcessId(2),r)).unwrap();
+        sibling.start().unwrap();
+        assert_eq!(registry::with_quiescent_group(ProcessId(1),|_,_|Ok(())),Err(ProcessError::NotRunnable));
+        sibling.returned();drop(sibling);
+        // Sealing owner lifecycle after the last return revokes even an already
+        // reserved child frame; an AS Arc alone never authorizes user entry.
+        registry::with_record(ProcessId(2),|p,r| {p.state=ProcessState::Ready;r.state=ProcessState::Ready;Ok(())}).unwrap();
+        let mut sibling=registry::with_record(ProcessId(2),|_,r|execution::Lease::reserve(ProcessId(2),r)).unwrap();
+        registry::with_quiescent_group(ProcessId(1),|p,r| {p.state=ProcessState::Dead;r.state=ProcessState::Dead;Ok(())}).unwrap();
+        assert_eq!(sibling.start(),Err(ProcessError::NotRunnable));drop(sibling);
+        println!("actual leases: 8000 entries, Ready before HAL return excluded, kill gate and stale PID identity OK");
+    }
+    pub fn cannot_send() { let lease=reserve().unwrap(); @SEND@ }
+}
+fn main() { process::run(); }

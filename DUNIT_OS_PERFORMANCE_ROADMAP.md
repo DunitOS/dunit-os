@@ -1,6 +1,6 @@
 # Dunit OS — отдельный roadmap производительности и SMP
 
-Создан: 11 ноября 2026. Обновлён: **13 ноября 2026**; реализации и результаты привязаны к отчётам ниже.
+Создан: 11 ноября 2026. Обновлён: **14 ноября 2026**; реализации и результаты привязаны к отчётам ниже.
 Статус: **OP0–OP3 выполнены частично; текущая работа — OP3; SMP dispatch ещё нет**.
 Инициатива пользователя: максимальная практическая производительность,
 настоящая одновременная работа на нескольких ядрах и отзывчивый desktop/SDK.
@@ -32,10 +32,10 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 | Этап | Статус | Подтверждённый результат / оставшаяся работа |
 | --- | --- | --- |
 | OP0 | Частично | TCG/UP baseline, metadata и checked benchmarks готовы; KVM reference, IPC/часть сцен и точная телеметрия открыты |
-| OP1 | Частично | Аудит, CPU-local entry, scoped registry/task locks и object pins готовы; execution/IRQ/preemption model ещё не закрыт |
+| OP1 | Частично | Аудит, CPU-local entry, registry/task locks, pins и exclusive execution leases готовы; cancellation/IRQ model ещё открыт |
 | OP2 | Частично | Limine AP boot, APIC/IPI и timer probes: BIOS 1/2/4/8, UEFI 4; точные часы и расширенная платформенная проверка открыты |
-| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; полный lifecycle/wait/wake, IRQ progress и TLB gates открыты |
-| OP4 | Не реализован | Нет атомарного Running(cpu), remote dispatch и параллельного исполнения приложений |
+| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; exclusive dispatch/return handoff готовы; полный cancel/predicate/wait, IRQ и TLB gates открыты |
+| OP4 | Подготовка | Exclusive CPU/ticket admission реализован; remote dispatch и параллельного исполнения приложений ещё нет |
 | OP5 | Не начат в этом треке | Масштабирование и scheduling latency — после корректного SMP |
 | OP6–OP8 | Не закрыты | Новые оптимизации ввода/SDK/рендера/I/O требуют профиля; исторические GUI-правки входят в baseline |
 | OP9 | Не закрыт | Итоговая performance/scaling-матрица требует готового SMP и стабильного reference runner |
@@ -54,8 +54,9 @@ KVM на стенде недоступен. Медианы PIT с шагом 10 
 
 1. **OP3: execution/lifecycle и IRQ progress.** Registry и task уже имеют
    реальные locks и владеющие pins; нет приватного static mutable Vec.
-   Теперь закрыть отмену/удаление при активном исполнении, handoff block/wake
-   вокруг HAL return и безопасные interruptible syscall boundaries.
+   Exclusive execution/return handoff уже реализован: Ready до завершения HAL
+   не разрешает повторный запуск. Теперь закрыть remote cancellation/stop ack,
+   producer predicate/check/register и interruptible syscall boundaries.
    Pin процесса не является атомарным правом исполнения или защитой mapping.
 2. Согласовать порядок process/task ↔ VFS/ProcFs, wait queues, IPC/handles,
    PMM/VMM и драйверов. Закрыть оставшиеся reentry и lifecycle/cancellation пути.
@@ -244,8 +245,13 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 
 ### OP4 — настоящий SMP scheduler и потоки
 
-- [ ] Разрешить несколько одновременно Running tasks; атомарно/под lock
-  закреплять `Ready → Running(cpu)`, исключив исполнение одного TID на двух CPU.
+- [x] [Exclusive execution admission и HAL return handoff](docs/performance/task-execution.md):
+  reservation с CPU/generation и task identity, Running перед HAL, запрет повторного
+  запуска до завершения return/cleanup; retirement checks для всего owner/thread group.
+  Host actual leases: 8 000 admissions; native и UP regressions. Это ещё не remote
+  cancellation и не одновременное исполнение приложений на нескольких CPU.
+- [ ] Включить несколько одновременно Running tasks на AP после оставшихся OP3
+  gates; сохранить уже установленный exclusive `Ready → Running(cpu)` claim.
 - [ ] Реализовать remote wakeup/reschedule IPI, race-safe block/wake/deadlines,
   CPU-local idle и сохранение GPR/FPU/TLS при вытеснении и миграции.
 - [ ] Первый корректный scheduler может иметь общую очередь, но kernel-wide lock,

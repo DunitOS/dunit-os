@@ -64,6 +64,8 @@ mod hal {
     #[derive(Debug,PartialEq,Eq)] enum ProcessError { NoCurrentProcess,NoSuchProcess,ProcessNotPrepared,InvalidMemoryRange,NotRunnable,InvalidUserContext }
     struct Process { state:ProcessState,is_kernel:bool,context:u64,clear_child_tid:u64 }
     pub struct ProcessRecord {pid:ProcessId,state:ProcessState,process:Option<Arc<IrqSafeSpinLock<Process>>>}
+    // This fixture exercises access/futex scopes, not dispatch/teardown.
+    mod execution { pub fn group_entered(_: &[super::ProcessRecord],_:super::ProcessId)->bool { false } }
     #[path=@REGISTRY@] mod registry;
     static SPACE:OnceLock<Arc<IrqSafeSpinLock<AddressSpace>>>=OnceLock::new();
     #[path=@WAIT@] mod wait_queue;
