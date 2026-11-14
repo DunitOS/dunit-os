@@ -34,7 +34,7 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 | OP0 | Частично | TCG/UP baseline, metadata и checked benchmarks готовы; IPC ping-pong и HPET metadata готовы; KVM reference, часть сцен и полная телеметрия открыты |
 | OP1 | Частично | Аудит, CPU-local entry, registry/task locks, pins и exclusive execution leases готовы; cancellation/IRQ model ещё открыт |
 | OP2 | Частично | Limine AP boot, APIC/IPI и timer probes: BIOS 1/2/4/8, UEFI 4; HPET/PIT fallback и cross-CPU brackets готовы; timer event model и платформенные gates открыты |
-| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; exclusive dispatch/return handoff готовы; checkpoint/register и IPC locks готовы; remote cancel, IRQ и TLB gates открыты |
+| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; exclusive dispatch/return handoff готовы; checkpoint/register и IPC locks готовы; TLB ack и mapping-copy pins готовы; remote cancel/IRQ и полный shared-VM stress открыты |
 | OP4 | Подготовка | Exclusive CPU/ticket admission реализован; remote dispatch и параллельного исполнения приложений ещё нет |
 | OP5 | Не начат в этом треке | Масштабирование и scheduling latency — после корректного SMP |
 | OP6–OP8 | Не закрыты | Новые оптимизации ввода/SDK/рендера/I/O требуют профиля; исторические GUI-правки входят в baseline |
@@ -51,6 +51,44 @@ stream time не доказывают ускорение, per-event tail latency
 всего этапа. Смешанные пункты ниже разделены: закрытые подзадачи не снимают
 оставшиеся SMP safety/performance gates.
 
+## Точка продолжения — OP3, память и синхронизация
+
+**Текущий этап: OP3. Roadmap целиком не завершён.** Последний проверенный
+срез — [TLB shootdown и mapping ownership](docs/performance/tlb-shootdown.md),
+коммит `2a3ec99`; предшествующий wait/clock/IPC foundation — `1e7fe00`.
+На финальном smoke-образе прошли BIOS/TCG 1/4/8 CPU, resource/lifecycle,
+GUI и C pointer/pixel regressions. Production-конфигурация проверена компиляцией;
+отдельный production boot, UEFI и HPET-off на этом новом срезе ещё не повторены.
+Предыдущие прогоны этих режимов относятся к foundation-срезу, а не заменяют
+новую проверку. Полные receipts и ограничения — в отчёте.
+
+**Следующий шаг — закончить оставшиеся OP3 safety gates, начиная с PTY и console:**
+
+1. Заменить UP-only mutable PTY table настоящим lock; удерживать owning endpoint
+   во время I/O/ioctl, уведомлять о slave read/write после отпускания table guard.
+2. Устранить `Endpoint::drop → wake_poll_waiters → task lock` под уже удержанным
+   task lock: откладывать readiness до выхода из последнего task scope.
+3. Свести terminal stdin owner/line в одну транзакцию; защитить console/scrollback
+   короткими scopes. Нельзя держать console lock через shell loop или exec.
+   Согласовать framebuffer render/modeset и оставшиеся driver/heap lock edges.
+4. Реализовать remote cancel/stop acknowledgement и финализацию группы.
+   Публиковать waitable exit только после остановки исполнителей и cleanup;
+   проверить nested dispatch, join/detach и cancellation ожиданий.
+5. Закрыть interruptible syscall/IRQ progress и полный lock-order audit;
+   выполнить remote CPL3/shared-VM/W^X/exit/reclaim stress и fault injection.
+
+**Ещё не сделано после OP3:** настоящий AP application dispatch, remote wakeup и
+idle/migration (OP4); scheduler accounting/scaling/latency (OP5); новый сквозной
+latency-профиль ввода и FrameDone/backpressure (OP6); профиль renderer, release
+profiles и parallel SDK jobs (OP7); подтверждённые профилем allocator/I/O
+оптимизации (OP8); итоговая performance/CI матрица (OP9). Неполные baseline-сцены,
+per-event tails/CPU/RSS telemetry и KVM reference runner OP0 также остаются открыты.
+Готовые исторические GUI-оптимизации и AP probes не закрывают эти пункты.
+
+На текущем стенде нет `/dev/kvm`; KVM scaling и численные целевые бюджеты
+потребуют другого runner. Это внешнее ограничение измерений, а оставшаяся
+реализация OP3/OP4 пока является незавершённой работой в коде.
+
 ## Ближайший порядок работ
 
 1. **OP3: execution/lifecycle и IRQ progress.** Registry и task уже имеют
@@ -63,7 +101,8 @@ stream time не доказывают ускорение, per-event tail latency
 2. Согласовать порядок process/task ↔ VFS/ProcFs, wait queues, IPC/handles,
    PMM/VMM и драйверов. Закрыть оставшиеся reentry и lifecycle/cancellation пути.
 3. Обеспечить atomic check/block/wake, interruptible syscall boundaries и прогресс
-   IPI; внедрить active CPU masks и acknowledged TLB shootdown до reuse страниц.
+   IPI; active CPU masks и acknowledged TLB shootdown уже защищают reuse страниц;
+   завершить remote CPL3/shared-VM stress и остальные ownership gates.
 4. **OP4:** атомарный Ready → Running(cpu), remote wakeup/reschedule, idle и
    миграция GPR/FPU/TLS; затем доказать overlapping execution и корректность
    приложений/потоков на 1/2/4/8 CPU.
@@ -237,6 +276,12 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   lock вместо static mutable manager, notifications после guards, packet identity,
   target handle insertion/queue publication в одной task transaction.
 
+- [x] [Acknowledged TLB invalidation и mapping-copy ownership](docs/performance/tlb-shootdown.md):
+  active roots, generation/ack через lock-free NMI receiver, user unmap/protect и
+  kernel alias reuse; AS pin/guard от проверки указателя до копирования, atomic PTE
+  без whole-table mutable references. Native IRQ-off AP retarget/reentry/reclaim и
+  host dropped-ACK refusal; это не полная concurrent shared-VM/CPL3 приёмка.
+
 Оставшиеся обязательные gates:
 
 - [ ] Полный lock ranking/reentry audit для process/task, VFS/ProcFs, wait queues,
@@ -250,8 +295,9 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 - [ ] Закрыть общий heap/PMM/shared VM/handles/device lock order и последний reader.
   PMM операции защищены отдельно; это не доказательство всей цепочки allocator/VM.
   Pin AddressSpace не является pin каждой mapping или shared-frame bookkeeping.
-- [ ] Active CPU masks, generation/ack TLB shootdown до reuse страниц: unmap,
-  mprotect/W^X, shared mappings, exit, миграция и гонка входа в address space.
+- [ ] Завершить приёмку active roots/shootdown на remote CPL3 W^X faults,
+  shared mappings, concurrent exit и миграции настоящих приложений. Сам механизм
+  ack-before-reuse и изолированная AP retarget/reentry проверка реализованы выше.
 - [ ] Выполнить cross-CPU memory/lifetime stress и fault injection после реализации
   этих механизмов. Текущие UP/native регрессии не заменяют эту матрицу.
 - **Приёмка:** нет stale mappings, double free, deadlock и утечки прав;
