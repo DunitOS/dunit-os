@@ -1235,7 +1235,8 @@ ownership VFS/resources, PMM leaf lock и проверка выделений н
 [настоящие registry/task locks и task pins](docs/performance/process-registry.md).
 Hardware boot/park проверен до 8 vCPU, но `dispatch_cpus=1`: приложения ещё UP.
 [Exclusive execution/return handoff](docs/performance/task-execution.md) уже
-установлен; следующий блок — remote cancel/stop, predicate/wait и IRQ progress,
+установлен. [Wait checkpoints, IPC locks и HPET/PIT](docs/performance/progress-foundation.md)
+проверены; следующий блок — remote cancel/stop и IRQ progress,
 затем полный lock ranking и TLB shootdown до AP dispatch. Mapping pin не заменён
 ни task Arc, ни execution ticket. KVM scaling и численные performance gates открыты; долги M7 сохраняются.
 

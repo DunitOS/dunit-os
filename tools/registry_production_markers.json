@@ -3,13 +3,21 @@
     "config": "limine_sdk_terminal.conf",
     "cmd": [
       "exec /system/bin/tcc /assets/tcc/performance.c -o /tmp/performance",
-      "exec /tmp/performance"
+      "exec /tmp/performance",
+      "exec /system/bin/tcc /assets/tcc/performance_ipc.c -o /tmp/performance-ipc",
+      "exec /tmp/performance-ipc",
+      "exec /app/musl_time"
     ]
   },
   "required": [
     "[TERM-007] Starting main loop",
     "[SMP] hardware_online=4 scheduler=up dispatch_cpus=1 APs=parked",
-    "[PERF-CORE] all checks passed"
+    "[PERF-CORE] all checks passed",
+    "[CLOCK] source=hpet",
+    "[CLOCK-SMP] bracketed_cpus=4",
+    "[TERM-007] Starting main loop",
+    "[PERF-IPC] all checks passed",
+    "[MUSL-TIME] OK"
   ],
   "forbidden": [
     "[PANIC]",
@@ -20,6 +28,17 @@
       "after": "[TERM-007] Starting main loop"
     },
     "[TASK-REGISTRY]",
-    "[TASK-EXECUTION]"
+    "[TASK-EXECUTION]",
+    "[PARKING]",
+    "[IPC-LOCK]",
+    "[CLOCK-PROBE]",
+    "[PANIC]",
+    "[PERF-IPC] FAIL",
+    "[MUSL-TIME] FAIL",
+    "tcc: error",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop"
+    }
   ]
 }

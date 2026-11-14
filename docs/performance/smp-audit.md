@@ -11,7 +11,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | current PID, exit/yield/schedule/escape flags | CPU-local runtime fields; aggregate counters/terminal ownership remain shared | implement atomic task execution ownership and remote scheduling |
 | PROCESS_TABLE and current process/thread access | IRQ-safe metadata registry; independently Arc-owned locked Process; membership revalidated after task lock; pins across callback/HAL; retired cleanup outside guards | preserve task/registry lock order; atomic execution/lifecycle/cancel and mapping lifetime remain open |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | exclusive CPU/generation reservation and Running claim installed; return/cleanup retains ownership; remote cancellation/scheduling remain open |
-| Wait queue, futex, pipe/PTY and IPC wakeup | UP check/block transaction; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | atomic predicate/block/wake protocol, remote runqueue notification, no waiting under IRQ spinlocks |
+| Wait queue, futex, pipe/PTY and IPC wakeup | notification checkpoint and generation-checked task registration; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | preserve checkpoint/register ordering; remote cancellation/runqueue notification and IRQ progress remain open |
 | PMM bitmap, heap and shared VM objects | PMM bitmap/accounting share an IRQ-safe leaf lock; one-shot bitmap publication; isolated BSP/AP allocation cohorts tested; heap/shared VM have separate owners | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | Arc-owned locked AddressSpace; dispatch scope pins active root; local invalidation | address-space active CPU mask, generation/ack TLB shootdown before reuse; prevent new entrants racing invalidation |
 | VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | process registry is released before task/VFS callbacks; ProcFs reads metadata only; complete device/IRQ/lifecycle ranking before AP dispatch |
@@ -19,7 +19,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | DunitFS/block drivers | owned/locked DunitFS backend; shared controller/device state | requests serialized by device, completion paths cannot require a lock held by waiter; durability tests unchanged |
 | Device IRQ, keyboard/pointer queues and display | INPUT_MASTER/DISPLAY_MASTER and IRQ-safe locks | one routed device IRQ owner initially; cross-CPU locks still needed for syscall readers; no desktop policy in kernel |
 | serial/framebuffer terminal and foreground state | shared sink and formatting/state | bounded critical sections, no per-event hot-path trace; console ownership is global policy, not CPU-local |
-| CPU clock/deadlines | PIT BSP ticks and SFMASK IRQ-off syscall entry | distinguish clocksource from per-CPU event timers; no cross-CPU TSC subtraction without synchronization checks |
+| CPU clock/deadlines | ACPI-validated HPET main counter, PIT fallback; actual AP clock brackets; PIT 100 Hz events | precise timer events and IRQ progress remain; counter resolution is not wake/dispatch latency |
 
 Sequence: first validate CPU-local entry on one CPU with the full boot/DF/IRQ,
 TLS/FPU and syscall contracts. Then APs may initialize private hardware state and
@@ -122,3 +122,10 @@ finish. Group retirement checks reject entered tasks; reserved frames can be
 revoked without gaining access to a replacement or dead owner. Remote stop and
 cancellation acknowledgements, predicate/check/register, IRQ/IPI progress and
 mapping/TLB lifetime remain mandatory before AP application dispatch.
+
+The [wait/clock/IPC foundation](progress-foundation.md) installs producer
+checkpoints and wake registration identity, independent HPET timekeeping with
+fallback and IRQ-off/AP proofs, and real IPC exclusion/packet identity. IPC
+send uses target task -> IPC -> metadata validation; retirement releases metadata
+before IPC clearing. Notifications run after the task/IPC guards. These additions
+do not close remote stop, kernel IRQ progress or active mappings/TLB reclamation.

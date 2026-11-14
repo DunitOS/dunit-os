@@ -108,6 +108,7 @@ def report(folder):
             group[trial] = item
     if set(core) != {"cpu-1", "cpu-2", "cpu-4", "cpu-8", "allocator", "memfs-io"}:
         raise ValueError("missing core scenes")
+    metadata = json.loads((folder / "metadata.json").read_text())
     for scene, trials in core.items():
         if set(trials) != set(range(6)):
             raise ValueError("missing core trials")
@@ -122,14 +123,13 @@ def report(folder):
         if any((v["work_units"], v["checksum"]) != expected for v in trials.values()):
             raise ValueError("incorrect fixed work")
         core[scene] = {
-            "coarse_guest_elapsed_ms": stats(
+            "guest_elapsed_ms": stats(
                 [trials[n]["elapsed_ns"] / 1e6 for n in range(1, 6)]
             ),
-            "clock_resolution_ms": 10,
-            "irq_off_may_undercount": True,
+            "clock_resolution_ms": (metadata["clock"]["guest_resolution_ns"] / 1e6 if metadata["clock"]["guest_resolution_ns"] is not None else None),
+            "irq_off_may_undercount": metadata["clock"]["guest_source"] != "hpet",
             "trials": list(trials.values()),
         }
-    metadata = json.loads((folder / "metadata.json").read_text())
     if not metadata["result"]["ok"]:
         raise ValueError("failed QEMU metadata")
     result = {

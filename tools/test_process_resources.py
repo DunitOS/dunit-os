@@ -16,8 +16,12 @@ def contract():
     result['forbidden'].append('[TASK-REGISTRY] FAIL')
     result['required'].append('[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK')
     result['forbidden'].append('[TASK-EXECUTION] FAIL')
+    result['required'].append('[PARKING] checkpoint, stale wake and registration identity OK')
+    result['forbidden'].append('[PARKING] FAIL')
+    result['required'].append('[IPC-LOCK] bounded FIFO, attachment identity and cleanup OK')
+    result['forbidden'].append('[IPC-LOCK] FAIL')
     for name in ('m6_reap', 'waitset', 'pty_args',
-                 'm6_musl_spawn', 'm6_pipe', 'm6_cond'):
+                 'm6_musl_spawn', 'm6_pipe', 'm6_cond', 'ipc_performance'):
         scene = json.loads((ROOT / f'tools/{name}_markers.json').read_text())
         result['run']['cmd'] += scene['run']['cmd']
         for key in ('required', 'forbidden'):

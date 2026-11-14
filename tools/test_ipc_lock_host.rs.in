@@ -1,0 +1,75 @@
+#![allow(dead_code)]
+extern crate alloc;
+#[path=@SYNC@] mod actual_sync;
+mod sync {
+    pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
+    pub type IrqSafeSpinLockGuard<'a,T> = crate::actual_sync::SpinLockGuard<'a,T>;
+}
+mod process {
+    use std::sync::atomic::{AtomicUsize,Ordering};
+    #[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord)]pub struct ProcessId(pub u64);
+    #[derive(Clone,Copy)]pub enum ProcessState {Ready,Dead,Reaped}
+    pub struct Process {pub pid:ProcessId,pub state:ProcessState}
+    pub fn process_exists(pid:ProcessId)->bool {pid.0>0 && pid.0<=100}
+    pub fn with_process_mut<R>(pid:ProcessId,write:impl for<'a> FnOnce(&'a mut Process)->Result<R,()>)->Result<R,()> {
+        // Task admission itself is covered by the actual registry/lease suite.
+        let mut process=Process {pid,state:ProcessState::Ready};write(&mut process)
+    }
+    pub static WAKES:AtomicUsize=AtomicUsize::new(0);
+    pub fn wake_ipc_waiters(_:ProcessId) {
+        let _snapshot=crate::ipc::ipc_stats(); // must reenter after IPC guard ends
+        WAKES.fetch_add(1,Ordering::SeqCst);
+    }
+}
+mod memory {
+    pub fn serial_write(_: &str) {}
+    pub mod pmm {
+        pub struct Pmm;pub struct Frame;
+        impl Frame {pub fn as_usize(&self)->usize {0}}
+        impl Pmm {pub fn alloc_frame(&self)->Option<Frame> {None}pub fn free_frame(&self,_:Frame) {}}
+        pub fn get_pmm()->Option<Pmm> {None}
+    }
+}
+#[path=@IPC@]mod ipc;
+fn main() {
+    use process::*;use ipc::*;use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+    ipc::init();
+    @NEGATIVE@
+    let sent=Arc::new(AtomicUsize::new(0));
+    let producers:Vec<_>=(1..=8u64).map(|sender| {
+        let sent=sent.clone();std::thread::spawn(move|| {
+            for sequence in 0..1000u64 {
+                let mut bytes=[0;16];bytes[..8].copy_from_slice(&sender.to_le_bytes());bytes[8..].copy_from_slice(&sequence.to_le_bytes());
+                loop {match send_bytes(ProcessId(sender),ProcessId(100),&bytes) {
+                    Ok(())=>break,Err(IpcError::QueueFull)=>std::thread::yield_now(),other=>panic!("send failed {other:?}")
+                }}
+                sent.fetch_add(1,Ordering::SeqCst);
+            }
+        })
+    }).collect();
+    let mut expected=[0u64;8];let mut count=0;
+    while count<8000 {
+        let mut bytes=[0;16];
+        match recv_bytes_with_sender(ProcessId(100),&mut bytes) {
+            Ok((sender,16))=>{let claimed=u64::from_le_bytes(bytes[..8].try_into().unwrap());let sequence=u64::from_le_bytes(bytes[8..].try_into().unwrap());
+                assert_eq!(sender.0,claimed);let i=sender.0 as usize-1;assert_eq!(sequence,expected[i]);expected[i]+=1;count+=1;}
+            Err(IpcError::NoMessage)=>std::thread::yield_now(),other=>panic!("receive failed {other:?}")
+        }
+    }
+    for producer in producers {producer.join().unwrap();}
+    assert_eq!(expected,[1000;8]);assert_eq!(sent.load(Ordering::SeqCst),8000);assert_eq!(process::WAKES.load(Ordering::SeqCst),8000);
+    send_bytes(ProcessId(1),ProcessId(100),b"small buffer").unwrap();
+    assert_eq!(recv_bytes(ProcessId(100),&mut [0;1]),Err(IpcError::MessageTooLarge));
+    assert_eq!(recv_bytes(ProcessId(100),&mut [0;32]),Ok(12));
+    let mut target=Process {pid:ProcessId(100),state:ProcessState::Ready};
+    send_attached(ProcessId(1),&mut target,b"first",7).unwrap();send_attached(ProcessId(2),&mut target,b"second",8).unwrap();
+    assert_eq!(recv_bytes(ProcessId(100),&mut [0;32]),Err(IpcError::AttachmentRequired));
+    let first=peek_attached(ProcessId(100)).unwrap();consume_attached(ProcessId(100),&first).unwrap();
+    assert_eq!(consume_attached(ProcessId(100),&first),Err(IpcError::NoMessage));
+    let second=peek_attached(ProcessId(100)).unwrap();assert_eq!(second.attachment,8);assert_eq!(&second.data[..second.len],b"second");
+    consume_attached(ProcessId(100),&second).unwrap();
+    for _ in 0..MAX_QUEUE_MESSAGES {send_bytes(ProcessId(1),ProcessId(100),b"x").unwrap();}
+    assert_eq!(send_bytes(ProcessId(1),ProcessId(100),b"x"),Err(IpcError::QueueFull));
+    get_ipc_manager().unwrap().clear_messages(ProcessId(100));assert_eq!(ipc_stats().queued_messages,0);
+    println!("IPC: 8000 ordered sends/receives, bounded FIFO, attachment identity, error preservation and reentrant wakes OK");
+}

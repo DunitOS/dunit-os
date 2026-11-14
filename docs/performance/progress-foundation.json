@@ -1,0 +1,1011 @@
+{
+  "date": "2026-11-14",
+  "scope": "Atomic producer checkpoint/register, wake generation identity, shared HPET clock with PIT fallback and IRQ-off/AP proof, owned IPC guard and packet identity, two-process IPC baseline. Application scheduler remains UP.",
+  "source": {
+    "base_commit": "9ed7f3801dccd46fb846771769a74e0db8aa4a71",
+    "files_sha256": {
+      "assets/tcc/performance_ipc.c": "66f32118c50757d2c4869b266861ad8cae035e146833a0d2ef27e3500c13731d",
+      "hal/src/limine.c": "53f1cc2e8828bb730c34f39acf0e0fecd1c8104fac5108ab650c19f55bd0408c",
+      "hal/src/mp.c": "bf5c4812a25e3e1aba2b0bf03deec6b040d9802d0ce0e389ebf3ff1901d686c3",
+      "kernel/src/clock.rs": "364ea6d85d08aa2ceee144626deaa034e3f96735a051e8870dad451ff8cae7d5",
+      "kernel/src/clock/acpi.rs": "c005b254a9da912730f377ff6abcf6991dc83ffba4042528aaad6b5dc50171e3",
+      "kernel/src/clock/hpet.rs": "95818f73c1b9c9b1a0a09a890bfdfcdee8636b9540e120772920e83e8751132a",
+      "kernel/src/cpu.rs": "2882752f5302581ac89bb841d20bebd90431e6aa3d306d6b5b751ad16996b759",
+      "kernel/src/ipc/mod.rs": "0c42d83b57f0f7e959ee50a7e667405ce87a7e9fec7b2655534460f3e2ab5e3d",
+      "kernel/src/ipc/smoke.rs": "d490892922686ea7fc18c6d7067d6e37fb61e3cb03f66adb20407c9e70d0ec7e",
+      "kernel/src/lib.rs": "22ed943675307365d15d823815cb8fe8ad61517dde781190a589f0e4c4e7e740",
+      "kernel/src/memory/vmm.rs": "44f0e05e25872b5ade37781e152dc4d1338b865108aa45722193ac6f67354cc6",
+      "kernel/src/process/execution_smoke.rs": "993f653c727ab65241ec54fd19bf02f761f714b3321a035f35c2fa541c870cdf",
+      "kernel/src/process/futex.rs": "5326fc2f5d3063b7d3640624faccb33afe2ec950844394ccf572406f43963cfd",
+      "kernel/src/process/mod.rs": "b9fcec9d3b61ed6d802091f933b299e3dc56a6955cfdef107b3543a89b2f6bc3",
+      "kernel/src/process/parking.rs": "5dbd0af98432c4cd360ddc2b540660a9e834925c84cac5f9af9735f1a0140db2",
+      "kernel/src/process/parking_smoke.rs": "010c9d50b4903d6aa3961dcd55bc8a7852a38cb0d33e29c7986d867d57ffc435",
+      "kernel/src/process/transitions.rs": "26b4e8dc6620fb22a2b92d47749798a4551de79b9079c71427985a86ce8b270e",
+      "kernel/src/process/wait_queue.rs": "8b1beecc0c65bce4f568c00f6491d4d8fa4a2bd5acd210368a9ae864104c998e",
+      "kernel/src/syscall/attached_ipc.rs": "438b3373c5e12dd927abba0d90c71687a54d79632aead31565d6bcac348efa2b",
+      "kernel/src/syscall/mod.rs": "2d47a16fef2b0e72cb1532261dce69b0e470500212bfca65ae2aec91da908739",
+      "kernel/src/syscall/native_fd.rs": "12576bd7066a180f1b5904615a70c32593247241265913805512d3b6cb7bd268",
+      "kernel/src/syscall/wait_set.rs": "ca87339e82372eec99e5018620c2f276979ce0ca28b1ba115619ce9932a57f07",
+      "tools/ipc_performance_markers.json": "6a9a99eba44ddbb698428746820de10ad39bd06042fab93cba9649120cd4a2e3",
+      "tools/ipc_performance_report.py": "e7b10665c14ad07c294e5a049e768ffa5b46151da757c2df72060b72f5301bbd",
+      "tools/performance_baseline.py": "0988b439c21a024014261dfe4da691c6fbbe241d71dab5ccd53bf34c9405e655",
+      "tools/performance_metadata.py": "554725d8255a542c655cc63c16350fca0c26c0d74528c1c6374782be189ef433",
+      "tools/qemu_test.py": "d5c005ea47b02184a1b53a54c25753e09ae96c0a6ff95af7a1d04438e8347fef",
+      "tools/registry_production_markers.json": "9acbb31711249a3a7eeeaff7ba05953114260e016ea1888d4e6a96a765b89432",
+      "tools/test_clock.py": "c714c1057350693e5c2d409b46480373dece187bfca79e7899b52c463a8f7505",
+      "tools/test_clock_host.rs": "5066dd55aa64e0610b47956c9bbf343ae6b941d0a54c2ccff0326b2fd56802b2",
+      "tools/test_clock_native.py": "3d4f5fe4b2dcbfabca39c8e77d1eedcbf9967419e8178ef19f77392fc3ed3ce9",
+      "tools/test_execution_native.py": "5bf240c51c99247e6de55b650f2b196bcc56b89bcd630d6a22d1a73420add757",
+      "tools/test_ipc_lock.py": "e7ca43dbdf28614e302a2b9ff472b8aeca075edda2c1847558511a1a9be67b8b",
+      "tools/test_ipc_lock_host.rs.in": "30873c5ee5bb60d110ae7baaa3e6a2146dc65f4b07a143f4113cc95c80a99e5c",
+      "tools/test_parking.py": "50e8517a0f9777c3981084e13ea3017c328904743dc082dbdbe37631cc88d0dc",
+      "tools/test_parking_host.rs.in": "b34b77d72c2ea283ccf09e3b9af9c177228be79208905c514e588d49d3bf31da",
+      "tools/test_process_resources.py": "749c385e7ba41d819c67aa4e3a898571c0eada4a9c36b35e1dd412ac14098823",
+      "tools/test_user_word.py": "0e17564d3f1a9faaba8f171668ebcdac1474d87750cfba95a81e4cb855e13bca",
+      "tools/test_wait_queue.py": "f4fa9f7114a10e0c108e68c9c906c6e6e41735e6837bb4ff9fba075cff2eb7da"
+    }
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "host_checks": {
+    "parking_forced_remote_gaps": 8000,
+    "wait_queue_concurrent_registrations": 8000,
+    "ipc_ordered_packets": 8000,
+    "ipc_producer_threads": 8,
+    "ipc_static_borrow_compile_negative": "passed",
+    "clock_parser_fallback_conversion_tests": 3,
+    "execution_actual_leases": 8000,
+    "process_access_mutations": 8000,
+    "futex_word_tests": 2,
+    "qemu_harness_tests": 19,
+    "performance_contract_tests": 4,
+    "abi_and_cpu_layout": "passed"
+  },
+  "native_runs": [
+    {
+      "receipt": "build/performance/progress-final-regression/metadata.json",
+      "started_utc": "2026-11-14T09:32:10.633443+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/progress-final-regression/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/progress-final-regression/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-regression/thread-lifecycle/metadata.json",
+      "started_utc": "2026-11-14T09:33:28.661745+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:/workspace/dunit-os/build/performance/progress-final-regression/thread-lifecycle/qemu-serial.log",
+          "-qmp",
+          "unix:/workspace/dunit-os/build/performance/progress-final-regression/thread-lifecycle/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-core/1/metadata.json",
+      "started_utc": "2026-11-14T09:29:14.393768+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-core/1/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-core/1/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-core/4/metadata.json",
+      "started_utc": "2026-11-14T09:29:32.722099+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-core/4/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-core/4/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-core/8/metadata.json",
+      "started_utc": "2026-11-14T09:29:51.293266+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-core/8/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-core/8/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-gui/metadata.json",
+      "started_utc": "2026-11-14T09:33:39.100823+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-gui/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-gui/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-pointer/metadata.json",
+      "started_utc": "2026-11-14T09:34:07.089498+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-pointer/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-pointer/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-fallback/metadata.json",
+      "started_utc": "2026-11-14T09:35:11.821630+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-fallback/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-fallback/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-machine",
+          "hpet=off",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "pit",
+        "guest_resolution_ns": 10000000,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-final-uefi/metadata.json",
+      "started_utc": "2026-11-14T09:35:30.502566+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "7db7811ba609a5e860dfbf9ee8864167d14fa3657fa946fb38c747758853700e",
+        "bytes": 266565632,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-final-uefi/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-final-uefi/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4",
+          "-drive",
+          "if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd",
+          "-drive",
+          "if=pflash,format=raw,unit=1,file=build/performance/progress-final-uefi/ovmf-vars.fd"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "receipt": "build/performance/progress-production/metadata.json",
+      "started_utc": "2026-11-14T09:37:13.410794+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "45ba80159d8b19ba514b10ea5d013a35674120758454530f11c968e986177ef0",
+        "bytes": 266457088,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/progress-production/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/progress-production/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "production_core": {
+    "identical_work_and_checksums_to_task_execution": true,
+    "samples": [
+      {
+        "scene": "cpu-1",
+        "trial": 0,
+        "elapsed_ns": 74691690,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-1",
+        "trial": 1,
+        "elapsed_ns": 44008480,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-1",
+        "trial": 2,
+        "elapsed_ns": 42276930,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-1",
+        "trial": 3,
+        "elapsed_ns": 46427010,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-1",
+        "trial": 4,
+        "elapsed_ns": 42757190,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-1",
+        "trial": 5,
+        "elapsed_ns": 42544050,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-2",
+        "trial": 0,
+        "elapsed_ns": 46606840,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-2",
+        "trial": 1,
+        "elapsed_ns": 43794160,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-2",
+        "trial": 2,
+        "elapsed_ns": 43114700,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-2",
+        "trial": 3,
+        "elapsed_ns": 46677060,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-2",
+        "trial": 4,
+        "elapsed_ns": 56946570,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-2",
+        "trial": 5,
+        "elapsed_ns": 45022450,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-4",
+        "trial": 0,
+        "elapsed_ns": 45249380,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-4",
+        "trial": 1,
+        "elapsed_ns": 45063420,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-4",
+        "trial": 2,
+        "elapsed_ns": 45066170,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-4",
+        "trial": 3,
+        "elapsed_ns": 45693380,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-4",
+        "trial": 4,
+        "elapsed_ns": 44365400,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-4",
+        "trial": 5,
+        "elapsed_ns": 46182250,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-8",
+        "trial": 0,
+        "elapsed_ns": 47469590,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-8",
+        "trial": 1,
+        "elapsed_ns": 67328220,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-8",
+        "trial": 2,
+        "elapsed_ns": 48612060,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-8",
+        "trial": 3,
+        "elapsed_ns": 47821800,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-8",
+        "trial": 4,
+        "elapsed_ns": 47643230,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "cpu-8",
+        "trial": 5,
+        "elapsed_ns": 47197790,
+        "work_units": 4194304,
+        "checksum": 9007160971231232
+      },
+      {
+        "scene": "allocator",
+        "trial": 0,
+        "elapsed_ns": 214138660,
+        "work_units": 16777216,
+        "checksum": 528482304
+      },
+      {
+        "scene": "allocator",
+        "trial": 1,
+        "elapsed_ns": 214509760,
+        "work_units": 16777216,
+        "checksum": 528482304
+      },
+      {
+        "scene": "allocator",
+        "trial": 2,
+        "elapsed_ns": 213110530,
+        "work_units": 16777216,
+        "checksum": 528482304
+      },
+      {
+        "scene": "allocator",
+        "trial": 3,
+        "elapsed_ns": 218854890,
+        "work_units": 16777216,
+        "checksum": 528482304
+      },
+      {
+        "scene": "allocator",
+        "trial": 4,
+        "elapsed_ns": 224217330,
+        "work_units": 16777216,
+        "checksum": 528482304
+      },
+      {
+        "scene": "allocator",
+        "trial": 5,
+        "elapsed_ns": 225580070,
+        "work_units": 16777216,
+        "checksum": 528482304
+      },
+      {
+        "scene": "memfs-io",
+        "trial": 0,
+        "elapsed_ns": 29064300,
+        "work_units": 2097152,
+        "checksum": 7340032
+      },
+      {
+        "scene": "memfs-io",
+        "trial": 1,
+        "elapsed_ns": 24293170,
+        "work_units": 2097152,
+        "checksum": 7340032
+      },
+      {
+        "scene": "memfs-io",
+        "trial": 2,
+        "elapsed_ns": 34985550,
+        "work_units": 2097152,
+        "checksum": 7340032
+      },
+      {
+        "scene": "memfs-io",
+        "trial": 3,
+        "elapsed_ns": 38133310,
+        "work_units": 2097152,
+        "checksum": 7340032
+      },
+      {
+        "scene": "memfs-io",
+        "trial": 4,
+        "elapsed_ns": 24855520,
+        "work_units": 2097152,
+        "checksum": 7340032
+      },
+      {
+        "scene": "memfs-io",
+        "trial": 5,
+        "elapsed_ns": 25598970,
+        "work_units": 2097152,
+        "checksum": 7340032
+      }
+    ]
+  },
+  "ipc": {
+    "smoke": {
+      "records": [
+        {
+          "trial": 0,
+          "elapsed_ns": 66750930,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574670253666792
+        },
+        {
+          "trial": 1,
+          "elapsed_ns": 66554190,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574618859125472
+        },
+        {
+          "trial": 2,
+          "elapsed_ns": 69632930,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574754823534504
+        },
+        {
+          "trial": 3,
+          "elapsed_ns": 68616110,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574686729716640
+        },
+        {
+          "trial": 4,
+          "elapsed_ns": 68183590,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574826851987512
+        },
+        {
+          "trial": 5,
+          "elapsed_ns": 68936060,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574982767637680
+        }
+      ],
+      "median_round_trip_ns": 68616.11,
+      "scope": "UP round-trip work; not scheduler SMP scaling, per-input tails or physical scanout"
+    },
+    "production": {
+      "records": [
+        {
+          "trial": 0,
+          "elapsed_ns": 70889570,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574670253666792
+        },
+        {
+          "trial": 1,
+          "elapsed_ns": 71592150,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574618859125472
+        },
+        {
+          "trial": 2,
+          "elapsed_ns": 66071200,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574754823534504
+        },
+        {
+          "trial": 3,
+          "elapsed_ns": 78623860,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574686729716640
+        },
+        {
+          "trial": 4,
+          "elapsed_ns": 65413290,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574826851987512
+        },
+        {
+          "trial": 5,
+          "elapsed_ns": 67533450,
+          "round_trips": 1000,
+          "bytes": 64000,
+          "checksum": 7916574982767637680
+        }
+      ],
+      "median_round_trip_ns": 67533.45,
+      "scope": "UP round-trip work; not scheduler SMP scaling, per-input tails or physical scanout"
+    }
+  },
+  "pointer_pixels": "[C-POINTER] pixels: visible -> hidden -> restored -> restored after exit at 350,220",
+  "setup_failure": {
+    "command_option": "-no-hpet",
+    "qemu_error": "invalid option",
+    "resolution": "Use -machine hpet=off; successful final fallback receipt above."
+  },
+  "limitations": [
+    "Hardware counter period 10 ns is resolution, not latency or measurement accuracy. PIT 100 Hz remains the event source.",
+    "Prior PIT elapsed samples undercount IRQ-off work; no before/after speedup inferred across clocksource change.",
+    "No KVM/reference scaling. scheduler=up dispatch_cpus=1; APs park after isolated probes.",
+    "Global notification sequence may conservatively retry on unrelated producers. Remote task stop/cancel, IRQ progress, complete lock ranking and acknowledged TLB shootdown remain open.",
+    "Mapping pinning during IPC user-copy/commit remains VM work; no IPC guard spans user-memory access.",
+    "IPC measures UP round trips with observed scheduling/copy/runtime costs, not per-input tails or physical scanout."
+  ]
+}

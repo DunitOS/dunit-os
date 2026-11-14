@@ -1,21 +1,28 @@
 pub mod scheduler;
 mod transitions;
+mod parking;
+#[cfg(feature = "boot-smoke-tests")]
+mod parking_smoke;
+#[cfg(feature = "boot-smoke-tests")]
+pub use parking_smoke::run_parking_smoke;
 mod execution;
 #[cfg(feature = "boot-smoke-tests")]
 mod execution_smoke;
 #[cfg(feature = "boot-smoke-tests")]
 pub use execution_smoke::run_execution_ownership_smoke;
 pub use transitions::{mark_process_prepared_as_ready, mark_process_ready,
-    save_current_user_context_for_yield, block_current, pipe_block_current, poll_block_current,
+    save_current_user_context_for_yield,
     mark_process_finished, timer_preempt_save_and_schedule};
-pub(crate) use transitions::wait_set_block_current;
-use transitions::wake_entry;
+pub(crate) use parking::{block_current, pipe_block_current, poll_block_current, wait_set_block_current};
+use parking::wake_entry;
 mod terminal_stdin;
 mod wait_queue;
 mod futex;
 mod user_word;
 pub use futex::{futex_wait, futex_wake, run_clear_child_tid_on_exit, set_current_clear_child_tid, FutexWaitOutcome};
 use wait_queue::{wake_matching, WaitEntry, WaitKey, WaitQueue};
+pub(crate) use wait_queue::Checkpoint as WaitCheckpoint;
+pub(crate) fn wait_checkpoint() -> WaitCheckpoint { WAIT_QUEUE.lock().checkpoint() }
 mod current_access;
 pub use current_access::{with_current_process, with_current_process_mut, with_current_thread_mut, with_process_mut};
 pub(crate) use current_access::signal_current_handle;
@@ -131,7 +138,7 @@ static TERMINAL_STDIN_WAITING_PID: AtomicU64 = AtomicU64::new(0);
 static PREEMPTION_COUNT: AtomicU64 = AtomicU64::new(0);
 // UP round-robin is the default. A child may finish before its parent's first wait.
 static PREEMPTION_ENABLED: AtomicBool = AtomicBool::new(true);
-/// IRQ-safe wait queue; check/block is covered by the caller's IRQ guard.
+/// Registration and notification checkpoint share this lock; task -> queue.
 static WAIT_QUEUE: IrqSafeSpinLock<WaitQueue> = IrqSafeSpinLock::new(WaitQueue::new());
 
 /// Буфер строки stdin терминала для процесса, ожидающего ввод. Раньше три
@@ -182,6 +189,7 @@ pub struct ProcessRecord {
     /// Independently owned task object; registry guards never span its mutex.
     process: Option<registry::Task>,
     execution: execution::State,
+    wait_generation: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1608,6 +1616,7 @@ pub fn insert_process_record(
             let record = &mut table[index];
             assert!(!record.execution.entered(), "replace entered task");
             record.execution = execution::State::default();
+            record.wait_generation = None;
             record.parent = parent;
             record.owner = None;
             record.path = path;
@@ -1619,7 +1628,8 @@ pub fn insert_process_record(
         } else {
             table.push(ProcessRecord { pid, owner: None, thread_auto_reap: false,
                 parent, state, status: None, has_run, waitable, path, process,
-                execution: execution::State::default() });
+                execution: execution::State::default(),
+                wait_generation: None });
             None
         }
     };
@@ -1719,6 +1729,7 @@ pub fn create_user_thread(entry: u64, stack_top: u64, arg: u64) -> Result<Thread
             path: String::from("[thread]"),
             process: Some(Arc::new(IrqSafeSpinLock::new(thread))),
             execution: execution::State::default(),
+            wait_generation: None,
         });
     }
     if let Err(error) = crate::process::scheduler::enqueue_ready(ProcessId(tid.0)) {
@@ -1873,8 +1884,14 @@ pub fn is_pid_blocked(pid: ProcessId) -> bool {
 
 fn remove_waiter(entity: ProcessId) {
     let _irq = InterruptGuard::new();
-    WAIT_QUEUE.lock().remove_entity(entity);
-    let pending = with_process_mut(entity, |process| Ok(process.wait_set.take())).ok().flatten();
+    let pending = with_task_record(entity, |process, record| {
+        WAIT_QUEUE.lock().remove_entity(entity);
+        record.wait_generation = None;
+        Ok(process.wait_set.take())
+    }).ok().flatten();
+    // Detached records can leave registrations, but no live replacement shares
+    // an allocated PID. The normal path above serializes cancel with admission.
+    if registry::task(entity).is_err() { WAIT_QUEUE.lock().remove_entity(entity); }
     drop(pending); // readiness/file leases may reenter after the task lock ends
 }
 
@@ -1895,7 +1912,7 @@ pub fn reap_process(pid: ProcessId) -> Result<(), ProcessError> {
         (from, retired)
     };
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    if let Some(mut ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
     drop(retired);
     log_process_transition(pid, from, ProcessState::Reaped, "reap");
     Ok(())
@@ -1950,7 +1967,7 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
         Ok((fds, vm, from))
     })?;
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    if let Some(mut ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
     log_process_transition(pid, from, ProcessState::Dead, "kill");
     fds.release();
     drop(vm);
@@ -2050,7 +2067,7 @@ pub fn wait_for_child(requested_pid: ProcessId) -> Result<WaitRecord, ProcessErr
     let pid = record.pid;
     log_process_transition(pid, record.state, ProcessState::Reaped, "wait");
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    if let Some(mut ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
     if let Some(task) = record.process.take() {
         let fds = { task.lock().take_fd_resources() };
         let closed = fds.release();
@@ -2084,7 +2101,7 @@ pub fn cleanup_prepared_children(parent_pid: ProcessId) -> usize {
     for record in retired {
         log_process_transition(record.pid, record.state, ProcessState::Reaped, "parent-exit");
         crate::process::scheduler::remove(record.pid);
-        if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(record.pid); }
+        if let Some(mut ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(record.pid); }
         drop(record);
     }
     removed
@@ -2101,7 +2118,7 @@ pub fn autoreap_process(pid: ProcessId, reason: &str) -> Result<(), ProcessError
     };
     log_process_transition(pid, record.state, ProcessState::Reaped, reason);
     crate::process::scheduler::remove(pid);
-    if let Some(ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
+    if let Some(mut ipc) = crate::ipc::get_ipc_manager() { ipc.clear_messages(pid); }
     drop(record);
     Ok(())
 }

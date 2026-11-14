@@ -63,7 +63,7 @@ mod hal {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)] enum ProcessState { Running,Blocked }
     #[derive(Debug,PartialEq,Eq)] enum ProcessError { NoCurrentProcess,NoSuchProcess,ProcessNotPrepared,InvalidMemoryRange,NotRunnable,InvalidUserContext }
     struct Process { state:ProcessState,is_kernel:bool,context:u64,clear_child_tid:u64 }
-    pub struct ProcessRecord {pid:ProcessId,state:ProcessState,process:Option<Arc<IrqSafeSpinLock<Process>>>}
+    pub struct ProcessRecord {pid:ProcessId,state:ProcessState,wait_generation:Option<u64>,process:Option<Arc<IrqSafeSpinLock<Process>>>}
     // This fixture exercises access/futex scopes, not dispatch/teardown.
     mod execution { pub fn group_entered(_: &[super::ProcessRecord],_:super::ProcessId)->bool { false } }
     #[path=@REGISTRY@] mod registry;
@@ -93,11 +93,11 @@ mod hal {
     fn with_current_thread_mut<R>(write:impl for<'a> FnOnce(&'a mut Process)->R)->Option<R> {
         let task=registry::task(ProcessId(1)).ok()?;let mut p=task.lock();Some(write(&mut p))
     }
-    fn wake_entry(_:WaitEntry) { assert_queue_unlocked();assert!(SPACE.get().unwrap().try_lock().is_some()); }
+    fn wake_entry(_:WaitEntry,_:u64) { assert_queue_unlocked();assert!(SPACE.get().unwrap().try_lock().is_some()); }
     pub fn run() {
         use futex::{futex_wait,futex_wake,FutexWaitOutcome::*};
         SPACE.set(Arc::new(IrqSafeSpinLock::new(AddressSpace))).ok().unwrap();
-        process_table().push(ProcessRecord {pid:ProcessId(1),state:ProcessState::Running,process:Some(Arc::new(IrqSafeSpinLock::new(Process {
+        process_table().push(ProcessRecord {pid:ProcessId(1),state:ProcessState::Running,wait_generation:None,process:Some(Arc::new(IrqSafeSpinLock::new(Process {
             state:ProcessState::Running,is_kernel:false,context:0,clear_child_tid:0 })))});
         for flags in [0,1,2,4,5,6] {
             FLAGS.store(flags,Ordering::SeqCst);

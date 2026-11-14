@@ -1,7 +1,8 @@
 use crate::process::ProcessId;
-use alloc::collections::BTreeMap;
+use crate::sync::{IrqSafeSpinLock, IrqSafeSpinLockGuard};
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
-use core::cell::UnsafeCell;
+use core::ops::{Deref, DerefMut};
 
 pub const MAX_MESSAGE_SIZE: usize = 256;
 pub const MAX_QUEUE_MESSAGES: usize = 128;
@@ -48,6 +49,7 @@ pub enum MessageType {
 
 #[derive(Debug, Clone)]
 pub struct Message {
+    sequence: u64,
     pub sender: ProcessId,
     pub attachment: u32,
     pub msg_type: MessageType,
@@ -58,6 +60,7 @@ pub struct Message {
 impl Message {
     pub fn new(sender: ProcessId, msg_type: MessageType) -> Self {
         Self {
+            sequence: 0,
             sender,
             attachment: 0,
             msg_type,
@@ -87,7 +90,8 @@ pub enum IpcError {
 
 pub struct IpcManager {
     shared_regions: BTreeMap<SharedMemoryId, SharedMemoryRegion>,
-    message_queues: BTreeMap<ProcessId, Vec<Message>>,
+    message_queues: BTreeMap<ProcessId, VecDeque<Message>>,
+    next_message_sequence: u64,
     next_shared_id: u64,
 }
 
@@ -105,6 +109,7 @@ impl IpcManager {
         Self {
             shared_regions: BTreeMap::new(),
             message_queues: BTreeMap::new(),
+            next_message_sequence: 0,
             next_shared_id: 1,
         }
     }
@@ -158,15 +163,23 @@ impl IpcManager {
         self.shared_regions.get(&id)
     }
 
-    pub fn send_message(&mut self, target: ProcessId, msg: Message) -> Result<(), IpcError> {
+    pub fn send_message(&mut self, target: ProcessId, mut msg: Message) -> Result<(), IpcError> {
         if !crate::process::process_exists(target) {
             return Err(IpcError::InvalidTarget);
         }
-        let queue = self.message_queues.entry(target).or_insert_with(Vec::new);
+        let queue = self
+            .message_queues
+            .entry(target)
+            .or_insert_with(VecDeque::new);
         if queue.len() >= MAX_QUEUE_MESSAGES {
             return Err(IpcError::QueueFull);
         }
-        queue.push(msg);
+        self.next_message_sequence = self
+            .next_message_sequence
+            .checked_add(1)
+            .expect("IPC sequence exhausted");
+        msg.sequence = self.next_message_sequence;
+        queue.push_back(msg);
         Ok(())
     }
 
@@ -175,7 +188,7 @@ impl IpcManager {
         if queue.is_empty() {
             None
         } else {
-            Some(queue.remove(0))
+            queue.pop_front()
         }
     }
 
@@ -204,40 +217,72 @@ impl IpcManager {
     }
 }
 
-/// Синглтон IPC-менеджера. Раньше `static mut Option<..>`; теперь `UnsafeCell`-
-/// newtype без `static mut`. Инициализируется один раз в `init` при загрузке,
-/// далее к нему обращается только кооперативный путь ядра на одном CPU, поэтому
-/// раздача `&'static mut` через `as_mut()` сохраняет прежнюю семантику.
-struct IpcManagerCell(UnsafeCell<Option<IpcManager>>);
-unsafe impl Sync for IpcManagerCell {}
-static IPC_MANAGER_INSTANCE: IpcManagerCell = IpcManagerCell(UnsafeCell::new(None));
+// Registry ownership is bounded by an actual guard; no static mutable reference.
+static IPC_MANAGER_INSTANCE: IrqSafeSpinLock<Option<IpcManager>> = IrqSafeSpinLock::new(None);
+pub struct IpcGuard(IrqSafeSpinLockGuard<'static, Option<IpcManager>>);
+impl Deref for IpcGuard {
+    type Target = IpcManager;
+    fn deref(&self) -> &IpcManager {
+        self.0.as_ref().expect("initialized IPC guard")
+    }
+}
+impl DerefMut for IpcGuard {
+    fn deref_mut(&mut self) -> &mut IpcManager {
+        self.0.as_mut().expect("initialized IPC guard")
+    }
+}
 
 /// Initialize the IPC manager and return its measured startup stats. At init
 /// there are no message queues (they are created lazily per target PID on the
 /// first `send`) and no shared-memory regions, so the boot log can report the
 /// real counts instead of claiming queues/shared memory were pre-created.
 pub fn init() -> IpcStats {
-    unsafe {
-        *IPC_MANAGER_INSTANCE.0.get() = Some(IpcManager::new());
+    {
+        let mut manager = IPC_MANAGER_INSTANCE.lock();
+        assert!(manager.is_none(), "IPC initialized twice");
+        *manager = Some(IpcManager::new());
     }
     let stats = ipc_stats();
-    crate::memory::serial_write("[IPC] manager ready: bounded byte message queues (lazy per-PID)\r\n");
+    crate::memory::serial_write(
+        "[IPC] manager ready: bounded byte message queues (lazy per-PID)\r\n",
+    );
     stats
 }
 
-pub fn get_ipc_manager() -> Option<&'static mut IpcManager> {
-    unsafe { (*IPC_MANAGER_INSTANCE.0.get()).as_mut() }
+pub fn get_ipc_manager() -> Option<IpcGuard> {
+    let guard = IPC_MANAGER_INSTANCE.lock();
+    if guard.is_none() {
+        None
+    } else {
+        Some(IpcGuard(guard))
+    }
 }
 
 pub fn send_bytes(sender: ProcessId, target: ProcessId, data: &[u8]) -> Result<(), IpcError> {
     if data.is_empty() || data.len() > MAX_MESSAGE_SIZE {
         return Err(IpcError::MessageTooLarge);
     }
-    let manager = get_ipc_manager().ok_or(IpcError::Unavailable)?;
-    manager.send_message(
-        target,
-        Message::with_data(sender, MessageType::WindowClose { window_id: 0 }, data),
-    )?;
+    // The target scope closes kill/admission races. The queue lock additionally
+    // orders process_exists with registry removal -> mailbox clearing.
+    crate::process::with_process_mut(target, |process| {
+        if matches!(
+            process.state,
+            crate::process::ProcessState::Dead | crate::process::ProcessState::Reaped
+        ) {
+            return Ok(Err(IpcError::InvalidTarget));
+        }
+        let result = get_ipc_manager()
+            .ok_or(IpcError::Unavailable)
+            .and_then(|mut manager| {
+                manager.send_message(
+                    target,
+                    Message::with_data(sender, MessageType::WindowClose { window_id: 0 }, data),
+                )
+            });
+        Ok(result)
+    })
+    .map_err(|_| IpcError::InvalidTarget)??;
+    // No task or IPC guard may span a readiness callback.
     crate::process::wake_ipc_waiters(target);
     Ok(())
 }
@@ -250,7 +295,7 @@ pub fn recv_bytes_with_sender(
     pid: ProcessId,
     out: &mut [u8],
 ) -> Result<(ProcessId, usize), IpcError> {
-    let manager = get_ipc_manager().ok_or(IpcError::Unavailable)?;
+    let mut manager = get_ipc_manager().ok_or(IpcError::Unavailable)?;
     let queue = manager
         .message_queues
         .get_mut(&pid)
@@ -258,12 +303,14 @@ pub fn recv_bytes_with_sender(
     if queue.is_empty() {
         return Err(IpcError::NoMessage);
     }
-    if queue[0].attachment != 0 { return Err(IpcError::AttachmentRequired); }
+    if queue[0].attachment != 0 {
+        return Err(IpcError::AttachmentRequired);
+    }
     let len = queue[0].len;
     if out.len() < len {
         return Err(IpcError::MessageTooLarge);
     }
-    let message = queue.remove(0);
+    let message = queue.pop_front().expect("checked nonempty queue");
     out[..len].copy_from_slice(&message.data[..len]);
     Ok((message.sender, len))
 }
@@ -275,18 +322,54 @@ pub fn ipc_stats() -> IpcStats {
 }
 
 /// Authenticated attachment metadata is supplied only by the atomic handle syscall.
-pub fn send_attached(sender: ProcessId, target: ProcessId, data: &[u8], attachment: u32) -> Result<(), IpcError> {
-    if data.is_empty() || data.len()>MAX_MESSAGE_SIZE {return Err(IpcError::MessageTooLarge);}
-    let mut message=Message::with_data(sender,MessageType::WindowClose{window_id:0},data);
-    message.attachment=attachment;
-    get_ipc_manager().ok_or(IpcError::Unavailable)?.send_message(target,message)?;
-    crate::process::wake_ipc_waiters(target);Ok(())
+pub fn send_attached(
+    sender: ProcessId,
+    target: &mut crate::process::Process,
+    data: &[u8],
+    attachment: u32,
+) -> Result<(), IpcError> {
+    if data.is_empty() || data.len() > MAX_MESSAGE_SIZE {
+        return Err(IpcError::MessageTooLarge);
+    }
+    let mut message = Message::with_data(sender, MessageType::WindowClose { window_id: 0 }, data);
+    message.attachment = attachment;
+    if matches!(
+        target.state,
+        crate::process::ProcessState::Dead | crate::process::ProcessState::Reaped
+    ) {
+        return Err(IpcError::InvalidTarget);
+    }
+    get_ipc_manager()
+        .ok_or(IpcError::Unavailable)?
+        .send_message(target.pid, message)?;
+    Ok(()) // caller notifies only after releasing the target task transaction
 }
-pub fn peek_attached(pid:ProcessId)->Result<Message,IpcError> {
-    get_ipc_manager().ok_or(IpcError::Unavailable)?.message_queues.get(&pid)
-        .and_then(|q|q.first()).cloned().ok_or(IpcError::NoMessage)
+pub fn peek_attached(pid: ProcessId) -> Result<Message, IpcError> {
+    get_ipc_manager()
+        .ok_or(IpcError::Unavailable)?
+        .message_queues
+        .get(&pid)
+        .and_then(|q| q.front())
+        .cloned()
+        .ok_or(IpcError::NoMessage)
 }
-pub fn consume_attached(pid:ProcessId)->Result<(),IpcError> {
-    let q=get_ipc_manager().ok_or(IpcError::Unavailable)?.message_queues.get_mut(&pid).ok_or(IpcError::NoMessage)?;
-    if q.is_empty(){return Err(IpcError::NoMessage);}q.remove(0);Ok(())
+pub fn consume_attached(pid: ProcessId, packet: &Message) -> Result<(), IpcError> {
+    let mut manager = get_ipc_manager().ok_or(IpcError::Unavailable)?;
+    let queue = manager
+        .message_queues
+        .get_mut(&pid)
+        .ok_or(IpcError::NoMessage)?;
+    if queue
+        .front()
+        .is_none_or(|front| front.sequence != packet.sequence)
+    {
+        return Err(IpcError::NoMessage);
+    }
+    queue.pop_front();
+    Ok(())
 }
+
+#[cfg(feature = "boot-smoke-tests")]
+mod smoke;
+#[cfg(feature = "boot-smoke-tests")]
+pub use smoke::run_ipc_lock_smoke;

@@ -31,10 +31,10 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 
 | Этап | Статус | Подтверждённый результат / оставшаяся работа |
 | --- | --- | --- |
-| OP0 | Частично | TCG/UP baseline, metadata и checked benchmarks готовы; KVM reference, IPC/часть сцен и точная телеметрия открыты |
+| OP0 | Частично | TCG/UP baseline, metadata и checked benchmarks готовы; IPC ping-pong и HPET metadata готовы; KVM reference, часть сцен и полная телеметрия открыты |
 | OP1 | Частично | Аудит, CPU-local entry, registry/task locks, pins и exclusive execution leases готовы; cancellation/IRQ model ещё открыт |
-| OP2 | Частично | Limine AP boot, APIC/IPI и timer probes: BIOS 1/2/4/8, UEFI 4; точные часы и расширенная платформенная проверка открыты |
-| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; exclusive dispatch/return handoff готовы; полный cancel/predicate/wait, IRQ и TLB gates открыты |
+| OP2 | Частично | Limine AP boot, APIC/IPI и timer probes: BIOS 1/2/4/8, UEFI 4; HPET/PIT fallback и cross-CPU brackets готовы; timer event model и платформенные gates открыты |
+| OP3 | В работе | VFS/backend, PMM, registry/task locks, teardown и dispatch pins готовы; exclusive dispatch/return handoff готовы; checkpoint/register и IPC locks готовы; remote cancel, IRQ и TLB gates открыты |
 | OP4 | Подготовка | Exclusive CPU/ticket admission реализован; remote dispatch и параллельного исполнения приложений ещё нет |
 | OP5 | Не начат в этом треке | Масштабирование и scheduling latency — после корректного SMP |
 | OP6–OP8 | Не закрыты | Новые оптимизации ввода/SDK/рендера/I/O требуют профиля; исторические GUI-правки входят в baseline |
@@ -43,8 +43,9 @@ CPU одновременно. Число CPU в QEMU, AP-boot и сообщен�
 **Фактический режим:** до 8 аппаратно запущенных vCPU в проверенной TCG-матрице,
 `scheduler=up dispatch_cpus=1 APs=parked`. AP обрабатывают изолированные hardware/PMM probes;
 приложения и pthread workers всё ещё выполняются последовательно на одном CPU.
-KVM на стенде недоступен. Медианы PIT с шагом 10 мс и host/QMP stream time
-не доказывают ускорение, per-event tail latency или input-to-photon.
+KVM на стенде недоступен. На QEMU q35 выбран HPET (шаг счётчика 10 нс),
+проверен PIT fallback; timer events пока PIT 100 Hz. Старые PIT-замеры и host/QMP
+stream time не доказывают ускорение, per-event tail latency или input-to-photon.
 
 Закрытая галочка означает завершённую узкую реализацию с отчётом, а не приёмку
 всего этапа. Смешанные пункты ниже разделены: закрытые подзадачи не снимают
@@ -56,7 +57,8 @@ KVM на стенде недоступен. Медианы PIT с шагом 10 
    реальные locks и владеющие pins; нет приватного static mutable Vec.
    Exclusive execution/return handoff уже реализован: Ready до завершения HAL
    не разрешает повторный запуск. Теперь закрыть remote cancellation/stop ack,
-   producer predicate/check/register и interruptible syscall boundaries.
+   predicate/check/register уже защищён notification checkpoint; остаются remote
+   stop/cancel и interruptible syscall boundaries.
    Pin процесса не является атомарным правом исполнения или защитой mapping.
 2. Согласовать порядок process/task ↔ VFS/ProcFs, wait queues, IPC/handles,
    PMM/VMM и драйверов. Закрыть оставшиеся reentry и lifecycle/cancellation пути.
@@ -133,7 +135,9 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 - [x] Разделить coarse PIT elapsed, host wall time и неизмеренные показатели в
   отчётах. [Queue](docs/performance/scheduler-queue.md) и
   [dispatch](docs/performance/dispatch-ownership.md) имеют checked до/после серии.
-- [ ] Завершить набор сцен: idle/startup, IPC ping-pong, loaded/multi-client и
+- [x] [Нативный IPC ping-pong](docs/performance/progress-foundation.md): два процесса,
+  warmup + пять серий по 1 000 round trips с sender/order/data/checksum checks.
+- [ ] Завершить набор сцен: idle/startup, loaded/multi-client и
   фиксированная игровая нагрузка. Pointer/GUI correctness уже проверяется;
   это не полноценный performance baseline этих сцен.
 - [ ] Зафиксировать KVM reference machine, шум/бюджеты и overhead профилирования;
@@ -176,9 +180,11 @@ input-to-photon не заявлять. Для игр, blur и больших р�
 - [x] Изолированные xAPIC/IPI round trips, EOI/spurious handling, BSP PIC routing
   и PIT-калиброванные local timer probes; после проверки AP паркуются без
   постоянных timer wakeups. BIOS 1/2/4/8 и UEFI 4 vCPU TCG проверены.
-- [ ] Выбрать точный clocksource и timer event model по CPUID/платформе. Проверить
-  межъядерную согласованность TSC/ordering либо использовать корректный fallback.
-  Текущее timekeeping остаётся PIT 100 Hz.
+- [x] [Глобальный HPET clocksource и PIT fallback](docs/performance/progress-foundation.md):
+  ACPI/checksum/64-bit/progress validation, IRQ-off progress, реальные AP clock
+  brackets, раздельная clock/event metadata; TSC cross-CPU не предполагается.
+- [ ] Завершить timer event model и точные wakeups. События пока PIT 100 Hz;
+  шаг HPET не является wakeup/dispatch latency или приёмкой всех платформ.
 - [ ] Расширить платформенную проверку (включая x2APIC и KVM/железо);
   xAPIC-матрица не считается доказательством всех APIC-режимов.
 - **Приёмка:** AP boot/park и реальные work/timer/IPI checks выполнены на стенде;
@@ -224,6 +230,13 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   explicit PID, TLS/join/reap/kill, preemption и futex переведены совместно.
   Dispatch frame удерживает весь task, без mutex guard через HAL/IRET.
 
+- [x] [Notification checkpoint и registration identity](docs/performance/progress-foundation.md):
+  IPC/pipe/poll/wait-set check/register защищены от выигравшего producer;
+  delayed wake не затрагивает новый park. Host 8 000 forced gaps + native proof.
+- [x] [IPC guard и очередь FIFO](docs/performance/progress-foundation.md): настоящий
+  lock вместо static mutable manager, notifications после guards, packet identity,
+  target handle insertion/queue publication в одной task transaction.
+
 Оставшиеся обязательные gates:
 
 - [ ] Полный lock ranking/reentry audit для process/task, VFS/ProcFs, wait queues,
@@ -231,8 +244,9 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   весь порядок. Не спать под spinlock и не ждать ack под lock получателя.
 - [ ] Безопасные interruptible syscall boundaries и гарантированный прогресс IPI
   вместо переноса бесконечных IRQ-off окон на несколько CPU.
-- [ ] Atomic predicate/check/block/wake и lifecycle/cancellation для потоков,
-  futex, pipe/PTY, IPC и wait-set; remote notification и порядок освобождения.
+- [ ] Завершить remote lifecycle/cancellation/stop для потоков и ожиданий,
+  remote runqueue notification и порядок освобождения. Check/register и wait
+  identity уже защищены; это не остановка выполняющегося CPU.
 - [ ] Закрыть общий heap/PMM/shared VM/handles/device lock order и последний reader.
   PMM операции защищены отдельно; это не доказательство всей цепочки allocator/VM.
   Pin AddressSpace не является pin каждой mapping или shared-frame bookkeeping.

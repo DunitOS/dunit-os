@@ -39,14 +39,15 @@ pub fn run_execution_ownership_smoke() -> bool {
         with_task_record(pid, |process, record| {
             process.state = ProcessState::Blocked;
             record.state = ProcessState::Blocked;
+            record.wait_generation = Some(WAIT_QUEUE.lock().push(WaitEntry {
+                entity: pid,
+                key: WaitKey::Timer,
+                deadline: Some(0),
+            }));
             Ok(())
         })?;
         // A producer wins the wake before the old CPU has completed return.
-        wake_entry(WaitEntry {
-            entity: pid,
-            key: WaitKey::Timer,
-            deadline: None,
-        });
+        wake_expired_waiters();
         if is_pid_runnable(pid) || reserve(pid).is_ok() {
             return Err(ProcessError::NotRunnable);
         }

@@ -7,6 +7,8 @@ extern struct LIMINE_MP(response) * get_mp_response(void);
 extern void hal_load_idt(void);
 extern void hal_mp_switch_stack(uint64_t index, struct LIMINE_MP(info) * info);
 extern uint64_t kernel_mp_ticks(void);
+extern uint64_t kernel_clock_ns(void);
+static uint64_t clock_verified;
 uint64_t hal_mp_cr3;
 uint64_t hal_mp_stack_tops[HAL_CPU_CAPACITY];
 extern uint64_t kernel_cpu_alloc(uint64_t size, uint64_t alignment);
@@ -20,8 +22,8 @@ typedef struct { uint64_t ready, done; uint8_t padding[48]; }
 static pmm_probe_slot pmm_slots[HAL_CPU_CAPACITY];
 static uint32_t pmm_requested, pmm_gate; /* gate: 0 rendezvous, 1 run, 2 abort */
 typedef struct {
-  uint64_t apic, ready, request, ack, ticks, work;
-  uint8_t padding[16];
+  uint64_t apic, ready, request, ack, ticks, work, clock;
+  uint8_t padding[8];
 } __attribute__((aligned(64))) cpu_slot;
 static cpu_slot slots[HAL_CPU_CAPACITY];
 static uint64_t count = 1;
@@ -192,6 +194,7 @@ int hal_mp_interrupt(uint64_t vector) {
   }
   if (vector == PROBE) {
     uint64_t request = __atomic_load_n(&slots[i].request, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&slots[i].clock, kernel_clock_ns(), __ATOMIC_RELAXED);
     __atomic_store_n(&slots[i].ack, request, __ATOMIC_RELEASE);
     if (__atomic_load_n(&slots[i].ticks, __ATOMIC_RELAXED) >= 2)
       store(0x320, 0x10000 | TIMER);
@@ -207,6 +210,7 @@ int hal_mp_start(void) {
   struct LIMINE_MP(response) *r = get_mp_response();
   if (!r) {
     slots[0].ready = 1;
+    clock_verified = 1;
     return 1;
   }
   __asm__ volatile("mov %%cr3,%0" : "=r"(hal_mp_cr3));
@@ -241,7 +245,9 @@ int hal_mp_start(void) {
   }
   /* APIC IRR coalesces equal pending vectors: validate one round trip at a
    * time rather than treating interrupt edges as a reliable message count. */
+  clock_verified = 1;
   for (uint64_t n = 1; n < count; n++) {
+    uint64_t before_clock = kernel_clock_ns();
     __atomic_store_n(&slots[n].request, 1, __ATOMIC_RELEASE);
     if (!send((uint32_t)slots[n].apic, PROBE))
       return 0;
@@ -254,6 +260,10 @@ int hal_mp_start(void) {
         return 0;
       pause_cpu();
     }
+    uint64_t remote_clock = __atomic_load_n(&slots[n].clock, __ATOMIC_RELAXED);
+    if (remote_clock < before_clock || remote_clock > kernel_clock_ns())
+      return 0;
+    clock_verified++;
   }
   start = kernel_mp_ticks();
   for (uint64_t spins = 0;; spins++) {
@@ -326,3 +336,5 @@ int hal_mp_run_pmm_probe(void) {
     pause_cpu();
   }
 }
+
+uint64_t hal_mp_clock_verified(void) { return clock_verified; }

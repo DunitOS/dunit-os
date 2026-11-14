@@ -1,0 +1,95 @@
+//! Real parking/registration code, privileged context capture replaced by a shim.
+#![allow(dead_code)]
+extern crate alloc;
+#[path=@SYNC@] mod actual_sync;
+mod sync {
+    pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
+    pub type IrqSafeSpinLockGuard<'a,T> = crate::actual_sync::SpinLockGuard<'a,T>;
+    pub struct InterruptGuard;
+    impl InterruptGuard { pub fn new()->Self { Self } }
+}
+mod cpu {
+    use std::sync::atomic::{AtomicBool,AtomicU64};
+    pub struct Runtime {pub yield_requested:AtomicBool,pub schedule_hint:AtomicU64}
+    static CPU:Runtime=Runtime {yield_requested:AtomicBool::new(false),schedule_hint:AtomicU64::new(0)};
+    pub fn runtime()->&'static Runtime {&CPU}
+}
+mod clock {
+    pub const TICKS_PER_SECOND:u64=100;
+    pub fn monotonic_ticks()->u64 {100}
+}
+mod hal {
+    pub unsafe fn syscall_capture_user_context(context:*mut u64,_:u64) {*context+=1;}
+    pub unsafe fn syscall_restart_user_context(context:*mut u64) {*context+=10;}
+}
+mod process {
+    use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+    use crate::sync::{InterruptGuard,IrqSafeSpinLock};
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub struct ProcessId(pub u64);
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub enum ProcessState {Running,Ready,Blocked}
+    #[derive(Debug,PartialEq,Eq)] pub enum ProcessError {NoCurrentProcess,NoSuchProcess,ProcessNotPrepared,NotRunnable,InvalidUserContext}
+    pub struct Process {state:ProcessState,is_kernel:bool,context:u64}
+    pub struct ProcessRecord {pid:ProcessId,state:ProcessState,wait_generation:Option<u64>,process:Option<registry::Task>}
+    mod execution {pub fn group_entered(_: &[super::ProcessRecord],_:super::ProcessId)->bool {false}}
+    #[path=@REGISTRY@] mod registry;
+    use registry::with_record as with_task_record;
+    #[path=@WAIT@] mod wait_queue;
+    use wait_queue::{WaitEntry,WaitKey,WaitQueue,wake_matching,Checkpoint as WaitCheckpoint};
+    static WAIT_QUEUE:IrqSafeSpinLock<WaitQueue>=IrqSafeSpinLock::new(WaitQueue::new());
+    fn wait_checkpoint()->WaitCheckpoint {WAIT_QUEUE.lock().checkpoint()}
+    fn current_entity_id()->Option<ProcessId> {Some(ProcessId(1))}
+    mod scheduler {
+        use super::*;
+        static ENQUEUES:AtomicUsize=AtomicUsize::new(0);
+        pub fn enqueue_ready(pid:ProcessId)->Result<(),ProcessError> {
+            assert!(WAIT_QUEUE.try_lock().is_some());
+            let task=registry::task(pid)?;let p=task.lock();assert_eq!(p.state,ProcessState::Ready);
+            ENQUEUES.fetch_add(1,Ordering::SeqCst);Ok(())
+        }
+    }
+    #[path=@PARKING@] mod parking;
+    fn running() {with_task_record(ProcessId(1),|p,r| {p.state=ProcessState::Running;r.state=p.state;r.wait_generation=None;Ok(())}).unwrap();}
+    fn state()->ProcessState {registry::table()[0].state}
+    fn notify() {wake_matching(&WAIT_QUEUE, |_|true,0,parking::wake_entry);}
+    pub fn run() {
+        registry::table().push(ProcessRecord {pid:ProcessId(1),state:ProcessState::Running,wait_generation:None,
+            process:Some(Arc::new(IrqSafeSpinLock::new(Process {state:ProcessState::Running,is_kernel:false,context:0})))});
+        // A producer wins after the false predicate and before registration.
+        let checkpoint=wait_checkpoint();notify();
+        parking::pipe_block_current(7,checkpoint).unwrap();assert_eq!(state(),ProcessState::Ready);
+        assert!(crate::cpu::runtime().yield_requested.load(Ordering::SeqCst));
+        assert_eq!(wake_matching(&WAIT_QUEUE, |_|true,0,|_,_|panic!("lost-wake retry registered")),0);
+        // A notification selected earlier must not wake a newer park of this PID.
+        running();parking::pipe_block_current(7,wait_checkpoint()).unwrap();
+        assert_eq!(state(),ProcessState::Blocked);
+        let mut delayed=None;
+        assert_eq!(wake_matching(&WAIT_QUEUE, |_|true,1,|entry,generation|delayed=Some((entry,generation))),1);
+        running();parking::pipe_block_current(7,wait_checkpoint()).unwrap();
+        let (entry,generation)=delayed.unwrap();parking::wake_entry(entry,generation);
+        assert_eq!(state(),ProcessState::Blocked);notify();assert_eq!(state(),ProcessState::Ready);
+        // IPC/sleep captures return context; poll/wait-set/pipe capture restart.
+        running();parking::block_current(None,Some(99),None).unwrap();assert_eq!(state(),ProcessState::Ready);
+        for key in 0..3 {
+            running();let checkpoint=wait_checkpoint();notify();
+            match key {
+                0=>parking::block_current(Some(ProcessId(1)),None,Some(checkpoint)),
+                1=>parking::poll_block_current(u64::MAX,checkpoint),
+                _=>parking::wait_set_block_current(u64::MAX,checkpoint),
+            }.unwrap();assert_eq!(state(),ProcessState::Ready);
+        }
+        // Force a remote producer into the check/register gap on every trial.
+        let checked=Arc::new(std::sync::Barrier::new(2));let published=checked.clone();
+        let producer={let checked=checked.clone();std::thread::spawn(move|| {
+            for _ in 0..8000 {checked.wait();notify();checked.wait();}
+        })};
+        for _ in 0..8000 {
+            running();let checkpoint=wait_checkpoint(); // predicate read false here
+            published.wait();published.wait();
+            parking::pipe_block_current(7,checkpoint).unwrap();assert_eq!(state(),ProcessState::Ready);
+        }
+        producer.join().unwrap();
+        assert_eq!(wake_matching(&WAIT_QUEUE, |_|true,0,|_,_|panic!("stranded registration")),0);
+        println!("parking: 8000 forced remote check/register races, stale wakes and deadlines OK");
+    }
+}
+fn main() {process::run();}

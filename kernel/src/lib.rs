@@ -843,7 +843,8 @@ pub extern "C" fn kernel_main(
         screen_log("[ .. ] Running FS mutation smoke test", false);
         if fs::vfs::run_fs_mutation_smoke() && process::run_resource_cleanup_smoke()
             && process::run_dispatch_pin_smoke() && process::run_registry_ownership_smoke()
-            && process::run_execution_ownership_smoke() {
+            && process::run_execution_ownership_smoke() && process::run_parking_smoke()
+            && ipc::run_ipc_lock_smoke() {
             screen_log("[ OK ] FS mutation smoke passed", false);
         } else {
             screen_log("[FAIL] FS mutation smoke failed", true);
@@ -853,7 +854,7 @@ pub extern "C" fn kernel_main(
     screen_log("[ .. ] Configuring interrupt handlers", false);
 
     clock::init_pit();
-    screen_log("[ OK ] Clocksource: PIT monotonic (100 Hz)", false);
+    screen_log(if clock::is_high_resolution() {"[ OK ] Clocksource: HPET; timer events: PIT 100 Hz"} else {"[ OK ] Clocksource: PIT fallback (100 Hz)"}, false);
 
     if terminal_mode == 0 {
         unsafe {
@@ -879,6 +880,8 @@ pub extern "C" fn kernel_main(
     screen_log("[ OK ] Hardware interrupts configured", false);
 
     cpu::start_multiprocessor();
+    #[cfg(feature = "boot-smoke-tests")]
+    clock::run_clock_probe();
     #[cfg(feature = "boot-smoke-tests")]
     assert!(memory::pmm::run_concurrent_smoke(), "concurrent PMM allocation/reclaim");
 

@@ -1,0 +1,22 @@
+{
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /system/bin/tcc /assets/tcc/performance_ipc.c -o /tmp/performance-ipc",
+      "exec /tmp/performance-ipc",
+      "exec /app/musl_time"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[PERF-IPC] all checks passed",
+    "[MUSL-TIME] OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[PERF-IPC] FAIL",
+    "[MUSL-TIME] FAIL",
+    "tcc: error",
+    {"marker": "[USER-FAULT]", "after": "[TERM-007] Starting main loop"}
+  ]
+}

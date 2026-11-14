@@ -61,24 +61,35 @@ pub(super) fn send(
         Some(Err(error)) => return error,
         None => return EINVAL,
     };
-    // Target existence was verified under the same IRQ guard, so insertion
-    // cannot race teardown. The source's original handle is never moved.
-    let received = match crate::process::with_process_mut(target, |p| {
-        Ok(p.handle_receive(object, rights as u32))
-    }) {
-        Ok(h) => h,
-        Err(e) => return process_error_to_errno(e),
-    };
-    bytes[offset as usize..offset as usize + 4].copy_from_slice(&received.to_le_bytes());
-    match crate::ipc::send_attached(sender, target, &bytes, received) {
-        Ok(()) => len as i64,
-        Err(e) => {
-            let _ = crate::process::with_process_mut(target, |p| {
-                let _ = p.handle_close(received);
-                Ok(())
-            });
-            ipc_error_to_errno(e)
+    // Target handle insertion and queue publication share the target task
+    // scope. The IPC guard ends before rollback or readiness notification.
+    let result = crate::process::with_process_mut(target, |process| {
+        if !process.ipc_handles_enabled {
+            return Ok(Err(EOPNOTSUPP));
         }
+        if matches!(
+            process.state,
+            crate::process::ProcessState::Dead | crate::process::ProcessState::Reaped
+        ) {
+            return Ok(Err(ENOENT));
+        }
+        let received = process.handle_receive(object, rights as u32);
+        bytes[offset as usize..offset as usize + 4].copy_from_slice(&received.to_le_bytes());
+        match crate::ipc::send_attached(sender, process, &bytes, received) {
+            Ok(()) => Ok(Ok(len as i64)),
+            Err(error) => {
+                let _ = process.handle_close(received);
+                Ok(Err(ipc_error_to_errno(error)))
+            }
+        }
+    });
+    match result {
+        Ok(Ok(len)) => {
+            crate::process::wake_ipc_waiters(target);
+            len
+        }
+        Ok(Err(error)) => error,
+        Err(error) => process_error_to_errno(error),
     }
 }
 pub(super) fn receive(message: u64, len: u64, sender: u64, handle: u64) -> i64 {
@@ -116,7 +127,7 @@ pub(super) fn receive(message: u64, len: u64, sender: u64, handle: u64) -> i64 {
             return e;
         }
     }
-    match crate::ipc::consume_attached(pid) {
+    match crate::ipc::consume_attached(pid, &packet) {
         Ok(()) => packet.len as i64,
         Err(e) => ipc_error_to_errno(e),
     }

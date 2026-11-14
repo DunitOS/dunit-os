@@ -72,10 +72,10 @@ pub(super) fn wait(
     timeout: u64,
     flags: u64,
 ) -> i64 {
-    // UP kernel: IRQ masking spans readiness checks, snapshot install and park.
-    // A producer cannot run in the check/register gap. Restart retains absolute
-    // deadlines and fd slot identities, including across spurious notifications.
+    // Checkpoint spans snapshot/probes/registration even with remote producers.
+    // Restart retains absolute deadlines and fd identities after a winning wake.
     let _irq = crate::sync::InterruptGuard::new();
+    let checkpoint = crate::process::wait_checkpoint();
     let saved = match crate::process::with_current_thread_mut(|thread| thread.wait_set.take()) {
         Some(value) => value,
         None => return EINVAL,
@@ -158,7 +158,7 @@ pub(super) fn wait(
         };
     }
     crate::process::with_current_thread_mut(|thread| thread.wait_set = Some(pending)).unwrap();
-    match crate::process::wait_set_block_current(wake_deadline) {
+    match crate::process::wait_set_block_current(wake_deadline, checkpoint) {
         Ok(()) => USER_CONTEXT_RETURN_MAGIC,
         Err(error) => {
             crate::process::with_current_thread_mut(|thread| thread.wait_set = None).unwrap();

@@ -744,27 +744,33 @@ pub fn map_mmio_region(phys: usize, length: usize) -> Option<usize> {
     map_device_region(phys, length, PageFlags::NO_CACHE | PageFlags::WRITE_THROUGH)
 }
 
+/// Firmware tables reside in immutable RAM/ROM, not device register space.
+/// Preserve any HHDM alias's PAT/cache bits; otherwise use normal RAM caching.
+pub(crate) fn map_firmware_region(phys: usize, length: usize) -> Option<usize> {
+    let cache=mapped_cache_type(phys_to_virt(phys)).unwrap_or(PageFlags::empty());
+    map_device_region(phys,length,cache)
+}
+fn mapped_cache_type(reference:usize)->Option<PageFlags> {
+    let mut table_phys=KERNEL_ROOT_FRAME.load(Ordering::Acquire);
+    if table_phys==UNINITIALIZED_ROOT {return None;}
+    for shift in [39,30,21,12] {
+        let entry=unsafe {page_table_from_phys_mut(PhysicalAddress(table_phys))}.get_entry((reference>>shift)&0x1ff);
+        if !entry.flags().contains(PageFlags::PRESENT) {return None;}
+        if shift==12 || (shift!=39 && entry.flags().contains(PageFlags::HUGE)) {
+            let pat=if shift==12 {entry.entry&(1<<7)} else {(entry.entry&(1<<12))>>5};
+            return Some(PageFlags::from_bits_retain((entry.entry&((1<<3)|(1<<4)))|pat));
+        }
+        table_phys=entry.addr().as_usize();
+    }
+    None
+}
+
 /// Extend a framebuffer with the same PAT/cache type as its boot mapping.
 /// Matching aliases is essential: register MMIO uses UC, but framebuffer writes
 /// need the bootloader's framebuffer cache type (normally write combining).
 pub fn map_framebuffer_region(phys: usize, length: usize, reference: usize) -> Option<usize> {
-    let mut table_phys = KERNEL_ROOT_FRAME.load(Ordering::Acquire);
-    if table_phys == UNINITIALIZED_ROOT { return None; }
-    let mut cache_bits = None;
-    for shift in [39, 30, 21, 12] {
-        let entry = unsafe { page_table_from_phys_mut(PhysicalAddress(table_phys)) }
-            .get_entry((reference >> shift) & 0x1ff);
-        if !entry.flags().contains(PageFlags::PRESENT) { return None; }
-        if shift == 12 || (shift != 39 && entry.flags().contains(PageFlags::HUGE)) {
-            let pat = if shift == 12 { entry.entry & (1 << 7) }
-                else { (entry.entry & (1 << 12)) >> 5 };
-            cache_bits = Some((entry.entry & ((1 << 3) | (1 << 4))) | pat);
-            break;
-        }
-        table_phys = entry.addr().as_usize();
-    }
-    // Bit 7 is PAT in a 4 KiB leaf PTE, not the huge-page bit used at upper levels.
-    map_device_region(phys, length, PageFlags::from_bits_retain(cache_bits?))
+    // Bit 7 is PAT in a 4 KiB leaf PTE, not the huge-page bit.
+    map_device_region(phys,length,mapped_cache_type(reference)?)
 }
 
 fn map_device_region(phys: usize, length: usize, cache: PageFlags) -> Option<usize> {

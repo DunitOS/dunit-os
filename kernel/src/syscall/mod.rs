@@ -1105,6 +1105,7 @@ fn sys_pipe(fds: *mut u32, flags: u32) -> i64 {
 fn sys_pipe_read(id: u64, buf: *mut u8, count: usize, nonblocking: bool) -> i64 {
     let mut kbuf = Vec::new();
     kbuf.resize(count, 0);
+    let checkpoint = crate::process::wait_checkpoint();
     match crate::pipe::read(id, &mut kbuf) {
         crate::pipe::PipeRead::Data(n) => {
             if let Err(error) = copy_buffer_to_user(buf, &kbuf[..n]) {
@@ -1116,7 +1117,7 @@ fn sys_pipe_read(id: u64, buf: *mut u8, count: usize, nonblocking: bool) -> i64 
         }
         crate::pipe::PipeRead::Eof => 0,
         crate::pipe::PipeRead::WouldBlock if nonblocking => EAGAIN,
-        crate::pipe::PipeRead::WouldBlock => match crate::process::pipe_block_current(id) {
+        crate::pipe::PipeRead::WouldBlock => match crate::process::pipe_block_current(id, checkpoint) {
             Ok(()) => USER_CONTEXT_RETURN_MAGIC,
             Err(error) => process_error_to_errno(error),
         },
@@ -1124,6 +1125,7 @@ fn sys_pipe_read(id: u64, buf: *mut u8, count: usize, nonblocking: bool) -> i64 
 }
 
 fn sys_pipe_write(id: u64, data: &[u8], nonblocking: bool) -> i64 {
+    let checkpoint = crate::process::wait_checkpoint();
     match crate::pipe::write(id, data) {
         crate::pipe::PipeWrite::Wrote(n) => {
             // New data — wake any reader blocked on an empty pipe.
@@ -1132,7 +1134,7 @@ fn sys_pipe_write(id: u64, data: &[u8], nonblocking: bool) -> i64 {
         }
         crate::pipe::PipeWrite::Broken => EPIPE,
         crate::pipe::PipeWrite::WouldBlock if nonblocking => EAGAIN,
-        crate::pipe::PipeWrite::WouldBlock => match crate::process::pipe_block_current(id) {
+        crate::pipe::PipeWrite::WouldBlock => match crate::process::pipe_block_current(id, checkpoint) {
             Ok(()) => USER_CONTEXT_RETURN_MAGIC,
             Err(error) => process_error_to_errno(error),
         },
@@ -1838,7 +1840,7 @@ fn sys_set_tid_address(addr: u64) -> i64 {
     crate::process::current_tid().map(|tid| tid.0 as i64).unwrap_or(0)
 }
 
-/// CLOCK_REALTIME uses bootloader UTC, CLOCK_MONOTONIC elapsed PIT time.
+/// CLOCK_REALTIME uses bootloader UTC, CLOCK_MONOTONIC uses the selected monotonic source.
 /// Missing wall-clock metadata returns an explicit error.
 fn sys_clock_gettime(clock_id: u64, out: *mut u64) -> i64 {
     if clock_id > 1 {
@@ -2783,7 +2785,7 @@ fn sys_sleep(ms: u64) -> i64 {
     }
 
     let deadline = crate::clock::Deadline::after_ms(ms).tick();
-    match crate::process::block_current(None, Some(deadline)) {
+    match crate::process::block_current(None, Some(deadline), None) {
         Ok(()) => USER_CONTEXT_RETURN_MAGIC,
         Err(error) => process_error_to_errno(error),
     }
@@ -2795,11 +2797,12 @@ fn sys_wait_event(timeout_ms: u64) -> i64 {
     let Some(pid) = crate::process::with_current_process(|process| process.pid) else {
         return EINVAL;
     };
+    let checkpoint = crate::process::wait_checkpoint();
     if crate::ipc::get_ipc_manager().map(|manager| manager.has_messages(pid)).unwrap_or(false) {
         return 0;
     }
     let deadline = (timeout_ms != 0).then(|| crate::clock::Deadline::after_ms(timeout_ms).tick());
-    match crate::process::block_current(Some(pid), deadline) {
+    match crate::process::block_current(Some(pid), deadline, Some(checkpoint)) {
         Ok(()) => USER_CONTEXT_RETURN_MAGIC,
         Err(error) => process_error_to_errno(error),
     }

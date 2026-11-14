@@ -114,8 +114,9 @@ def collect(root, image, qemu_command, profile):
             "kvm_accessible": os.access("/dev/kvm", os.R_OK | os.W_OK),
         },
         "clock": {
-            "guest_source": "PIT (current UP kernel)",
-            "guest_resolution_ns": 10_000_000,
+            "guest_source": None,
+            "guest_resolution_ns": None,
+            "guest_timer_event": None,
             "host": "time.monotonic",
             "physical_scanout_measured": False,
         },

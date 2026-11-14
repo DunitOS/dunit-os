@@ -60,6 +60,7 @@ extern "C" {
     fn hal_mp_prepare(mapped: u64) -> i32;
     fn hal_mp_start() -> i32;
     fn hal_mp_count() -> u64;
+    fn hal_mp_clock_verified() -> u64;
     fn hal_mp_snapshot(index: u64, out: *mut u64);
 }
 #[no_mangle]
@@ -97,7 +98,11 @@ pub fn start_multiprocessor() {
         line.push_str("\r\n");
         crate::memory::serial_write(line.as_str());
     }
-    assert_ne!(result, 0, "AP startup/timer/IPI handshake");
+    assert_ne!(result, 0, "AP startup/timer/IPI/clock handshake");
+    assert_eq!(unsafe {hal_mp_clock_verified()},count,"cross-CPU clock brackets");
+    let mut clock_line=crate::FmtBuf::new();
+    clock_line.push_str("[CLOCK-SMP] bracketed_cpus=");clock_line.push_u64(count);clock_line.push_str("\r\n");
+    crate::memory::serial_write(clock_line.as_str());
     let mut line = crate::FmtBuf::new();
     line.push_str("[SMP] hardware_online=");
     line.push_u64(count);

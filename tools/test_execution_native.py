@@ -9,6 +9,10 @@ def manifest(cpus):
     result = registry_manifest(cpus)
     result['required'].append('[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK')
     result['forbidden'].append('[TASK-EXECUTION] FAIL')
+    result['required'].append('[PARKING] checkpoint, stale wake and registration identity OK')
+    result['forbidden'].append('[PARKING] FAIL')
+    result['required'].append('[IPC-LOCK] bounded FIFO, attachment identity and cleanup OK')
+    result['forbidden'].append('[IPC-LOCK] FAIL')
     return result
 
 

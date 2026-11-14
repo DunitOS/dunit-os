@@ -146,6 +146,7 @@ pub(super) fn poll(records: *mut u8, count: usize, deadline_ns: u64) -> i64 {
         Ok(data) => data,
         Err(error) => return error,
     };
+    let checkpoint = crate::process::wait_checkpoint();
     let mut ready = 0;
     for record in data.chunks_exact_mut(8) {
         let fd = i32::from_le_bytes(record[..4].try_into().unwrap());
@@ -165,7 +166,7 @@ pub(super) fn poll(records: *mut u8, count: usize, deadline_ns: u64) -> i64 {
             Err(error) => error,
         };
     }
-    match crate::process::poll_block_current(deadline_ns) {
+    match crate::process::poll_block_current(deadline_ns, checkpoint) {
         Ok(()) => USER_CONTEXT_RETURN_MAGIC,
         Err(error) => process_error_to_errno(error),
     }

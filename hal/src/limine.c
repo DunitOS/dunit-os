@@ -46,6 +46,15 @@ static volatile struct limine_firmware_type_request firmware_type_request = {
 };
 
 __attribute__((used, section(".limine_requests")))
+static volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST,
+    .revision = 0
+};
+uint64_t hal_rsdp_address(void) {
+    return rsdp_request.response ? (uint64_t)rsdp_request.response->address : 0;
+}
+
+__attribute__((used, section(".limine_requests")))
 static volatile struct limine_boot_time_request boot_time_request = {
     .id = LIMINE_BOOT_TIME_REQUEST,
     .revision = 0

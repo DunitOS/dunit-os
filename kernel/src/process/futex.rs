@@ -81,11 +81,11 @@ pub fn futex_wait(
     }
     record.state = ProcessState::Blocked;
     process.state = ProcessState::Blocked;
-    queue.push(WaitEntry {
+    record.wait_generation = Some(queue.push(WaitEntry {
         entity,
         key: WaitKey::Word { owner, addr },
         deadline,
-    });
+    }));
     crate::cpu::runtime()
         .yield_requested
         .store(true, Ordering::SeqCst);

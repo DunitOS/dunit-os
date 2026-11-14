@@ -799,6 +799,9 @@ def run(args: argparse.Namespace) -> RunResult:
                     kernel_scheduler=cpu_state[2],
                     dispatch_cpus=int(cpu_state[3]),
                 )
+            clock_state = re.search(r"\[CLOCK\] source=(\w+) resolution_ns=(\d+) event=([\w-]+)", serial.text)
+            if clock_state:
+                metadata["clock"].update(guest_source=clock_state[1], guest_resolution_ns=int(clock_state[2]), guest_timer_event=clock_state[3])
             metadata["measurements"]["run_wall_ms"] = (
                 time.monotonic() - launch_started
             ) * 1000
