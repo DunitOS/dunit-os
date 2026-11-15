@@ -19,19 +19,21 @@ pub(super) fn with_process<R>(
 }
 
 /// Shared by current owner, current thread and explicit-PID mutation paths.
-/// Flush fd readiness only after the Process/table borrow, even on callback Err.
+/// Release retired endpoint/capability owners and notify after the task lock,
+/// including callback errors. Destructors may reenter readiness or ProcFs.
 pub fn with_process_mut<R>(
     pid: ProcessId,
     write: impl for<'a> FnOnce(&'a mut Process) -> Result<R, ProcessError>,
 ) -> Result<R, ProcessError> {
     let _irq = InterruptGuard::new();
     let task = registry::task(pid)?;
-    let (result, wake) = {
+    let (result, wake, retired) = {
         let mut process = task.lock();
         registry::validate(pid, &task)?;
         let result = write(&mut process);
-        (result, process.take_fd_wakeup())
+        (result, process.take_fd_wakeup(), process.take_retired_resources())
     };
+    drop(retired);
     if wake {
         wake_wait_set_waiters();
     }

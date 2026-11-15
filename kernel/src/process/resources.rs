@@ -2,6 +2,24 @@
 use super::*;
 
 #[derive(Default)]
+pub(super) struct RetiredResources {
+    pub(super) endpoints: Vec<Arc<crate::pty::Endpoint>>,
+    pub(super) files: Vec<Arc<crate::fs::file_cap::FileCapability>>,
+}
+
+impl Process {
+    pub(super) fn retire_fd(&mut self, mut entry: FdEntry) {
+        if let Some(endpoint) = entry.terminal.take() {
+            self.retired_resources.endpoints.push(endpoint);
+        }
+    }
+
+    pub(super) fn take_retired_resources(&mut self) -> RetiredResources {
+        core::mem::take(&mut self.retired_resources)
+    }
+}
+
+#[derive(Default)]
 pub(super) struct FdResources {
     entries: BTreeMap<ProcessFd, FdEntry>,
     refs: BTreeMap<crate::fs::vfs::FileDescriptor, u32>,
@@ -204,7 +222,7 @@ pub fn run_resource_cleanup_smoke() -> bool {
             .map_err(|_| ProcessError::InvalidFd)?;
         Ok(())
     }
-    if check().is_ok() {
+    if check().and_then(|_| super::fd_retirement_smoke::check()).is_ok() {
         crate::memory::serial_write(
             "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK\r\n",
         );

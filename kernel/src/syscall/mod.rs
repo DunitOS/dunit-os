@@ -826,13 +826,17 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
         return error;
     }
 
-    match crate::process::get_fd(fd).map(|entry| entry.target) {
-        Some(crate::process::FdTarget::Stdin) => {
+    let entry = match crate::process::get_fd(fd) {
+        Some(entry) => entry,
+        None => return EBADF,
+    };
+    match entry.target {
+        crate::process::FdTarget::Stdin => {
             // PTY slave? Drain the master→slave ring before the legacy path.
-            if let Some(current) = crate::process::get_fd(fd).and_then(|entry| entry.terminal.as_ref().map(|endpoint| endpoint.id)) {
+            if let Some(endpoint) = entry.terminal.as_ref() {
                 let mut pty_buf = Vec::new();
                 pty_buf.resize(count, 0);
-                match crate::pty::slave_read_stdin(current, &mut pty_buf) {
+                match crate::pty::slave_read_stdin(endpoint, &mut pty_buf) {
                     Some(crate::pty::SlaveRead::Data(read)) => {
                         if let Err(error) = copy_buffer_to_user(buf, &pty_buf[..read]) {
                             return error;
@@ -862,13 +866,12 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
                 Err(error) => return process_error_to_errno(error),
             }
         }
-        Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => return EBADF,
-        Some(crate::process::FdTarget::Pipe { id, write: false }) => {
-            return sys_pipe_read(id, buf, count, crate::process::get_fd(fd).map(|entry| entry.status() & 64 != 0).unwrap_or(false));
+        crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr => return EBADF,
+        crate::process::FdTarget::Pipe { id, write: false } => {
+            return sys_pipe_read(id, buf, count, entry.status() & 64 != 0);
         }
-        Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // read on write end
-        Some(crate::process::FdTarget::Vfs(_)) => {}
-        None => return EBADF,
+        crate::process::FdTarget::Pipe { .. } => return EBADF, // read on write end
+        crate::process::FdTarget::Vfs(_) => {}
     }
 
     let vfs_fd = match process_vfs_fd(fd) {
@@ -1098,10 +1101,14 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
         Err(error) => return error,
     };
 
-    match crate::process::get_fd(fd).map(|entry| entry.target) {
-        Some(crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr) => {
-            let tag = if matches!(crate::process::get_fd(fd).map(|entry| entry.target), Some(crate::process::FdTarget::Stderr)) { "STDERR" } else { "STDOUT" };
-            let routed = crate::process::get_fd(fd).and_then(|entry| entry.terminal).and_then(|endpoint| crate::pty::slave_write_stdout(endpoint.id, &data));
+    let entry = match crate::process::get_fd(fd) {
+        Some(entry) => entry,
+        None => return EBADF,
+    };
+    match entry.target {
+        crate::process::FdTarget::Stdout | crate::process::FdTarget::Stderr => {
+            let tag = if matches!(entry.target, crate::process::FdTarget::Stderr) { "STDERR" } else { "STDOUT" };
+            let routed = entry.terminal.as_ref().and_then(|endpoint| crate::pty::slave_write_stdout(endpoint, &data));
             match routed {
                 Some(Ok(0)) => return EAGAIN,
                 Some(Ok(count)) => { write_stdio(tag, &data[..count]); return count as i64; }
@@ -1109,13 +1116,12 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
                 None => { write_stdio(tag, &data); write_terminal_foreground(&data); return data.len() as i64; }
             }
         }
-        Some(crate::process::FdTarget::Stdin) => return EBADF,
-        Some(crate::process::FdTarget::Pipe { id, write: true }) => {
-            return sys_pipe_write(id, &data, crate::process::get_fd(fd).map(|entry| entry.status() & 64 != 0).unwrap_or(false));
+        crate::process::FdTarget::Stdin => return EBADF,
+        crate::process::FdTarget::Pipe { id, write: true } => {
+            return sys_pipe_write(id, &data, entry.status() & 64 != 0);
         }
-        Some(crate::process::FdTarget::Pipe { .. }) => return EBADF, // write on read end
-        Some(crate::process::FdTarget::Vfs(_)) => {}
-        None => return EBADF,
+        crate::process::FdTarget::Pipe { .. } => return EBADF, // write on read end
+        crate::process::FdTarget::Vfs(_) => {}
     }
 
     let vfs_fd = match process_vfs_fd(fd) {

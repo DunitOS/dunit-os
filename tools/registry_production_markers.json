@@ -20,6 +20,8 @@
     "[MUSL-TIME] OK"
   ],
   "forbidden": [
+    "[PTY-LOCK]",
+    "[FD-RETIREMENT]",
     "[PANIC]",
     "[PMM-SMP]",
     "tcc: error",

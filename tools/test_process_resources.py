@@ -11,6 +11,8 @@ def contract():
     result = vfs_contract()
     result['required'].append('[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK')
     result['forbidden'].append('[PROCESS-RESOURCES] FAIL')
+    result['required'].append('[PTY-LOCK] owning I/O, read/write wake, hangup and drain OK')
+    result['required'].append('[FD-RETIREMENT] final PTY/cap drops, fd errors and wake reentry after unlock OK')
     result['required'].append('[DISPATCH-PIN] stack/FPU/address-space survive Process drop and reclaim after frame OK')
     result['required'].append('[TASK-REGISTRY] callback pin, detached cleanup, dispatch pin and reentry OK')
     result['forbidden'].append('[TASK-REGISTRY] FAIL')

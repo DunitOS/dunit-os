@@ -53,28 +53,23 @@ stream time не доказывают ускорение, per-event tail latency
 
 ## Точка продолжения — OP3, память и синхронизация
 
-**Текущий этап: OP3. Roadmap целиком не завершён.** Последний проверенный
-срез — [TLB shootdown и mapping ownership](docs/performance/tlb-shootdown.md),
-коммит `2a3ec99`; предшествующий wait/clock/IPC foundation — `1e7fe00`.
-На финальном smoke-образе прошли BIOS/TCG 1/4/8 CPU, resource/lifecycle,
-GUI и C pointer/pixel regressions. Production-конфигурация проверена компиляцией;
-отдельный production boot, UEFI и HPET-off на этом новом срезе ещё не повторены.
-Предыдущие прогоны этих режимов относятся к foundation-срезу, а не заменяют
-новую проверку. Полные receipts и ограничения — в отчёте.
+**Текущий этап: OP3. Roadmap целиком не завершён.** Новый срез —
+[PTY ownership и deferred fd retirement](docs/performance/pty-ownership.md),
+поверх `63faf03` (TLB/mapping foundation `2a3ec99`). PTY table защищена настоящим
+lock; I/O, ioctl и readiness удерживают endpoint. Уведомления и последние
+endpoint/file drops выполняются после guards. Проверены реальное пробуждение
+blocked tasks и handover старого/нового endpoint. Режим остаётся UP.
+Матрица и ограничения приведены в отчёте; новые проверки не закрывают весь OP3.
 
-**Следующий шаг — закончить оставшиеся OP3 safety gates, начиная с PTY и console:**
+**Следующий шаг — оставшиеся OP3 safety gates, начиная с console:**
 
-1. Заменить UP-only mutable PTY table настоящим lock; удерживать owning endpoint
-   во время I/O/ioctl, уведомлять о slave read/write после отпускания table guard.
-2. Устранить `Endpoint::drop → wake_poll_waiters → task lock` под уже удержанным
-   task lock: откладывать readiness до выхода из последнего task scope.
-3. Свести terminal stdin owner/line в одну транзакцию; защитить console/scrollback
+1. Свести terminal stdin owner/line в одну транзакцию; защитить console/scrollback
    короткими scopes. Нельзя держать console lock через shell loop или exec.
    Согласовать framebuffer render/modeset и оставшиеся driver/heap lock edges.
-4. Реализовать remote cancel/stop acknowledgement и финализацию группы.
+2. Реализовать remote cancel/stop acknowledgement и финализацию группы.
    Публиковать waitable exit только после остановки исполнителей и cleanup;
    проверить nested dispatch, join/detach и cancellation ожиданий.
-5. Закрыть interruptible syscall/IRQ progress и полный lock-order audit;
+3. Закрыть interruptible syscall/IRQ progress и полный lock-order audit;
    выполнить remote CPL3/shared-VM/W^X/exit/reclaim stress и fault injection.
 
 **Ещё не сделано после OP3:** настоящий AP application dispatch, remote wakeup и
@@ -281,6 +276,12 @@ input-to-photon не заявлять. Для игр, blur и больших р�
   kernel alias reuse; AS pin/guard от проверки указателя до копирования, atomic PTE
   без whole-table mutable references. Native IRQ-off AP retarget/reentry/reclaim и
   host dropped-ACK refusal; это не полная concurrent shared-VM/CPL3 приёмка.
+
+- [x] [PTY table/endpoint ownership и fd retirement](docs/performance/pty-ownership.md):
+  IRQ-safe table transactions, owning fd snapshots для read/write/ioctl/readiness,
+  уведомления после guards, attachment identity при final drop/reattach;
+  close/dup/install/bind/error paths откладывают последние endpoint/file owners
+  до выхода из task scope. Console, remote cancel и общий lock ranking открыты.
 
 Оставшиеся обязательные gates:
 

@@ -101,6 +101,13 @@ jobs:
       - name: Native C SDK header, files and processes
         run: python3 tools/qemu_test.py --build --markers-file tools/c_sdk_core_markers.json --post-boot-delay 3 --settle 3 --cmd-timeout 90 --timeout 300 --boot-timeout 180
 
+      - name: OP3 terminal ownership and transport contracts
+        run: |
+          python3 tools/test_qmp_transport.py
+          python3 tools/test_pty.py
+          python3 tools/test_process_access.py
+          python3 tools/test_process_resources.py --reuse-image --cpus 4 --accel tcg
+
       - name: Native C callbacks over Rust widgets and exact pixels
         run: python3 tools/test_c_ui.py --accel tcg
 

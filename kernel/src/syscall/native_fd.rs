@@ -85,7 +85,7 @@ pub(super) fn readiness(fd: i32, events: u16) -> u16 {
             let readiness = entry
                 .terminal
                 .as_ref()
-                .and_then(|endpoint| crate::pty::slave_output_readiness(endpoint.id));
+                .and_then(|endpoint| crate::pty::slave_output_readiness(endpoint));
             match readiness {
                 Some((writable, closed)) => {
                     if writable {
@@ -103,7 +103,7 @@ pub(super) fn readiness(fd: i32, events: u16) -> u16 {
                 if let Some((readable, closed)) = entry
                     .terminal
                     .as_ref()
-                    .and_then(|endpoint| crate::pty::slave_readiness(endpoint.id))
+                    .and_then(|endpoint| crate::pty::slave_readiness(endpoint))
                 {
                     if readable {
                         result |= events & POLL_READ;

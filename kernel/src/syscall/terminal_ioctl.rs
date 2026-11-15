@@ -4,26 +4,26 @@ use super::*;
 /// Ioctl(fd, op, record, len): 0 probe; 1 get dimensions; 2 set dimensions;
 /// 3 bytes of pending input. Dimensions are four little-endian u16 values.
 pub(super) fn ioctl(fd: u32, op: u32, record: *mut u8, len: usize) -> i64 {
-    let target = match crate::process::get_fd(fd) {
-        Some(entry) => entry.target,
+    let entry = match crate::process::get_fd(fd) {
+        Some(entry) => entry,
         None => return EBADF,
     };
     if !matches!(
-        target,
+        entry.target,
         crate::process::FdTarget::Stdin
             | crate::process::FdTarget::Stdout
             | crate::process::FdTarget::Stderr
     ) {
         return -25; // ENOTTY: a valid descriptor that is not a terminal.
     }
-    let pid = match crate::process::get_fd(fd).and_then(|entry| entry.terminal) {
-        Some(endpoint) => endpoint.id,
+    let endpoint = match entry.terminal {
+        Some(endpoint) => endpoint,
         None => return -25,
     };
     match op {
         0 if len == 0 => 0,
         1 if len == 8 => {
-            let dimensions = match crate::pty::slave_dimensions(pid) {
+            let dimensions = match crate::pty::slave_dimensions(&endpoint) {
                 Some(value) => value,
                 None => return -25,
             };
@@ -36,14 +36,14 @@ pub(super) fn ioctl(fd: u32, op: u32, record: *mut u8, len: usize) -> i64 {
             };
             let mut dimensions = [0u8; 8];
             dimensions.copy_from_slice(&bytes);
-            if crate::pty::set_slave_dimensions(pid, dimensions) {
+            if crate::pty::set_slave_dimensions(&endpoint, dimensions) {
                 0
             } else {
                 -25
             }
         }
         3 if len == 4 => {
-            let count = crate::pty::slave_pending_input(pid).unwrap_or(0) as u32;
+            let count = crate::pty::slave_pending_input(&endpoint).unwrap_or(0) as u32;
             copy_buffer_to_user(record, &count.to_le_bytes()).map_or_else(|error| error, |_| 0)
         }
         0..=3 => EINVAL,

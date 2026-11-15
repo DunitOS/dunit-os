@@ -1,6 +1,6 @@
 # SMP shared-state audit — OP1
 
-Initial audit: 11 November 2026. Updated on 14 November 2026; implementation receipts below.
+Initial audit: 11 November 2026. Updated on 15 November 2026; implementation receipts below.
 Audit of the UP implementation; this inventory is a safety
 gate, not a claim that shared state is now safe to execute on APs.
 
@@ -12,6 +12,7 @@ gate, not a claim that shared state is now safe to execute on APs.
 | PROCESS_TABLE and current process/thread access | IRQ-safe metadata registry; independently Arc-owned locked Process; membership revalidated after task lock; pins across callback/HAL; retired cleanup outside guards | preserve task/registry lock order; atomic execution/lifecycle/cancel and mapping lifetime remain open |
 | Scheduler ready Vec and process state | queue-only IRQ-safe lock; state checks outside lock; generation-tagged candidates | exclusive CPU/generation reservation and Running claim installed; return/cleanup retains ownership; remote cancellation/scheduling remain open |
 | Wait queue, futex, pipe/PTY and IPC wakeup | notification checkpoint and generation-checked task registration; generation-bounded wake selection; callbacks outside queue lock; futex task lookup and mapping lock precede queue lock; atomic word compare/register under queue | preserve checkpoint/register ordering; remote cancellation/runqueue notification and IRQ progress remain open |
+| PTY streams and final fd owners | IRQ-safe table; owning endpoint through I/O/ioctl/readiness; final-drop attachment identity; notifications and retired endpoint/file drops after guards | preserve no PTY -> registry nesting; console/stdin and complete driver/task lock ranking remain open |
 | PMM bitmap, heap and shared VM objects | PMM bitmap/accounting share an IRQ-safe leaf lock; one-shot bitmap publication; isolated BSP/AP allocation cohorts tested; heap/shared VM have separate owners | cross-CPU allocation/lifetime audit and lock order; reclaim only after final reader |
 | Page tables, CR3 and MMIO mappings | locked AddressSpace and active-root pin; atomic PTEs, shared references; active-root masks, generation/ack NMI shootdown before reuse; real MMIO guard | remote CPL3 faults, shared-VM/application exit/migration stress and complete driver/readers audit |
 | VFS registry and filesystem backends | scoped IRQ-safe registry guard; Arc-owned backend locks shared by mounts/files/capabilities | process registry is released before task/VFS callbacks; ProcFs reads metadata only; complete device/IRQ/lifecycle ranking before AP dispatch |
@@ -135,3 +136,20 @@ acknowledgements before user-frame/kernel-alias reuse, guarded address-space
 entry, atomic PTE access and a CPU-bound active mapping pin across user copies.
 Isolated AP IRQ-off retarget/reentry/reclaim and host missing-ACK checks do not
 close remote CPL3 cancellation or the remaining shared-device/IRQ lock orders.
+
+## PTY transactions and fd retirement (15 November 2026)
+
+The [PTY receipt](pty-ownership.md) replaces the UP-only mutable channel map
+with IRQ-safe transactions. Slave APIs borrow a privately constructed endpoint,
+and read/write/ioctl hold the fd's owner through the operation. Metadata checks
+for a detached master happen outside the table guard. Read and write notify after
+unlock, including freeing ring capacity. A final destructor only removes its own
+attachment generation: a replacement can win before the old destructor acquires
+the table, and endpoint movement preserves that generation.
+
+Fd close, dup2/install replacement, invalid/full allocation and terminal binding
+retain retired endpoints until the task mutation unlocks, including callback
+errors. Final file-capability close uses the same owned batch. State/context-only
+registry callbacks do not manipulate fds. Task scopes continue to forbid nested
+task locks; this receipt does not close arbitrary callback reentry, console
+ownership, remote cancellation or interruptible kernel execution.

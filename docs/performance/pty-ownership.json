@@ -1,0 +1,843 @@
+{
+  "date": "2026-11-15",
+  "base_commit": "63faf032f207063f0206125835be33c0c5ea2f2f",
+  "scope": "OP3 PTY locking, endpoint ownership, fd retirement and QMP stdio; UP application dispatch",
+  "source_sha256": {
+    "kernel/src/process/current_access.rs": "111e5ebf202e50281c18cf710c799c4404cdabcbe7ea5f5f24aab0c04bfa8f61",
+    "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+    "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+    "kernel/src/process/lifecycle.rs": "a8d68141b1d03aefec73d002937756458291d6d814271b12cf62e9fe5a411020",
+    "kernel/src/process/mod.rs": "2853746a9fe378209c14cdf795ade5067704e17816ee5904316b744c8d5a96d7",
+    "kernel/src/process/resources.rs": "245f1b396b8906b2f9330a320f02338d88c20da35a1a08014034116f871f7ae4",
+    "kernel/src/process/runner.rs": "b3d350ac0367ae4d802b18d2f69b9d595b73d80f5b9c7863c4410c60d8c29798",
+    "kernel/src/pty/mod.rs": "3aecedbb725adf8adc03cb4ad61cf9b85dd05b8e389c8229558aab5edd655c43",
+    "kernel/src/syscall/mod.rs": "ccd5c02dfd78c16123c8484870c05155b2ec48c475c39fe7fc75eac578882126",
+    "kernel/src/syscall/native_fd.rs": "15b46dc835558e89da2d985d9b747e98368144aa8003f75adc1548af19e7c361",
+    "kernel/src/syscall/terminal_ioctl.rs": "2f21e8d355013c5b0ac37347ed6ddb0dd97e3e374cd316a5b2d4e91cec1753b0",
+    "tools/boot_markers.json": "f4cb05e4c2b065d4b0bb09807f86e6fc0cf73c6f22f53db66f238f5173c97fb8",
+    "tools/qemu_test.py": "4346cc40ba7fde9294d9a93711ae1f46b5808efe5479e93c816df8baa27784cb",
+    "tools/registry_production_markers.json": "fcd9e4dd55fc42f12d3afa818190f175c082ce10440933e8f7ab98013ee93ca4",
+    "tools/test_process_access.py": "be3f47f84a76f7d4e0f262fd91739f2e0116a97e05d3140ab627b9b09d2487f9",
+    "tools/test_process_resources.py": "ccc60694f2696ffc23c18b8f1d3c8f722e0b7b0ae3d49ae48b3e8cb34b60bc92",
+    "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654",
+    "tools/test_pty_host.rs": "1b5822160828b4dc19819919c7b0891c653d3fd7263b3fb26f9b5ca100aa6bb2",
+    "tools/test_qmp_transport.py": "f478db7672b977d26a071401272ae8253a1e44e8cdcb1c79ab136179a4336c78",
+    "tools/test_vfs_ownership.py": "49a643d9d376318afe66e6a9eeff3ad436160200862c50e447ca7948b5c3741b"
+  },
+  "host_checks": {
+    "test_pty.py": "5 passed; 200000 ordered bytes, reentry, handover and moved endpoint retirement",
+    "test_process_access.py": "7 passed; 8000 mutations, nonescaping borrows and retired reentry",
+    "test_qmp_transport.py": "5 passed; fragmentation, large payload, EOF, errors and deadline",
+    "test_user_word.py": "2 passed",
+    "test_wait_queue.py": "1 passed",
+    "test_execution_ownership.py": "3 passed",
+    "test_parking.py": "1 passed",
+    "test_ipc_lock.py": "2 passed",
+    "test_user_memory.py": "3 passed",
+    "test_qemu_actions.py": "4 passed",
+    "test_qemu_boot_actions.py": "4 passed",
+    "test_qemu_marker_phases.py": "5 passed",
+    "gen_abi.py --check": "94 syscalls, 25 errno, 7 rights; no ABI change",
+    "cargo check release + boot-smoke-tests": "passed",
+    "cargo check release production": "passed"
+  },
+  "native_receipts": [
+    {
+      "receipt_path": "build/performance/pty-generation/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T08:44:10.428418+00:00",
+        "git": {
+          "commit": "8f9cace3744032e3b3dc62a7fbd6901d31a4e30c",
+          "status": "M .github/workflows/Build.yml\n M DUNIT_OS_PERFORMANCE_ROADMAP.md\n M DUNIT_OS_TECHNICAL_ROADMAP.md\n M docs/performance/smp-audit.md\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/boot_markers.json\n M tools/registry_production_markers.json\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n?? docs/performance/pty-ownership.json\n?? docs/performance/pty-ownership.md\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? tools/test_pty.py",
+          "tracked_diff_sha256": "6ce42d2304bc84ff5d193fd60cd5f12f1dafa7218f974edef5c463181811c619",
+          "untracked_sha256": {
+            "docs/performance/pty-ownership.json": "24b331977c0345c4a20d778b445743884bb3a6cc17f2de4368dabc0d9f668a54",
+            "docs/performance/pty-ownership.md": "65ffe0de7264c9c4cb618900e1171bcc60f91e1421157a854fb2c473d0045194",
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "476251083358bd96bb29480a7ec2320b86910ee426bf8a16687f67a7cd8138ed",
+          "bytes": 267028480,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:/home/tuxpc/dunit-os-op3-registry/build/performance/pty-generation/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "4"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 4,
+          "emulator_vcpus": 4,
+          "kernel_online_cpus": 4,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 4180.164544000036,
+          "run_wall_ms": 74237.98613500003,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": true,
+          "reason": "completed",
+          "missing": [],
+          "forbidden": []
+        }
+      }
+    },
+    {
+      "receipt_path": "build/performance/pty-generation/thread-lifecycle/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T08:53:07.214819+00:00",
+        "git": {
+          "commit": "8f9cace3744032e3b3dc62a7fbd6901d31a4e30c",
+          "status": "M .github/workflows/Build.yml\n M DUNIT_OS_PERFORMANCE_ROADMAP.md\n M DUNIT_OS_TECHNICAL_ROADMAP.md\n M docs/performance/smp-audit.md\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/boot_markers.json\n M tools/registry_production_markers.json\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n?? docs/performance/pty-ownership.json\n?? docs/performance/pty-ownership.md\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? tools/test_pty.py",
+          "tracked_diff_sha256": "13da84889674c82d6b229b2d5ce9aa056bca1c8cd6673fb7b1bcf2603be11097",
+          "untracked_sha256": {
+            "docs/performance/pty-ownership.json": "24b331977c0345c4a20d778b445743884bb3a6cc17f2de4368dabc0d9f668a54",
+            "docs/performance/pty-ownership.md": "65ffe0de7264c9c4cb618900e1171bcc60f91e1421157a854fb2c473d0045194",
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "476251083358bd96bb29480a7ec2320b86910ee426bf8a16687f67a7cd8138ed",
+          "bytes": 267028480,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:/home/tuxpc/dunit-os-op3-registry/build/performance/pty-generation/thread-lifecycle/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "4"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 4,
+          "emulator_vcpus": 4,
+          "kernel_online_cpus": 4,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 4283.003266000378,
+          "run_wall_ms": 9355.05421500011,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": true,
+          "reason": "completed",
+          "missing": [],
+          "forbidden": []
+        }
+      }
+    },
+    {
+      "receipt_path": "build/performance/pty-generation-boot/1/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T09:05:16.719018+00:00",
+        "git": {
+          "commit": "8f9cace3744032e3b3dc62a7fbd6901d31a4e30c",
+          "status": "M .github/workflows/Build.yml\n M DUNIT_OS_PERFORMANCE_ROADMAP.md\n M DUNIT_OS_TECHNICAL_ROADMAP.md\n M docs/performance/smp-audit.md\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/boot_markers.json\n M tools/registry_production_markers.json\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n?? docs/performance/pty-ownership.json\n?? docs/performance/pty-ownership.md\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? tools/test_pty.py",
+          "tracked_diff_sha256": "13da84889674c82d6b229b2d5ce9aa056bca1c8cd6673fb7b1bcf2603be11097",
+          "untracked_sha256": {
+            "docs/performance/pty-ownership.json": "24b331977c0345c4a20d778b445743884bb3a6cc17f2de4368dabc0d9f668a54",
+            "docs/performance/pty-ownership.md": "65ffe0de7264c9c4cb618900e1171bcc60f91e1421157a854fb2c473d0045194",
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "476251083358bd96bb29480a7ec2320b86910ee426bf8a16687f67a7cd8138ed",
+          "bytes": 267028480,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:build/performance/pty-generation-boot/1/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "1"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 1,
+          "emulator_vcpus": 1,
+          "kernel_online_cpus": 1,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 4231.814159999885,
+          "run_wall_ms": 12614.15173899968,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": true,
+          "reason": "completed",
+          "missing": [],
+          "forbidden": []
+        }
+      }
+    },
+    {
+      "receipt_path": "build/performance/pty-generation-boot/8/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T09:05:29.599468+00:00",
+        "git": {
+          "commit": "8f9cace3744032e3b3dc62a7fbd6901d31a4e30c",
+          "status": "M .github/workflows/Build.yml\n M DUNIT_OS_PERFORMANCE_ROADMAP.md\n M DUNIT_OS_TECHNICAL_ROADMAP.md\n M docs/performance/smp-audit.md\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/boot_markers.json\n M tools/registry_production_markers.json\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n?? docs/performance/pty-ownership.json\n?? docs/performance/pty-ownership.md\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? tools/test_pty.py",
+          "tracked_diff_sha256": "13da84889674c82d6b229b2d5ce9aa056bca1c8cd6673fb7b1bcf2603be11097",
+          "untracked_sha256": {
+            "docs/performance/pty-ownership.json": "24b331977c0345c4a20d778b445743884bb3a6cc17f2de4368dabc0d9f668a54",
+            "docs/performance/pty-ownership.md": "65ffe0de7264c9c4cb618900e1171bcc60f91e1421157a854fb2c473d0045194",
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "476251083358bd96bb29480a7ec2320b86910ee426bf8a16687f67a7cd8138ed",
+          "bytes": 267028480,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:build/performance/pty-generation-boot/8/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "8"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 8,
+          "emulator_vcpus": 8,
+          "kernel_online_cpus": 8,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 4485.457651000161,
+          "run_wall_ms": 12872.472437999932,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": true,
+          "reason": "completed",
+          "missing": [],
+          "forbidden": []
+        }
+      }
+    },
+    {
+      "receipt_path": "build/performance/pty-generation-gui/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T09:06:03.420471+00:00",
+        "git": {
+          "commit": "8f9cace3744032e3b3dc62a7fbd6901d31a4e30c",
+          "status": "M .github/workflows/Build.yml\n M DUNIT_OS_PERFORMANCE_ROADMAP.md\n M DUNIT_OS_TECHNICAL_ROADMAP.md\n M docs/performance/smp-audit.md\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/boot_markers.json\n M tools/registry_production_markers.json\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n?? docs/performance/pty-ownership.json\n?? docs/performance/pty-ownership.md\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? tools/test_pty.py",
+          "tracked_diff_sha256": "13da84889674c82d6b229b2d5ce9aa056bca1c8cd6673fb7b1bcf2603be11097",
+          "untracked_sha256": {
+            "docs/performance/pty-ownership.json": "24b331977c0345c4a20d778b445743884bb3a6cc17f2de4368dabc0d9f668a54",
+            "docs/performance/pty-ownership.md": "65ffe0de7264c9c4cb618900e1171bcc60f91e1421157a854fb2c473d0045194",
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "5f3fc1186307fc8250dbe9c5a780036982b5a67b86903cd9ffc8d5f603196358",
+          "bytes": 267028480,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:build/performance/pty-generation-gui/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "4"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 4,
+          "emulator_vcpus": 4,
+          "kernel_online_cpus": 4,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 6482.455629000015,
+          "run_wall_ms": 38349.41988099991,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": true,
+          "reason": "completed",
+          "missing": [],
+          "forbidden": []
+        }
+      }
+    },
+    {
+      "receipt_path": "build/performance/pty-generation-production/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T09:07:08.461627+00:00",
+        "git": {
+          "commit": "8f9cace3744032e3b3dc62a7fbd6901d31a4e30c",
+          "status": "M .github/workflows/Build.yml\n M DUNIT_OS_PERFORMANCE_ROADMAP.md\n M DUNIT_OS_TECHNICAL_ROADMAP.md\n M docs/performance/smp-audit.md\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/boot_markers.json\n M tools/registry_production_markers.json\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n?? docs/performance/pty-ownership.json\n?? docs/performance/pty-ownership.md\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? tools/test_pty.py",
+          "tracked_diff_sha256": "13da84889674c82d6b229b2d5ce9aa056bca1c8cd6673fb7b1bcf2603be11097",
+          "untracked_sha256": {
+            "docs/performance/pty-ownership.json": "24b331977c0345c4a20d778b445743884bb3a6cc17f2de4368dabc0d9f668a54",
+            "docs/performance/pty-ownership.md": "65ffe0de7264c9c4cb618900e1171bcc60f91e1421157a854fb2c473d0045194",
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "e61f85f3f908ec6615673c63056f47c5c910fdb4377ab72a889751871b147730",
+          "bytes": 266893312,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:build/performance/pty-generation-production/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "4"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 4,
+          "emulator_vcpus": 4,
+          "kernel_online_cpus": 4,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 3931.407410999782,
+          "run_wall_ms": 30165.301907999947,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": true,
+          "reason": "completed",
+          "missing": [],
+          "forbidden": []
+        }
+      }
+    }
+  ],
+  "failed_attempts": [
+    {
+      "receipt_path": "build/performance/pty-boot/1/metadata.json",
+      "metadata": {
+        "schema_version": 1,
+        "started_utc": "2026-11-15T08:31:04.727300+00:00",
+        "git": {
+          "commit": "63faf032f207063f0206125835be33c0c5ea2f2f",
+          "status": "M .github/workflows/Build.yml\n M kernel/src/process/current_access.rs\n M kernel/src/process/mod.rs\n M kernel/src/process/resources.rs\n M kernel/src/pty/mod.rs\n M kernel/src/syscall/mod.rs\n M kernel/src/syscall/native_fd.rs\n M kernel/src/syscall/terminal_ioctl.rs\n M tools/qemu_test.py\n M tools/test_process_access.py\n M tools/test_process_resources.py\n M tools/test_pty_host.rs\n M tools/test_vfs_ownership.py\n?? kernel/src/process/fd.rs\n?? kernel/src/process/fd_retirement_smoke.rs\n?? kernel/src/process/lifecycle.rs\n?? kernel/src/process/runner.rs\n?? kernel/target\n?? tools/test_pty.py\n?? tools/test_qmp_transport.py\n?? userspace/system_apps/abi_test/target\n?? userspace/system_apps/args_test/target\n?? userspace/system_apps/bmp_viewer/target\n?? userspace/system_apps/calc/target\n?? userspace/system_apps/color_test/target\n?? userspace/system_apps/cwd_test/target\n?? userspace/system_apps/dsh/target\n?? userspace/system_apps/dsh_calc_test/target\n?? userspace/system_apps/dtop/target\n?? userspace/system_apps/dufetch/target\n?? userspace/system_apps/elf_demo/target\n?? userspace/system_apps/env_test/target\n?? userspace/system_apps/exit_test/target\n?? userspace/system_apps/fault_pf/target\n?? userspace/system_apps/fault_ud/target\n?? userspace/system_apps/file_api_test/target\n?? userspace/system_apps/fs_test/target\n?? userspace/system_apps/fsck_dunit/target\n?? userspace/system_apps/futex_test/target\n?? userspace/system_apps/gui_calc/target\n?? userspace/system_apps/gui_client/target\n?? userspace/system_apps/gui_demo/target\n?? userspace/system_apps/gui_files/target\n?? userspace/system_apps/gui_server/target\n?? userspace/system_apps/gui_settings/target\n?? userspace/system_apps/gui_shbuf_peer/target\n?? userspace/system_apps/gui_stat/target\n?? userspace/system_apps/gui_terminal/target\n?? userspace/system_apps/handle_test/target\n?? userspace/system_apps/image_demo/target\n?? userspace/system_apps/init/target\n?? userspace/system_apps/init_probe/target\n?? userspace/system_apps/input_test/target\n?? userspace/system_apps/ipc_child/target\n?? userspace/system_apps/ipc_parent/target\n?? userspace/system_apps/kill_target/target\n?? userspace/system_apps/path_test/target\n?? userspace/system_apps/pointer_queue_denied/target\n?? userspace/system_apps/pointer_queue_test/target\n?? userspace/system_apps/pointer_test/target\n?? userspace/system_apps/preempt_child/target\n?? userspace/system_apps/preempt_test/target\n?? userspace/system_apps/pty_args_test/target\n?? userspace/system_apps/pty_echo/target\n?? userspace/system_apps/pty_terminal_test/target\n?? userspace/system_apps/pty_test/target\n?? userspace/system_apps/resumable_child/target\n?? userspace/system_apps/resumable_test/target\n?? userspace/system_apps/runtime_stress/target\n?? userspace/system_apps/scheduler_test/target\n?? userspace/system_apps/sdk_api_test/target\n?? userspace/system_apps/sdk_catalog_test/target\n?? userspace/system_apps/setup/target\n?? userspace/system_apps/spawn_ready_test/target\n?? userspace/system_apps/stdin_test/target\n?? userspace/system_apps/svg_test/target\n?? userspace/system_apps/thread_test/target\n?? userspace/system_apps/tls_test/target\n?? userspace/system_apps/vm_guard_fault/target\n?? userspace/system_apps/vm_peer/target\n?? userspace/system_apps/vm_protect_fault/target\n?? userspace/system_apps/vm_test/target\n?? userspace/system_apps/wait_test/target\n?? userspace/system_apps/waitset_pty_peer/target\n?? userspace/system_apps/waitset_test/target\n?? userspace/system_apps/yield_child/target\n?? userspace/system_apps/yield_test/target",
+          "tracked_diff_sha256": "132152424c74ccdbd627b1411d1b58940776c3c7b5213b38402c1642f56fdc6e",
+          "untracked_sha256": {
+            "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+            "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+            "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+            "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+            "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654",
+            "tools/test_qmp_transport.py": "f478db7672b977d26a071401272ae8253a1e44e8cdcb1c79ab136179a4336c78"
+          }
+        },
+        "image": {
+          "path": "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+          "sha256": "62a75a4cdae0150c435ac79c489c661fcc7439b49930e8375d06e324660c15dd",
+          "bytes": 267028480,
+          "profile": "full"
+        },
+        "tools": {
+          "qemu": "QEMU emulator version 11.1.2\nCopyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers",
+          "rustc": "rustc 1.100.0-nightly (67854e511 2026-08-15)\nbinary: rustc\ncommit-hash: 67854e511de21d881bb16426996cd4259d44aa2e\ncommit-date: 2026-08-15\nhost: x86_64-unknown-linux-gnu\nrelease: 1.100.0-nightly\nLLVM version: 23.1.0",
+          "cc": "cc (GCC) 16.2.1 20260810\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+        },
+        "guest": {
+          "qemu_command": [
+            "qemu-system-x86_64",
+            "-no-reboot",
+            "-m",
+            "512M",
+            "-display",
+            "none",
+            "-serial",
+            "file:build/performance/pty-boot/1/qemu-serial.log",
+            "-qmp",
+            "stdio",
+            "-vga",
+            "std",
+            "-global",
+            "VGA.vgamem_mb=32",
+            "-cdrom",
+            "/home/tuxpc/dunit-os-op3-registry/build/microkernel.iso",
+            "-boot",
+            "d",
+            "-machine",
+            "q35,accel=tcg",
+            "-smp",
+            "1"
+          ],
+          "machine": "q35,accel=tcg",
+          "requested_vcpus": 1,
+          "emulator_vcpus": 1,
+          "kernel_online_cpus": 1,
+          "kernel_scheduler": "up",
+          "dispatch_cpus": 1
+        },
+        "host": {
+          "system": "Linux",
+          "release": "7.3.0-3-cachyos",
+          "cpu_model": "AMD Ryzen 5 5600 6-Core Processor",
+          "logical_cpus": 12,
+          "affinity": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "cgroup": {
+            "cpu.max": null,
+            "cpuset.cpus.effective": "0-11",
+            "memory.max": null
+          },
+          "kvm_accessible": false
+        },
+        "clock": {
+          "guest_source": "hpet",
+          "guest_resolution_ns": 10,
+          "guest_timer_event": "pit-100hz",
+          "host": "time.monotonic",
+          "physical_scanout_measured": false
+        },
+        "measurements": {
+          "launch_to_ready_wall_ms": 3979.65883400002,
+          "run_wall_ms": 12362.048601000197,
+          "cpu_time_ms": null,
+          "rss_bytes": null
+        },
+        "result": {
+          "ok": false,
+          "reason": "marker budget failed: 1 missing, 0 forbidden",
+          "missing": [
+            "Clocksource: PIT monotonic (100 Hz)"
+          ],
+          "forbidden": []
+        }
+      },
+      "resolution": "Updated obsolete PIT-clocksource budget to assert foundation HPET selection and PIT events; full rerun passed."
+    }
+  ],
+  "limits": [
+    "Applications still scheduler=up dispatch_cpus=1; APs park after probes",
+    "No KVM performance/scaling or physical scanout measurement",
+    "UEFI not repeated",
+    "Console/stdin, remote cancel/stop, IRQ progress and complete lock ranking remain open"
+  ],
+  "code_review": "Independent read-only PTY/retirement audit completed; attachment identity subsequently made generation-based and verified against moved-Arc cleanup.",
+  "verified_source_sha256": {
+    "kernel/src/process/current_access.rs": "111e5ebf202e50281c18cf710c799c4404cdabcbe7ea5f5f24aab0c04bfa8f61",
+    "kernel/src/process/fd.rs": "b6c83d84a5d665cda5eae0168e81c5fd0127e625f1d1ad364dc6c3babb08b220",
+    "kernel/src/process/fd_retirement_smoke.rs": "3d97c32163e5bfa14a8941b0d4b76a047d4f359c0c7a155dbfcef5373416694c",
+    "kernel/src/process/lifecycle.rs": "bcb5f090853aa80493bb14c6be9448dc84a667163d744a7483dfb626842de309",
+    "kernel/src/process/mod.rs": "2853746a9fe378209c14cdf795ade5067704e17816ee5904316b744c8d5a96d7",
+    "kernel/src/process/resources.rs": "245f1b396b8906b2f9330a320f02338d88c20da35a1a08014034116f871f7ae4",
+    "kernel/src/process/runner.rs": "147462b1709017658b112fbeed0cd68cb0486bb333bd63161bb2da0368cf9c98",
+    "kernel/src/pty/mod.rs": "3aecedbb725adf8adc03cb4ad61cf9b85dd05b8e389c8229558aab5edd655c43",
+    "kernel/src/syscall/mod.rs": "ccd5c02dfd78c16123c8484870c05155b2ec48c475c39fe7fc75eac578882126",
+    "kernel/src/syscall/native_fd.rs": "15b46dc835558e89da2d985d9b747e98368144aa8003f75adc1548af19e7c361",
+    "kernel/src/syscall/terminal_ioctl.rs": "2f21e8d355013c5b0ac37347ed6ddb0dd97e3e374cd316a5b2d4e91cec1753b0",
+    "tools/boot_markers.json": "f4cb05e4c2b065d4b0bb09807f86e6fc0cf73c6f22f53db66f238f5173c97fb8",
+    "tools/qemu_test.py": "4346cc40ba7fde9294d9a93711ae1f46b5808efe5479e93c816df8baa27784cb",
+    "tools/registry_production_markers.json": "fcd9e4dd55fc42f12d3afa818190f175c082ce10440933e8f7ab98013ee93ca4",
+    "tools/test_process_access.py": "be3f47f84a76f7d4e0f262fd91739f2e0116a97e05d3140ab627b9b09d2487f9",
+    "tools/test_process_resources.py": "ccc60694f2696ffc23c18b8f1d3c8f722e0b7b0ae3d49ae48b3e8cb34b60bc92",
+    "tools/test_pty.py": "298b4a60bdc40b9cf3b31f4d2a67f434596c34da64acd9bf1971b6f57f905654",
+    "tools/test_pty_host.rs": "1b5822160828b4dc19819919c7b0891c653d3fd7263b3fb26f9b5ca100aa6bb2",
+    "tools/test_qmp_transport.py": "f478db7672b977d26a071401272ae8253a1e44e8cdcb1c79ab136179a4336c78",
+    "tools/test_vfs_ownership.py": "49a643d9d376318afe66e6a9eeff3ad436160200862c50e447ca7948b5c3741b"
+  },
+  "nonsemantic_after_native_checks": "Removed trailing blank lines at EOF in lifecycle.rs and runner.rs; executable source is unchanged."
+}

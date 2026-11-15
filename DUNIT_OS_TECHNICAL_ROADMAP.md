@@ -1236,8 +1236,11 @@ ownership VFS/resources, PMM leaf lock и проверка выделений н
 Hardware boot/park проверен до 8 vCPU, но `dispatch_cpus=1`: приложения ещё UP.
 [Exclusive execution/return handoff](docs/performance/task-execution.md) уже
 установлен. [Wait checkpoints, IPC locks и HPET/PIT](docs/performance/progress-foundation.md)
-проверены; следующий блок — remote cancel/stop и IRQ progress,
-затем полный lock ranking и TLB shootdown до AP dispatch. Mapping pin не заменён
+проверены; [TLB acknowledgements и mapping-copy pins](docs/performance/tlb-shootdown.md)
+установлены. [PTY ownership и deferred fd retirement](docs/performance/pty-ownership.md)
+защищают table, in-flight endpoints и последние drops вне task guards.
+Следующий блок — console/stdin, remote cancel/stop и IRQ progress,
+затем полный lock ranking и remote shared-VM stress до AP dispatch. Mapping pin не заменён
 ни task Arc, ни execution ticket. KVM scaling и численные performance gates открыты; долги M7 сохраняются.
 
 **Must-have:** M0; preemption/threads/wait queues/handles/shared VM; GUI protocol/server; DWM parity; DunitFS recovery + disk-root/init; persistence matrix.

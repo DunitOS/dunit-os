@@ -28,8 +28,9 @@ mod process {
     pub type Handle=u32;
     #[derive(Debug,PartialEq,Eq)] pub enum ProcessError { NoSuchProcess,ProcessNotPrepared,NotRunnable }
     #[derive(Debug,PartialEq,Eq)] pub enum HandleError { NoSuchTarget,AccessDenied,WrongType }
-    pub struct Process { pub pid:u64,pub cwd:String,pub cap:std::sync::Arc<u64>,pub pending:bool,pub signals:u64 }
+    pub struct Process { pub pid:u64,pub cwd:String,pub cap:std::sync::Arc<u64>,pub pending:bool,pub signals:u64,pub retired:Vec<Box<dyn Send>> }
     impl Process {
+        fn take_retired_resources(&mut self)->Vec<Box<dyn Send>> { std::mem::take(&mut self.retired) }
         fn take_fd_wakeup(&mut self)->bool { std::mem::take(&mut self.pending) }
         fn signal_target(&self,h:Handle)->Result<ProcessId,HandleError> {
             match h {0=>Err(HandleError::AccessDenied),3=>Err(HandleError::WrongType),n=>Ok(ProcessId(n as u64))}
@@ -54,7 +55,7 @@ mod process {
         use std::sync::{Arc,atomic::{AtomicBool,Ordering}};
         fn object() -> registry::Task {
             Arc::new(crate::sync::IrqSafeSpinLock::new(Process {pid:4,cwd:String::new(),
-                cap:Arc::new(4),pending:false,signals:0}))
+                cap:Arc::new(4),pending:false,signals:0,retired:Vec::new()}))
         }
         registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
         let pin=registry::task(ProcessId(4)).unwrap();let weak=Arc::downgrade(&pin);
@@ -118,8 +119,11 @@ mod process {
     }
     pub fn init() {
         for n in 1..=2 { process_table().push(ProcessRecord {pid:ProcessId(n),process:Some(std::sync::Arc::new(crate::sync::IrqSafeSpinLock::new(Process {
-            pid:n,cwd:format!("task{n}"),cap:std::sync::Arc::new(n),pending:false,signals:0 })))}); }
+            pid:n,cwd:format!("task{n}"),cap:std::sync::Arc::new(n),pending:false,signals:0,retired:Vec::new() })))}); }
         process_table().push(ProcessRecord {pid:ProcessId(3),process:None});
+    }
+    pub fn read_missing(read: impl for<'a> FnOnce(&'a Process)->u64)->Result<u64,ProcessError> {
+        current_access::with_process(ProcessId(99),read)
     }
     #[path=@ACCESS@] pub mod current_access;
     pub use current_access::*;
@@ -196,6 +200,27 @@ println!("task scopes: owner/thread routing, error notifications, self/cross-tar
 
     def test_registry_pins_exclusion_reentry_and_retirement(self):
         result=self.compile('process::probe_registry();',run=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_retired_owners_reenter_after_error_and_missing_callback(self):
+        result=self.compile(r"""
+use process::*;
+struct Reenter;
+impl Drop for Reenter {
+    fn drop(&mut self) { with_process_mut(ProcessId(1), |p| {p.signals+=1;Ok(())}).unwrap(); }
+}
+let result:Result<(),_>=with_process_mut(ProcessId(1),|p| {
+    p.retired.push(Box::new(Reenter));p.pending=true;Err(ProcessError::NotRunnable)
+});
+assert_eq!(result,Err(ProcessError::NotRunnable));
+assert_eq!(with_current_process(|p|p.signals),Some(1));
+let captured=Reenter;
+assert_eq!(with_process_mut(ProcessId(99),move |_| {drop(captured);Ok(())}),Err(ProcessError::NoSuchProcess));
+assert_eq!(with_current_process(|p|p.signals),Some(2));
+let captured=Reenter;
+assert_eq!(read_missing(move |_| {drop(captured);0}),Err(ProcessError::NoSuchProcess));
+assert_eq!(with_current_process(|p|p.signals),Some(3));
+""",run=True)
         self.assertEqual(result.returncode,0,result.stderr)
 
     def test_static_argument_callback_is_rejected(self):
