@@ -1,5 +1,7 @@
 # Dunit OS
 
+![Dunit OS](assets/images/banner.png)
+
 Dunit is an experimental operating system for x86_64 computers. It has a Rust
 kernel, a C/NASM hardware layer, Limine BIOS/UEFI boot, a terminal and a userspace
 desktop.
