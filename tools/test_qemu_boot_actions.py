@@ -11,7 +11,8 @@ import qemu_test
 
 
 class BootActionBudgetTests(unittest.TestCase):
-    def scenario(self, *, late=20, step_timeout=30, overall=60, command=False):
+    def scenario(self, *, late=20, step_timeout=30, overall=60, command=False,
+                 screenshot_error=None):
         clock = SimpleNamespace(now=0.0)
         def advance(seconds):
             clock.now += seconds
@@ -34,15 +35,17 @@ class BootActionBudgetTests(unittest.TestCase):
                 disk=None, iso=str(image), cmd=['exec sample'] if command else [], scratch_disk=None,
                 scratch_bus='ahci', uefi=False, qemu_arg=[], accel='tcg', mem='64M', interactive=False,
                 timeout=overall, boot_timeout=20, ready_marker='ready', post_boot_delay=0,
-                cmd_timeout=15, settle=0, linger=0, screenshot=None)
+                cmd_timeout=15, settle=0, linger=0,
+                screenshot='nested/capture.ppm' if screenshot_error else None)
             process = Mock(returncode=0)
-            with patch.object(qemu_test, 'Qmp'), patch.object(qemu_test, 'SerialTail', return_value=serial), \
+            with patch.object(qemu_test, 'Qmp') as qmp, patch.object(qemu_test, 'SerialTail', return_value=serial), \
                  patch.object(qemu_test, 'build_qemu_command', return_value=['fake-qemu']), \
                  patch.object(qemu_test.subprocess, 'Popen', return_value=process), \
                  patch.object(qemu_test, 'type_command'), \
                  patch.object(qemu_test.time, 'monotonic', side_effect=lambda: clock.now), \
                  patch.object(qemu_test.time, 'sleep', side_effect=advance), \
                  contextlib.redirect_stderr(io.StringIO()):
+                qmp.return_value.screendump.side_effect = screenshot_error
                 result = qemu_test.run(args)
             self.assertTrue(process.wait.called)
         return result, clock.now
@@ -66,6 +69,13 @@ class BootActionBudgetTests(unittest.TestCase):
         result, elapsed = self.scenario(command=True)
         self.assertFalse(result.ok)
         self.assertLess(elapsed, 16)
+
+    def test_failed_requested_screenshot_fails_run_despite_good_markers(self):
+        result, _ = self.scenario(screenshot_error=RuntimeError('capture rejected'))
+        self.assertFalse(result.ok)
+        self.assertEqual(result.missing_markers, [])
+        self.assertIn('capture rejected', result.reason)
+        self.assertIsNone(result.screenshot)
 
 
 if __name__ == '__main__':

@@ -237,7 +237,12 @@ class Qmp:
         self.execute("send-key", {"keys": keys, "hold-time": hold_ms})
 
     def screendump(self, path: Path) -> None:
-        self.execute("screendump", {"filename": str(path)})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        reply = self.execute("screendump", {"filename": str(path)})
+        if "error" in reply:
+            raise RuntimeError(f"screendump failed: {reply['error']}")
+        if not path.is_file() or path.stat().st_size == 0:
+            raise RuntimeError(f"screendump produced no image: {path}")
 
     def quit(self) -> None:
         try:
@@ -784,12 +789,8 @@ def run(args: argparse.Namespace) -> RunResult:
             shot = Path(args.screenshot)
             if not shot.is_absolute():
                 shot = workdir / shot
-            try:
-                qmp.screendump(shot)
-                time.sleep(0.3)
-                result.screenshot = str(shot)
-            except Exception as err:
-                print(f"[qemu_test] screenshot failed: {err}", file=sys.stderr)
+            qmp.screendump(shot)
+            result.screenshot = str(shot)
 
         # Optionally linger until the hard timeout to keep collecting serial.
         if args.linger:

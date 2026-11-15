@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 
@@ -21,6 +22,13 @@ for line in sys.stdin:
         emit({'return':{}});break
     if command=='bad':
         emit({'error':{'class':'CommandNotFound'}});continue
+    if command=='screendump':
+        filename=message['arguments']['filename']
+        if filename.endswith('rejected.ppm'):
+            emit({'error':{'class':'GenericError','desc':'capture rejected'}});continue
+        if not filename.endswith('missing.ppm'):
+            with open(filename,'wb') as image:
+                image.write(b'P6\n1 1\n255\n\x00\x00\x00')
     emit({'event':'TEST'})
     emit({'return':message.get('arguments',{})})
 '''
@@ -53,6 +61,18 @@ class StdioTests(unittest.TestCase):
         qmp = self.peer('pass')
         with self.assertRaisesRegex(RuntimeError, 'transport closed'):
             qmp.connect(timeout=2)
+
+    def test_screendump_creates_parent_and_requires_an_image(self):
+        qmp = self.peer()
+        qmp.connect(timeout=2)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'nested' / 'capture.ppm'
+            qmp.screendump(path)
+            self.assertTrue(path.read_bytes().startswith(b'P6\n1 1\n'))
+            with self.assertRaisesRegex(RuntimeError, 'capture rejected'):
+                qmp.screendump(path.with_name('rejected.ppm'))
+            with self.assertRaisesRegex(RuntimeError, 'produced no image'):
+                qmp.screendump(path.with_name('missing.ppm'))
 
     def test_silent_peer_has_a_deadline(self):
         qmp = self.peer('import time; time.sleep(10)')

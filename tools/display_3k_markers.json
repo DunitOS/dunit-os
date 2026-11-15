@@ -15,63 +15,63 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 94,
           "y": 18,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
@@ -124,21 +124,14 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 43,
-          "y": 127,
-          "interval": 0.02
-        }
-      },
-      {
-        "relative_motion": {
-          "x": 0,
-          "y": 16,
-          "interval": 0.02
+          "y": 86,
+          "interval": 0.03
         }
       },
       {
@@ -191,21 +184,21 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
-          "y": 80,
-          "interval": 0.02
+          "y": 125,
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
-          "x": 26,
+          "x": 72,
           "y": 0,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
@@ -250,6 +243,11 @@
         "delay_ms": 2500
       },
       {
+        "wait_marker": "gui_server: desktop ready",
+        "occurrences": 1,
+        "timeout": 45
+      },
+      {
         "execute": "screendump",
         "arguments": {
           "filename": "/tmp/dunit-3k/3072x1920.ppm"
@@ -267,21 +265,21 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
-          "y": 80,
-          "interval": 0.02
+          "y": 125,
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
-          "x": 26,
+          "x": 72,
           "y": 0,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
@@ -326,6 +324,11 @@
         "delay_ms": 2500
       },
       {
+        "wait_marker": "gui_server: desktop ready",
+        "occurrences": 2,
+        "timeout": 45
+      },
+      {
         "execute": "screendump",
         "arguments": {
           "filename": "/tmp/dunit-3k/2880x1800.ppm"
@@ -343,21 +346,21 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
-          "y": 80,
-          "interval": 0.02
+          "y": 125,
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
-          "x": 26,
+          "x": 72,
           "y": 0,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
@@ -402,6 +405,11 @@
         "delay_ms": 2500
       },
       {
+        "wait_marker": "gui_server: desktop ready",
+        "occurrences": 3,
+        "timeout": 45
+      },
+      {
         "execute": "screendump",
         "arguments": {
           "filename": "/tmp/dunit-3k/2560x1600.ppm"
@@ -419,21 +427,21 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
-          "y": 80,
-          "interval": 0.02
+          "y": 125,
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
-          "x": 26,
+          "x": 72,
           "y": 0,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
@@ -478,6 +486,11 @@
         "delay_ms": 2500
       },
       {
+        "wait_marker": "gui_server: desktop ready",
+        "occurrences": 4,
+        "timeout": 45
+      },
+      {
         "execute": "screendump",
         "arguments": {
           "filename": "/tmp/dunit-3k/2560x1440.ppm"
@@ -495,21 +508,21 @@
         "relative_motion": {
           "x": 127,
           "y": 127,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
           "x": 127,
-          "y": 80,
-          "interval": 0.02
+          "y": 125,
+          "interval": 0.03
         }
       },
       {
         "relative_motion": {
-          "x": 26,
+          "x": 72,
           "y": 0,
-          "interval": 0.02
+          "interval": 0.03
         }
       },
       {
@@ -552,6 +565,11 @@
       },
       {
         "delay_ms": 2500
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "occurrences": 5,
+        "timeout": 45
       },
       {
         "execute": "screendump",
