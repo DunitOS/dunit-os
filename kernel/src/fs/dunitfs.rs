@@ -446,7 +446,7 @@ impl DunitFs {
             }
             nodes[index] = Some(decode_node(entry, &geom)?);
         }
-        let mut fs = Self {
+        let fs = Self {
             device,
             partition_start,
             geom,

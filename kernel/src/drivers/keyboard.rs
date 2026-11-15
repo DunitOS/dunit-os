@@ -8,7 +8,6 @@ use queue::ScancodeQueue;
 // Both raw/cooked legacy readers and GetKeyEvent consume the same FIFO. IRQ
 // updates and record pops are atomic under the existing interrupt-safe lock.
 static KEYBOARD: IrqSafeSpinLock<ScancodeQueue> = IrqSafeSpinLock::new(ScancodeQueue::new());
-pub fn init() {}
 pub fn read_scancode() -> Option<u8> {
     KEYBOARD.lock().pop().map(|event| event.raw)
 }

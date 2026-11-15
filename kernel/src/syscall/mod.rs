@@ -10,7 +10,9 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 #[cfg(feature = "boot-smoke-tests")]
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+#[cfg(feature = "boot-smoke-tests")]
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

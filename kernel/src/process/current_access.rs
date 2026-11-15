@@ -20,7 +20,7 @@ pub(super) fn with_process<R>(
 
 /// Shared by current owner, current thread and explicit-PID mutation paths.
 /// Release retired endpoint/capability owners and notify after the task lock,
-/// including callback errors. Destructors may reenter readiness or ProcFs.
+/// including callback errors. Destructors may reenter readiness or task snapshots.
 pub fn with_process_mut<R>(
     pid: ProcessId,
     write: impl for<'a> FnOnce(&'a mut Process) -> Result<R, ProcessError>,

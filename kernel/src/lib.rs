@@ -11,7 +11,6 @@ pub mod command;
 pub mod console_font;
 pub mod clock;
 pub mod cpu;
-pub mod dpkg;
 pub mod drivers;
 pub mod elf;
 pub mod fs;
@@ -21,7 +20,6 @@ pub mod initrd;
 pub mod input;
 pub mod interrupts;
 pub mod ipc;
-pub mod kthreads;
 pub mod memory;
 pub mod pipe;
 pub mod power;
@@ -68,7 +66,7 @@ fn panic(info: &PanicInfo) -> ! {
 }
 
 #[repr(C)]
-struct LimineFramebuffer {
+pub struct LimineFramebuffer {
     address: *mut u8,
     width: u64,
     height: u64,
@@ -93,11 +91,9 @@ struct ShellState {
     history_buffer: [[u8; 256]; 50],
     history_lens: [usize; 50],
     history_count: usize,
-    history_index: usize,
     history_position: isize,
     terminal_cwd: [u8; 256],
     terminal_cwd_len: usize,
-    terminal_dir_entries: [fs::vfs::DirEntry; 32],
 }
 
 struct ShellStateCell(UnsafeCell<ShellState>);
@@ -109,11 +105,9 @@ static SHELL: ShellStateCell = ShellStateCell(UnsafeCell::new(ShellState {
     history_buffer: [[0; 256]; 50],
     history_lens: [0; 50],
     history_count: 0,
-    history_index: 0,
     history_position: -1,
     terminal_cwd: { let mut path = [0u8; 256]; path[0] = b'/'; path },
     terminal_cwd_len: 1,
-    terminal_dir_entries: [fs::vfs::DirEntry::empty(); 32],
 }));
 
 /// Tiny fixed-capacity string builder for honest, measured boot lines.
@@ -359,7 +353,6 @@ fn terminal_collect_foreground_input(
     }
 }
 
-#[no_mangle]
 /// Состояние раннего экранного лога (fb-указатель + текущая Y). Раньше два
 /// `static mut`; теперь одна структура за `UnsafeCell`. Пишется/читается только
 /// кооперативным путём загрузки на одном CPU.
@@ -676,7 +669,6 @@ pub extern "C" fn kernel_main(
             input::set_mouse_bounds(width, height);
         }
         screen_log_early(fb_addr, width, early_log_y, "[KERNEL] screen log ready");
-        early_log_y += 10;
     } else {
         serial_write("[KERNEL] framebuffer FAIL\r\n");
     }
@@ -1148,9 +1140,7 @@ pub extern "C" fn kernel_main(
                                                     }
                                                 }
                                                 shell::ShellOutcome::NotFound => {
-                                                    if cmd_str.starts_with("dpkg ") {
-                                                        "dpkg: not implemented"
-                                                    } else if cmd_str.starts_with("kill ") {
+                                                    if cmd_str.starts_with("kill ") {
                                                         "kill: not implemented"
                                                     } else if cmd_str.starts_with("killall ") {
                                                         "killall: not implemented"

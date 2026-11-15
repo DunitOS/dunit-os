@@ -34,6 +34,5 @@ pub fn init() {
     if let Some(mut vfs) = crate::fs::vfs::get_vfs() {
         crate::fs::dunitfs::auto_mount(&mut vfs);
     }
-    keyboard::init();
     mouse::init();
 }
