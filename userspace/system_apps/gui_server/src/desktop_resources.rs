@@ -13,32 +13,7 @@ pub(super) const WALLPAPER_HEIGHT: usize = 1080;
 pub(super) const WALLPAPER_OFFSET: usize = 54;
 pub(super) const WALLPAPER_STRIDE: usize = WALLPAPER_WIDTH * 3;
 
-/// Slurp a whole (binary) VFS file into a byte vector. Unlike
-/// `settings::read_file` this imposes no UTF-8 requirement and a larger cap, so
-/// it can carry the multi-megabyte wallpaper. `None` on open error.
-pub(super) fn read_binary(path: &str, cap: usize) -> Option<Vec<u8>> {
-    let fd = libdunit::open(path, libdunit::OPEN_READ);
-    if fd < 0 {
-        return None;
-    }
-    let fd = fd as usize;
-    let mut data: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = libdunit::read(fd, &mut chunk);
-        if n <= 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..n as usize]);
-        if data.len() > cap {
-            break;
-        }
-    }
-    libdunit::close(fd);
-    Some(data)
-}
-
-/// A 1600x900 24-bit BMP: "BM" magic, 54-byte pixel offset, matching
+/// A 1920x1080 24-bit BMP: "BM" magic, 54-byte pixel offset, matching
 /// dimensions and 24 bpp. Mirrors the legacy `validate_wallpaper_bmp`.
 pub(super) fn validate_wallpaper_bmp(data: &[u8]) -> bool {
     data.len() >= WALLPAPER_OFFSET + WALLPAPER_STRIDE * WALLPAPER_HEIGHT
@@ -72,7 +47,7 @@ pub(super) fn load_wallpaper(
         ));
         return Some(image.pixels);
     }
-    let data = read_binary(path, 8 * 1024 * 1024)?;
+    let data = libdunit::read_binary(path, 8 * 1024 * 1024)?;
     if !validate_wallpaper_bmp(&data) {
         return None;
     }

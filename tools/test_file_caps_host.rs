@@ -1,7 +1,11 @@
 //! Exercises the real VFS, MemFS and open-description capabilities. Only the
 //! platform interrupt guard, initrd source and serial sink are replaced.
 extern crate alloc;
+#[path = "../kernel/src/sync.rs"]
+mod actual_sync;
 mod sync {
+    pub use crate::actual_sync::{OnceCell, SpinLock as IrqSafeSpinLock};
+    pub type IrqSafeSpinLockGuard<'a, T> = crate::actual_sync::SpinLockGuard<'a, T>;
     pub struct InterruptGuard;
     impl InterruptGuard {
         pub fn new() -> Self {
@@ -40,12 +44,12 @@ use vfs::{FileSystem, FileType, OpenFlags as F, VfsError as E};
 // The real kernel is UP; its VFS resolve scratch buffer is shared.
 static KERNEL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn tree() -> vfs::VirtualFileSystem {
-    let mut backend = Box::new(memfs::MemFs::new());
+    let mut backend = memfs::MemFs::new();
     backend.mkdir("/tmp/source").unwrap();
     backend.mkdir("/tmp/dest").unwrap();
     backend.add_file("/tmp/source/old", b"original".to_vec());
     let mut vfs = vfs::VirtualFileSystem::new();
-    vfs.mount("/", Box::leak(backend)).unwrap();
+    vfs.mount("/", std::sync::Arc::new(sync::IrqSafeSpinLock::new(backend))).unwrap();
     vfs
 }
 #[test]

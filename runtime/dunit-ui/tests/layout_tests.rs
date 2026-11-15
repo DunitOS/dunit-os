@@ -214,6 +214,18 @@ fn translate_subtree_moves_descendants_without_touching_siblings_or_sizes() {
 }
 
 #[test]
+fn translate_rejects_invalid_node_and_mismatched_layout_without_mutation() {
+    let (tree, mut lay) = r("Column { Text#leaf height=10 }", 100., 60.);
+    let before: Vec<_> = tree.iter().map(|node| lay.rect(node.id)).collect();
+    assert!(!lay.translate_subtree(&tree, dunit_ui::NodeId(u32::MAX), 1., 2.));
+    let larger = parse("Column { Text Text Text }").unwrap();
+    assert!(!lay.translate_subtree(&larger, larger.root(), 1., 2.));
+    let smaller = parse("Text").unwrap();
+    assert!(!lay.translate_subtree(&smaller, smaller.root(), 1., 2.));
+    assert_eq!(tree.iter().map(|node| lay.rect(node.id)).collect::<Vec<_>>(), before);
+}
+
+#[test]
 fn grid_honors_child_constraints_sizing_and_alignment_within_fixed_cells() {
     let (tree, lay) = r(
         r#"Grid columns=2 spacing=10 align=end cross-align=center {

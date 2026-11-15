@@ -31,7 +31,10 @@ do
     "$test_dir/regression"
 done
 
-cargo test --manifest-path runtime/dunit/Cargo.toml --features gui --test filename_editor --test settings_editor
+cargo test --manifest-path runtime/dunit/Cargo.toml --features gui --test settings_editor
+# Files now uses the shared SDK editor instead of the removed filename_editor.
+cargo test --manifest-path runtime/dunit-widgets/Cargo.toml --test text_input
+cargo test --manifest-path runtime/dunit-component/Cargo.toml
 
 bash tools/test_dwm_config_host.sh
 

@@ -64,6 +64,17 @@ fn main() -> dunit::Result<()> {
         assert_eq!(file.read(&mut [0])?, 0);
     }
     assert_eq!(copy, bulk);
+    assert_eq!(libdunit::read_binary_checked("sdk-api-bulk.bin", bulk.len()).map_err(Error)?, bulk);
+    assert_eq!(libdunit::read_binary_checked("sdk-api-bulk.bin", bulk.len() - 1), Err(libdunit::EFBIG));
+    assert_eq!(libdunit::read_binary("sdk-api-bulk.bin", bulk.len() - 1), None);
+    assert_eq!(libdunit::read_binary_checked("sdk-api-missing.bin", 10), Err(libdunit::ENOENT));
+    fs::write("sdk-api-empty.bin", &[])?;
+    assert_eq!(libdunit::read_binary_checked("sdk-api-empty.bin", 0).map_err(Error)?, []);
+    fs::write("sdk-api-empty.bin", &[1])?;
+    assert_eq!(libdunit::read_binary_checked("sdk-api-empty.bin", 0), Err(libdunit::EFBIG));
+    fs::remove_file("sdk-api-empty.bin")?;
+    assert_eq!(system::stats()?.fs_open_handles, handles);
+    dunit::println!("[SDKAPI] bounded assets exact limit errors cleanup OK")?;
     fs::remove_file("sdk-api-bulk.bin")?;
     dunit::println!("[SDKAPI] bulk exact read write OK")?;
     fs::rename("sdk-api.txt", "sdk-api-renamed.txt")?;

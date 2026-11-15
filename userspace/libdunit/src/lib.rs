@@ -9,6 +9,7 @@ pub mod wait_set;
 pub mod pointer;
 pub mod file_cap;
 mod exec_path;
+mod bounded_read;
 
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
@@ -486,30 +487,21 @@ pub fn read_line() -> Result<String, isize> {
     }
 }
 
-/// Slurp a whole (binary) VFS file into a byte vector, up to `cap` bytes. Unlike
-/// `read_to_string` this imposes no UTF-8 requirement, so it can carry fonts,
-/// wallpapers and other raw assets. Returns `None` on open error; a file larger
-/// than `cap` is returned truncated at the first chunk that crosses the cap.
-pub fn read_binary(path: &str, cap: usize) -> Option<Vec<u8>> {
+/// Read a complete binary file. Oversize files and I/O errors are rejected;
+/// a successful prefix is never returned as a complete asset.
+pub fn read_binary_checked(path: &str, cap: usize) -> Result<Vec<u8>, isize> {
     let fd = open(path, OPEN_READ);
     if fd < 0 {
-        return None;
+        return Err(fd);
     }
-    let fd = fd as usize;
-    let mut data: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = read(fd, &mut chunk);
-        if n <= 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..n as usize]);
-        if data.len() > cap {
-            break;
-        }
-    }
-    close(fd);
-    Some(data)
+    let result = bounded_read::read(cap, |buffer| read(fd as usize, buffer));
+    let closed = close(fd as usize);
+    result.and_then(|data| if closed < 0 { Err(closed) } else { Ok(data) })
+}
+
+/// Compatibility wrapper for optional assets: errors, including oversize, are None.
+pub fn read_binary(path: &str, cap: usize) -> Option<Vec<u8>> {
+    read_binary_checked(path, cap).ok()
 }
 
 pub fn read_to_string(path: &str) -> Result<String, isize> {

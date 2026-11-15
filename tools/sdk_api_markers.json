@@ -20,7 +20,8 @@
     "[EXEC] /app/sdk_api_test returned code=1",
     "[EXEC] /app/dsh_calc_test returned code=0",
     "calc: bye",
-    "[SDKAPI] bulk exact read write OK"
+    "[SDKAPI] bulk exact read write OK",
+    "[SDKAPI] bounded assets exact limit errors cleanup OK"
   ],
   "forbidden": [
     "[PANIC]",

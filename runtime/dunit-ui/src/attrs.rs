@@ -69,15 +69,18 @@ impl Edges {
     /// CSS-style shorthand: 1 value = all, 2 = vertical/horizontal,
     /// 4 = top/right/bottom/left. Other counts are ignored (returns `None`).
     fn parse(s: &str) -> Option<Edges> {
-        let mut it = s.split_whitespace().filter_map(parse_f32);
-        let v: [f32; 4] = {
-            let a = it.next()?;
-            match (it.next(), it.next(), it.next()) {
-                (None, _, _) => [a, a, a, a],
-                (Some(b), None, _) => [a, b, a, b],
-                (Some(b), Some(c), Some(d)) => [a, b, c, d],
-                _ => return None,
-            }
+        let mut values = [0.; 4];
+        let mut count = 0;
+        for token in s.split_whitespace() {
+            if count == values.len() { return None; }
+            values[count] = parse_f32(token)?;
+            count += 1;
+        }
+        let v = match count {
+            1 => [values[0]; 4],
+            2 => [values[0], values[1], values[0], values[1]],
+            4 => values,
+            _ => return None,
         };
         Some(Edges { top: v[0], right: v[1], bottom: v[2], left: v[3] })
     }
@@ -188,6 +191,12 @@ fn parse_sizing(s: &str) -> Sizing {
     }
     if s == "grow" || s == "fill" {
         return Sizing::Grow(1.0);
+    }
+    if let Some(weight) = s.strip_prefix("grow(").and_then(|v| v.strip_suffix(')')) {
+        if let Some(weight) = parse_f32(weight).filter(|v| *v > 0.) {
+            return Sizing::Grow(weight);
+        }
+        return Sizing::Auto;
     }
     if let Some(rest) = s.strip_suffix('%') {
         if let Some(v) = parse_f32(rest) {

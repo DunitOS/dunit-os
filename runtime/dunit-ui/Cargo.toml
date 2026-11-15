@@ -2,7 +2,7 @@
 # retained tree with stable IDs, and a constraint/flex layout engine
 # (Row/Column/Stack/Grid/Scroll). Pure `no_std + alloc`, zero dependencies, so
 # the same code runs in host tests and inside the userspace GUI stack on
-# `x86_64-unknown-none`. DSS styling, widgets and motion land in later M4 slices.
+# `x86_64-unknown-none`. DSS styling and widget semantics use separate runtimes.
 [package]
 name = "dunit_ui"
 version = "0.1.0"

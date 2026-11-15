@@ -14,7 +14,7 @@ pub struct NodeId(pub u32);
 
 /// The structural kind of a node. The five container kinds drive layout; every
 /// other element (`Text`, `Button`, …) is an opaque, sized leaf at this layer —
-/// widget semantics arrive in a later slice.
+/// widget semantics are provided by the component runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
     Row,

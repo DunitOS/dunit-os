@@ -44,8 +44,8 @@ impl Layout {
         let mut boxes=self.boxes.clone();arrange(tree,id,rect,&desired,&mut boxes);
         if boxes.iter().any(|r|![r.x,r.y,r.w,r.h].iter().all(|v|v.is_finite())||r.w<0.||r.h<0.){return false;}self.boxes=boxes;true
     }
-    /// Translate a node and its descendants atomically. Invalid offsets or
-    /// coordinate overflow leave the entire layout unchanged.
+    /// Translate a node and its descendants atomically. Invalid node IDs,
+    /// tree/layout sizes, offsets or overflow leave the layout unchanged.
     pub fn translate_subtree(&mut self, tree: &Tree, id: NodeId, dx: f32, dy: f32) -> bool {
         fn valid(layout: &Layout, tree: &Tree, id: NodeId, dx: f32, dy: f32) -> bool {
             let rect = layout.rect(id);
@@ -58,7 +58,8 @@ impl Layout {
             rect.y += dy;
             for &child in &tree.node(id).children { apply(layout, tree, child, dx, dy); }
         }
-        if !dx.is_finite() || !dy.is_finite() || !valid(self, tree, id, dx, dy) { return false; }
+        if self.boxes.len() != tree.len() || id.0 as usize >= tree.len()
+            || !dx.is_finite() || !dy.is_finite() || !valid(self, tree, id, dx, dy) { return false; }
         apply(self, tree, id, dx, dy);
         true
     }

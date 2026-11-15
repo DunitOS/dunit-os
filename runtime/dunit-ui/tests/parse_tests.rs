@@ -87,3 +87,28 @@ fn rejects_trailing_content() {
         other => panic!("expected Unexpected, got {:?}", other),
     }
 }
+
+#[test]
+fn malformed_padding_preserves_previous_edges_and_weighted_grow_is_decoded() {
+    let mut attrs = dunit_ui::Attrs::default();
+    attrs.apply("padding", "9");
+    let before = attrs.padding;
+    for invalid in ["1 bad 2", "1 2 3", "1 2 3 4 5", ""] {
+        attrs.apply("padding", invalid);
+        assert_eq!(attrs.padding, before);
+    }
+    attrs.apply("padding", "1 2 3 4");
+    assert_eq!((attrs.padding.top, attrs.padding.right, attrs.padding.bottom, attrs.padding.left), (1., 2., 3., 4.));
+    let tree = parse("Row { Stack width=grow(3) Stack width=grow }").unwrap();
+    let child = tree.node(tree.node(tree.root()).children[0]);
+    assert_eq!(child.attrs.width, Sizing::Grow(3.));
+    assert_eq!(child.attrs.grow, 3.);
+}
+
+#[test]
+fn quoted_strings_preserve_utf8_and_ascii_escapes() {
+    let tree = parse(r#"Text "Привет 世界 🙂\n\t\"quoted\"\\tail""#).unwrap();
+    assert_eq!(tree.node(tree.root()).text.as_deref(), Some("Привет 世界 🙂\n\t\"quoted\"\\tail"));
+    let tree = parse(r#"Text "\🙂""#).unwrap();
+    assert_eq!(tree.node(tree.root()).text.as_deref(), Some("🙂"));
+}

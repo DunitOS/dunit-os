@@ -121,27 +121,27 @@ impl<'a> Parser<'a> {
     /// Parse a double-quoted string with `\" \\ \n \t` escapes.
     fn parse_string(&mut self) -> Result<String> {
         self.bump(); // opening quote
-        let mut out = String::new();
+        let mut out = alloc::vec::Vec::new();
         loop {
             let c = match self.bump() {
                 Some(c) => c,
                 None => return Err(UiError::UnexpectedEof(String::from("unterminated string"))),
             };
             match c {
-                b'"' => return Ok(out),
+                b'"' => return Ok(String::from_utf8_lossy(&out).into_owned()),
                 b'\\' => {
                     let e = self
                         .bump()
                         .ok_or_else(|| UiError::UnexpectedEof(String::from("dangling escape")))?;
                     out.push(match e {
-                        b'n' => '\n',
-                        b't' => '\t',
-                        b'"' => '"',
-                        b'\\' => '\\',
-                        other => other as char,
+                        b'n' => b'\n',
+                        b't' => b'\t',
+                        b'"' => b'"',
+                        b'\\' => b'\\',
+                        other => other,
                     });
                 }
-                other => out.push(other as char),
+                other => out.push(other),
             }
         }
     }

@@ -11,3 +11,6 @@ crate-type = ["rlib"]
 dunit_file_cap_abi = { path = "../../abi/file-cap" }
 dunit_pointer_abi = { path = "../../abi/pointer-input" }
 dunit_wait_abi = { path = "../../abi/wait-set" }
+
+[dev-dependencies]
+dunit_shell = { path = "../../runtime/dunit-shell" }
