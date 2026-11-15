@@ -88,16 +88,10 @@ profile metadata, desktop registry executables and required runtime tools.
 It also extracts the installer's FAT image and compares its initrd byte for
 byte with the live initrd. Minimal rejects every extra payload file.
 
-Local validation for this change passed seven host tests, composition checks
-for both ISOs, and BIOS and UEFI boots of both release variants. Minimal executed
-`dufetch` successfully. The existing production Settings scenario checks dock
-launch, palette scrolling, Lua activation and layout switching on the DWM ISO.
-Both release variants also passed BIOS boots under TCG. The existing full
-boot-marker regression passed with `runtime_stress` and IPC, and the compiler
-warning check measured 13 warnings against the existing budget of 99.
-
-Image sizes on this build were approximately 75 MiB for Minimal and 240 MiB for
-DWM; sizes will change as the kernel and packaged software evolve.
+Release acceptance requires host composition checks, both BIOS/UEFI boots and
+production desktop interactions. Build sizes vary with payload and revision;
+measure the actual artifacts rather than relying on an old size estimate.
+Historical validation is separate from a fresh run of the commands above.
 
 ## Release publication
 

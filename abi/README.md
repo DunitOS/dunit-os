@@ -1,137 +1,211 @@
-# Dunit Userspace ABI v0
+# Native Dunit ABI
 
-The stable contract between userspace and the Green Tea Kernel, versioned
-independently of any single language binding. This is the foundation M6 (the
-Dunit musl fork) builds on: the kernel speaks native Dunit syscalls — never Linux
-numbers or structs — and both `libdunit` (Rust) and the C sysroot are generated
-from the same source so they can never drift.
+The kernel uses native Dunit syscall numbers and records. POSIX types are
+translated by musl; public kernel structs are never replaced with Linux structs.
+The ABI query currently reports major version 0. ThreadExit v1 names an opt-in
+argument encoding, not a global ABI-major change.
 
-## Syscall numbers — single source of truth
+## Authoritative definitions
 
-`abi/syscalls.abi` lists every syscall as `<number> <CanonicalName>`. It is
-authoritative. Regenerate the consumers after any edit:
+`syscalls.abi`, `errno.abi` and `rights.abi` define numbers, positive errno
+magnitudes and capability bits. `transfers.abi` defines file/transfer operations.
+Generated C headers in `include/dunit/` and Rust modules in `userspace/libdunit`
+are committed outputs; do not edit them by hand. Kernel enums/constants must
+agree with their manifests. The generator verifies that agreement:
 
-    python3 tools/gen_abi.py          # regenerate + verify kernel agrees
-    python3 tools/gen_abi.py --check  # verify only, write nothing (CI guard)
-
-Generated, committed, never hand-edited:
-
-- `userspace/libdunit/src/syscall_numbers.rs` — Rust `pub const SYSCALL_<NAME>`
-- `userspace/libdunit/src/errno_numbers.rs` — Rust `pub const E<NAME>` + `error_name()`
-- `userspace/libdunit/src/rights_numbers.rs` — Rust `pub const RIGHT_<NAME>`
-- `abi/include/dunit/syscall.h` — C `#define SYS_<NAME>` (consumed by the musl fork)
-- `abi/include/dunit/errno.h` — C `#define DUNIT_E<NAME>` (== POSIX errno magnitudes)
-- `abi/include/dunit/rights.h` — C `#define DUNIT_RIGHT_<NAME>` (handle capability bits)
-
-The kernel's `enum Syscall`, its `E<NAME>` error consts (`kernel/src/syscall/mod.rs`)
-and its `RIGHT_<NAME>` bits (`kernel/src/handle.rs`) are the implementor; the
-generator refuses to run if any disagrees with its manifest, so the kernel,
-libdunit and the C sysroot stay locked together.
-
-## Error numbers
-
-`abi/errno.abi` lists each error as `<positive magnitude> <NAME>`. Dunit syscalls
-report failure by returning the negated value in `rax` (`EINVAL` → `-22`); the
-magnitudes equal POSIX errno, so the Dunit-error → POSIX-errno mapping is identity.
-
-## Handle rights
-
-`abi/rights.abi` lists each capability bit as `<bit index> <NAME>`. A handle's
-rights only ever narrow (never widen) when transferred between processes.
-
-## Capability query
-
-`sys_abi_query` (syscall `AbiQuery`) lets a program negotiate features explicitly
-instead of inferring them from a kernel version. libdunit exposes it as
-`abi_query(query, arg)` / `abi_version()` with selectors:
-
-- `ABI_QUERY_VERSION` (0) → ABI major version (`0` for v0)
-- `ABI_QUERY_SYSCALL_COUNT` (1) → size of the syscall number space (highest + 1)
-- `ABI_QUERY_HAS_SYSCALL` (2) → `1` if syscall number `arg` is enabled in this
-  build, else `0` (so a cfg-gated syscall like the boot-smoke `SmokeDone` reports
-  `0` in a production kernel)
-
-## Process-entry ABI (current)
-
-On entry the kernel ELF loader (`kernel/src/elf/mod.rs`) hands a program a
-SysV-style initial stack plus register args:
-
-```
-rsp -> argc            (u64)
-       argv[0..argc]   (*const u8), then NULL
-       envp[0..]       (*const u8), then NULL
-       auxv[0..]       { a_type: u64, a_val: u64 }, then { AT_NULL, 0 }
-       (padding, then the NUL-terminated argv/env strings + AT_RANDOM bytes)
+```bash
+python3 tools/gen_abi.py
+python3 tools/gen_abi.py --check
+python3 tools/gen_transfer_values.py --check
 ```
 
-`%rsp` is `8 mod 16` (the x86-64 SysV *function*-entry shape a no-libc Rust
-`_start` expects after a `call`); `%rdi=argc`, `%rsi=argv`, `%rdx=envp`; fds
-`0/1/2` = stdin/stdout/stderr. The auxiliary vector carries the static-first
-subset `AT_PAGESZ` (4096), `AT_SECURE` (0) and `AT_RANDOM` (→ 16 bytes).
+## Calling convention
 
-A libc `crt1` re-aligns itself (musl's `_start` does `and $-16,%rsp`), so the
-`8 mod 16` convention serves both a no-libc Rust `_start` and a libc crt1 — no
-separate `rsp` 0-mod-16 switch is needed, and the auxv is the piece a crt1 reads
-after the envp NULL. `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY` describe the
-ELF headers and entry for static C TLS. A mapped table is reused; static layouts
-without a PT_PHDR/load-backed table receive a bounded exact copy on the initial
-stack. Invalid PT_PHDR declarations are rejected. The argc/argv/env layout and
-register convention are unchanged; consumers skip unknown auxv types.
+| Register | Meaning |
+|---|---|
+| rax | Number on entry, signed result on return |
+| rdi, rsi, rdx, r10, r8, r9 | Arguments 0 through 5 |
+| rcx, r11 | Clobbered by syscall; not arguments |
 
-## ELF contract (current)
+Nonnegative results indicate success; negative results are negated POSIX errno
+magnitudes. Entry is `syscall`; return uses IRETQ. HAL-private dispatch return
+sentinels are not userspace results. User flags are preserved while DF is cleared
+for kernel execution; see [entry flags](../docs/architecture/kernel-entry-flags.md).
 
-The loader accepts ELF64, little-endian, `EM_X86_64`, **`ET_EXEC` only** (fixed-
-address static executables — matches M6's static-first stance; no PIE/`ET_DYN`).
-Segments honoured: `PT_LOAD` (mapped) and `PT_TLS` (TLS image, Variant II). No
-`PT_INTERP` / dynamic linker, no load bias, no `PT_GNU_RELRO` yet.
+`AbiQuery` selectors: 0 gives ABI major version; 1 gives highest number plus one;
+2 queries whether a specified syscall is enabled in this build. Reserved numbers
+and smoke-only calls are not proof of supported production behavior.
+Handle rights attenuate on transfer and cannot widen.
 
-## ABI v0 conformance (freestanding C, no musl)
+## Process entry and ELF
 
-The roadmap's ABI v0 "done" gate is met: `userspace/ctests/` holds a freestanding
-C program (`hello.c`) with a Dunit `crt0` (`crt0.s`) — no libc. The host C
-compiler builds it against these generated headers; the kernel ELF loader runs it
-as `/app/c_hello`. Its `crt0` reads `argc/argv/envp` straight off the SysV initial
-stack (not the registers), calls `main`, makes raw `write`/`exit` syscalls, checks
-the errno contract (an out-of-range fd returns `-EBADF`), and exits with `main`'s
-value. `crt0.s` is the seed the eventual Dunit musl `crt1` generalises. Test:
-`tools/qemu_test.py --build --markers-file tools/m6_c_abi_markers.json`.
+```text
+rsp -> argc: u64
+       argv pointers, NULL
+       envp pointers, NULL
+       auxv {type: u64, value: u64}, ending {AT_NULL, 0}
+       padding, NUL-terminated strings and AT_RANDOM bytes
+```
 
-## Status / roadmap
+RSP is 8 mod 16 for a no-libc function-style `_start`; rdi=argc, rsi=argv,
+rdx=envp. Musl crt1 realigns its stack. Auxv includes AT_PAGESZ=4096,
+AT_SECURE=0, AT_RANDOM and AT_PHDR/PHENT/PHNUM/ENTRY for static TLS. A bounded
+exact program-header copy is supplied on the initial stack when no load-backed
+table exists; invalid PT_PHDR declarations are rejected. Skip unknown auxv
+entries. Bootstrap random bytes are not secure entropy.
 
-- [x] Syscall-number manifest + Rust/C generation + kernel consistency check.
-- [x] Error-number manifest + Rust/C generation + `error_name()` + kernel check (M6.3).
-- [x] Handle-rights manifest + Rust/C generation + kernel check (M6.3). Reserved fds `0/1/2` + inheritance still to document.
-- [x] Capability/feature query (`sys_abi_query`) + `abi_test` smoke (M6.3).
-- [x] Process-entry ABI + ELF contract documented (current shape above).
-- [x] **ABI v0 conformance gate: freestanding C program (own crt0) reads args/env, raw syscalls, errno, exit — verified (M6.3).**
-- [x] **Process-entry auxv** (`AT_PAGESZ`/`AT_SECURE`/`AT_RANDOM`/`AT_NULL`), verified from C (`c_hello` walks envp→auxv). Stack is now musl-crt1-ready; crt1 self-aligns, so no `rsp` 0-mod-16 switch needed (M6.3).
-- [x] `AT_PHDR`/`AT_PHENT`/`AT_PHNUM`/`AT_ENTRY` for static TLS, checked by C entry and native musl thread stress.
-- [ ] Scalar widths/alignment for `time_t`/`off_t`/`ino_t`/`pid_t`/pointers, versioned wire structs (M6.3).
-- [x] M6.2 `dunit-musl` fork repo created (`github.com/DunitOS/dunit-musl`, musl v1.2.6+67 `b1efda5b`, MIT) and wired here as the `toolchains/dunit-musl` submodule, with provenance (`UPSTREAM.md`), porting plan (`PORTING.md`) and CI.
-- [x] M6.4 `x86_64-dunit` sysroot — `toolchains/dunit-musl/tools/dunit/build-libc.sh` produces a static `libc.a` + crt objects + headers; `make userspace` builds it once and links the `MUSL_CTESTS` against it. (A packaged `dunit-cc` wrapper is still a convenience TODO.)
-- [x] M6.2 libc port — **`build:`/`syscall:`/`crt`/`fs:`(write+files)/`vm:` landed and verified on the kernel.** Static musl programs run over the Dunit ABI: `musl_hello` (crt1 + `__init_tls` + native `SetThreadPointer` + `write`), `musl_stdio` (`printf` via `__stdio_write` → native `Write`), `musl_malloc` (mallocng over native `Mmap`), `musl_file` (`open`/read/write/close via a native-`Open` flag/arg adapter, incl. a write+read roundtrip in `/persist`). Unmapped Linux syscalls return documented `-ENOSYS` sentinels (M6.1). See `userspace/ctests/musl_*.c` and `tools/m6_musl_*_markers.json`.
-- [x] M6.2 libc port — **`thread:` works.** The native `__clone` + per-thread `SetThreadPointer` trampoline, a futex dispatcher onto `FutexWait`/`FutexWake`, `exit`→`ThreadExit` vs `exit_group`→`Exit`, and a new kernel **`SetTidAddress`** (75) clear-child-tid primitive (zeroes the registered word + `futex_wake` on thread exit) that releases musl's thread-list lock. `musl_thread` runs two pthreads with a contended mutex and joins them (counter=10000). **The static C acceptance suite `hello`/`stdio`/`malloc`/`file`/`thread` is complete.**
-- [x] M6.2 libc port — **`fs:` surface complete.** Beyond open/read/write/close: buffered stdio read+write (`__stdio_read`/`__stdio_write`/`readv`/`writev` over native `Read`/`Write`), `stat` (native `Stat` → `struct stat`), directory iteration (`opendir`/`readdir`), `getcwd`/`chdir`, file management (`mkdir`/`rmdir`/`unlink`/`rename`/`fsync`), and clocks/sleep (`clock_gettime`/`nanosleep` over native `ClockGetTime`/`Sleep`, monotonic since boot). A `dunit-cc` wrapper + `x86_64-dunit-cc`/`-ar`/`-strip` + an SDK manifest package the sysroot. Verified by the `musl_*` suite (11 programs).
-- [ ] M6.2 libc port — `signal:`/`network:`/`ldso:` stay documented `ENOSYS`; packaging (`dunit-cc` wrapper, upstream diff/version table). Static `__thread`/`_Thread_local` uses the published program-header auxv.
+ELF64/LE/x86_64 ET_EXEC static executables are supported. PT_LOAD permissions
+obey W^X; PT_TLS initializes x86_64 Variant II static TLS independently per TID.
+PT_INTERP, ET_DYN/PIE, dynamic loader/DTV and PT_GNU_RELRO are unsupported.
+Run `tools/check_userspace_elf.py` before stripping: it validates bounds, entry,
+static segments, non-executable stack and named undefined symbols. Stripped
+files cannot prove symbol information that has been removed; OSABI metadata
+alone does not prove native syscall usage.
 
-See `DUNIT_OS_TECHNICAL_ROADMAP.md` §M6 for the full plan.
+## Memory and records
 
-### ThreadExit v1 detached reclamation (M6, approved 2026-10-24)
+VM page size is 4096. Anonymous private mappings are zero-filled. Protection
+supports NONE, R, RW and RX; W+X is rejected. MAP_GUARD (bit 6) adds an unmapped
+page on each side. Full usable-range unmap releases guards; partial guarded
+unmap is rejected. A fixed guarded address names the reservation start, with
+usable return address one page later. Shared VM uses rights-bearing handles
+and independent mapping lifetimes: unmap and handle close are separate releases.
 
-`ThreadExit=31` decodes arg0 high32 exactly `1` as opt-in auto-reap;
-low32 is the signed exit code. Legacy i32 calls retain joinable status.
-The opt-in is valid only for an additional thread (main returns EINVAL).
-All dead threads release their kernel stack and kernel-allocated TLS after HAL
-returns; joinable status survives until ThreadJoin=30. Auto-reap deletes that
-status as well, so it must not have a joiner. No syscall number was added.
+Public records are repr(C), little-endian x86_64. DirEntry carries a 64-byte name,
+name length and type; FileStat carries type/size. File types are 1 file, 2 directory,
+3 device. WaitStatus is two i32 words: kind/code. Kinds: 0 exit, 1 page fault,
+2 general protection, 3 invalid opcode, 4 divide by zero, 5 unknown fault,
+-1 empty and -2 prepared child. Generated headers and typed bindings define
+complete current layouts and bounds; no copied historical syscall table is kept.
+A path is bounded to 256 bytes, a native user-copy to 64 KiB, readdir to 64 entries
+per call and IPC messages to 256 bytes. Safe wrappers use smaller transfer chunks.
 
-## Native wait-set (M7 foundation)
+## Threads
 
-`WaitSetWait` (89) observes own-inbox IPC, descriptor readiness, monotonic
-timers and child termination in one blocking call. It is non-consuming and
-level-triggered. `abi/wait-set` defines the shared Rust record layout;
-`libdunit::wait_set::wait` is the safe slice-based binding. The exact contract,
-limits and remaining M7 work are in [SDK foundation](../docs/sdk/m7-start.md).
+Additional threads share process address space/cwd/fds and own GPR, kernel stack,
+FXSAVE and static TLS. ThreadCreate validates executable entry and writable,
+16-byte-aligned user stack top; the return slot is at stack_top-8. Entry must
+terminate with ThreadExit. A thread fault is isolated from the remaining process.
+Caller-owned user stack stays live until the thread completes and is joined.
+
+ThreadExit=31 decodes arg0 high32 exactly 1 as opt-in auto-reap; low32 is the
+i32 exit code. Legacy signed i32 encodings (high32 0 or 0xffffffff) retain joinable
+status. Main-thread opt-in returns EINVAL. Heavy stack/TLS owners retire after
+HAL escapes the exiting stack; ThreadJoin=30 consumes joinable status. Auto-reap
+also discards status and must not have a joiner. This encoding was approved
+24 October 2026 and adds no syscall number.
+
+## Descriptors and spawn
+
+Reserved descriptors are 0 stdin, 1 stdout, 2 stderr; ordinary fd allocation
+starts at 3 with a limit of 1024. Open flags: READ=1, WRITE=2, CREATE=4, TRUNC=8,
+APPEND=16, EXCL=32, NONBLOCK=64, CLOEXEC=128. Access/unsupported bits are checked.
+
+## Fcntl(fd, command, argument)
+
+| Command | Meaning |
+|---|---|
+| 0 | Get per-descriptor flags, bit 0 CLOEXEC |
+| 1 | Set per-descriptor flags; reject bits other than bit 0 |
+| 2 | Get shared status: READ=1, WRITE=2, APPEND=16, NONBLOCK=64 |
+| 3 | Set APPEND/NONBLOCK; preserve access mode |
+| 4 | Duplicate to lowest unused descriptor >= argument, clear CLOEXEC |
+| 5 | Same, set CLOEXEC |
+| 6 | Atomic pipe creation: fd carries NONBLOCK=64/CLOEXEC=128, argument points to two u32 descriptors |
+
+Descriptor duplication shares open-description status/offset/terminal endpoint,
+while CLOEXEC belongs to each descriptor. POSIX encodings are translated in
+musl. Locks/ownership/signals are unsupported and return an explicit error.
+
+## Poll(records, count, absolute_deadline_ns)
+
+At most 1024 records, each 8 bytes: fd:i32, requested:u16, returned:u16,
+little-endian. Requested READ=1/WRITE=2; returned additionally HUP=4, ERROR=8,
+INVALID=16. A negative fd is ignored. Invalid descriptors produce INVALID;
+other requested bits are rejected. Return value counts records with events.
+Deadline 0 snapshots; u64::MAX waits indefinitely; otherwise CLOCK_MONOTONIC
+nanoseconds. Readiness scan and wait-queue registration are atomic with respect
+to interrupts; wake restarts the syscall with the original absolute deadline.
+No per-frame userspace sleep loop replaces a kernel wait.
+
+Regular files are immediately ready. Pipes and PTY input/output inspect actual
+queue capacity and peer lifetime. Terminal stdio carries a shared endpoint in
+its open description, so dup/inheritance preserve it independently of PID.
+Master close gives EOF after buffered input and EPIPE for subsequent output;
+slave EOF is observed after the last endpoint reference and buffered output.
+
+The mixed native wait-set is described below; the terminal subset follows.
+
+## Versioned SpawnArgs
+
+Old shape is unchanged: path pointer/length, string block pointer/length, argc.
+The old bounded length has its top bit clear. The sixth register is ignored
+entirely in that case, including arbitrary nonzero values left by old wrappers.
+An extended call sets length bit 63 and gives the string-section boundary in
+argument six. The remaining block contains tagged action records.
+
+Each header is six little-endian u32 words: tag, target fd, source fd, native
+open flags, mode, path byte length; path bytes follow without NUL. Tags:
+1 close, 2 dup2, 3 open, 4 chdir. Unused words must be zero. Limits: 64 actions,
+16 argv + 16 env, 128 bytes per string, bounded copied block/path. Fchdir and
+unsupported spawn attributes explicitly fail. Open mode is carried but POSIX
+ownership/permission enforcement remains an unimplemented profile capability.
+
+Actions run in order against a private child fd table/cwd. CLOEXEC cleanup
+runs after actions, then ELF/argv/env/TLS are prepared while unscheduled. Only
+a successful transaction publishes runnable state. Errors reap the prepared
+child and its fd references. Filesystem effects of completed open actions are
+not rolled back (matching spawn file-action side effects); parent descriptors
+and cwd never change. Native privileged handles are not inherited through this
+POSIX fd table. Unsupported attributes are rejected before child creation.
+
+PTY argv uses the same explicit bit-63 opt-in in its existing block-length
+argument; argument six is argv count only for opted-in calls. Old env-only
+calls ignore that register. Search is userspace policy; native calls accept
+literal paths rather than searching command names.
+
+## File-backed private mapping
+
+The existing Mmap fd/offset slots provide eager private snapshots, preserving
+the shared file offset. Offset/alignment, lengths, read authority and W^X are
+validated. The final partial file page is zero-filled; ranges beyond its page
+are rejected. No shared mappings, demand paging, COW or SIGBUS are claimed.
+
+## Terminal ioctl
+
+`Ioctl(fd, operation, record, record_len)` uses Dunit operation numbers and bounded
+little-endian records, not Linux requests/termios structures. Operations:
+
+| op | record | Meaning |
+|---|---|---|
+| 0 | null, length 0 | Probe an attached PTY stdio descriptor |
+| 1 | 8 bytes | Get rows, columns, pixel width, pixel height (four u16) |
+| 2 | 8 bytes | Set those dimensions on the attached endpoint |
+| 3 | 4 bytes | Get pending input byte count (u32) |
+
+Unset dimensions are zero, meaning unknown; the kernel does not invent terminal
+geometry. State is shared by the PTY endpoint's stdin/stdout/stderr and inherited/duplicated descriptors, independent of process identity. The process must
+possess a valid descriptor referring to that terminal. Unknown descriptors return
+EBADF, ordinary files/pipes return ENOTTY, bad record lengths return EINVAL,
+invalid user memory returns EFAULT, unsupported terminal operations return
+EOPNOTSUPP. Records are copied and validated before mutation.
+
+musl translates TIOCGWINSZ/TIOCSWINSZ/FIONREAD and uses the public ioctl adapter
+for isatty. Canonical line editing, terminal echo, baud rates, process groups,
+TCGETS/TCSETS, drain/flush and signal generation are **not implemented**; requests
+are rejected explicitly. Returning a fabricated termios record would claim a
+line discipline the PTY does not have. Geometry change signals are likewise not
+claimed. GUI master geometry publication awaits a descriptor mechanism for the
+master endpoint; this subset does not overload an unrelated file descriptor
+with a PTY table identifier.
+
+## Native wait-set
+
+WaitSetWait=89 observes own-inbox IPC, fd readiness, monotonic timers and child
+termination in a bounded blocking call. It is non-consuming and level-triggered,
+with call-scoped registration. `abi/wait-set` defines records and
+`libdunit::wait_set::wait` supplies the safe binding. See
+[SDK foundation](../docs/sdk/native-api.md#wait-set) for limits and semantics.
 
 ## Queued pointer input (M7, approved 31 October 2026)
 
@@ -141,7 +215,7 @@ consume an event. `abi/pointer-input` shares the codec between kernel and
 `libdunit::pointer::read`. Button transitions survive render stalls; pure motion
 may coalesce. Overflow and ownership handover explicitly reset the consumer's
 press/capture baseline. `GetMouseState` (60), including its wheel accumulator,
-remains compatible. See the [complete contract](../docs/sdk/pointer-events-proposal.md).
+remains compatible. See the [complete contract](../docs/sdk/input.md#queued-pointer-input).
 
 The compatible modifier extension approved 2 November 2026 keeps length 32 as
 exact v1. Length 40 returns those same bytes plus a u32 Shift/Ctrl/Alt/Super mask
@@ -149,11 +223,11 @@ at 32..36 (bits 0..3), captured at enqueue, and zero reserved bytes at 36..40.
 Length 56 adds v3: the v2 prefix, signed i32 device dx/dy at offsets 40/44,
 a u32 relative-source flag at 48, and four zero reserved bytes at 52. Absolute
 sources have zero deltas. `read_with_motion` requests v3 and preserves movement
-beyond display bounds. See [pointer modes](../docs/sdk/pointer-modes.md).
+beyond display bounds. See [pointer modes](../docs/sdk/input.md#pointer-modes).
 Other lengths return EINVAL. `libdunit::pointer::read_with_modifiers` uses v2;
 the existing `read` still uses v1. Pure motion coalesces only with equal masks.
 All formats retain an event on failed user copy. No syscall number or right
-changes. See the [approved extension](../docs/sdk/pointer-modifier-snapshot-proposal.md).
+changes. See the [approved extension](../docs/sdk/input.md#pointer-modifier-snapshots).
 
 
 ## File capabilities and attached IPC (M7.7)
@@ -180,4 +254,14 @@ and attenuates an owned handle, attests its identity to the receiver, and rolls
 back on a full queue. Legacy receive refuses an attached head without consuming
 it; invalid output buffers and insufficient capacity also preserve the message.
 The kernel has no clipboard owner, MIME negotiation or desktop application list.
-See [M7.7 lifetime and scope](../docs/sdk/m7-7-transfers.md).
+See [M7.7 lifetime and scope](../docs/sdk/desktop-transfers.md#clipboard-and-dragdrop).
+
+## Conformance and limits
+
+The freestanding `/app/c_hello` uses generated headers and its own crt0 to read
+stack argv/env/auxv, exercise raw write/exit and validate negative EBADF.
+`tools/m6_c_abi_markers.json` checks native execution through `qemu_test.py`.
+Musl/thread/fd suites validate higher adapters separately. Current support does
+not imply signals, cancellation, fork/image-exec, secure entropy, dynamic linking,
+full termios, POSIX ownership/accounts or a frozen previous-release fixture suite.
+See [current state](../docs/architecture/current-state.md#open-gates).

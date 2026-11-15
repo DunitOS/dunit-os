@@ -1,11 +1,5 @@
-# AGENTS.md
+# Agent instructions
 
-Этот файл намеренно короткий. Единственный авторитетный контракт для любого
-агента в этом репозитории — **[CLAUDE.md](./CLAUDE.md)**.
-
-Прочитай CLAUDE.md целиком перед любыми изменениями. Он покрывает весь проект:
-ядро, HAL, ABI, libdunit, musl-порт, GUI/desktop, тесты (`tools/qemu_test.py` и
-маркерные файлы), git-процесс, опасные действия и правила качества.
-
-Отдельных правил здесь нет специально — чтобы инструкции не расходились между
-двумя документами. Если тебе показали только AGENTS.md, открой CLAUDE.md.
+Read [CLAUDE.md](CLAUDE.md) in full before changing this repository. It is the
+single authoritative contributor contract for kernel, HAL, ABI, userspace,
+musl/TinyCC, GUI, tests and Git. This file adds no separate rules.

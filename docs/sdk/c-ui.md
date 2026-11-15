@@ -6,7 +6,7 @@ The static library is the existing Rust `ComponentWindow`, component model,
 DSS theme, renderer and window transport behind a synchronous C adapter.
 It implements no second layout engine, widget painter or GUI handshake.
 
-This subset describes Text, Input, Textarea, Button, Column, Row, Stack, Grid, Checkbox, Switch, ToggleButton
+The core nodes are Text, Input, Textarea, Button, Column, Row, Stack, Grid, Checkbox, Switch, ToggleButton
 and grouped Radio nodes. It opens one native themed window and dispatches
 activation messages back to the C-owned model.
 Slider, VerticalSlider, Spinbox, Progress and Busy are available through the
@@ -224,7 +224,7 @@ proposals and external reset.
 
 ## Menus, choices and transient overlays
 
-Popup descriptions extend the existing node array and use the same four run
+Popup descriptions extend the existing node array and use the shared run
 entry points, styles and ordinary `callbacks.update` messages. No new public
 record, callback layout or exported function is required.
 
@@ -291,154 +291,11 @@ Rust code, LLVM bitcode and unneeded symbols are excluded from the shipped C
 archive. The linker script coalesces sections; it fixes no code addresses.
 Real undefined libc references remain linkable. C linkers need no LLVM plugin.
 
-The final M7.10 machine-code archive is 2,922,604 bytes. The measured full initrd
-is 124,015,854 bytes including the retained development compatibility object;
+The final accepted machine-code archive is 2,922,604 bytes. The measured full initrd
+is 124,015,854 bytes including the generated development compatibility object;
 it fits the existing 128 MiB installer ESP without a partition/format change.
 The original unpruned archive was 8,094,406 bytes; LLVM/LTO intermediate archives
 are not shipped. Minimal images omit the library with the rest of the toolchain.
-
-## Historical validation by increment
-
-The following results record the individual implementation checkpoints. Current
-complete acceptance and its economical combined runner appear at the end.
-
-```sh
-python3 tools/gen_abi.py --check
-cargo test --manifest-path runtime/dunit-c/Cargo.toml --lib
-python3 tools/test_c_ui_archive.py  # needs the normal build tools, including lld
-python3 tools/test_c_ui.py --accel tcg
-python3 tools/test_c_ui_checkables.py --accel tcg
-python3 tools/test_c_ui_radio.py --accel tcg
-python3 tools/test_c_ui_disabled.py --accel tcg
-python3 tools/test_c_ui_style.py --accel tcg
-python3 tools/test_c_ui_text.py --accel tcg
-python3 tools/test_c_ui_numbers.py --accel tcg
-python3 tools/test_c_ui_popups.py --accel tcg
-python3 tools/test_c_ui_compat_host.py
-python3 tools/test_c_ui_compat.py --accel tcg
-```
-
-The wrapper generates direct-Rust reference canvases, performs the normal kernel
-quick build, and runs OS execution only through `qemu_test.py`. TCC compiles and
-links `/assets/tcc/gui.c` inside Dunit against the installed archive. The actual
-program rejects bad versions/trees, detects nested/repeated runs, opens its window,
-activates Increment twice with keyboard input and exits through Quit with code 0.
-Both full 400×180 client captures (Count 0 and Count 2 with focus) exactly match
-the ordinary Rust SDK. C progress output explicitly flushes stdio so harness
-waits observe callback progress while the window's synchronous loop is running.
-
-Eight Rust adapter checks, seven existing button regressions, the actual
-archive-link test, five header/sysroot checks and nine existing image-profile
-checks passed (30 total). Native GUI: ten required
-and six forbidden markers; both framebuffer comparisons passed. The prior C
-file/errno/spawn/wait contract is also rerun on the same final image.
-
-The compatibility runner freezes the original v1 source and UI header from
-`9df23f6` under `tools/fixtures/c_ui_v1/`, with SHA-256 pins. Host TCC compiles
-that client before a scoped clean and native Rust runtime rebuild. The retained
-x86_64 ELF object enters the initrd unchanged; on-device TCC only links it
-against the rebuilt archive. All ten required/six forbidden markers and both
-exact Rust framebuffer comparisons remain in force. The runner also verifies
-the object and library hashes in the actual initrd and writes its receipt to
-`build/c-ui-compat-result.json`. No compiled fixture is committed.
-
-On 7 November 2026, this proof passed under QEMU TCG, together with six fixture
-integrity/contract checks and eight Rust adapter tests. This covers the frozen
-four-kind v1 client with the current compiler and architecture; it does not
-establish compatibility for every historical compiler or the complete C SDK.
-The remaining widget/style/transfer matrix keeps M7.10 open.
-
-The checkables scenario compiles `/assets/tcc/checkables.c` inside Dunit, toggles
-each control on and off with Tab/Space/Enter and closes via Quit. On 7 November
-2026, QEMU TCG passed eleven required/six forbidden markers and exact 400×240
-Rust-reference comparisons for initial, all-checked and all-unchecked states.
-The original frozen-client compatibility scenario also passed against this
-extended library, including both original framebuffer comparisons. Host checks:
-eleven adapter tests, fifteen existing button/checkable regressions, six frozen
-fixture checks, five header/sysroot checks, nine image-profile checks and one
-archive-link test (47 total). Adapter tests cover pointer release, declined
-C-owned changes, full-width message IDs, accessibility and malformed leaves.
-
-The radio scenario compiles `/assets/tcc/radio.c` inside Dunit and verifies
-rejection of a doubly checked group before opening the window. It then exercises
-two independent groups (Column and Row), six arrow selections with wraparound,
-one tab stop per group, suppressed reactivation and a normal Quit exit. Three
-400×240 screenshots match direct Rust SDK pixels exactly. A message using
-`UINT64_MAX` crosses the native C callback unchanged. This adds four node kinds
-and 744 bytes to the shipped archive (2,059,840 bytes); the ESP size is unchanged.
-The radio gate keeps twelve required/six forbidden markers. Host checks total
-52: sixteen adapter, fifteen button/checkable, six fixture, five header/sysroot,
-nine image-profile and one archive-link test. The frozen v1 object also passes
-its separate native gate with both original pixel comparisons against this
-library. Other widget/style/transfer bindings remain outside this increment.
-
-The disabled-controls scenario compiles `/assets/tcc/disabled.c` inside Dunit,
-tabs past disabled controls, enables them, activates a button and checkbox, then
-disables them again while retaining checked state. Its three 400×240 captures
-match direct Rust SDK pixels exactly (nine required/six forbidden markers).
-Host tests also exercise all nine activation kinds, disabled radio tab stops,
-rejection of invalid flag combinations and cancellation when a press is disabled
-before release. Checks total 56: twenty adapter, fifteen button/checkable, six
-fixture, five header/sysroot, nine image-profile and one archive-link test.
-The shipped archive is 2,060,368 bytes (+528); the installer ESP is unchanged.
-
-The layout/style block passes 64 host/Rust checks: 28 adapter, 15 existing
-button/checkable, six frozen fixture, five header/sysroot, nine image-profile
-and one archive-link test (both public entry points are retained and linked).
-The native layout lab passes ten required/six forbidden markers and three
-exact 560×360 Rust-reference comparisons. Hit rectangles independently confirm
-that the Grid reflows from two rows to one. The lab also rejects invalid style
-configuration/classes before opening and proves that the styled and original
-entry points share the one-session guard. The frozen older C object passes
-its own QEMU TCG run after a forced rebuild, including both original pixel
-comparisons. Archive: 2,062,380 bytes (+2,012), still in the original ESP.
-Other advanced widget bindings and transfer/file capabilities
-remain later M7.10 work; the style block completes application DSS/classes and core
-Column/Row/Stack/Grid layout surface, not the full milestone.
-
-The text-input block passes 117 host/Rust checks: 37 adapter, 59 existing editor/
-input/soft-wrap/button/checkable, six fixture, five header/sysroot, nine image
-profile and one archive-link test (all three exports). The on-device TCC form
-passes twelve required/six forbidden markers and three exact 560×460 reference
-canvases: initial, edited and reset. Keyboard input exercises the eight-scalar
-name limit, submit, password editing, multiline LF, read-only suppression,
-disabled Tab skipping, model-declined edits and external reset. Test captures
-focus buttons to avoid relying on caret blink timing. Host checks additionally
-cover UTF-8 selection/history, password export, full `UINT64_MAX` field IDs,
-owned labels/placeholders, error/close returns and invalid configuration.
-The retained original v1 C object also passes after a forced runtime rebuild,
-including its two exact pixel comparisons. The archive is 2,096,708 bytes
-(+34,328); the existing installer ESP still fits. Other advanced widgets and
-explicit C transfer/file-capability bindings keep M7.10 open.
-
-The numeric-controls block passes 98 host/Rust checks: 46 adapter, 31 existing
-slider/vertical-slider/spinbox/progress, six fixture, five header/sysroot, nine
-image-profile and one archive-link test (all four public exports). Host tests
-include full `i64::MIN..=i64::MAX` and `UINT64_MAX` IDs, validation, read-only,
-passive Tab behavior, owned labels, error/close and declined candidates. The
-native mixed application passes thirteen required/six forbidden markers and
-three exact 560×520 reference canvases. It exercises six numeric changes,
-an explicit page step, signed draft commit, text coexistence, Busy state,
-model rejection, disabled/read-only suppression and external reset. Native
-captures disable motion and focus a button; timed Busy animation is covered
-by the existing SDK regression suite. The frozen original C object passes
-its separate forced-rebuild run with both original framebuffer comparisons.
-Archive: 2,123,556 bytes (+26,848), still in the existing installer ESP.
-Collections/workspace widgets and explicit C transfer/capability
-bindings remain outside this block; M7.10 is still open.
-
-The popup block passes 90 host/Rust checks: 54 adapter, 15 existing SDK menu/
-overlay/tooltip, six fixture, five header/sysroot, nine image-profile and one
-archive-link test. The native example passes twelve required/six forbidden
-markers, four exact 560×420 canvases and the exact 249×26 tooltip paint region.
-It exercises F10/Alt mnemonics, disabled/separator skipping, a nested action
-using `UINT64_MAX`, controlled Select acceptance/decline, Shift+F10 context,
-real PS/2 hover deadlines and reset. Host checks include malformed parents,
-duplicate bindings/keys, multiple selected options, invalid labels, menu depth,
-owned strings, focus restoration and complete tooltip-frame equality. The
-retained original C object passes its own forced-rebuild QEMU run with both
-original complete pixel comparisons. The archive is 2,142,076 bytes (+18,520);
-the installer ESP and every existing v1 record/export remain unchanged.
 
 ## Collections and workspace
 
@@ -581,8 +438,7 @@ no partial path is copied. Other errors are negative. The buffer is bounded to
 the process window session, just like the component entries. The selected path
 is a path, not a capability grant; open it explicitly with the desired rights.
 
-
-## M7.10 acceptance and ABI maintenance
+## ABI maintenance and verification
 
 The complete published v1 declaration set is frozen in
 `tools/fixtures/c_ui_abi_v1.json`. `tools/test_c_ui_abi.py` rejects changes to its
@@ -630,7 +486,7 @@ is 124,015,854 bytes including the development compatibility object. The 128 MiB
 installer ESP is unchanged. Screenshots and receipts remain generated build
 artifacts. The core M7.10 C SDK acceptance is complete; the Rust session's existing
 single-window/bootstrap limit and unsupported kernel/libc facilities are not
-expanded by this bridge. This does not complete M7.11 application migration.
+expanded by this bridge. The bridge does not expand unsupported native kernel/libc facilities.
 
 ## Game pointer modes
 
@@ -638,4 +494,31 @@ expanded by this bridge. This does not complete M7.11 application migration.
 the current callback's window. The existing native input callback receives
 `DUNIT_GUI_IN_POINTER_MODE` acknowledgements/revocation and
 `DUNIT_GUI_IN_RELATIVE` signed deltas. A zero return means queued, not granted.
-See the [lifetime, compatibility and tested C example](pointer-modes.md).
+See the [lifetime, compatibility and tested C example](input.md#pointer-modes).
+
+## Native C header
+
+`#include <dunit.h>` imports the existing native musl file/process interfaces and
+Dunit's generated syscall, errno, rights and transfer constants. The [C UI bridge](c-ui.md) supplies versioned callbacks for the shared Rust
+component, control and transfer runtime.
+
+`tools/gen_abi.py` generates the umbrella header; its included Dunit headers
+continue to come from the existing ABI manifests. No syscall numbers or error,
+rights or transfer values are copied into the umbrella. `--check` checks it too.
+No kernel ABI, permissions or GUI wire format changes are required.
+
+The libc APIs keep their existing semantics: for example, `open`/`read` report
+`-1` and set `errno`, while `posix_spawn` returns an error number. `SYS_*` values
+are native Dunit syscall numbers. Their visibility is not a promise of Linux
+compatibility or of unsupported POSIX operations; the existing native profile
+and documented refusals still apply.
+
+`tools/ensure_musl_sysroot.py` installs the common headers under the host sysroot's
+`include/` after both a libc rebuild and a cache hit. Changed headers are copied
+without rebuilding unchanged libc or rewriting unchanged headers. The existing
+image packer publishes them under `/system/include/`; on-device TCC already
+searches that sysroot. This preserves the established sysroot layout.
+
+Run `tools/test_c_sdk_headers.py` and `tools/c_sdk_core_markers.json` to verify
+generated includes, sysroot cache/rebuild installs and on-device file/errno/child
+status behavior. `<dunit.h>` is part of the generated ABI check.

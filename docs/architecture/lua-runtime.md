@@ -1,136 +1,92 @@
-# Lua runtime: compatibility and system integration
+# Lua runtime
 
-Status: static compilation and Dunit QEMU compatibility, runner regression and compositor integration passed. See `tools/lua_markers.json` and `tools/lua_desktop_markers.json`.
+Dunit ships official unmodified Lua 5.5.1 (24 July 2026) from
+[the upstream release](https://www.lua.org/ftp/lua-5.5.1.tar.gz), SHA-256
+`1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce`.
+Sources and the original MIT license remain in `third_party/lua/src`; provenance
+is in [UPSTREAM.md](../../third_party/lua/UPSTREAM.md). Version changes require
+fresh native compatibility tests. Lua 5.5's seeded three-argument lua_newstate
+API differs from Lua 5.4.
 
-See [system Lua](lua-system.md) for the full interpreter, bytecode compiler,
-TCC build and on-device source rebuild.
+## Programs and commands
 
-## Reference implementation
+`/system/bin/lua` is the ordinary interpreter with all upstream libraries;
+`/system/bin/luac` compiles bytecode. `/app/dwm_lua` is a separate restricted
+[desktop worker](desktop.md#lua-layout). All use cross-TCC and native Dunit musl,
+producing static native ELF, not host Lua or a Linux ABI replacement.
 
-Use the official, unmodified Lua **5.5.1** source release (2026-07-24), downloaded
-from <https://www.lua.org/ftp/lua-5.5.1.tar.gz>. SHA-256:
-
-```
-1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
-```
-
-The official unmodified source is vendored in `third_party/lua/src`, with
-provenance and pinned archive hash in `third_party/lua/UPSTREAM.md`, its upstream
-README alongside, and the MIT copyright/license block retained in `src/lua.h`.
-See the official [download page](https://www.lua.org/download.html) and
-[Lua 5.5 manual](https://www.lua.org/manual/5.5/manual.html).
-Updating the version requires rerunning the compatibility
-gate. The harness uses the Lua 5.5 `lua_newstate(allocator, userdata, seed)` API;
-it is intentionally not source-compatible with the two-argument Lua 5.4 API.
-
-## Scope and execution model
-
-`userspace/ctests/lua_spike.c` embeds the official VM and parser using the C API.
-It tests arithmetic (integer division and floating exponentiation), table
-construction/update, protected errors with `pcall`, instruction-hook exhaustion,
-allocator exhaustion, and complete allocator release after `lua_close`.
-Each probe has a fresh state and a 256 KiB budget for Lua-managed allocations,
-including allocator headers. The surrounding C process, native stack and musl
-allocator bookkeeping are outside that budget. An explicit seed makes this probe
-reproducible; production must supply an unpredictable seed for hash hardening.
-
-Base, math, string and table libraries are registered. Math random/randomseed are removed. `os`, `io`, `package`, `debug` and coroutine
-libraries are never registered; `load`, `loadfile`, `dofile`, and `collectgarbage`
-are removed. Source enters through `luaL_loadbufferx(..., "t")`, refusing binary
-chunks. The spike's scripts are fixed test data, not a shipped script loader.
-No Dunit syscall, filesystem, process, network, GUI, or capability API is exposed
-to Lua. No language imitation is used.
-
-The count hook raises an ordinary Lua error after approximately 20,000 VM
-instructions, checked every 1,000 instructions. **This is a compatibility probe,
-not a hostile-script isolation mechanism.** A script can catch hook errors with
-`pcall`; hooks also do not preempt long-running C functions or source compilation.
-Before accepting untrusted scripts, run the VM in a separate Dunit process with
-external time/memory enforcement and explicit host-call capabilities. Do not
-claim that this hook supplies an uncatchable CPU limit. Keep production host
-functions bounded and avoid permitting coroutine creation without installing
-equivalent hooks on every thread.
-
-## Static compilation
-
-The normal `make userspace` recipe builds the compatibility probe and DWM runner
-with Dunit cross-TCC (`-std=c11`) and the pinned native musl sysroot. The explicit
-`LUA_UNITS` list in Makefile is the source of truth. The full standalone runtime
-uses the additional standard-library units and upstream lua.c/luac.c.
-
-For the compatibility probe and restricted DWM runner, do not enable
-`LUA_USE_LINUX`, `LUA_USE_POSIX`, dlopen, readline, or the standalone `lua.c`
-frontend. Their explicit units exclude `liolib.c`, `loslib.c`, `loadlib.c`,
-`ldblib.c`, `lcorolib.c`, and `linit.c`. No host `-lm`/`-ldl` is needed: the Dunit
-musl archive contains its math functions. Auxiliary/base-library object code
-still references standard stdio helpers, even though the file-loading globals
-are removed; linking them does not expose them as Lua APIs.
-
-`Makefile` compiles `lua_spike` and `dwm_lua` through the pinned musl
-sysroot with its explicit `LUA_SOURCES` list and packages the resulting ELFs
-through the standard userspace/initrd path. `userspace/lua_runtime/limits.h`
-is shared by the compatibility probe and runner so allocator/hook behavior has
-one implementation. See [the runner contract](dwm-lua-runner.md) for the
-one-shot process, validated rectangles, animation policy, and CLI/environment
-invocation. The runner exposes fewer base functions than the acceptance probe;
-protected error handling remains tested in the latter.
-
-## Pinned musl compatibility assessment
-
-The pinned `toolchains/dunit-musl` supplies `malloc/realloc/free`, memcpy/strings,
-strtod/numeric formatting, locale helpers, ISO C math, and x86-64
-`setjmp/longjmp`. These are the relevant Lua dependencies. Lua errors exercise
-the latter directly. This single-threaded generic-C profile does not require
-signals, fork/exec, networking, dynamic loading, wall-clock time, pthreads, poll,
-or directory iteration. `lua_newstate` takes an explicit seed, avoiding
-`luaL_newstate`'s default time-based seed generation on Dunit's uptime-only
-clock. Actual static linking and execution remain the authoritative proof.
-
-Possible blockers to check are unresolved libc symbols, compiler assumptions
-in floating math/locale, musl allocator behavior under the configured VM budget,
-and correct native exception unwinding through setjmp/longjmp. Do not replace
-failures with fake successful libc stubs.
-
-## QEMU gate (passed)
-
-The build coordinator must package the resulting ELF through the normal initrd
-path and run it via `tools/qemu_test.py`, never a separate QEMU launcher. The executable manifest is `tools/lua_markers.json`; it requires all of:
-
-```
-[TERM-007] Starting main loop
-[LUA] language OK
-[LUA] instruction-budget OK
-[LUA] allocation-budget OK
-[LUA] compatibility OK
+```text
+exec lua -v
+exec lua -i
+exec lua /path/program.lua
+exec luac -o /tmp/program.luac /path/program.lua
+exec lua /tmp/program.luac
+exec tcc @/system/src/lua/build.rsp
+exec /tmp/lua -v
 ```
 
-Forbid `[PANIC]` and `[LUA] FAIL`; require normal process exit status zero.
-The compatibility and runner gates passed in Dunit QEMU.
-This gate supports choosing the real upstream Lua runtime for integration; it
-does not establish a production sandbox, application API, editor, file format,
-or security policy.
+Use `-i` to select the REPL explicitly; `os.exit(0)` leaves it. Native libc
+recognizes attached PTY descriptors through its ioctl subset and blocking stdio
+waits for readiness. No full termios line discipline is implied.
 
-The same manifest runs an explicit `dwm_lua` CLI request and
-`userspace/ctests/dwm_lua_test.c`. The C regression parent launches the actual runner through native PTY
-create/spawn/read/close calls from the generated ABI, compares the complete
-successful policy output, and checks WIFEXITED/WEXITSTATUS for each request.
-Pinned musl has no usable pipe/file-action adaptation, so the test does not
-assume that newer fork features exist. Child polling is bounded; failure or
-timeout kills and boundedly reaps the child before closing the PTY. Success coverage is
-columns, monocle, zero windows, and environment invocation. Negative coverage
-is invalid geometry, missing rectangles, instruction exhaustion, allocator
-exhaustion, syntax failure, and invalid arguments. Every failure must have the expected nonzero exit status, an actual diagnostic,
-and no policy header/rectangle in the captured merged stdout/stderr. The test
-does not claim that a merged PTY can distinguish the two output streams. This avoids global serial markers
-mistaking one child's failure status for all failed cases.
+## Build and configuration
 
-Lua fixtures live under `assets/dwm/scripts/tests/`; the existing recursive
-asset packer ships them as `/assets/dwm/scripts/tests/`. They are inert scripts
-and are never automatically evaluated by the compositor. Their explicit use is
-limited to the regression parent. All QEMU execution must still go through
-`tools/qemu_test.py --build --markers-file tools/lua_markers.json` with adequate
-boot/command timeouts. A passing manifest is required before reporting the Lua
-runtime integration as tested.
+Makefile LUA_UNITS/LUA_FULL_UNITS own the source lists for host cross compilation
+and on-device response files. `config/lua.h` owns installation defaults.
+`tools/pack_initrd.py` installs upstream sources/headers and build.rsp under
+`/system/src/lua`; the response file builds `/tmp/lua` with real on-device TCC.
+Default source modules live in `/system/share/lua/5.5/` and the current directory.
+Upstream LUA_PATH_5_5/LUA_PATH, LUA_CPATH_5_5/LUA_CPATH and init variables keep
+standard behavior; package.path remains mutable. Desktop script paths are TOML
+policy and are not compiled into the interpreter.
 
-The runner reads source in at most 4096-byte requests, with a final extra-byte
-check after 64 KiB; no read exceeds the kernel MAX_USER_COPY limit.
+Full Lua includes io/os/package/debug/coroutine/utf8. Dynamic C modules,
+unsupported libc calls and unavailable OS facilities return documented errors.
+Ordinary file modules, file I/O and bytecode are supported. Do not interpret an
+upstream library table as proof of popen/dlopen/signals/networking.
+
+Native musl `dunit_io.h` bounds transfers and handles short I/O and EAGAIN waits;
+remove uses native path adapters. These prevent truncated TCC output and broken
+fgets. Current fd flags, pipes and spawn actions are documented in the
+[native ABI](../../abi/README.md#descriptors-and-spawn). No host math/dl library
+is substituted; musl supplies math, locale, allocator and setjmp/longjmp.
+
+## Compatibility probe and isolation
+
+`userspace/ctests/lua_spike.c` creates a fresh state per probe with a 256 KiB
+Lua-managed allocation quota, including its allocation headers. C process,
+stack and musl bookkeeping lie outside the quota. It tests arithmetic/tables,
+protected errors, instruction exhaustion, allocator exhaustion and full release
+at lua_close. Its deterministic seed is test data; secure production entropy
+is still absent.
+
+The probe registers base/math/string/table; random/randomseed and file-loading,
+load and collectgarbage globals are removed. It loads source-only buffers and
+exposes no Dunit filesystem/process/GUI/capability host API. The restricted worker
+uses separate production limits and exposes fewer functions than this probe.
+
+A count hook checks every 1000 instructions and raises after about 20000 in the
+probe. Lua pcall can catch ordinary hook errors; compilation and long C calls
+are not preempted. Hooks/heap quotas alone are not hostile-script isolation.
+Desktop workers run in separate processes with external monotonic deadlines,
+bounded host functions and validated output. Never move synchronous Lua execution
+into the compositor or assume a Lua allocator quota limits all process memory.
+
+## Verification
+
+`tools/lua_markers.json` exercises the language probe and actual PTY-launched
+worker: columns, monocle, no windows, environment invocation, bad geometry,
+missing rectangles, instruction/memory exhaustion, syntax and argument errors.
+The parent compares complete output and each child's exit; failures emit a
+nonzero status/diagnostic and no partial policy. A timeout kills and reaps the
+worker before PTY close. A merged PTY cannot distinguish stdout from stderr.
+Inert fixtures live in `/assets/dwm/scripts/tests/` and are explicitly selected.
+The runner reads chunks no larger than 4096 bytes with a final overflow check
+at the 64 KiB source bound.
+
+`tools/lua_system_markers.json` checks standard libraries, coroutine/UTF-8,
+string packing, bytecode, require, file roundtrips, REPL and a complete TCC rebuild
+inside Dunit followed by the same library regression. `musl_io` checks more than
+200 KiB across write/writev/fwrite/fread and failures. Desktop policy/fallback
+uses separate Lua desktop manifests. All native verification uses qemu_test.py;
+source inspection and historical passed runs are not a fresh execution.

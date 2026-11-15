@@ -1,399 +1,206 @@
-# Dunit OS — правила работы для AI-агентов
+# Dunit OS contributor contract
 
-Этот файл — обязательный контракт для любого агента в репозитории, включая субагентов.
-Он покрывает весь проект: ядро, HAL, ABI, libdunit, musl-порт, GUI/desktop, тесты и git.
+This contract applies to every agent and every part of the repository, including
+delegated work. The human sets architecture and system policy; agents implement,
+verify and repair authorized work independently. User instructions take
+precedence, including permission already granted in the session.
 
-Главный принцип:
+## Repositories and architecture
 
-> Человек определяет архитектуру и направление. Ты реализуешь, проверяешь, исправляешь и
-> доводишь результат до проверенного состояния — самостоятельно и на высоком качестве.
+[DunitOS/dunit-os](https://github.com/DunitOS/dunit-os) is the main OS repository
+(default branch `main`). [dunit-musl](https://github.com/DunitOS/dunit-musl) and
+[dunit-tcc](https://github.com/DunitOS/dunit-tcc) are complete upstream forks on
+`master`, pinned at `toolchains/dunit-musl` and `toolchains/dunit-tcc`.
+Each fork records its upstream base in `UPSTREAM.md`, plan in `PORTING.md`
+and maintained delta in `DELTA.md`.
 
----
+Green Tea Kernel is Rust `no_std`, built as `libkernel.a` and linked with the
+C/NASM HAL. Limine supplies BIOS/UEFI boot. HAL owns hardware entry, GDT/TSS/IDT,
+syscall entry/return, context-switch assembly and port I/O. The kernel provides
+VM, processes/threads, scheduling, VFS/storage, IPC, handles and device mechanisms.
+Independent Rust/C ELF applications use the generated native Dunit ABI through
+`libdunit`, the SDK or Dunit musl. POSIX provides source portability; the kernel
+does not implement the Linux ABI.
 
-## Организация и репозитории
+Desktop policy belongs in userspace. `gui_server` owns display/input master
+handles and hosts the compositor and DWM shell; retaining the shell there was
+the accepted M7.9 decision. `init` (PID 1) supervises manifest-defined services.
+Apps keep separate address spaces and crash isolation. The kernel must not know
+application names, IDs, paths, icons, themes, panels, docks or launcher entries.
+Apps/assets come from initrd/filesystem, never kernel `include_bytes!`.
 
-Проект живёт в GitHub-организации **[DunitOS](https://github.com/DunitOS)**. Три репозитория:
+The application scheduler is still UP: AP probes and parked CPUs do not imply
+simultaneous application execution. Root is MemFS; DunitFS mounts at `/persist`.
+Signals, process-image exec/fork, dynamic linking/TLS, networking, audio,
+complete USB and advanced power services have open gates. Check the
+[technical roadmap](../../DUNIT_OS_TECHNICAL_ROADMAP.md) and
+[performance roadmap](../../DUNIT_OS_PERFORMANCE_ROADMAP.md) before making claims.
 
-- **[DunitOS/dunit-os](https://github.com/DunitOS/dunit-os)** — основной монорепозиторий ОС: ядро Green Tea (Rust `no_std`), C/NASM HAL, Limine boot, Dunit ABI + `libdunit`, userspace-компоситор/DWM и приложения, DunitFS, тестовый харнесс `tools/qemu_test.py`. Ветка `main`.
-- **[DunitOS/dunit-musl](https://github.com/DunitOS/dunit-musl)** — форк musl, портируемый на нативный Dunit ABI (не Linux-совместимость): статическая `libc.a`, против которой собираются C-программы. Подключён как сабмодуль `toolchains/dunit-musl`, ветка `master`. См. §8.
-- **[DunitOS/dunit-tcc](https://github.com/DunitOS/dunit-tcc)** — форк TinyCC, портируемый на Dunit как **компилятор C внутри самой ОС** (капстоун M6). Подключён как сабмодуль `toolchains/dunit-tcc`, ветка `master`.
+## Autonomy and approval boundaries
 
-Оба форка ведутся по одной методике: настоящий git-форк полного upstream-дерева, пиннутая база в `UPSTREAM.md`, тематические коммиты, план в `PORTING.md`, таблица отличий `DELTA.md`, правило M6.1 (неподдержанное — документированный `ENOSYS`, без тихих заглушек). Процесс с сабмодулями — §8 и §10: сначала push в сам форк, затем отдельным коммитом бамп указателя в `dunit-os`; никогда не коммить указатель на непушнутый коммит форка.
+Complete authorized work without handing routine commands, debugging, test runs
+or repair to the user. Investigate failures, fix their causes and rerun relevant
+checks. Choose routine implementation details independently.
 
----
+Obtain a human decision before an unapproved change to these contracts:
 
-## 0. Абсолютные запреты: костыли, хардкод, мусор
+- New syscalls or changes to `abi/*.abi`, including numbers and rights.
+- Public `gui-v1` wire format or binary userspace compatibility.
+- Kernel/userspace responsibilities, privileges, capabilities or security policy.
+- Initrd or on-disk filesystem formats.
+- Dangerous actions listed below.
 
-Это самое жёсткое правило файла. Оно стоит выше скорости, удобства и желания «просто закрыть задачу».
+Explain concrete alternatives and a recommendation while continuing independent
+work. Existing user authorization covers its stated scope; a roadmap entry alone
+does not approve future contract changes.
 
-**НЕЛЬЗЯ:**
+## Implementation quality
 
-- писать костыли, временные обходы, «пока так сойдёт»;
-- хардкодить то, что по смыслу является политикой, конфигурацией или данными;
-- оставлять заглушки, которые изображают работающую функциональность;
-- оставлять TODO вместо необходимой реализации;
-- копировать одну и ту же логику в несколько мест;
-- оставлять мёртвый код, неиспользуемые модули, закомментированные блоки, отладочный вывод;
-- коммитить бэкапы, артефакты сборки, временные файлы (`*.bak`, `*.orig`, `*.log`, `old/`, образы, `build/`);
-- отключать, ослаблять или удалять тесты и маркеры ради прохождения проверки;
-- скрывать ошибки, глушить предупреждения, подгонять тест под реализацию;
-- делать «быстрый фикс» там, где есть правильное архитектурное решение.
+Solve problems in the layer that owns them. Do not add fake-success stubs,
+unnecessary workarounds, duplicate logic, required-work TODOs, dead code,
+commented-out blocks or permanent debug output. Unsupported functionality returns
+documented `ENOSYS`/`ENOTSUP`, never silently ignores parameters or claims success.
+An unavoidable temporary workaround must be minimal, record its blocking reason
+and removal condition in code, avoid a second source of truth and appear as
+technical debt in the final report.
 
-**ОБЯЗАТЕЛЬНО:**
+Read each file's current contents before editing. Before substantial work, read
+the roadmap, inspect affected modules and all callers, tests and boundaries.
+Resolve code/documentation contradictions using evidence. Search all enum
+consumers when adding a variant; do not hide missing handling with a wildcard.
 
-- решать задачу в правильном слое с первого раза, даже если это дольше;
-- перед любым обходом спросить себя: «можно ли решить это архитектурно?» Если да — решай так;
-- если временный обход действительно неизбежен (редкий случай, обоснованный блокирующей причиной): делай его минимальным, документируй причину и условие удаления в коде, следи, чтобы он не стал вторым источником правды, и обязательно назови его в финальном отчёте как технический долг;
-- убирать за собой: удалил подсистему — удали её импорты, декларации модулей, тесты, ссылки, ассеты, упоминания в документации;
-- держать репозиторий чистым после каждой задачи.
+Keep responsibilities clear and files manageable. Split mixed responsibilities
+or files approaching roughly 1,500 lines before expanding them. Avoid speculative
+frameworks and layers. Before removing a subsystem, review its contents and
+history, move reusable behavior to its owner, then remove dependencies, imports,
+initialization, state, tests, build entries, assets and documentation references.
+Search the entire repository for old symbols/paths and verify the result.
+Preserve existing user changes and other developers' work.
 
-Критерий качества: код должен быть таким, чтобы человек, который понимает всю систему, не нашёл в нём, что исправлять.
+## ABI and userspace
 
----
+`abi/syscalls.abi`, `abi/errno.abi` and `abi/rights.abi` are authoritative.
+`tools/gen_abi.py` generates Rust/C definitions and checks the kernel enum;
+`--check` is a CI gate. Never edit generated files or add a syscall only to the
+kernel enum. After approval, fetch and check the latest manifest and enum before
+choosing a number; regenerate every output and run conformance checks.
+The convention is `rax` number/result, `rdi/rsi/rdx/r10/r8/r9` arguments,
+with negative POSIX error returns.
 
-## 1. Автономность
+`libdunit` provides low-level native wrappers; kernel/ABI tests stay on that
+layer. Apps use available SDK functionality. Service migrations use lower SDK
+layers rather than rewriting the compositor or service manager as widgets.
+Protect dangerous device/process operations with capabilities immediately.
+Keep public wire structures separate from kernel-private and musl structures.
 
-- Работай самостоятельно. Не жди ручных действий, подтверждений и запуска команд пользователем.
-- Предполагай, что пользователя нет за компьютером: он не запустит команду, не закроет QEMU, не пришлёт лог, не нажмёт клавишу.
-- Не заканчивай ответ фразой «теперь пользователь должен запустить…». Запусти и проверь сам.
-- Не останавливайся после первого сбоя: разбери причину, исправь, перепрогони.
-- Не передавай человеку очевидную ремонтную работу.
-- Решай без вопросов всё, у чего есть очевидно правильное решение: выбор имён, структуры тестов, внутренние константы, мелкие решения внутри своей подсистемы, пункты roadmap.
+## Configuration and GUI
 
-**Остановись и спроси человека, только если** задача упирается в решение, которое меняет контракт или политику системы:
+One authoritative configuration source controls changeable desktop policy:
+application metadata, themes/fonts/icons, wallpaper, panels/docks/windows,
+widgets, workspaces, shortcuts, rules and animations. Replacing a hardcoded match
+with a map of constants is not configuration. Runtime must consume configuration;
+verify changes through to visible behavior.
 
-- новый syscall или любое изменение `abi/*.abi`;
-- изменение wire-формата протокола `gui-v1`;
-- граница kernel/userspace (что считается механизмом, а что политикой);
-- модель привилегий и прав (handles, capabilities, привилегированные операции);
-- формат initrd или формат ФС на диске;
-- всё, что ломает бинарную совместимость userspace;
-- необратимые или опасные действия (раздел 11).
+Technical invariants stay in code: ABI layouts, pixel-format arithmetic,
+algorithm constants, memory-safety/resource limits and hardware constraints.
+Reload follows `read -> parse -> validate -> resolve -> apply` atomically.
+A malformed candidate keeps the previous working state and clear diagnostics.
+Shared appearance tokens remain authoritative. Preserve GUI boot, input/display,
+multiple clients, focus/move/resize/close, Terminal/Files, themes/wallpaper,
+panels/dock/workspaces, transparency and blur. Organize `gui_server` by compositor,
+protocol, windows, input and configuration ownership. Never restore the removed
+kernel desktop.
 
-Как спрашивать: сформулируй развилку, перечисли варианты, дай рекомендацию с причиной. Остальную часть задачи продолжай сам, не блокируясь на ответе.
+## musl and TinyCC
 
----
+Target `x86_64-dunit`, static first. `tools/dunit/build-libc.sh <sysroot>` builds
+`libc.a`, crt objects and `dunit-cc` in `build/dunit-sysroot`; the driver emits
+static `ET_EXEC`. Regenerate the musl mapping through `gen_syscall_h.py`, never
+hand-edit `arch/x86_64/bits/syscall.h`. After fork source changes, invalidate the
+generated `build/dunit-sysroot` and `build/dunit-musl-build` caches so tests cannot
+use old libc; retain fingerprint checks. New musl tests belong in
+`userspace/ctests`, the normal Makefile build and `tools/m6_*_markers.json`, and
+run with `exec <name>`.
 
-## 2. Единственная точка запуска и проверки
+Keep complete upstream trees and narrow native adapters. Commit/test/fetch/rebase
+and push the fork first; only then commit the OS submodule pointer separately.
+Never publish a pointer to a fork commit absent from its remote repository.
 
-Вся сборка, запуск и проверка системы идут только через `tools/qemu_test.py`.
+## Verification
 
-- Не запускай QEMU вручную и не пиши альтернативные скрипты запуска в обход `qemu_test.py`.
-- Не проси пользователя что-то запускать.
+All OS builds, boots and runtime verification use `tools/qemu_test.py`.
+Do not run QEMU manually or create a competing runner. A quick kernel compile
+check is allowed before an expensive harness build, using exact Makefile flags
+(`-Zbuild-std`, `compiler-builtins-mem`, `json-target-spec`). Independent host/unit
+checks are allowed. Compilation alone proves no runtime claim.
 
-Типичный прогон:
-
-```
-python3 tools/qemu_test.py --build --markers-file tools/<имя>_markers.json \
+```bash
+python3 tools/qemu_test.py --build --markers-file tools/<suite>_markers.json \
   --post-boot-delay 3 --settle 4 --cmd-timeout 45 --timeout 220 --boot-timeout 120
 ```
 
-- `--build` собирает HAL, ядро, userspace и ISO. Без `--build` переиспользуется `build/microkernel.iso` (удобно для серии проверок на одном образе, например poweroff/reboot).
-- На нагруженной машине увеличь таймауты: `--cmd-timeout 90 --settle 8 --boot-timeout 240`.
-- Перед дорогим `--build` быстро проверь компиляцию ядра через `cargo` с теми же флагами, что использует `Makefile` (`-Zbuild-std`, `compiler-builtins-mem`, `json-target-spec`). Не придумывай флаги — бери из `Makefile`.
-- Терминальный режим использует `limine_test_terminal.conf`, GUI-режим — `limine_test_gui.conf`. Автотесты никогда не зависят от интерактивного меню.
-
-### Цикл разработки
-
-```
-понять → спланировать → реализовать → qemu_test.py → разобрать serial-лог
-   → исправить → qemu_test.py → повторять до успеха → аудит → отчёт
-```
-
-Успешная сборка не означает работающую систему. Утверждения «cargo build прошёл», «код компилируется», «файл удалён» не являются доказательством. Успех — это поведение системы, подтверждённое тестом.
-
----
-
-## 3. Маркерные тесты
-
-Контракты проверки лежат в `tools/*_markers.json`.
-
-Структура файла:
-
-```
-{ "run": { "config": "...", "cmd": ["..."] },
-  "required":  [ { "marker": "...", "claim": "...", "source": "..." } ],
-  "forbidden": [ { "marker": "...", "why": "...",   "source": "..." } ] }
-```
-
-Правила:
-
-- `run.cmd` — список команд, выполняемых по очереди. Если команда гасит ВМ (`poweroff`, `reboot`), она должна быть единственной.
-- `required` — все маркеры должны появиться в serial-логе. `forbidden` — ни один не должен.
-- Маркеры сопоставляются как **подстроки** по всему логу. Маркер обязан быть в **одной строке**: символ `\n` внутри маркера ломает сопоставление.
-- Маркер должен проверять наблюдаемое поведение, а не строку, которую ты сам добавил в `println`. Пример: для `poweroff` важно, что QEMU действительно завершился, а не что ядро написало «poweroff requested».
-- Не ослабляй, не удаляй и не переписывай маркеры, чтобы тест прошёл. Удалять маркеры и тесты можно только вместе с удалением подсистемы, которую они проверяли, и это должно быть названо в отчёте.
-- Обязательный набор для любого прогона: `[TERM-007] Starting main loop` — в `required` (система загрузилась); `[PANIC]` — в `forbidden`.
-
-### Чтение serial-лога
-
-Лог лежит в `build/qemu-serial.full.log`. Основные метки:
-
-- `[TERM-007] Starting main loop` — система дошла до терминала;
-- `[PANIC]` — паника ядра, всегда ошибка;
-- `[STDOUT] …` — вывод userspace-программ;
-- `[USER-FAULT] pid=… reason=… rip=… addr=… err=…` — пользовательский сбой (по `reason` и `err` определяется тип, например NX при выборке);
-- `[WAIT] …`, `[PROCESS-RUN] exited pid=… code=…` — жизненный цикл процессов;
-- `invalid syscall number: …` для ещё не поддержанного вызова — **безвредно**: это ожидаемый `ENOSYS` (правило M6.1, раздел 8).
-
-### После каждой проверки
-
-1. Проанализируй serial-лог.
-2. Убедись, что система действительно загрузилась и нужные маркеры есть, запрещённых нет.
-3. Покажи релевантный хвост лога.
-4. Кратко опиши результат.
-5. Если нашёл проблему — найди первопричину, исправь и повтори прогон.
-
-Не утверждай, что что-то работает, пока это не подтверждено тестом.
-
----
-
-## 4. Архитектура и границы
-
-```
-независимые userspace ELF-приложения          статические C / musl программы
-          \                                            /
-   libdunit (Rust)                    Dunit musl (libc.a)
-                  \                      /
-          Dunit Userspace ABI v0  (abi/, генерируется)
-                          |
-        gui_server (композитор/DWM)  ← политика в userspace
-                          |
-          Green Tea Kernel (Rust no_std)  ← механизмы
-                          |
-              C/NASM HAL (GDT/IDT/syscall/таймер)
-                          |
-                 Limine (BIOS/UEFI) / QEMU
-```
-
-Главное правило: **ядро даёт механизмы, userspace даёт политику.**
-
-- Ядро: процессы и потоки, адресные пространства, планировщик, VMM/PMM, VFS и ФС, IPC, handles/capabilities, display/input как механизмы, драйверы.
-- Userspace: десктоп, панель, dock, launcher, темы, список приложений, init-сервисы, оболочки.
-- Ядро не знает о конкретных приложениях (`gui_terminal`, `gui_files`, `gui_calc` и т.д.), их путях, иконках и именах.
-
-Текущие реальные ограничения (не называй систему тем, чем она не является):
-
-- ядро одно-процессорное (UP); комментарии «SMP-ready» в коде не отражают реальности — не опирайся на них;
-- корневая ФС — MemFS; DunitFS пока только на `/persist`;
-- сигналы, динамический TLS, полноценные `fork`/`exec`, сеть, звук, USB, ACPI-питание ещё не готовы или готовы частично — смотри roadmap и README.
-
----
-
-## 5. Ядро и HAL
-
-- Ядро (`kernel/`) — Rust `no_std`, собирается в `libkernel.a` и линкуется с HAL.
-- HAL (`hal/`) — C и NASM: загрузка, GDT/TSS/IDT, вход в syscall через `syscall`/`sysret`, порты ввода-вывода, переключение контекста, вход в Rust `kernel_main`.
-- Не добавляй desktop- и window-management-политику в ядро. Не создавай новый kernel GUI вместо удалённого legacy.
-- Не вшивай userspace-приложения и ассеты в ядро через `include_bytes!`. Приложения и ассеты загружаются из initrd (`/app`, `/assets`) и с файловой системы.
-- Новые опасные операции (чтение/запись физических устройств, запуск привилегированных действий, управление процессами других пользователей) сразу делай защищёнными через capability/права, а не «потом».
-- При добавлении варианта в `enum` найди через `grep` **все** места `match` по этому enum и обработай их. Не используй `_ =>` как способ заткнуть компилятор.
-- При удалении файла сначала найди все импорты, инициализации, вызовы, syscalls, состояние, ассеты, ссылки в сборке, тесты и документацию. Удаление одного файла — это не удаление подсистемы.
-- Не используй код как источник истины, если он противоречит roadmap или README: сначала разберись, что верно, и исправь расхождение, а не обходи его.
-
----
-
-## 6. ABI (`abi/`)
-
-Единый источник правды — `abi/syscalls.abi`, `abi/errno.abi`, `abi/rights.abi`.
-
-- Из них `tools/gen_abi.py` генерирует Rust (`userspace/libdunit`) и C-заголовки (`abi/include/dunit/*.h`) и проверяет, что enum ядра с ними согласован. `--check` — гейт CI.
-- **Сгенерированные файлы руками не правь.** Меняй манифест и перегенерируй.
-- Новый syscall — **только** через `abi/syscalls.abi` + регенерация. Нельзя добавлять вариант прямо в enum ядра.
-- Номер syscall выбирай после `git fetch`, сверившись с актуальным манифестом **и** enum ядра: у второго разработчика могут появиться свежие номера (уже была коллизия на номере 78).
-- Изменение общих контрактов ABI требует решения человека (раздел 1).
-- Соглашение: `rax` — номер, `rdi/rsi/rdx/r10/r8/r9` — аргументы; `errno` — отрицательные POSIX-значения.
-
----
-
-## 7. libdunit и userspace
-
-- `userspace/libdunit` — нативный интерфейс приложений: обёртки syscalls, права из `rights.abi`.
-- Приложения — независимые ELF-процессы со своими адресными пространствами. Не сливай их обратно в `gui_server` ради удобства. Сохраняй изоляцию сбоев.
-- `init` (PID 1) — сервис-менеджер: читает манифесты сервисов и запускает их.
-- Тестовые программы живут рядом с остальными приложениями и подключаются в сборку штатным способом.
-
----
-
-## 8. musl-порт (`dunit-musl`)
-
-Репозиторий: https://github.com/DunitOS/dunit-musl (ветка `master`).
-Подключён как сабмодуль `toolchains/dunit-musl`. Это полный форк musl, а не набор отдельных `.c`.
-
-Целевая платформа: `x86_64-dunit`, static-first. Хост-компилятор служит кросс-компилятором, потому что процессор тот же.
-
-### Где что лежит
-
-- `PORTING.md` — план порта и тематические коммиты;
-- `UPSTREAM.md` — происхождение (upstream musl, MIT);
-- `DELTA.md` — таблица отличий от upstream (генерируется скриптом);
-- `gen_syscall_h.py` — таблица `DUNIT_MAP` (имя Linux-вызова → номер Dunit), из неё регенерируется `arch/x86_64/bits/syscall.h`.
-
-### Сборка
-
-- `tools/dunit/build-libc.sh <sysroot>` собирает статический `libc.a`, crt-объекты и обёртку `dunit-cc` в `build/dunit-sysroot`.
-- `dunit-cc` создаёт статический `ET_EXEC`.
-- Sysroot кэшируется по наличию `libc.a`. **После любой правки исходников форка обязательно** `rm -rf build/dunit-sysroot build/dunit-musl-build`, иначе пересборки не будет.
-
-### Правило M6.1 (строго)
-
-Неподдерживаемый вызов возвращает документированный `-ENOSYS` (или `ENOTSUP`). Он **никогда** не возвращает ложный успех и не маскируется тихой заглушкой. Если реализация частичная (например, `posix_spawn` игнорирует часть параметров), это нужно либо дореализовать, либо явно вернуть ошибку — а не молча проглотить.
-
-### Рабочий процесс с сабмодулем
-
-1. Правки вноси **внутри** `toolchains/dunit-musl`.
-2. Коммить там тематическими коммитами (`build`, `crt`, `syscall`, `fs`, `vm`, `thread` и т.д.) и **сделай push в сам репозиторий `dunit-musl`** (ветка `master`, с `fetch` и `rebase` по правилам раздела 10).
-3. Только после этого в `dunit-os` обнови указатель сабмодуля и закоммить его **отдельным коммитом**.
-4. Никогда не коммить в `dunit-os` указатель на коммит сабмодуля, которого нет на удалённом сервере.
-5. Для нового musl-теста: `.c` в `userspace/ctests`, подключение в `Makefile`, файл `tools/m6_*_markers.json`, запуск командой `exec <имя>`.
-
----
-
-## 9. GUI и desktop
-
-Dunit использует userspace-архитектуру GUI: `gui_server` — это отдельный userspace ELF, а не часть ядра.
-
-- Desktop должен быть управляем конфигурацией (configuration-driven). Не хардкодь в Rust: список приложений, их имена, ID, пути, иконки, записи launcher и dock, обои, темы, цвета, параметры панели, dock и окон, радиусы, размеры, анимации, workspace, горячие клавиши, метаданные приложений, ассеты.
-- Не заменяй `match app { "gui_files" => … }` на `HashMap::from([...])` — это тот же хардкод в другой форме.
-- Один авторитетный источник правды. Нельзя, чтобы значение жило одновременно в TOML, в Rust-константе и в fallback. Если конфиг есть, runtime обязан реально его использовать.
-- Что остаётся в коде: технические инварианты (ABI, раскладка протокола, лимиты безопасности памяти, аппаратные ограничения, внутренние константы алгоритмов). Правило: если пользовательская или desktop-политика может логично измениться без смены архитектуры, она должна быть в конфигурации. Не превращай конфиг в свалку технических констант.
-- Не возвращай legacy kernel GUI и не восстанавливай его под другим именем.
-- Configuration должна работать в реальности: проверяй цепочку «изменил конфиг → применил → поведение изменилось», а не только то, что TOML парсится.
-- Загрузка конфигурации: `read → parse → validate → apply`. Повреждённый конфиг не должен ронять desktop и не должен применяться частично; сохраняй последнюю рабочую конфигурацию и выдавай понятную диагностику.
-- Сохраняй существующую функциональность GUI после рефакторинга: загрузка, `gui_server`, ввод, дисплей, несколько клиентов, фокус, перенос, закрытие, терминал, файловый менеджер, обои, тема, dock, панель, workspace, прозрачность и blur.
-- Не раздувай `gui_server` в один огромный модуль: структура по ответственности (композитор, протокол, окна, ввод, конфиг).
-
----
-
-## 10. Git: коммиты и push
-
-После изменений и **успешных** проверок ты сам делаешь коммит и push. Не жди отдельной просьбы.
-
-В репозитории работают два разработчика, и второй пушит независимо. Поэтому порядок строгий:
-
-1. Убедись, что тесты по задаче прошли.
-2. `git fetch origin`.
-3. Сравни свою ветку с удалённой (`git rev-list --left-right --count HEAD...origin/<ветка>`). Если отстал — `git rebase origin/<ветка>`.
-4. Если rebase принёс чужие изменения, **перепрогони тесты** на получившемся состоянии.
-5. Добавляй в индекс **конкретные файлы** (`git add <путь>`), а не `git add -A`. Следи, чтобы не попали артефакты, бэкапы, логи, образы.
-6. Коммить небольшими тематическими коммитами.
-7. `git push origin <ветка>`.
-
-Ветки: `main` в `dunit-os`, `master` в `dunit-musl`.
-
-Правила:
-
-- Сообщения коммитов — в формате `<область>: <что сделано>` в повелительном наклонении (`syscall:`, `elf:`, `hal:`, `process:`, `power:`, `fs:`, `build:`, `gui:`, `musl:` и т.д.). Сохраняй трейлер `Co-Authored-By`, если он принят в истории проекта.
-- Если push отклонён (non-fast-forward) — это сигнал сделать `fetch` и `rebase`, а не `--force`.
-- При конфликте: аккуратно разреши (сохрани изменения обеих сторон, не выбирай слепо «свою» версию), перепрогони тесты и только потом пушь.
-- Коммиты второго разработчика реальные. Никогда не приписывай их себе или пользователю и не откатывай их без явного решения человека.
-- Не пушь код, который не проходил проверку. Не пушь с красными тестами.
-- Один коммит — одно логическое изменение.
-
----
-
-## 11. Опасные действия (только с явным согласием человека)
-
-- запись на **физический** диск, реальные `mkfs`/`install`/`blkwrite` вне образов QEMU. Образы в `build/*.img` — безопасны;
-- `git push --force`, `git reset --hard`, `git clean -f`, удаление веток;
-- удаление файлов и каталогов, которые ты не создавал, без просмотра содержимого и истории;
-- изменение `git config`;
-- push прямо в ветку без `fetch` и `rebase`;
-- отправка кода или секретов на внешние сервисы;
-- запись в `/dev/*` на хосте.
-
----
-
-## 12. Параллельные агенты
-
-- Субагентов используй для **исследования только на чтение** и для независимых правок **разных** файлов.
-- Сборки и прогоны QEMU **сериализуй**: общий `build/`, общий `build/microkernel.iso` и общий QMP-сокет затираются при параллельных запусках.
-- Если нужна настоящая параллельная сборка — отдельный `git worktree` на агента со своим каталогом сборки.
-- Общий git-индекс тоже общий: не запускай параллельно операции коммита.
-- Субагент подчиняется тем же правилам этого файла.
-
----
-
-## 13. Качество, структура и порядок
-
-- Не создавай гигантские файлы. История проекта уже знает, чем кончается файл на 5000 строк (`ui_loop.rs`). Если файл приближается к ~1500 строк или смешивает несколько ответственностей — раздели его по смыслу до продолжения работы.
-- Не создавай абстракции ради абстракций: никаких больших универсальных фреймворков, лишних слоёв и настроек для внутренних констант.
-- Цель: простая архитектура, чёткие границы, явный поток данных, проверяемое поведение.
-- Перед крупной задачей: прочитай `DUNIT_OS_TECHNICAL_ROADMAP.md`, изучи затронутые модули, найди всех вызывающих, проверь существующие тесты и границу kernel/userspace. Не считай, что один очевидный файл содержит всю реализацию.
-- Roadmap — архитектурный ориентир (зависимости, критерии приёмки, границы, отложенные решения), а не просто список фич. Если код противоречит roadmap, не маскируй это обходом: определи правильную точку и исправь.
-- Приоритет решений: архитектурно корректное → соответствует roadmap → сохраняет границу kernel/userspace → конфигурируемо, если это политика → проверяемо через `qemu_test.py` → минимальный технический долг → простое в развитии. Меньшее число строк не является причиной выбрать вариант.
-- Не делай «фейковый рефакторинг»: переименование, перенос хардкода в другой файл, конфиг, который никто не читает, старый код, который просто не вызывается, но ещё компилируется.
-- Перед правкой файла читай его актуальное содержимое; для замены используй минимальный уникальный фрагмент. Не стирай куски функций неточной заменой.
-- При удалении legacy: найти все зависимости → перенести нужное в правильный слой → проверить → удалить старое полностью, включая мёртвый код, импорты, тесты и ссылки → найти оставшиеся упоминания по всему репозиторию → прогнать тесты. Не оставляй старое «на всякий случай».
-
----
-
-## 14. Честность
-
-- Не говори «готово», если часть не проверена. Явно называй непроверенное.
-- Не поддакивай и не приукрашивай. Если решение человека кажется ошибочным — скажи прямо, с причинами, и предложи альтернативу.
-- Не имитируй прогресс: «добавлен конфиг» не равно «desktop управляется конфигом»; «файл удалён» не равно «legacy удалён»; «тест прошёл один раз» не равно «система проверена». Проверяй сквозной результат.
-
----
-
-## 15. Финальный аудит и отчёт
-
-После крупной задачи сделай аудит:
-
-- не осталось ли старого хардкода, мёртвого кода и ссылок на удалённое;
-- не появился ли новый обход или второй источник правды;
-- не вернулась ли desktop-политика в ядро; не нарушена ли граница kernel/userspace;
-- не осталось ли встроенного в ядро userspace-состояния;
-- не сломана ли существующая функциональность;
-- для удаления legacy и устранения хардкода — поиск по всему репозиторию по старым символам и значениям;
-- не попали ли в коммит артефакты или бэкапы.
-
-Финальный отчёт (на русском, кратко, без воды):
-
-1. Что изменено и какие архитектурные решения приняты.
-2. Какой хардкод и какой legacy удалён (если задача была об этом).
-3. Что намеренно оставлено и почему.
-4. Какие тесты запускались и результат `qemu_test.py`.
-5. Релевантный хвост serial-лога.
-6. Что закоммичено и запушено (хэши, ветка; для musl — и коммит в сабмодуле, и бамп указателя).
-7. Оставшийся технический долг, если он есть. Не скрывай проблемы.
-
----
-
-## 16. Типичные ошибки и защита от них
-
-1. Push без `fetch` → non-fast-forward. Всегда `fetch` + `rebase` + повторный тест.
-2. Новый syscall добавлен в enum ядра, но не в `abi/syscalls.abi` → дрейф и коллизии. Только через манифест.
-3. Коллизия номера syscall с работой второго разработчика. Сверяйся со свежим манифестом и enum после `fetch`.
-4. Правка с неточным фрагментом стирает кусок функции. Читай файл перед правкой.
-5. Остановка на «скомпилировалось». Проверяй поведением через `qemu_test.py`.
-6. Забыт сброс кэша sysroot после правки форка musl. `rm -rf build/dunit-sysroot build/dunit-musl-build`.
-7. Маркер с `\n` не находится. Маркер — одна строка.
-8. Ложный успех или тихая заглушка вместо ошибки. Документированный `ENOSYS`/`ENOTSUP`.
-9. Неполный `match` при добавлении варианта enum. `grep` по всем местам использования.
-10. Приписывание чужих коммитов себе или пользователю. Второй разработчик существует.
-11. Коммит артефактов и бэкапов. Только конкретные файлы в `git add`.
-12. Параллельные сборки в общем `build/`. Сериализуй или используй worktree.
-
----
-
-## 17. Главный принцип Dunit
-
-Dunit строится как система, которую можно понимать, изменять и проверять.
-
-```
-ядро        → механизмы
-userspace   → политика
-конфиг      → пользовательское состояние
-приложения  → независимые ELF-процессы
-libdunit    → нативный интерфейс приложений
-musl        → портируемость исходников C поверх нативного ABI
-gui_server  → композитор и десктоп
-тесты       → объективная проверка
-```
-
-Не хардкодь политику. Не возвращай legacy-архитектуру. Не заводи второй источник правды.
-Не оставляй мусор и технический долг без причины. Не считай успешную сборку доказательством работы.
-
-Если проблему можно решить архитектурно — решай её архитектурно.
-Если код противоречит целевой архитектуре — исправляй код, а не подгоняй архитектуру под старый код.
+`--build` creates HAL, kernel, userspace and ISO; compatible follow-up checks
+can reuse `build/microkernel.iso`. Increase loaded-runner timeouts when needed.
+Use deterministic Terminal/GUI configs, never an interactive menu. The harness
+must complete and shut down QEMU without user participation.
+
+Marker contracts are `tools/*_markers.json`: sequential `run.cmd`, required and
+forbidden markers with claims/source references. A VM-stopping command such as
+poweroff/reboot must be the only command in its run. Matching uses substrings
+across serial output: each marker fits one line without an embedded newline.
+Verify observed behavior, not a message inserted solely to pass a test. The
+mandatory marker baseline requires `[TERM-007] Starting main loop` and forbids
+`[PANIC]`; preserve the existing boot/readiness contracts.
+
+Never weaken, suppress or rewrite tests/warnings/markers to pass. Removing tests
+is allowed only with removal of their subsystem, and must be reported. Inspect
+`build/qemu-serial.full.log` after each run for boot readiness, required/forbidden
+markers, exit statuses, faults and resource cleanup. `[USER-FAULT]` is expected
+only in a test that checks it; unsupported calls returning documented `ENOSYS`
+are not false success. Diagnose failures, rerun after repair and report relevant
+serial evidence. Reading contracts or historical results is not a fresh test.
+
+## Shared workspace and Git
+
+Delegated agents may research read-only or edit disjoint assigned files. Builds
+and QEMU sharing `build/`, ISO or QMP socket must be serialized. Parallel builds
+require isolated worktrees and build directories. The Git index, commits and
+submodule updates are shared mutations: serialize them. Every agent follows
+this contract and respects existing changes.
+
+After relevant checks pass, complete the authorized commit/push workflow:
+
+1. `git fetch origin`; compare `HEAD...origin/<branch>` using
+   `git rev-list --left-right --count`.
+2. Rebase on `origin/<branch>` if behind. Resolve conflicts preserving both
+   developers' intent; rerun affected checks after incoming changes.
+3. Stage explicit paths with `git add <path>`, never `git add -A`.
+4. Make small thematic commits, imperative `<area>: <action>`, preserving
+   established `Co-Authored-By` trailers.
+5. `git push origin <branch>`. A non-fast-forward rejection requires another
+   fetch/rebase/test cycle, never force push.
+
+Do not publish unverified code or red tests. Do not attribute another developer's
+commits to yourself or the user or revert them without an explicit decision.
+Exclude build products, logs, images, backups (`*.bak`, `*.orig`) and temporary
+files from commits.
+
+## Dangerous actions
+
+Explicit human authorization is required for physical disk or host `/dev/*`
+writes; real-device mkfs/install/blkwrite; force push, hard reset, forced Git
+clean or branch deletion; Git configuration changes; deleting pre-existing
+files without reviewing contents and history; publishing code/secrets externally
+outside the authorized workflow; or bypassing fetch/rebase checks. Disposable
+QEMU images in `build/*.img` and generated-cache invalidation are normal
+verification scope.
+
+## Final audit and report
+
+Audit boundaries, old symbols/paths, policy hardcoding, duplicate sources,
+resource lifetimes and preserved behavior. Exclude artifacts and backups.
+Report changes/decisions, removed legacy/hardcoding, intentional limits, tests
+and serial evidence, commit/push hashes and branch, and remaining debt. For fork
+changes report both fork commit and OS pointer update. Keep the report concise
+and use the user's requested language; repository Markdown is English.
+State unverified work and limitations plainly.

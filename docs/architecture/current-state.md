@@ -1,147 +1,132 @@
-# Dunit OS — фактическое состояние (snapshot M0)
+# Current system state
 
-> Честный срез того, что **реально работает** в ядре Green Tea, а не что
-> запланировано. Каждое утверждение `WORKING` подкреплено наблюдаемым признаком
-> из serial-лога, который выдаёт `tools/qemu_test.py` (единственная точка
-> запуска и тестирования). `PARTIAL`/`PROTOTYPE`/`MISSING` означают ровно то,
-> что написано: не верить на слово, сверяться с кодом.
->
-> - **Дата среза:** 2026-09-20, milestone M0.
-> - **Как воспроизвести:** `tools/qemu_test.py` → `build/qemu-serial.full.log`.
-> - **Легенда:** ✅ WORKING · 🟡 PARTIAL · 🧪 PROTOTYPE · ⛔ MISSING.
+Source review: 15 November 2026, before OP4. This page describes implemented
+behavior and its limits. Test contracts describe how to verify it; their presence
+is not evidence of a fresh run. The [technical roadmap](../../DUNIT_OS_TECHNICAL_ROADMAP.md)
+and [performance roadmap](../../DUNIT_OS_PERFORMANCE_ROADMAP.md) own future work.
 
-## Как читать этот документ
+## Architecture
 
-Признак (`evidence`) — это строка, которую печатает ядро при загрузке или при
-прогоне встроенных smoke-тестов. Если строка исчезла или изменилась, а документ
-нет — расходится документ, чинить нужно его. Все цитаты ниже взяты из реального
-прогона, а не сочинены.
+Limine boots the Rust Green Tea Kernel through a C/NASM HAL on x86_64.
+HAL owns CPU entry, descriptor tables and context switches. The kernel owns
+memory, tasks, scheduling, IPC, handles, VFS and device mechanisms. Applications
+use the generated [native Dunit ABI](../../abi/README.md); musl translates POSIX
+source interfaces into that ABI.
 
-**Это проверяется в CI (бюджет M0):**
+Userspace `init` supervises manifest-defined services. `gui_server` owns the
+display/input master handles and hosts the compositor and DWM shell. Keeping the
+shell there is the accepted architecture; applications retain separate address
+spaces. Desktop lists, themes and rules come from userspace configuration.
+The kernel recovery terminal and early boot display remain diagnostic bootstrap
+paths. They must continue to work when userspace initialization fails.
 
-- `tools/boot_markers.json` — манифест, связывающий каждый WORKING-claim с
-  конкретным serial-маркером и файлом-источником. `tools/qemu_test.py
-  --markers-file tools/boot_markers.json` роняет прогон, если хоть один
-  required-маркер пропал или появился forbidden (`[PANIC]`, утечка
-  VFS-хендлов). Так claim не может быть WORKING без доказательства в загрузке.
-- `tools/check_warnings.py` + `tools/warnings_budget.json` — бюджет
-  компиляторных warnings (ядро + userspace). Растить его нельзя: CI падает,
-  если число warnings превысило зафиксированное. Планка только опускается
-  (`--update`).
-- Оба шага встроены в `.github/workflows/Build.yml` перед публикацией релиза.
+## Implemented behavior
 
-## Загрузка и платформа
-
-| Подсистема | Статус | Признак в serial-логе |
+| Area | Behavior | Verification contract |
 |---|---|---|
-| Boot по Limine v5 | ✅ | `[BOOT] START` … `[KERNEL] START` |
-| HHDM / higher-half | ✅ | `[KERNEL] HHDM setup` |
-| Framebuffer | ✅ | `Framebuffer: 1280x800x32 initialized` |
-| GDT | ✅ | `[HAL] OK`, `GDT loaded` |
-| IDT + exception handlers | ✅ | `IDT loaded with 256 entries`, `Exception handlers registered` |
-| Serial-лог (отладка) | ✅ | весь `build/qemu-serial.full.log` |
+| Boot | BIOS/UEFI, Limine framebuffer and external initrd | `tools/boot_markers.json`, `tools/test_image_profiles.py` |
+| Memory | PMM-backed growing heap, isolated address spaces, guarded VM, W^X, shared buffers and eager private file mappings | `tools/boot_markers.json`, `tools/test_user_memory.py` |
+| Tasks | Timer preemption, per-thread GPR/kernel stack/FXSAVE/static TLS, spawn/wait/kill, fault isolation, futex waits | `tools/boot_markers.json`, `tools/m6_thread_lifecycle_markers.json` |
+| Ownership | Task registry pins, exclusive execution admission, deferred dispatch/fd retirement, locked PTY queues | `tools/test_process_resources.py`, `tools/test_pty.py` |
+| Waiting | Blocking timer/IPC/futex and level-triggered mixed IPC/fd/timer/child wait-set | `tools/waitset_markers.json`, `tools/test_wait_queue.py` |
+| Files | MemFS root, initrd apps/assets, task snapshots, DunitFS v2 at `/persist`, fd duplication/pipes/flags/spawn actions | `tools/m6_fileops_markers.json`, `tools/m6_native_fd_markers.json` |
+| Devices | PS/2 input, queued pointer input, PCI, framebuffer/Bochs display modes, AHCI and virtio-blk | driver-specific and GUI marker contracts |
+| Runtime | Static native Rust SDK, static Dunit musl, on-device TinyCC and full Lua interpreter | [SDK](../sdk/README.md), [libc tests](../libc-test.md), [Lua](lua-runtime.md) |
+| Desktop | Configurable panels/components, themes, input/focus, text clipboard, scoped file transfers, window motion and isolated Lua workers | [desktop manual](desktop.md), `tools/gui_smoke_markers.json` |
 
-## Память
+Application dispatch is UP: APs run bounded initialization/ownership/TLB probes
+and then park; `dispatch_cpus=1`. This does not demonstrate concurrent application
+execution. FXSAVE covers x87/MMX/SSE; AVX/XSAVE is outside the supported profile.
+On q35, HPET supplies monotonic time and PIT supplies 100 Hz scheduling events.
+Realtime uses Limine's UTC boot timestamp plus monotonic elapsed time; an absent
+boot timestamp returns an error. Desktop clock widgets still display uptime.
 
-| Подсистема | Статус | Признак / примечание |
-|---|---|---|
-| Physical Memory Manager | ✅ | `[PMM] OK`, `Physical memory: 339 MiB usable` |
-| Virtual Memory Manager | ✅ | `[VMM] OK` |
-| Kernel heap (PMM-backed, growable) | ✅ | `[HEAP] OK (PMM-backed, growable)` |
-| Переключение адресных пространств | ✅ | `[ADDRSPACE-TEST] OK`, `[PROCESS-ADDRSPACE-TEST] OK` |
-| MMIO-аллокатор | ✅ | `[MMIO-ALLOC-TEST] OK` |
-| VM mappings (userspace) | 🟡 | anonymous private, `munmap/mprotect`, guard pages и shared objects работают; нет file mappings/COW/rights |
+Root `/` is MemFS populated from initrd. DunitFS `/persist` stores persistent data;
+an installer and successful data readback do not establish a disk-backed system
+root or booting init from disk. Device discovery and proc diagnostics do not
+establish a mounted general-purpose DevFS/ProcFS interface.
 
-## Планировщик и процессы
+## Pre-OP4 review
 
-| Возможность | Статус | Признак / примечание |
-|---|---|---|
-| UP round-robin планировщик | ✅ | `[SCHED] UP round-robin init: timer-preemption=on fpu=fxsave smp=off` |
-| Context switch (save/restore + `yield`) | ✅ | `Scheduler: cooperative context switch ready` |
-| Таймерное вытеснение (preemption) | ✅ | включено по умолчанию; `[PREEMPT-TEST] OK preempts=N` проверяет CPU-bound parent/child без `yield` и сохранность разных XMM значений. FXSAVE/FXRSTOR сохраняет x87/MMX/SSE (без AVX). |
-| SMP / многоядерность | ⛔ | `smp=off`; поднимается один CPU |
-| Загрузка ELF и запуск процесса | ✅ | `[EXEC] loading /app/runtime_stress`, `[ELF-TEST] userspace app started` |
-| `spawn` дочернего процесса | ✅ | `[SPAWN] ready pid=5 path=/app/resumable_child execution=not-started` |
-| `wait` и коды возврата | ✅ | `[WAIT] pid=5 kind=0 code=7` |
-| Возобновляемый дочерний процесс | ✅ | `resumable_child: A` → `C`, `[PROCESS-RUN] exited pid=5 code=7` |
-| `kill` процесса | ✅ | `[WAIT] pid=10 kind=0 code=-9` (runtime_stress: kill OK) |
-| Обработка user-fault (page fault) | ✅ | `[USER-FAULT] pid=11 reason=page-fault … err=0x4`, `[WAIT] pid=11 kind=1 code=-14` |
-| Schedulable user threads | ✅ | `[THREAD-TEST] OK`: TID, create/exit/nonblocking join, отдельные GPR/kernel stack/FXSAVE, общий PID/address space/fd table; thread fault не завершает процесс |
-| Native wait-set (M7, 2026-10-26) | 🟡 | `[WAITSET] OK`: IPC + timer + file/pipe/PTY + child exit в одном call-scoped level-triggered вызове; edge/persistent registration ещё нет. `tools/waitset_markers.json`, `docs/sdk/m7-start.md`. |
-| Wait queues / blocking sleep / IPC event | ✅ | `[WAIT-TEST] OK`: timeout, blocked sleep, wake при отправке IPC; GUI apps ждут событие без yield polling |
-| VM lifecycle | ✅ | `[VM-TEST] OK`: `munmap/mprotect`, W^X, guard fault, shared frame между процессами и освобождение после закрытия/exit |
-| Static TLS | ✅ | `[TLS-TEST] OK`: `FS.base`, x86_64 Variant II TCB, initial `PT_TLS` `.tdata/.tbss`, изоляция main/threads |
-| Futex-like wait/wake | ⛔ | следующий пункт M1 |
+The review followed declarations, callers and history across kernel/HAL, VFS,
+task/PTY ownership, runtime/userspace and first-party documentation. It removed
+unused kernel package-catalog and thread-runner simulations, an unmounted DevFS
+that discarded writes while reporting success, an unmounted ProcFS with no EOF
+progress and invented stat sizes, an empty keyboard initializer,
+unused shell fields and an obsolete bootloader system sketch. `dtop` now uses
+SystemStats memory counters and reports CPU usage unavailable; `--once` provides
+a terminating snapshot. Asset reads now reject incomplete/oversized candidates, quoted DUI strings
+preserve UTF-8, padding rejects malformed fragments, weighted grow sizing works,
+and subtree translation rejects invalid IDs/layout sizes.
+No syscall, right, wire record or disk format changed.
 
-Профиль исполнения: UP round-robin с PIT (~100 Гц), один процесс исполняется
-в каждый момент времени. Состояние x87/MMX/SSE сохраняется отдельно для каждого
-потока; AVX/XSAVE пока не поддержаны. `clock.rs` предоставляет монотонные
-тики/наносекунды и deadline. Dynamic TLS/DTV, edge/persistent registration для нового wait-set и SMP остаются будущими задачами.
+Markdown is consolidated into current manuals and two roadmaps. Historical
+proposal/status documents no longer form competing sources of current truth.
+Upstream license/provenance text and JSON measurement receipts are retained.
+Compatibility entry points are retained where callers still require them.
 
-## IPC
+## Open gates
 
-| Возможность | Статус | Признак / примечание |
-|---|---|---|
-| Байтовые очереди сообщений | ✅ | `[IPC] manager ready: bounded byte message queues (lazy per-PID)` |
-| `send` / `receive` между процессами | ✅ | `[IPC] send from=12 to=13 len=7`, `[IPC] recv pid=13 len=7`, `ipc_parent: OK` |
-| Границы: ≤256 байт, ≤128 сообщений/очередь | ✅ | `MAX_MESSAGE_SIZE`, `MAX_QUEUE_MESSAGES` |
-| Неблокирующий `receive` | ✅ | пустая очередь → `EAGAIN` |
-| Блокирующее ожидание IPC-события | ✅ | `wait_event` + повторный `receive`; `libdunit::ipc_recv_blocking` |
-| Shared VM object | ✅ | `shared_vm_create/map/close`, refcounted frames; ID пока без rights/handle table |
+- [OP4 ownership gates](../performance/smp.md#pre-op4-gates): active global VMM,
+  terminal/scrollback, recovery-shell and terminal stdin paths still need scoped
+  ownership before AP execution. Registry/PTY improvements alone do not close
+  these gates. Lock ordering and deferred resource destruction remain mandatory.
+- Secure entropy is absent. ELF AT_RANDOM bootstrap bytes are not a CSPRNG and
+  must not support cryptography or a claim of production hash hardening.
+- Signals/interruption, cancellation, process-image exec/fork, dynamic loader/DTV,
+  full termios, POSIX ownership/accounts and disk-backed system root remain open.
+- Networking needs packet RX/TX, native socket objects/rights/readiness and DNS.
+  HTTPS additionally requires entropy and TLS. Network-controller discovery is
+  not a working network stack. Audio, full USB enumeration and power services
+  remain incomplete; xHCI compatibility heuristics need real-device validation.
+- Eager file MAP_PRIVATE is a snapshot with EOF/W^X limits; no demand paging,
+  COW, MAP_SHARED or SIGBUS semantics are claimed. Directory iteration is a
+  bounded snapshot, not a persistent fd-backed directory object.
+- GUI send success does not prove completion of every RESULT/CONFIGURE/FRAME_DONE
+  transaction. Full resize acknowledgment/rollback remains a protocol-state gate.
+- Previous-release binary fixtures, upstream upgrade rehearsal and reference-PC
+  validation remain distinct release gates. QEMU results prove their named scope.
 
-## Файловая система
+## Verification
 
-| Возможность | Статус | Признак / примечание |
-|---|---|---|
-| VFS + MemFS как `/` | ✅ | `[MEMFS] mounted as /`, `[VFS] init OK` |
-| Встроенные `/app` и `/assets` | ✅ | приложения грузятся из `/app` (`include_bytes!`) |
-| syscalls FS (`open/read/write/close/readdir/stat`) | ✅ | `[SYSCALL-FS-TEST] OK`, `[SYSCALL-FS-SEMANTICS-TEST] OK` |
-| Initrd-архив | ⛔ | `Initrd: no archive provided; using embedded /app and /assets` — стор есть, архив в boot-путь не подключён |
-| DunitFS на диске / `/persist` | 🟡 | код есть; в текущем прогоне диск не смонтирован (`disks=0`) |
-| `seek` / `dup` / `pipe` | ⛔ | нет |
+All OS builds and boots use `tools/qemu_test.py`; shared builds are serialized.
+Use `tools/test_process_resources.py` for teardown/fd/thread regressions, the boot
+manifest on 1 and 8 CPUs, and GUI plus production manifests on 4 CPUs. Host ABI,
+protocol, PTY, wait/IPC, task-access and build-tool checks complement native runs.
+Read the full serial log for readiness, exits, faults and resource cleanup.
+Warnings are tracked by `tools/check_warnings.py`; budgets must not increase.
 
-## Драйверы и устройства
+The pre-OP4 branch passed native resource/thread suites on 4 CPUs, full boot on
+1/8 CPUs, GUI smoke on 4 CPUs, production core/IPC/time on 4 CPUs, and the SDK
+file/entry/time/child suite plus dtop snapshot. Required markers were present and
+forbidden markers absent. Host ABI/protocol, PTY, task access, wait/IPC,
+user-memory, harness/tooling, image/configuration and DWM/component regressions
+also passed. Bounded-reader tests cover short reads, exact limits, oversize,
+mid-read EIO and invalid transfer counts; native cases verify fd cleanup.
 
-| Устройство | Статус | Признак / примечание |
-|---|---|---|
-| PS/2 клавиатура | ✅ | `Keyboard driver ready`, `IRQ 1: Keyboard interrupt enabled` |
-| PS/2 мышь | ✅ | `Mouse input driver ready`, `IRQ 12 … enabled` |
-| PIT таймер (~100 Гц) | ✅ | `IRQ 0: PIT timer enabled (~100 Hz)` |
-| PCI-обнаружение | ✅ | `[PCI] devices detected=6 usb=0 net=1 msi=2 msix=1` |
-| Сетевая карта e1000 | 🟡 | обнаружена, MMIO/MAC готовы, **packet-io=not-implemented** |
-| Сетевой стек | ⛔ | `[NET] … stack=not-implemented` |
-| AHCI (SATA) | 🟡 | контроллер найден (`initialized=1`), но `disks=0` (устройство non-ATA пропущено) |
-| xHCI / USB | 🧪 | контроллеры не найдены (`found=0`); HID-парсер готов, энумерации нет |
-| virtio-blk | ⛔ | `no legacy virtio-blk device` |
+Kernel production/smoke checks emitted zero warnings. The warning checker's
+listed userspace subset also measured zero, and its budget was lowered to zero.
+That subset does not cover every packaged app; existing warnings in other
+apps are not evidence of a clean whole-repository warning inventory. Fresh
+receipts are under `build/performance/pre-op4-*` and
+`build/performance/pre-op4-review/`; they are generated artifacts, not source docs.
 
-## Userspace
+## Historical validation
 
-| Возможность | Статус | Признак / примечание |
-|---|---|---|
-| `libdunit` (no_std обёртки syscalls) | ✅ | все приложения линкуются с ней |
-| Терминал / tty | ✅ | `Dunit OS 1.0.0 (Green Tea) tty1`, `root@dunit:~#` |
-| Встроенные приложения (`/app/*`) | ✅ | `runtime_stress`, `ipc_parent`, `elf_demo`, `fault_pf` и др. отрабатывают |
-| Raw framebuffer/ввод из userspace | 🟡 | доступны напрямую, без capability/разграничения |
-| GUI-режим | 🧪 | код ветки есть; текущий прогон идёт в terminal mode |
-| Динамическая линковка / PIE | ⛔ | только static non-PIE ELF |
+These are prior results, not new proofs for an arbitrary later change:
 
-## Что подтверждают встроенные smoke-тесты
+| Date / source | Scope |
+|---|---|
+| 24 October, M6 integration | One regression run: 40 contracts, 73 commands, 175 required markers, zero forbidden. Static C ABI, fd/PTY/lifecycle, musl threads, TCC/Lua, themes/SVG and desktop policy; other suites were separate. |
+| 24 October, thread stress | 1000 joinable and 1000 detached threads with TLS/errno/malloc/yield; both completed without previous OOM. |
+| 24 October, persistence | 131072-byte musl write, shutdown and raw-image reboot/readback at `/persist`; hash `b4c071280fb62325`. |
+| 24 October, reproducibility | Offline clean-fork libc archive reproduced SHA-256 `3941cd27e27ff606698b8329a2d290c7db06afc8c9bd0b8ee78cf528be1874fa`. |
+| 24 October, GUI | Separate 512/768/1024 MiB smoke matrix, production 3K mode switching and SVG UI; Lua failure/timeout fallback checked separately. |
+| OP3 published base `f713fc7` | PTY generation/endpoint ownership, task/fd retirement and native resource/boot/GUI/production suites; [retained receipts](../performance/smp.md#verification). |
 
-Прогон `runtime_stress` последовательно проходит (все с `OK` в логе):
-allocator, keyboard decoder, VFS, usercopy, resumable child, IPC, повторный
-spawn (×3 `elf_demo`), kill, обработка page fault. Завершается
-`[EXEC] /app/runtime_stress returned code=0` без утечки VFS-хендлов
-(`VFS handles clean`). Отдельно `ipc_parent` завершается `code=0`.
-
-Это и есть текущая планка «не сломать»: любое изменение ядра должно оставлять
-эти строки на месте при прогоне через `tools/qemu_test.py`.
-
-## Крупные пробелы (входы в последующие milestones)
-
-- **M1** — вытеснение по-настоящему, потоки, TLS, futex, полноценный `mmap`.
-- **Сеть** — packet I/O для e1000 и сетевой стек (сейчас `not-implemented`).
-- **Хранилище** — реальный диск/DunitFS смонтирован и переживает перезагрузку.
-- **USB** — энумерация устройств поверх готового HID-парсера.
-- **ABI** — versioned манифест вместо ручного дублирования номеров (см.
-  [dunit-abi-v1.md](./dunit-abi-v1.md)), capability-модель для framebuffer/ввода.
-- **M6** — musl fork поверх замороженного Dunit ABI v1.
+Original M6 source findings used revision `36e85ce`. Subsequent fixes covered
+literal-path kernel spawning, userspace command resolution, versioned spawn
+records, strict unsupported libc errors, realtime validity, static TLS auxv,
+thread reclamation, MemFS unlink identity, shared-buffer release and configuration
+validation. Old line numbers and unaccepted recommendations at that revision
+must not be read as current failures or pending M7 decisions.
