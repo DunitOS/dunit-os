@@ -27,7 +27,7 @@ paths. They must continue to work when userspace initialization fails.
 | Boot | BIOS/UEFI, Limine framebuffer and external initrd | `tools/boot_markers.json`, `tools/test_image_profiles.py` |
 | Memory | PMM-backed growing heap, isolated address spaces, guarded VM, W^X, shared buffers and eager private file mappings | `tools/boot_markers.json`, `tools/test_user_memory.py` |
 | Tasks | Timer preemption, per-thread GPR/kernel stack/FXSAVE/static TLS, spawn/wait/kill, fault isolation, futex waits | `tools/boot_markers.json`, `tools/m6_thread_lifecycle_markers.json` |
-| Ownership | Task registry pins, exclusive execution admission, deferred dispatch/fd retirement, locked PTY queues | `tools/test_process_resources.py`, `tools/test_pty.py` |
+| Ownership | Task registry pins, exclusive execution admission, deferred dispatch/fd retirement, locked PTY queues and scoped console/stdin transactions | `tools/test_process_resources.py`, `tools/test_pty.py`, `tools/boot_markers.json` |
 | Waiting | Blocking timer/IPC/futex and level-triggered mixed IPC/fd/timer/child wait-set | `tools/waitset_markers.json`, `tools/test_wait_queue.py` |
 | Files | MemFS root, initrd apps/assets, task snapshots, DunitFS v2 at `/persist`, fd duplication/pipes/flags/spawn actions | `tools/m6_fileops_markers.json`, `tools/m6_native_fd_markers.json` |
 | Devices | PS/2 input, queued pointer input, PCI, framebuffer/Bochs display modes, AHCI and virtio-blk | driver-specific and GUI marker contracts |
@@ -67,10 +67,10 @@ Compatibility entry points are retained where callers still require them.
 
 ## Open gates
 
-- [OP4 ownership gates](../performance/smp.md#pre-op4-gates): active global VMM,
-  terminal/scrollback, recovery-shell and terminal stdin paths still need scoped
-  ownership before AP execution. Registry/PTY improvements alone do not close
-  these gates. Lock ordering and deferred resource destruction remain mandatory.
+- [OP4 ownership gates](../performance/smp.md#pre-op4-gates): console/stdin scopes
+  and the former global VMM getter are addressed. Display-master/modeset lifetime,
+  driver DMA retirement, remote cancellation, lock ranking/IRQ progress and real
+  concurrent VM/application stress remain open before AP dispatch.
 - Secure entropy is absent. ELF AT_RANDOM bootstrap bytes are not a CSPRNG and
   must not support cryptography or a claim of production hash hardening.
 - Signals/interruption, cancellation, process-image exec/fork, dynamic loader/DTV,

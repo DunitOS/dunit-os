@@ -196,11 +196,31 @@ These boundaries do not make arbitrary task callbacks reentrant.
 
 ## Pre-OP4 gates
 
-The current console getter returns an unrestricted mutable reference retained by
-the shell loop and requested again by foreground syscall output. Terminal stdin
-uses a shared UnsafeCell buffer with a separate atomic owner PID; its read/write/
-clear/readiness operations are not one cross-CPU transaction. Scoped ownership
-must end before HAL entry rather than returning a mutable reference past a lock.
+The global VMM getter was removed in the acknowledged-TLB implementation.
+Boot metadata is atomic; MMIO extents and kernel table publication share a lock,
+and process mappings use owning address-space scopes. Active-root mutation
+helpers are restricted to early boot smoke tests. This closes the old getter
+item, not the concurrent shared-VM/final-reader acceptance gates.
+
+Console history now belongs to the console under one IRQ-safe lock. Shell and
+foreground output use a handle whose operations release the guard before return;
+no console borrow/lock spans shell commands, VFS work, stdin polling or HAL entry.
+Serial output runs outside that lock and long output releases it between bounded
+character batches. Foreground PID/sink and the stdin owner/line/readiness share a
+separate lock. Ancestry checks precede acquisition and revalidate the foreground
+selection; notifications follow unlock. Partial reads retain their owner, a
+competing request cannot replace unread input, and a buffered line is not a new
+keyboard request. Foreground switches discard pending input atomically.
+
+`kernel/tests/terminal_stdin.rs` checks 10,000 concurrently supplied lines with
+one-byte reads, owner isolation, stale supply and reset. `terminal_display.rs`
+checks independent history, concurrent handles/snapshots, serial reentry and the
+existing display lease. `tools/boot_markers.json` additionally drives two real
+`calc` input lines, normal exit, Ctrl+C and a subsequent successful exec under
+TCG on one/eight CPUs. These checks exercise UP application dispatch; APs park.
+Full repaint IRQ-off latency, display-master transitions and modeset/mapping
+retirement remain open. An atomic display-owner check alone cannot synchronize
+an in-flight framebuffer write with lease acquisition or mapping destruction.
 
 AHCI and Virtio block error paths also need DMA retirement. AHCI command timeout
 can leave a slot active while the next transfer rewrites its command/data backing;
@@ -213,8 +233,9 @@ receipts do not prove delayed/stuck-device behavior.
 The following require implementation or further native proof before AP application
 dispatch:
 
-- Console/foreground/stdin and every driver shared-state owner, complete
-  task/VFS/backend/device/heap/PMM/IRQ lock ranking, and bounded IRQ-off work.
+- Display-master/console/modeset coordination and remaining driver shared-state
+  owners, complete task/VFS/backend/device/heap/PMM/IRQ lock ranking, and bounded
+  IRQ-off work.
 - Interruptible syscall/IPI progress, remote cancellation/group-stop
   acknowledgements and cleanup only after active CPUs hand back execution.
 - Remote runqueues, reschedule/idle notifications, migration and wake/check-sleep

@@ -139,9 +139,6 @@ mod registry_smoke;
 #[cfg(feature = "boot-smoke-tests")]
 pub use registry_smoke::run_registry_ownership_smoke;
 use registry::{table as process_table, with_record as with_task_record};
-static TERMINAL_FOREGROUND_PID: AtomicU64 = AtomicU64::new(0);
-static FOREGROUND_OUTPUT_SINK: AtomicU64 = AtomicU64::new(ProcessOutputSink::SerialOnly as u64);
-static TERMINAL_STDIN_WAITING_PID: AtomicU64 = AtomicU64::new(0);
 /// Count of committed timer-driven context switches. Only advanced when
 /// `timer_preempt_save_and_schedule` actually hands the CPU to another process,
 /// so a non-zero value is proof that preemption fired (see M1 [PREEMPT-TEST]).
@@ -151,14 +148,18 @@ static PREEMPTION_ENABLED: AtomicBool = AtomicBool::new(true);
 /// Registration and notification checkpoint share this lock; task -> queue.
 static WAIT_QUEUE: IrqSafeSpinLock<WaitQueue> = IrqSafeSpinLock::new(WaitQueue::new());
 
-/// Буфер строки stdin терминала для процесса, ожидающего ввод. Раньше три
-/// `static mut`; теперь одна структура за `UnsafeCell`-newtype. Доступ идёт
-/// кооперативно (подача из оболочки и чтение из syscall на одном CPU); какой
-/// именно PID вправе читать, определяет отдельный атомик TERMINAL_STDIN_WAITING_PID.
-struct TerminalStdinCell(UnsafeCell<TerminalStdin>);
-unsafe impl Sync for TerminalStdinCell {}
-static TERMINAL_STDIN: TerminalStdinCell =
-    TerminalStdinCell(UnsafeCell::new(TerminalStdin::new()));
+/// Foreground selection and pending line ownership are one transaction. No
+/// registry, wait-queue, console or user-copy work runs while this lock is held.
+struct TerminalState {
+    foreground: Option<ProcessId>,
+    sink: ProcessOutputSink,
+    stdin: TerminalStdin,
+}
+static TERMINAL_STATE: IrqSafeSpinLock<TerminalState> = IrqSafeSpinLock::new(TerminalState {
+    foreground: None,
+    sink: ProcessOutputSink::SerialOnly,
+    stdin: TerminalStdin::new(),
+});
 
 pub const WAIT_KIND_EMPTY: i32 = -1;
 pub const WAIT_KIND_SPAWN_PREPARED: i32 = -2;
@@ -1207,15 +1208,6 @@ pub enum FdCleanup {
 pub enum ProcessOutputSink {
     SerialOnly = 0,
     Terminal = 1,
-}
-
-impl ProcessOutputSink {
-    fn from_u64(value: u64) -> Self {
-        match value {
-            1 => Self::Terminal,
-            _ => Self::SerialOnly,
-        }
-    }
 }
 
 /// Descriptor flags are per-fd; status belongs to the shared open description.

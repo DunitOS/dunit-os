@@ -2,9 +2,33 @@
   "description": "Executable link between WORKING claims in docs/architecture/current-state.md and the serial markers that prove them. tools/qemu_test.py --markers-file tools/boot_markers.json fails the run if any required marker is missing or any forbidden marker appears. This is the M0 CI budget: a status claim is only allowed to say WORKING if a marker here traces it to a real boot.",
   "run": {
     "config": "limine_test_terminal.conf",
-    "cmd": ["exec /app/runtime_stress", "exec /app/ipc_parent"]
+    "cmd": ["exec /app/runtime_stress", "exec /app/ipc_parent", "exec /app/calc", "exec /app/./calc", "exec /app/ipc_parent"],
+    "command_actions": {
+      "exec /app/calc": [
+        {"wait_marker": "calc> "},
+        {"type_text": "410+3"},
+        {"wait_marker": "[STDOUT] 413"},
+        {"type_text": "700+1"},
+        {"wait_marker": "[STDOUT] 701"},
+        {"type_text": "exit"},
+        {"wait_marker": "[EXEC] /app/calc returned code=0"}
+      ],
+      "exec /app/./calc": [
+        {"wait_marker": "calc> "},
+        {"execute": "send-key", "arguments": {"keys": [{"type": "qcode", "data": "ctrl"}, {"type": "qcode", "data": "c"}], "hold-time": 80}},
+        {"wait_marker": "exec: interrupted"}
+      ],
+      "exec /app/ipc_parent": [
+        {"wait_marker": "ipc_parent: OK"},
+        {"wait_marker": "[EXEC] /app/ipc_parent returned code=0"}
+      ]
+    }
   },
   "required": [
+    {"marker": "[STDOUT] 413", "claim": "foreground terminal stdin supplies a complete expression", "source": "kernel/src/process/terminal_stdin.rs; userspace/system_apps/calc/src/main.rs"},
+    {"marker": "[STDOUT] 701", "claim": "a second terminal line reaches the same foreground reader", "source": "kernel/src/process/lifecycle.rs"},
+    {"marker": "calc: bye", "claim": "interactive foreground application exits and returns console ownership", "source": "kernel/src/lib.rs; kernel/src/command.rs"},
+    {"marker": "exec: interrupted", "claim": "Ctrl+C clears pending input before a subsequent foreground exec", "source": "kernel/src/lib.rs; kernel/src/process/lifecycle.rs"},
     {"marker": "[DF-TEST] syscall+irq flags preserved", "claim": "DF cleared at kernel entry and preserved in userspace across timer interrupts and syscall return", "source": "userspace/system_apps/preempt_child/src/main.rs; kernel/src/hal.rs; kernel/src/command.rs"},
     { "marker": "[KERNEL] START", "claim": "boot/kernel handoff", "source": "kernel/src/lib.rs" },
     { "marker": "GDT loaded", "claim": "GDT", "source": "hal/src/gdt.c" },

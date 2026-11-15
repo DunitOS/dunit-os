@@ -1590,7 +1590,7 @@ fn write_stdio(label: &str, data: &[u8]) {
 fn write_terminal_foreground(data: &[u8]) {
     match crate::process::current_process_output_sink() {
         Some(crate::process::ProcessOutputSink::Terminal) => {
-            let Some(console) = crate::terminal::get_console() else {
+            let Some(mut console) = crate::terminal::console() else {
                 return;
             };
             match core::str::from_utf8(data) {

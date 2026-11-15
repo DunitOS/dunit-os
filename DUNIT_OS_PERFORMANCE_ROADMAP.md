@@ -30,7 +30,7 @@ measurements do not establish per-event tails or input-to-photon latency.
 | OP0 | Partial | KVM runner, remaining scenes, full telemetry, budgets/noise |
 | OP1 | Partial | Remote lifecycle/cancellation and IRQ/preemption/idle model |
 | OP2 | Partial | Timer event model, x2APIC/KVM/hardware platform coverage |
-| OP3 | In progress | Console/stdin, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
+| OP3 | In progress | Display/device ownership, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
 | OP4 | Prepared only | AP application dispatch, remote wakeups, migration and overlapping execution |
 | OP5 | Not started | Scheduler scaling, accounting and latency |
 | OP6–OP8 | Open | New profile-driven input, rendering, memory and I/O work |
@@ -152,13 +152,20 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
 - [x] Locked PTY table, owning endpoint snapshots for I/O/ioctl/readiness, attachment
   identity across final-drop/reattach, notifications and last endpoint/file
   owners retired after task scopes on close/dup/install/bind/error paths.
+- [x] Global VMM ownership: atomic boot metadata, locked MMIO extent/kernel-table
+  publication and scoped owning address-space access. The old VMM getter was
+  removed by the acknowledged-TLB work; active-root mutation helpers are boot-smoke-only.
+- [x] Console/scrollback ownership ends at each output, cursor, theme or scroll
+  operation; shell/exec retains only a handle. Foreground selection, stdin owner,
+  supplied bytes and readiness share one lock; partial reads retain ownership,
+  competing requests cannot steal a line and wake callbacks run after unlock.
+  Host concurrency and native interactive/interrupt/re-exec regressions cover this scope.
 
 Remaining gates, in order:
 
-- [ ] Replace the remaining unsynchronized global VMM access with scoped ownership.
-- [ ] Console/stdin: transact owner and line state together; short console/scrollback
-  scopes, no console lock through shell/exec; coordinate framebuffer render/
-  modeset and remaining driver/heap edges.
+- [ ] Coordinate console framebuffer writes with display-master acquisition/release
+  and modeset/mapping retirement; bound full repaint IRQ-off time and finish
+  remaining driver/heap edges.
 - [ ] Remote cancellation/stop acknowledgements and group finalization. Publish
   waitable exit only after executors stop and cleanup completes; cover nested
   dispatch, join/detach and cancelling waits. Check/register identity alone

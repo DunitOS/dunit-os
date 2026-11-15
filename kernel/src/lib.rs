@@ -200,9 +200,9 @@ fn load_terminal_theme() -> &'static term_theme::TermTheme {
     term_theme::DEFAULT
 }
 
-fn terminal_exec(console: &mut terminal::FbConsole, cwd: &str, command_line: &str) {
+fn terminal_exec(console: &mut terminal::Console, cwd: &str, command_line: &str) {
     struct TerminalInput<'a> {
-        console: &'a mut terminal::FbConsole,
+        console: &'a mut terminal::Console,
     }
 
     impl command::ExecInput for TerminalInput<'_> {
@@ -281,7 +281,7 @@ fn terminal_exec(console: &mut terminal::FbConsole, cwd: &str, command_line: &st
 }
 
 fn terminal_collect_foreground_input(
-    console: &mut terminal::FbConsole,
+    console: &mut terminal::Console,
     pid: process::ProcessId,
 ) -> bool {
     let mut input = [0u8; 256];
@@ -331,8 +331,7 @@ fn terminal_collect_foreground_input(
                         input[len] = b'\n';
                         len += 1;
                     }
-                    let _ = process::provide_terminal_stdin(pid, &input[..len]);
-                    return true;
+                    return process::provide_terminal_stdin(pid, &input[..len]).is_ok();
                 }
 
                 if ch == '\t' {
@@ -954,11 +953,11 @@ pub extern "C" fn kernel_main(
             screen_log("[ OK ] Framebuffer parameters extracted", false);
 
             screen_log("[ .. ] Calling terminal::init()", false);
-            terminal::init(fb_addr, width, height, pitch);
+            unsafe { terminal::init(fb_addr, width, height, pitch); }
             screen_log("[ OK ] terminal::init() returned", false);
 
             screen_log("[ .. ] Getting console instance", false);
-            if let Some(console) = terminal::get_console() {
+            if let Some(mut console) = terminal::console() {
                 screen_log("[ OK ] Console instance obtained", false);
 
                 // Apply the configured kernel-terminal color theme BEFORE the
@@ -1120,7 +1119,7 @@ pub extern "C" fn kernel_main(
                                             let mut cwd_buf =
                                                 alloc::string::String::from(terminal_cwd());
                                             let outcome =
-                                                shell::run_command(console, &mut cwd_buf, cmd_str);
+                                                shell::run_command(&mut console, &mut cwd_buf, cmd_str);
                                             terminal_set_cwd(&cwd_buf);
                                             match outcome {
                                                 shell::ShellOutcome::Handled => "",
@@ -1135,7 +1134,7 @@ pub extern "C" fn kernel_main(
                                                     if args.is_empty() {
                                                         "Usage: exec <path>"
                                                     } else {
-                                                        terminal_exec(console, &cwd_buf, &args);
+                                                        terminal_exec(&mut console, &cwd_buf, &args);
                                                         ""
                                                     }
                                                 }

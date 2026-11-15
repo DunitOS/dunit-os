@@ -76,45 +76,34 @@ pub fn set_terminal_foreground_process(pid: Option<ProcessId>) {
 }
 
 pub fn set_foreground_process(pid: Option<ProcessId>, sink: ProcessOutputSink) {
-    TERMINAL_FOREGROUND_PID.store(pid.map(|pid| pid.0).unwrap_or(0), Ordering::SeqCst);
-    FOREGROUND_OUTPUT_SINK.store(
-        if pid.is_some() {
-            sink as u64
-        } else {
-            ProcessOutputSink::SerialOnly as u64
-        },
-        Ordering::SeqCst,
-    );
-    if pid.is_none() {
-        TERMINAL_STDIN_WAITING_PID.store(0, Ordering::SeqCst);
-        unsafe {
-            let stdin = &mut *TERMINAL_STDIN.0.get();
-            stdin.clear();
-        }
+    let mut terminal = TERMINAL_STATE.lock();
+    let sink = if pid.is_some() { sink } else { ProcessOutputSink::SerialOnly };
+    if terminal.foreground != pid || terminal.sink != sink || pid.is_none() {
+        terminal.stdin.clear();
+    }
+    terminal.foreground = pid;
+    terminal.sink = sink;
+}
+
+fn is_foreground_descendant(mut pid: ProcessId, foreground: ProcessId) -> bool {
+    loop {
+        if pid == foreground { return true; }
+        let parent = {
+            let table = process_table();
+            process_record_index(&table, pid).and_then(|index| table[index].parent)
+        };
+        let Some(parent) = parent else { return false; };
+        pid = parent;
     }
 }
 
 pub fn current_process_output_sink() -> Option<ProcessOutputSink> {
-    let foreground = TERMINAL_FOREGROUND_PID.load(Ordering::SeqCst);
-    if foreground == 0 {
-        return None;
-    }
-
-    let mut pid = current_pid().map(|id| id.0).unwrap_or(0);
-    while pid != 0 {
-        if pid == foreground {
-            return Some(ProcessOutputSink::from_u64(
-                FOREGROUND_OUTPUT_SINK.load(Ordering::SeqCst),
-            ));
-        }
-        let table = process_table();
-        let Some(index) = process_record_index(&table, ProcessId(pid)) else {
-            return None;
-        };
-        pid = table[index].parent.map(|parent| parent.0).unwrap_or(0);
-    }
-
-    None
+    let pid = current_pid()?;
+    let (foreground, sink) = {
+        let terminal = TERMINAL_STATE.lock();
+        (terminal.foreground?, terminal.sink)
+    };
+    is_foreground_descendant(pid, foreground).then_some(sink)
 }
 
 pub fn current_process_is_terminal_foreground() -> bool {
@@ -123,49 +112,40 @@ pub fn current_process_is_terminal_foreground() -> bool {
 
 pub fn request_terminal_stdin_for_current() -> Result<(), ProcessError> {
     let pid = current_pid().ok_or(ProcessError::NoCurrentProcess)?;
-    if !current_process_is_terminal_foreground() {
+    let foreground = {
+        let terminal = TERMINAL_STATE.lock();
+        if terminal.sink != ProcessOutputSink::Terminal {
+            return Err(ProcessError::NoCurrentProcess);
+        }
+        terminal.foreground.ok_or(ProcessError::NoCurrentProcess)?
+    };
+    if !is_foreground_descendant(pid, foreground) {
         return Err(ProcessError::NoCurrentProcess);
     }
-    TERMINAL_STDIN_WAITING_PID.store(pid.0, Ordering::SeqCst);
+    let mut terminal = TERMINAL_STATE.lock();
+    // Registry ancestry is checked without the terminal lock. Revalidate the
+    // selection before publishing a request so a foreground switch wins.
+    if terminal.foreground != Some(foreground) || terminal.sink != ProcessOutputSink::Terminal {
+        return Err(ProcessError::NoCurrentProcess);
+    }
+    terminal.stdin.request(pid.0);
     Ok(())
 }
 
 pub fn terminal_stdin_waiting_pid() -> Option<ProcessId> {
-    let pid = TERMINAL_STDIN_WAITING_PID.load(Ordering::SeqCst);
-    if pid == 0 {
-        None
-    } else {
-        Some(ProcessId(pid))
-    }
+    TERMINAL_STATE.lock().stdin.waiting_pid().map(ProcessId)
 }
 
 pub fn provide_terminal_stdin(pid: ProcessId, data: &[u8]) -> Result<(), ProcessError> {
-    if TERMINAL_STDIN_WAITING_PID.load(Ordering::SeqCst) != pid.0 {
-        return Err(ProcessError::NoSuchProcess);
-    }
-    unsafe {
-        let stdin = &mut *TERMINAL_STDIN.0.get();
-        stdin.provide(data);
-    }
+    let supplied = TERMINAL_STATE.lock().stdin.provide(pid.0, data);
+    if !supplied { return Err(ProcessError::NoSuchProcess); }
     wake_poll_waiters();
     Ok(())
 }
 
 pub fn take_terminal_stdin_for_current(out: &mut [u8]) -> Result<Option<usize>, ProcessError> {
     let pid = current_pid().ok_or(ProcessError::NoCurrentProcess)?;
-    if TERMINAL_STDIN_WAITING_PID.load(Ordering::SeqCst) != pid.0 {
-        return Ok(None);
-    }
-    unsafe {
-        let stdin = &mut *TERMINAL_STDIN.0.get();
-        let read = stdin.take(out);
-        // WAITING_PID also owns the supplied line. Keep that ownership while
-        // short reads leave bytes buffered, including the terminating newline.
-        if read.is_some() && !stdin.is_ready() {
-            TERMINAL_STDIN_WAITING_PID.store(0, Ordering::SeqCst);
-        }
-        Ok(read)
-    }
+    Ok(TERMINAL_STATE.lock().stdin.take(pid.0, out))
 }
 
 pub fn get_process_snapshots() -> Vec<ProcessSnapshot> {
@@ -477,9 +457,8 @@ pub(crate) fn wake_wait_set_waiters() {
     wake_matching(&WAIT_QUEUE, |entry| entry.key == WaitKey::WaitSet, 0, wake_entry);
 }
 pub fn terminal_input_ready() -> bool {
-    let owner = TERMINAL_STDIN_WAITING_PID.load(Ordering::SeqCst);
-    owner != 0 && current_pid().map(|pid| pid.0) == Some(owner)
-        && unsafe { (&*TERMINAL_STDIN.0.get()).is_ready() }
+    let Some(pid) = current_pid() else { return false; };
+    TERMINAL_STATE.lock().stdin.is_ready(pid.0)
 }
 
 /// Wake every process blocked on the pipe end `id`.

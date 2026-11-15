@@ -1,6 +1,6 @@
 //! Shared command core used by both the kernel terminal (terminal mode) and the
 //! GUI terminal. Command handlers write to a `ShellSink` so the same dispatcher
-//! drives `terminal::FbConsole` and the GUI line buffer without duplication.
+//! drives `terminal::Console` and the GUI line buffer without duplication.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -73,15 +73,15 @@ impl core::fmt::Write for SinkWriter<'_> {
     }
 }
 
-impl ShellSink for crate::terminal::FbConsole {
+impl ShellSink for crate::terminal::Console {
     fn write_str(&mut self, s: &str) {
-        crate::terminal::FbConsole::write_str(self, s);
+        crate::terminal::Console::write_str(self, s);
     }
     fn set_fg_color(&mut self, color: u32) {
-        crate::terminal::FbConsole::set_fg_color(self, color);
+        crate::terminal::Console::set_fg_color(self, color);
     }
     fn reset_fg_color(&mut self) {
-        crate::terminal::FbConsole::reset_fg_color(self);
+        crate::terminal::Console::reset_fg_color(self);
     }
 }
 

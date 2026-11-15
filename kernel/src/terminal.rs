@@ -1,17 +1,16 @@
-use core::cell::UnsafeCell;
+use crate::sync::IrqSafeSpinLock;
 // Every scanout-writing primitive honors the existing display-master lease.
 // Terminal history and serial output continue while userspace owns the display.
-use core::sync::atomic::{AtomicBool, Ordering};
 
-pub struct Framebuffer {
-    pub address: *mut u32,
-    pub width: usize,
-    pub height: usize,
-    pub pitch: usize,
+struct Framebuffer {
+    address: *mut u32,
+    width: usize,
+    height: usize,
 }
 
-pub struct FbConsole {
+pub(crate) struct FbConsole {
     fb: Framebuffer,
+    scrollback: ScrollbackState,
     cursor_x: usize,
     cursor_y: usize,
     char_width: usize,
@@ -49,12 +48,12 @@ enum EscState {
 /// Framebuffer is XRGB — drop the theme's 0xFF alpha byte so a `0xAARRGGBB`
 /// preset color writes cleanly as a pixel.
 #[inline]
-fn rgb(color: u32) -> u32 {
+const fn rgb(color: u32) -> u32 {
     color & 0x00FF_FFFF
 }
 
 /// Build the 16-slot XRGB palette from a theme (0..=7 normal, 8..=15 bright).
-fn palette_from(t: &term_theme::TermTheme) -> [u32; 16] {
+const fn palette_from(t: &term_theme::TermTheme) -> [u32; 16] {
     let mut p = [0u32; 16];
     let mut i = 0;
     while i < 8 {
@@ -78,17 +77,19 @@ struct ScrollbackState {
     viewport_top: usize,
     view_at_bottom: bool,
 }
-struct ScrollbackCell(UnsafeCell<ScrollbackState>);
-unsafe impl Sync for ScrollbackCell {}
-static SCROLLBACK: ScrollbackCell = ScrollbackCell(UnsafeCell::new(ScrollbackState {
-    lines: [[b' '; MAX_COLS]; SCROLLBACK_LINES],
-    colors: [[DEFAULT_FG_COLOR; MAX_COLS]; SCROLLBACK_LINES],
-    lens: [0; SCROLLBACK_LINES],
-    len: 1,
-    active_line: 0,
-    viewport_top: 0,
-    view_at_bottom: true,
-}));
+impl ScrollbackState {
+    const fn new() -> Self {
+        Self {
+            lines: [[b' '; MAX_COLS]; SCROLLBACK_LINES],
+            colors: [[DEFAULT_FG_COLOR; MAX_COLS]; SCROLLBACK_LINES],
+            lens: [0; SCROLLBACK_LINES],
+            len: 1,
+            active_line: 0,
+            viewport_top: 0,
+            view_at_bottom: true,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -100,17 +101,26 @@ pub struct CursorInfo {
 }
 
 impl FbConsole {
-    pub fn new(fb_addr: *mut u32, width: usize, height: usize, pitch: usize) -> Self {
+    /// # Safety
+    /// The framebuffer must stay writable and valid until this console is
+    /// dropped. Concurrent pixel writers require separate display ownership.
+    /// A zero-sized framebuffer may use a null pointer while unpublished.
+    pub(crate) const unsafe fn new(
+        fb_addr: *mut u32,
+        width: usize,
+        height: usize,
+        pitch: usize,
+    ) -> Self {
         let stride = pitch / 4;
         let fb = Framebuffer {
             address: fb_addr,
             width,
             height,
-            pitch,
         };
 
         Self {
             fb,
+            scrollback: ScrollbackState::new(),
             cursor_x: 0,
             cursor_y: 0,
             char_width: 8,
@@ -129,12 +139,6 @@ impl FbConsole {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.cursor_x = 0;
-        self.cursor_y = 0;
-        self.reset_scrollback();
-    }
-
     fn max_chars(&self) -> usize {
         (self.fb.width / self.char_width).min(MAX_COLS)
     }
@@ -144,24 +148,22 @@ impl FbConsole {
     }
 
     fn reset_scrollback(&mut self) {
-        unsafe {
-            let sb = &mut *SCROLLBACK.0.get();
-            for row in 0..SCROLLBACK_LINES {
-                sb.lens[row] = 0;
-                for col in 0..MAX_COLS {
-                    sb.lines[row][col] = b' ';
-                    sb.colors[row][col] = DEFAULT_FG_COLOR;
-                }
-            }
-            sb.len = 1;
-            sb.active_line = 0;
-            sb.viewport_top = 0;
-            sb.view_at_bottom = true;
+        let sb = &mut self.scrollback;
+        for row in 0..SCROLLBACK_LINES {
+            sb.lens[row] = 0;
+            sb.lines[row].fill(b' ');
+            sb.colors[row].fill(DEFAULT_FG_COLOR);
         }
+        sb.len = 1;
+        sb.active_line = 0;
+        sb.viewport_top = 0;
+        sb.view_at_bottom = true;
     }
 
     fn clear_pixels(&mut self) {
-        if crate::handle::display_owner() != 0 { return; }
+        if crate::handle::display_owner() != 0 {
+            return;
+        }
         unsafe {
             let ptr = self.fb.address;
             let color = self.bg_color;
@@ -174,128 +176,107 @@ impl FbConsole {
     }
 
     fn follow_bottom(&mut self) {
-        unsafe {
-            let sb = &mut *SCROLLBACK.0.get();
-            let rows = self.visible_rows();
-            sb.viewport_top = sb.len.saturating_sub(rows);
-            sb.view_at_bottom = true;
-            self.cursor_y = sb.active_line.saturating_sub(sb.viewport_top);
-        }
+        let rows = self.visible_rows();
+        let sb = &mut self.scrollback;
+        sb.viewport_top = sb.len.saturating_sub(rows);
+        sb.view_at_bottom = true;
+        self.cursor_y = sb.active_line.saturating_sub(sb.viewport_top);
     }
 
     fn append_history_line(&mut self) {
-        unsafe {
-            let sb = &mut *SCROLLBACK.0.get();
-            if sb.len < SCROLLBACK_LINES {
-                sb.active_line = sb.len;
-                sb.len += 1;
-            } else {
-                for row in 1..SCROLLBACK_LINES {
-                    sb.lines[row - 1] = sb.lines[row];
-                    sb.colors[row - 1] = sb.colors[row];
-                    sb.lens[row - 1] = sb.lens[row];
-                }
-                sb.active_line = SCROLLBACK_LINES - 1;
+        let sb = &mut self.scrollback;
+        if sb.len < SCROLLBACK_LINES {
+            sb.active_line = sb.len;
+            sb.len += 1;
+        } else {
+            for row in 1..SCROLLBACK_LINES {
+                sb.lines[row - 1] = sb.lines[row];
+                sb.colors[row - 1] = sb.colors[row];
+                sb.lens[row - 1] = sb.lens[row];
             }
-
-            let al = sb.active_line;
-            sb.lens[al] = 0;
-            for col in 0..MAX_COLS {
-                sb.lines[al][col] = b' ';
-                sb.colors[al][col] = self.fg_color;
-            }
+            sb.active_line = SCROLLBACK_LINES - 1;
         }
+        let al = sb.active_line;
+        sb.lens[al] = 0;
+        sb.lines[al].fill(b' ');
+        sb.colors[al].fill(self.fg_color);
     }
 
     fn write_history_char(&mut self, ch: u8) {
-        unsafe {
-            let max_chars = self.max_chars();
-            if self.cursor_x >= max_chars {
-                self.cursor_x = 0;
-                self.append_history_line();
-                self.follow_bottom();
-                self.render_viewport();
-            }
-
-            let sb = &mut *SCROLLBACK.0.get();
-            let line = sb.active_line;
-            let col = self.cursor_x;
-            if line < SCROLLBACK_LINES && col < MAX_COLS {
-                sb.lines[line][col] = ch;
-                sb.colors[line][col] = self.fg_color;
-                if sb.lens[line] <= col {
-                    sb.lens[line] = col + 1;
-                }
+        if self.cursor_x >= self.max_chars() {
+            self.cursor_x = 0;
+            self.append_history_line();
+            self.follow_bottom();
+            self.render_viewport();
+        }
+        let sb = &mut self.scrollback;
+        let line = sb.active_line;
+        let col = self.cursor_x;
+        if line < SCROLLBACK_LINES && col < MAX_COLS {
+            sb.lines[line][col] = ch;
+            sb.colors[line][col] = self.fg_color;
+            if sb.lens[line] <= col {
+                sb.lens[line] = col + 1;
             }
         }
     }
 
     fn erase_history_char(&mut self) {
-        unsafe {
-            if self.cursor_x == 0 {
-                return;
-            }
-            self.cursor_x -= 1;
-            let sb = &mut *SCROLLBACK.0.get();
-            let line = sb.active_line;
-            let col = self.cursor_x;
-            if line < SCROLLBACK_LINES && col < MAX_COLS {
-                sb.lines[line][col] = b' ';
-                sb.colors[line][col] = self.fg_color;
-                while sb.lens[line] > 0
-                    && sb.lines[line][sb.lens[line] - 1] == b' '
-                {
-                    sb.lens[line] -= 1;
-                }
+        if self.cursor_x == 0 {
+            return;
+        }
+        self.cursor_x -= 1;
+        let sb = &mut self.scrollback;
+        let line = sb.active_line;
+        let col = self.cursor_x;
+        if line < SCROLLBACK_LINES && col < MAX_COLS {
+            sb.lines[line][col] = b' ';
+            sb.colors[line][col] = self.fg_color;
+            while sb.lens[line] > 0 && sb.lines[line][sb.lens[line] - 1] == b' ' {
+                sb.lens[line] -= 1;
             }
         }
     }
 
     fn render_viewport(&mut self) {
         self.clear_pixels();
-        unsafe {
-            let sb = &*SCROLLBACK.0.get();
-            let rows = self.visible_rows();
-            let max_chars = self.max_chars();
-            for screen_row in 0..rows {
-                let history_row = sb.viewport_top + screen_row;
-                if history_row >= sb.len {
-                    break;
-                }
-                let len = sb.lens[history_row].min(max_chars);
-                for col in 0..len {
-                    self.draw_glyph_color(
-                        col,
-                        screen_row,
-                        sb.lines[history_row][col],
-                        sb.colors[history_row][col],
-                    );
-                }
+        let rows = self.visible_rows();
+        let max_chars = self.max_chars();
+        for screen_row in 0..rows {
+            let history_row = self.scrollback.viewport_top + screen_row;
+            if history_row >= self.scrollback.len {
+                break;
             }
-
-            if sb.active_line >= sb.viewport_top && sb.active_line < sb.viewport_top + rows {
-                self.cursor_y = sb.active_line - sb.viewport_top;
-            } else {
-                self.cursor_y = rows.saturating_sub(1);
+            let len = self.scrollback.lens[history_row].min(max_chars);
+            for col in 0..len {
+                let ch = self.scrollback.lines[history_row][col];
+                let color = self.scrollback.colors[history_row][col];
+                self.draw_glyph_color(col, screen_row, ch, color);
             }
+        }
+        let sb = &self.scrollback;
+        if sb.active_line >= sb.viewport_top && sb.active_line < sb.viewport_top + rows {
+            self.cursor_y = sb.active_line - sb.viewport_top;
+        } else {
+            self.cursor_y = rows.saturating_sub(1);
         }
     }
 
     pub fn scroll_view(&mut self, lines: i32) {
-        unsafe {
-            let sb = &mut *SCROLLBACK.0.get();
-            let rows = self.visible_rows();
-            let max_top = sb.len.saturating_sub(rows);
-            if lines < 0 {
-                sb.viewport_top = sb.viewport_top.saturating_sub((-lines) as usize);
-            } else {
-                sb.viewport_top = (sb.viewport_top + lines as usize).min(max_top);
-            }
-            sb.view_at_bottom = sb.viewport_top == max_top;
-            let at_bottom = sb.view_at_bottom;
-            self.render_viewport();
-            self.draw_cursor(at_bottom);
+        let rows = self.visible_rows();
+        let sb = &mut self.scrollback;
+        let max_top = sb.len.saturating_sub(rows);
+        if lines < 0 {
+            sb.viewport_top = sb
+                .viewport_top
+                .saturating_sub(lines.unsigned_abs() as usize);
+        } else {
+            sb.viewport_top = sb.viewport_top.saturating_add(lines as usize).min(max_top);
         }
+        sb.view_at_bottom = sb.viewport_top == max_top;
+        let at_bottom = sb.view_at_bottom;
+        self.render_viewport();
+        self.draw_cursor(at_bottom);
     }
 
     pub fn clear_screen(&mut self) {
@@ -306,7 +287,9 @@ impl FbConsole {
     }
 
     pub fn clear_top_area(&mut self, lines: usize) {
-        if crate::handle::display_owner() != 0 { return; }
+        if crate::handle::display_owner() != 0 {
+            return;
+        }
         unsafe {
             let ptr = self.fb.address;
             let color = self.bg_color;
@@ -411,7 +394,11 @@ impl FbConsole {
         let n = if self.csi_n == 0 { 1 } else { self.csi_n }; // bare ESC[m == ESC[0m
         let mut i = 0;
         while i < n {
-            let p = if self.csi_n == 0 { 0 } else { self.csi_params[i] };
+            let p = if self.csi_n == 0 {
+                0
+            } else {
+                self.csi_params[i]
+            };
             match p {
                 0 => {
                     self.fg_color = self.default_fg;
@@ -488,11 +475,9 @@ impl FbConsole {
             return;
         }
 
-        unsafe {
-            if !(*SCROLLBACK.0.get()).view_at_bottom {
-                self.follow_bottom();
-                self.render_viewport();
-            }
+        if !self.scrollback.view_at_bottom {
+            self.follow_bottom();
+            self.render_viewport();
         }
 
         if c == '\x08' {
@@ -521,10 +506,8 @@ impl FbConsole {
         };
 
         self.write_history_char(ch_byte);
-        unsafe {
-            if (*SCROLLBACK.0.get()).view_at_bottom {
-                self.draw_glyph(self.cursor_x, self.cursor_y, ch_byte);
-            }
+        if self.scrollback.view_at_bottom {
+            self.draw_glyph(self.cursor_x, self.cursor_y, ch_byte);
         }
         self.cursor_x += 1;
     }
@@ -534,7 +517,9 @@ impl FbConsole {
     }
 
     fn draw_glyph_color(&mut self, char_x: usize, char_y: usize, ch: u8, fg_color: u32) {
-        if crate::handle::display_owner() != 0 { return; }
+        if crate::handle::display_owner() != 0 {
+            return;
+        }
         let glyph = get_font_glyph(ch);
         let px_x = char_x * self.char_width;
         let px_y = char_y * self.char_height;
@@ -559,21 +544,10 @@ impl FbConsole {
         }
     }
 
-    pub fn write_str(&mut self, s: &str) {
-        serial_write_text(s);
-        for c in s.chars() {
-            self.draw_char(c);
-        }
-    }
-
-    pub fn write_display_str(&mut self, s: &str) {
-        for c in s.chars() {
-            self.draw_char(c);
-        }
-    }
-
     pub fn draw_cursor(&mut self, visible: bool) {
-        if crate::handle::display_owner() != 0 { return; }
+        if crate::handle::display_owner() != 0 {
+            return;
+        }
         let px_x = self.cursor_x * self.char_width;
         let px_y = self.cursor_y * self.char_height;
         let color = if visible {
@@ -606,14 +580,20 @@ fn get_font_glyph(ch: u8) -> &'static [u8; 16] {
     &crate::console_font::FONT_8X16[ch as usize]
 }
 
-/// Хранилище единственной консоли фреймбуфера. Раньше `static mut MaybeUninit`;
-/// теперь `UnsafeCell`-newtype без `static mut`. Инициализируется один раз в
-/// `init` при загрузке, далее выдаётся кооперативному пути как `&'static mut`.
-struct ConsoleStorageCell(UnsafeCell<core::mem::MaybeUninit<FbConsole>>);
-unsafe impl Sync for ConsoleStorageCell {}
-static CONSOLE_STORAGE: ConsoleStorageCell =
-    ConsoleStorageCell(UnsafeCell::new(core::mem::MaybeUninit::uninit()));
-static CONSOLE_INITIALIZED: AtomicBool = AtomicBool::new(false);
+// The framebuffer pointer is used only under the console lock. This protects
+// console writers; display-master/modeset ownership is a separate device gate.
+unsafe impl Send for FbConsole {}
+
+struct ConsoleState {
+    initialized: bool,
+    console: FbConsole,
+}
+
+// Initialize the large history in static storage, never on a boot stack.
+static CONSOLE: IrqSafeSpinLock<ConsoleState> = IrqSafeSpinLock::new(ConsoleState {
+    initialized: false,
+    console: unsafe { FbConsole::new(core::ptr::null_mut(), 0, 0, 0) },
+});
 
 fn serial_write_text(text: &str) {
     use crate::serial::serial_write_byte;
@@ -625,45 +605,98 @@ fn serial_write_text(text: &str) {
     }
 }
 
-pub fn init(fb_addr: *mut u32, width: usize, height: usize, pitch: usize) {
-    unsafe {
-        let ptr = (*CONSOLE_STORAGE.0.get()).as_mut_ptr();
-        let stride = pitch / 4;
-
-        core::ptr::write(&mut (*ptr).fb.address, fb_addr);
-        core::ptr::write(&mut (*ptr).fb.width, width);
-        core::ptr::write(&mut (*ptr).fb.height, height);
-        core::ptr::write(&mut (*ptr).fb.pitch, pitch);
-        core::ptr::write(&mut (*ptr).cursor_x, 0);
-        core::ptr::write(&mut (*ptr).cursor_y, 0);
-        core::ptr::write(&mut (*ptr).char_width, 8);
-        core::ptr::write(&mut (*ptr).char_height, 16);
-        core::ptr::write(&mut (*ptr).fg_color, rgb(term_theme::DEFAULT.fg));
-        core::ptr::write(&mut (*ptr).bg_color, rgb(term_theme::DEFAULT.bg));
-        core::ptr::write(&mut (*ptr).stride, stride);
-        core::ptr::write(&mut (*ptr).palette, palette_from(term_theme::DEFAULT));
-        core::ptr::write(&mut (*ptr).default_fg, rgb(term_theme::DEFAULT.fg));
-        core::ptr::write(&mut (*ptr).bold, false);
-        core::ptr::write(&mut (*ptr).esc, EscState::Normal);
-        core::ptr::write(&mut (*ptr).csi_cur, 0);
-        core::ptr::write(&mut (*ptr).csi_params, [0; 8]);
-        core::ptr::write(&mut (*ptr).csi_n, 0);
-        core::ptr::write(&mut (*ptr).csi_has_param, false);
-
-        CONSOLE_INITIALIZED.store(true, Ordering::Relaxed);
-    }
+/// # Safety
+/// The boot framebuffer mapping must remain valid for the kernel's lifetime.
+/// Display lease/modeset coordination remains the caller's device contract.
+pub unsafe fn init(fb_addr: *mut u32, width: usize, height: usize, pitch: usize) {
+    let mut state = CONSOLE.lock();
+    assert!(!state.initialized, "terminal initialized twice");
+    state.console.fb = Framebuffer {
+        address: fb_addr,
+        width,
+        height,
+    };
+    state.console.stride = pitch / 4;
+    state.initialized = true;
 }
 
-pub fn get_console() -> Option<&'static mut FbConsole> {
-    unsafe {
-        if CONSOLE_INITIALIZED.load(Ordering::Relaxed) {
-            Some((*CONSOLE_STORAGE.0.get()).assume_init_mut())
-        } else {
-            None
+fn with_console<R>(f: impl FnOnce(&mut FbConsole) -> R) -> Option<R> {
+    let mut state = CONSOLE.lock();
+    state.initialized.then(|| f(&mut state.console))
+}
+
+/// A shell output handle. Each operation releases ownership before returning;
+/// retaining this handle across commands or HAL entry retains no console lock.
+pub struct Console(());
+
+pub fn console() -> Option<Console> {
+    CONSOLE.lock().initialized.then_some(Console(()))
+}
+
+impl Console {
+    pub fn write_str(&mut self, text: &str) {
+        // Serial I/O is independent and must not extend the console guard.
+        serial_write_text(text);
+        self.write_display_str(text);
+    }
+
+    pub fn write_display_str(&mut self, text: &str) {
+        // Bound each ownership scope even for a large syscall/shell output.
+        let mut chars = text.chars();
+        loop {
+            let mut chunk = ['\0'; 64];
+            let mut count = 0;
+            for slot in &mut chunk {
+                let Some(ch) = chars.next() else {
+                    break;
+                };
+                *slot = ch;
+                count += 1;
+            }
+            if count == 0 {
+                break;
+            }
+            with_console(|console| {
+                for &ch in &chunk[..count] {
+                    console.draw_char(ch);
+                }
+            });
         }
+    }
+
+    pub fn draw_char(&mut self, ch: char) {
+        with_console(|console| console.draw_char(ch));
+    }
+
+    pub fn draw_cursor(&mut self, show: bool) {
+        with_console(|console| console.draw_cursor(show));
+    }
+
+    pub fn scroll_view(&mut self, lines: i32) {
+        with_console(|console| console.scroll_view(lines));
+    }
+
+    pub fn clear_screen(&mut self) {
+        with_console(FbConsole::clear_screen);
+    }
+
+    pub fn clear_top_area(&mut self, lines: usize) {
+        with_console(|console| console.clear_top_area(lines));
+    }
+
+    pub fn set_theme(&mut self, theme: &term_theme::TermTheme) {
+        with_console(|console| console.set_theme(theme));
+    }
+
+    pub fn set_fg_color(&mut self, color: u32) {
+        with_console(|console| console.set_fg_color(color));
+    }
+
+    pub fn reset_fg_color(&mut self) {
+        with_console(FbConsole::reset_fg_color);
     }
 }
 
 pub fn get_cursor_info() -> Option<CursorInfo> {
-    get_console().map(|console| console.cursor_info())
+    with_console(|console| console.cursor_info())
 }
