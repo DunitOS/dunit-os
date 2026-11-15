@@ -8,6 +8,10 @@ open. [Current state](docs/architecture/current-state.md) describes the implemen
 Historical reports are evidence for their recorded commits, not fresh verification
 of today's tree. Git history retains the superseded roadmap and vault.
 
+`[x]` marks completed work with recorded verification. `[ ]` marks remaining
+work or acceptance. Partial milestones contain both; a checked foundation does
+not close its unchecked release gates.
+
 ## Purpose and architecture
 
 Dunit is an independent x86_64 desktop OS: Green Tea Kernel, native Dunit ABI,
@@ -45,7 +49,7 @@ all drivers moved to userspace.
 | Area | Implemented foundation | Open limits |
 | --- | --- | --- |
 | Boot | Limine BIOS/UEFI, deterministic Terminal/GUI configs, ISO/disk images, real initrd | Normal disk-backed root and complete first-boot profiles |
-| Memory | PMM/VMM/growable heap, isolated ELF, safe user copy, anonymous private mmap/unmap/protect, W^X/guards/shared objects | File mappings, demand paging/COW, dynamic loader/TLS, swap |
+| Memory | PMM/VMM/growable heap, isolated ELF, safe user copy, anonymous/private file mmap/unmap/protect, W^X/guards/shared objects | Shared file mappings, demand paging/COW, dynamic loader/TLS, swap |
 | Runtime | Preemptive UP, schedulable threads, FXSAVE x87/MMX/SSE, static TLS, futex, wait queues, clocks | Concurrent AP applications, priorities/accounting, AVX/XSAVE, signals/interruption, process-image exec/fork |
 | Objects/ABI | Generated native ABI, bounded IPC with sender identity, narrowing-only handles, display/input exclusivity | Public release compatibility suite, edge/persistent wait-set, future network contracts |
 | Files | VFS/MemFS root, fd/cwd/file APIs, dup/pipe/fcntl/poll/ioctl and atomic spawn actions | Independent complete DevFS/ProcFS contracts, disk root, ownership/groups/permissions and links |
@@ -89,22 +93,29 @@ as longevity goals. Builds/QEMU sharing artifacts and Git mutations are serializ
 
 ## M0 — truthful baseline and executable contracts
 
-Implemented: factual snapshot, ABI documentation, honest boot logs, CI warning
-budget and required/forbidden markers. Maintain a source/test link for every
-working claim and versioned decisions for process entry, handles, GUI, libc and
-future services. Acceptance: repeatable Terminal/GUI/BIOS/UEFI baseline with no
-claim based only on source-file existence; compiler warning budget may decrease,
-not silently grow. A historical snapshot must state its date and limits.
+- [x] Maintain an English current-state snapshot and native ABI documentation.
+- [x] Replace misleading boot claims with observable readiness/failure markers.
+- [x] Enforce CI warning budgets and source-linked required/forbidden markers.
+- [x] Verify the Terminal/GUI and BIOS/UEFI baseline through the shared harness.
+- [x] Remove the unused Rust bootloader experiment; Limine remains the bootloader.
+- [ ] Keep every working claim linked to its source/test and dated evidence.
+- [ ] Version future process-entry, handle, GUI, libc and service decisions.
+- [ ] Preserve repeatable baseline checks and lower warning budgets as debt clears;
+  source-file existence is never acceptance evidence.
 
 ## M1 — kernel runtime prerequisites
 
-Implemented: default UP preemption proven with CPU-bound parent/child without
-yield; per-thread GPR/kernel stack/FXSAVE and shared process address space/fds;
-thread create/exit/join and fault isolation; blocked sleep/IPC/timeouts; anonymous
-VM partial unmap/protect, guards/W^X and shared-frame teardown; Variant II static
-PT_TLS/FS.base; atomic compare-and-park native futex with timeout; capability
-memory/endpoints/display/input and narrowing-only transfer. Mutable globals have
-moved toward owned/locked/atomic state; their SMP safety is tracked in OP1–OP3.
+- [x] Enable UP timer preemption, checked with CPU-bound parent/child without yield.
+- [x] Give threads separate GPR, kernel stacks and FXSAVE state, sharing process
+  address space and fd ownership.
+- [x] Implement thread create/exit/join and isolate faults to the affected thread.
+- [x] Block on sleep, IPC and timeouts without a userspace polling loop.
+- [x] Implement anonymous VM partial unmap/protect, guards, W^X and shared-frame
+  teardown; eager private file mappings retain their documented EOF limits.
+- [x] Initialize independent Variant II static PT_TLS and FS.base per thread.
+- [x] Implement atomic compare-and-park futex wait/wake with timeouts.
+- [x] Provide capability memory/endpoints/display/input and narrowing-only transfer.
+- [ ] Complete owned/locked/atomic global-state migration and SMP safety in OP1–OP3.
 
 Depends on M0. Acceptance: preemption/starvation stress, distinct XMM/TLS/errno,
 wait/wake races without lost wakes or busy waiting, mapping boundaries and kill/
@@ -113,11 +124,13 @@ be tested. Dynamic TLS/DTV, AVX, accounting/priorities and SMP are separate gate
 
 ## M2 — GUI protocol and headless reference models
 
-Implemented: versioned `gui-v1` binary specification/codec and deterministic
-headless models for framing/negotiation/errors, serials/namespaces, surface/
-buffer/configure/ack/commit lifetimes, frame callbacks, focus/input/grabs,
-geometry/quotas and seeded malformed-byte/event tests. Useful pure window/
-composition models were retained; the old egui process lifecycle was removed.
+- [x] Publish the versioned gui-v1 binary specification and common codec.
+- [x] Test framing/negotiation/errors, serials/namespaces and surface/buffer/
+  configure/ack/commit lifetimes with deterministic headless models.
+- [x] Test frame callbacks, focus/input/grabs, geometry and quotas.
+- [x] Keep seeded malformed-byte/event tests and useful pure window/composition models.
+- [x] Remove the obsolete egui process lifecycle.
+- [ ] Freeze a public release contract only after its separate compatibility gate.
 
 GUI contracts negotiate features and bound little-endian records and damage.
 Shared XRGB8888/ARGB8888 buffers have explicit size/stride/offset/ownership;
@@ -134,11 +147,12 @@ cannot panic. Public release freeze remains a separate ABI gate.
 
 ## M3 — userspace compositor
 
-Implemented: exclusive display/input/shared-buffer mechanisms, ordinary ELF
-`gui_server`, two isolated clients, software composition, frame lifecycle,
-focus/input routing and removal of legacy kernel GUI/GUI1/dead display-server
-crates. Live routing uses kernel-authenticated sender identity and the common
-protocol codec; no magic PID or per-client wire copies.
+- [x] Provide exclusive display/input authority and shared-buffer mechanisms.
+- [x] Run gui_server as an ordinary ELF process with two isolated clients.
+- [x] Implement software composition, frame lifecycle and focus/input routing.
+- [x] Authenticate IPC senders in the kernel and use the common protocol codec.
+- [x] Remove the kernel GUI, GUI1 and dead display-server crates.
+- [ ] Complete the longer idle/load, resize-storm and GUI-service recovery matrix.
 
 Depends on M1/M2. Acceptance: overlapping clients, resize storms, reuse, input
 isolation, crash cleanup and 10-minute idle/load. Malformed clients disconnect,
@@ -149,18 +163,18 @@ the application widget layer.
 
 ## M4 — configurable DWM and UI runtime parity
 
-Implemented: independent `runtime/` crates for TTF text, DUI retained tree/two-pass
-layout, DSS cascade/tokens/states/motion, widgets and software paint; interactive
-windows, panel/dock/launcher/tray, quick settings, notifications, workspaces and
-switcher; terminal/Files/Calculator/Monitor/Settings clients and userspace `dsh`
-over PTY. `setup` and Settings share validated configuration. Lua/luac run on
-Dunit; sandboxed policy/event scripts use deadlines and preserve working geometry
-on error. TOML is base policy, DSS appearance, Lua behavior/native motion.
-
-Configuration and assets are external: app/widget manifests, fonts, wallpaper,
-five Chameleon icon themes and shared static SVG/bitmap lookup with scale/aliases/
-fallback. Pointer geometry and mode switching through 3072×1920 are checked.
-Available static SVG features do not imply full browser SVG support.
+- [x] Provide independent runtime crates for TTF text, DUI retained/two-pass layout,
+  DSS cascade/tokens/states/motion, widgets and software painting.
+- [x] Implement interactive windows, panel/dock/launcher/tray, quick settings,
+  notifications, workspaces and the switcher.
+- [x] Ship Terminal, Files, Calculator, Monitor and Settings; run userspace dsh over PTY.
+- [x] Share validated configuration between setup and Settings.
+- [x] Run native Lua/luac and isolated policy/event workers with deadlines and
+  working-geometry fallback. TOML owns policy, DSS appearance and Lua behavior.
+- [x] Load app/widget manifests, fonts, wallpapers and five Chameleon icon themes
+  externally, with shared static SVG/bitmap scale, aliases and fallback.
+- [x] Verify pointer geometry and display mode switching through 3072×1920.
+- [ ] Expand SVG features only with their own conformance; the static profile is bounded.
 
 Use stable UI IDs and Row/Column/Stack/Grid/Scroll constraints, common widgets,
 capture/bubble events, keyboard focus, cascade defaults→theme→class→state and
@@ -170,9 +184,11 @@ layout→atomic swap; retain last-known-good on failure. Configuration must chan
 runtime behavior, not just parse successfully. Filesystem watching remains a
 future event facility; explicit reload exists.
 
-Open: session/window geometry persists across reload/reconnect only, not proven
-across reboot; complete persistent user profiles depend on M5. Accessibility,
-complex text shaping/IME and whole-scene frame budgets are incremental gates.
+- [ ] Prove session/window geometry persistence across reboot, beyond reload/reconnect.
+- [ ] Finish persistent user profiles after M5 installed-root work.
+- [ ] Provide filesystem change events; explicit reload already exists.
+- [ ] Complete accessibility, shaping/IME and whole-scene frame budgets.
+
 Acceptance: full feature parity, keyboard-only use, malformed reload rollback,
 1024×768/1600×900/HiDPI visual/layout tests and animation timing; persistent
 configuration/session hashes across stop/start. Appearance changes require no
@@ -180,20 +196,22 @@ kernel rebuild. Brightness UI eventually uses display/power service control.
 
 ## M5 — installed root, provisioning and recoverable storage
 
-Partial. Implemented: GPT ESP/Dunit System/Data policy excludes foreign partition
-types; real initrd and service manifests; supervision/restart budgets and
-`/persist/.provisioned`; DunitFS v2 bitmap/extents, directories, rename/unlink,
-timestamps/mode, fsync, generations/metadata COW, fsck and degraded read-only
-mount; transactional validate→partition→format→copy→verify→boot-config→sync
-installer with rollback; AHCI/VirtIO and BIOS/UEFI paths; distinct image/profile
-manifests. Partition/device identity, bounds and explicit destructive authorization
-remain mandatory for real installation.
+- [x] Validate GPT ESP/Dunit System/Data policy, excluding foreign partition types.
+- [x] Supply real initrd/service manifests, supervision/restart budgets and
+  `/persist/.provisioned` state.
+- [x] Implement DunitFS v2 bitmap/extents, directories, rename/unlink, timestamps/
+  mode, fsync, generations/metadata COW, fsck and degraded read-only mount.
+- [x] Run transactional validate→partition→format→copy→verify→boot-config→sync
+  installation with rollback.
+- [x] Support AHCI/VirtIO installation paths and BIOS/UEFI profile/image manifests.
+- [ ] Preserve partition/device identity, bounds and explicit authorization on real disks.
 
-Open: disk-backed root with init/services/apps/assets read from system volume;
-read-mostly system enforcement, complete system/user provisioning; ownership/
-groups/permissions, links/orphan cleanup and scalable metadata beyond 64 nodes;
-1,000-file and broader interruption/recovery acceptance. Initrd extraction into
-MemFS and a writable `/persist` do not close the milestone.
+- [ ] Load root, init, services, apps and assets from the installed system volume.
+- [ ] Enforce a read-mostly system volume and complete system/user provisioning.
+- [ ] Implement ownership/groups/permissions, links and orphan cleanup.
+- [ ] Scale metadata beyond 64 nodes and pass the 1,000-file acceptance scene.
+- [ ] Complete interruption/recovery coverage. Initrd-backed MemFS and writable
+  /persist do not close installed-root acceptance.
 
 Target hierarchy: `/system/{bin,lib,share,services}`, `/apps/<id>`,
 `/users/<uid>/{home,config,data}`, `/var/{log,lib}`, volatile `/run`, device
@@ -223,23 +241,36 @@ syscall/error/structure adapters, VM/fs/process/thread backends; retain generic
 CPU/ISO C code and avoid scattered Dunit conditionals or upstream reformatting.
 Kernel never consumes Linux numbers/structs or public musl structs.
 
-Toolchain: logical `x86_64-dunit`, static compiler-driver/LLD flow, crt1/crti/crtn,
-public headers/libc.a, native headers, compiler/ar/strip wrappers and SDK version/
-license manifest. Reject host headers/libraries. CMake/Meson/Autoconf cross files
-and fingerprint-driven sysroot rebuilds exist. Clean/offline rebuild, artifact
-hash/upgrade rehearsal and published versioned capability profile remain release
-requirements. Full GCC or Rust-on-device ports are not prerequisites.
+- [x] Build logical x86_64-dunit through the static compiler-driver/LLD flow.
+- [x] Stage crt1/crti/crtn, public/native headers and libc.a.
+- [x] Provide compiler/ar/strip wrappers and SDK version/license metadata.
+- [x] Reject host headers/libraries and generate CMake/Meson/Autoconf cross files.
+- [x] Invalidate stale sysroots through source/compiler fingerprints.
+- [x] Record an identical clean/offline libc archive rebuild.
+- [ ] Rehearse upstream upgrades and publish a versioned release capability profile.
+  Full GCC or Rust-on-device ports are not prerequisites.
 
 Profiles and remaining gates:
 
-| Profile | Implemented | Open acceptance |
-| --- | --- | --- |
-| A: startup/ISO C | crt/init/main/exit, 0/1/2, stdio, strings/math/conversion, constructors/args/env/auxv | Maintain startup/stack/bss/error/invalid-pointer conformance |
-| B: VM/allocator/time | anonymous mmap/unmap/protect, allocator without Linux brk, zero-fill/alignment, monotonic and valid-boot-UTC realtime | Secure entropy; fragmentation/OOM/protection and clock edge cases |
-| C: files | buffered FILE, open/read/write/seek/stat/cwd/directories/rename/unlink/fsync/truncate, flags/error adapters | Installed-root libc/tools, full ownership/account database and storage matrix |
-| D: processes | native posix_spawn argv/env/cwd, pipes/dup/redirection/fcntl/poll/ioctl, atomic ordered open/close/dup2/chdir actions | Process-image exec/fork; unsupported spawn attributes remain errors |
-| E: threads | native thread/TLS/futex, create/join/detach, errno, mutex/condvar/rwlock/once and reclamation | Broader primitives such as barrier, owner-death/cancellation/interruption policy |
-| F: later | Official static-only build policy | Signals/timers/interruption, sockets after netd, dynamic loader/TLS and demand-driven fork/COW |
+- [x] Profile A: crt/init/main/exit, fd 0/1/2, stdio, strings/math/conversion,
+  constructors, arguments, environment and auxv.
+- [ ] Maintain Profile A startup/stack/BSS/error/invalid-pointer conformance.
+- [x] Profile B: mmap/unmap/protect, allocator without Linux brk, zero-fill/alignment,
+  monotonic time and valid-boot-UTC realtime.
+- [ ] Supply secure entropy and extend fragmentation/OOM/protection/clock-edge coverage.
+- [x] Profile C: buffered FILE, open/read/write/seek/stat/cwd/directories/rename/
+  unlink/fsync/truncate and strict flag/error adapters.
+- [ ] Run libc/tools from installed root and complete ownership/accounts/storage matrix.
+- [x] Profile D: native posix_spawn argv/env/cwd, pipes/dup/redirection/fcntl/poll/
+  ioctl and atomic ordered open/close/dup2/chdir actions.
+- [ ] Implement process-image exec/fork only after their contracts; reject unsupported
+  spawn attributes until supported.
+- [x] Profile E: native thread/TLS/futex, create/join/detach, errno, mutex/condvar/
+  rwlock/once/barrier and heavy-resource reclamation.
+- [ ] Define owner-death, cancellation/interruption and broader thread-primitives policy.
+- [x] Profile F: enforce the official static-only build policy.
+- [ ] Add signals/timers/interruption, sockets after netd, dynamic loader/TLS and
+  demand-driven fork/COW as independently gated work.
 
 `pthread_cancel`/asynchronous cancellation explicitly fail ENOTSUP; system/popen
 and fork-dependent paths cannot silently succeed. Define signal delivery frames,
@@ -254,7 +285,9 @@ and threaded allocator stress; static ELF gates reject executable stacks/W+X,
 unexpected DYNAMIC/INTERP/unresolved symbols. Persistence checks content after
 power cycle. Retain pinned upstream libc-test subset and full unsupported-case
 inventory with reasons/owners; subset success is not broad POSIX conformance.
-Previous-release binaries and frozen ABI/libc release contracts remain open.
+
+- [ ] Verify previous-release binaries and freeze ABI/libc release contracts.
+
 Network and dynamic suites stay separate from static/thread/persistence gates.
 
 The recorded M6 repair passed 40 contracts/73 commands/175 required markers with
@@ -273,48 +306,53 @@ and removing duplicate handshakes, unsafe entry and manual standard controls.
 
 ### M7.1 — wait-set
 
-Implemented `WaitSetWait` (89): call-scoped level-triggered IPC, timer/deadline,
-file/pipe/PTY and child-exit readiness, safe wrapper and owning event loop;
-tokens, timeout, fd identity/deadline preservation and cancellation via IPC.
-Previous IPC/futex/wait/poll calls remain compatible. Open: edge/persistent
-registration and broader integration; socket readiness follows M8.
+- [x] Implement WaitSetWait (89) for call-scoped level-triggered IPC, timer/deadline,
+  file/pipe/PTY and child-exit readiness, with safe wrapper and owning event loop.
+- [x] Preserve tokens, timeout/fd identity/deadlines and cancellation via IPC.
+- [x] Keep previous IPC/futex/wait/poll calls compatible.
+- [ ] Add edge/persistent registration and broader integration.
+- [ ] Add socket readiness after M8.
+
 Acceptance: pipe/IPC/timer wake returns the correct token, close produces hangup,
 timeouts/lost-wake races pass and real event loops block without polling.
 Depends on M1; future contract expansion needs approval.
 
 ### M7.2 and M7.3 — runtime, tooling and app manifest
 
-Implemented CLI/TUI/GUI `cargo dunit new/build/run/test` wrapping the existing
-harness, native `#[dunit::main]` argv/env/panic/exit and compiler-collected tests
-(empty/Err/panic fail), owning fs/process/time/io/env/args/stats APIs and shared
-Error/errno. `dunit.toml` v1 strictly declares identity/name/icon/kind, exact Cargo
-binary target and unique requested capability names; declarations grant no
-rights. Packaging and a shared userspace catalog feed launcher/dock/startup.
-CLI/TUI use configured Terminal with separate argv/PTY, never shell interpolation.
+- [x] Provide CLI/TUI/GUI cargo dunit new/build/run/test through the shared harness.
+- [x] Supply native #[dunit::main] argv/env/panic/exit and compiler-collected tests;
+  empty suites, Err and panic fail explicitly.
+- [x] Provide owning fs/process/time/io/env/args/stats and shared Error/errno APIs.
+- [x] Validate dunit.toml v1 identity/name/icon/kind, exact Cargo binary target and
+  unique requested capabilities; declarations grant no rights.
+- [x] Feed launcher/dock/startup through packaging and a shared userspace catalog.
+- [x] Launch CLI/TUI with configured Terminal and separate argv/PTY, without shell
+  interpolation.
+- [ ] Distribute the standalone SDK and finish remaining legacy-catalog migration.
+- [ ] Provide SDK thread/synchronization APIs and the future dunit::net backend.
 
-Open: standalone SDK distribution, remaining legacy catalog migration, thread/
-sync APIs and the future `dunit::net` backend. Acceptance: generated app has no
-unsafe/extern-C/raw entry, cross-builds/packages/runs with checked output/window;
+Acceptance: generated apps have no unsafe/extern-C/raw entry and cross-build,
+package and run with checked output/window;
 `cargo dunit test` supplies its own markers. At least one migrated real app uses
 this route. Capability declaration, cwd/env, spaces in paths, CLI/TUI input,
 child cancel/exit and cleanup must retain native checks.
 
 ### M7.4 and M7.5 — typed UI, shared styles and effects
 
-Implemented owning Component/update/view, retained stable control keys,
-layout/style/tree diff, old/new damage repair, clipped repaint, shared-buffer
-reuse and no-op frame skipping; common Window/ComponentWindow manages configure/
-resize/input/frame/close and teardown. Stable opaque/unscaled/unobscured scenes
-use real texture/composition/present damage; overlap, effects and scene changes
-fall back to full composition. Existing gui-v1 wire format is retained.
-
-Shared typed DSS tokens supply colors, fonts, spacing, radii, borders, gradients,
-shadows, clips and client-canvas backdrop blur. Light/dark reload preserves models
-and last-good appearance. Stable-key timed appearance transitions use wait-set
-sampling, retargeting and reduced motion. Open: nested component lifecycle,
-geometry/full-widget animation coverage, declarative whole-window transparency/
-blur/rounding without manual ARGB, adaptive asset/manifest packaging and expanded
-visual references/static SVG features. Complex shaping/IME remain later work.
+- [x] Provide owning Component/update/view with retained stable control keys,
+  layout/style/tree diff, old/new damage repair and clipped repaint.
+- [x] Reuse shared buffers, skip no-op frames and own configure/resize/input/frame/
+  close lifecycle through Window/ComponentWindow.
+- [x] Propagate real texture/composition/present damage for stable opaque/unscaled/
+  unobscured scenes; use full composition for overlap/effects/scene changes.
+- [x] Keep the existing gui-v1 wire format.
+- [x] Share typed DSS colors/fonts/spacing/radii/borders/gradients/shadows/clips and
+  client-canvas backdrop blur, preserving model and last-good light/dark appearance.
+- [x] Sample, retarget and reduce stable-key timed transitions through wait-set.
+- [ ] Complete nested component lifecycle and geometry/full-widget animations.
+- [ ] Provide declarative whole-window transparency/blur/rounding without manual ARGB.
+- [ ] Expand adaptive assets/manifests, visual references and static SVG features.
+- [ ] Add complex text shaping/IME as later work.
 
 Acceptance: message sequences prove model/tree state; incremental/full pixels
 match, old shadows/blur sample regions repaint correctly, tiny changes bound
@@ -325,14 +363,21 @@ tracked with reproducible performance evidence rather than average FPS.
 
 ### M7.6 — widget behavior
 
-Implemented families: push/toggle/check/radio/switch; controlled Input/Textarea
-with grapheme/word/line selection, soft wrap, undo/redo, password/readonly/limits;
-shared two-axis scroll/selection autoscroll/auto-hide; slider/vertical slider,
-integer spinbox, progress/busy; select, menu bar/submenus/context/tooltip;
-tabs/splitter/toolbar/status/dialog/modal/message box; virtual list/tree/table,
-stable selection/expansion/sort/F2 rename and Open/Save/Directory file picker.
-State-aware flex/grid, capture/bubble with stop/prevent, scoped mnemonics/roving
-focus and lifecycle cancellation use common paint/hit geometry and styles.
+- [x] Implement push/toggle/check/radio/switch controls.
+- [x] Implement controlled Input/Textarea, grapheme/word/line selection, soft wrap,
+  undo/redo, password/readonly and limits.
+- [x] Share two-axis scrolling, selection autoscroll and auto-hide behavior.
+- [x] Provide horizontal/vertical sliders, integer spinboxes and progress/busy states.
+- [x] Provide select, menu bar/submenus/context menu and tooltips.
+- [x] Provide tabs/splitter/toolbar/status/dialog/modal/message box.
+- [x] Virtualize list/tree/table with stable selection/expansion/sort/F2 rename.
+- [x] Provide Open/Save/Directory file pickers.
+- [x] Share state-aware flex/grid, capture/bubble stop/prevent, scoped mnemonics,
+  roving focus, lifecycle cancellation and paint/hit geometry/styles.
+- [x] Pass recorded event/model, native gallery, 10,000-row bounded-viewport and
+  light/dark/restore exact-pixel widget acceptance.
+- [ ] Define cross-surface popups/global grabs and inter-window modality.
+- [ ] Provide accessibility/IME services; role labels alone do not establish them.
 
 Each control specifies state transitions, pointer/keyboard/focus/resize and role/
 label metadata. Negotiated key-up/focus snapshots, queued short pointer events,
@@ -348,16 +393,17 @@ claim an accessibility/IME service. Widget-only tests cannot close all of M7.
 
 ### M7.7 and M7.8 — transfers and protocol ownership
 
-Implemented common protocol/control codecs (`CAP1/INP1/RLD1/NOT1`, centralized
-GUIC) and generated XFR1 transfer values. Live committed-buffer damage reaches
-CPU textures and framebuffer presentation; CI rejects duplicated control tags.
-
-`gui_server` brokers typed text/files/images/custom-MIME clipboard/DnD,
-copy/move/link negotiation, pointer capture/feedback/target highlighting and
-on-demand shared-buffer data. File targets receive genuine attenuated file/
-directory capabilities with owned/RAII lifetime; text targets receive quoted
-paths. Transfers retain authorization/rollback across IPC and do not imply
-revocation after completion. Files' private clipboard was removed.
+- [x] Centralize CAP1/INP1/RLD1/NOT1, GUIC and generated XFR1 transfer values.
+- [x] Deliver committed-buffer damage to CPU textures and framebuffer presentation;
+  CI rejects duplicated control tags.
+- [x] Broker typed text/files/images/custom-MIME clipboard/DnD in gui_server.
+- [x] Negotiate copy/move/link, capture/feedback/highlighting and on-demand shared data.
+- [x] Transfer owned/RAII attenuated file/directory capabilities to file targets and
+  quoted paths to text targets, retaining authorization and rollback across IPC.
+- [x] Remove Files' private clipboard.
+- [x] Pass the recorded 49 ordered source/target pairs across seven production apps.
+- [ ] Expand the matrix with each new catalog entry; completed transfer does not
+  imply a revocation contract.
 
 Acceptance recorded complete: all 49 ordered source/target pairs among seven
 production GUI apps, with new catalog entries failing incomplete matrix coverage;
@@ -369,11 +415,13 @@ must not be imitated by copy. No duplicate wire definitions or handshakes.
 
 ### M7.9 — compositor shell decision
 
-Completed branch: retain the shell in `gui_server`, using the shared DSS registry,
-palette/metrics/cursor/shadow/control geometry and atomic candidate validation.
-Settings saves only intentional scalar overrides, preserving DSS inheritance,
-independent tables/comments and no-op files. Appearance CI gates exclude format
-arithmetic/resource limits appropriately.
+- [x] Keep the accepted compositor-hosted shell in gui_server on shared DSS.
+- [x] Share palette/metrics/cursor/shadow/control geometry and atomic candidate validation.
+- [x] Save only intentional Settings overrides, preserving DSS inheritance,
+  independent tables/comments and no-op files.
+- [x] Exclude format arithmetic/resource limits appropriately from appearance gates.
+- [ ] Meet the ≤16 ms whole-frame goal; recorded 21 ms markers do not meet it.
+- [ ] Define external layers/struts/policy/restart contracts before shell extraction.
 
 A normal external SDK-client probe established isolation/publication/boot/recovery,
 not a complete shell replacement. External layers/struts/policy/restart contracts
@@ -383,40 +431,44 @@ slower runs and do not establish universal speedup/non-regression.
 
 ### M7.10 — thin generated C SDK
 
-Implemented/accepted: `<dunit.h>` and `libdunit_ui.a` wrap the same Rust runtime,
-widgets/styles/renderer. Generated C/Rust records, constants, callbacks, layouts,
-exports and signatures come from `runtime/dunit-c/api.json` and existing ABI/
-protocol owners. C owns model/update data; SDK owns input/focus/rendering with
-bounded copied/borrowed lifetimes and error/reentry/reopen rules.
-Core/checkable/radio/disabled, layout/styles/text/numbers/progress/menus,
-collections/workspace/file picker and clipboard/DnD/file-capability tokens are
-available. Additive C ABI v1 snapshots and an old object surviving forced Rust
-rebuild/guest link-only execution protect compatibility. Native TCC compilation
-and exact Rust/C pixel comparisons prove one toolkit. Image/ESP budgets remain
-measured requirements, not permission to grow artifacts indefinitely.
+- [x] Provide dunit.h/libdunit_ui.a over the shared Rust widget/style/render runtime.
+- [x] Generate C/Rust records/constants/callbacks/layouts/exports/signatures from
+  runtime/dunit-c/api.json and the existing ABI/protocol owners.
+- [x] Keep C model/update data separate from SDK input/focus/render ownership with
+  bounded copied/borrowed lifetimes and error/reentry/reopen rules.
+- [x] Expose core/checkable/radio/disabled, layout/styles/text/numbers/progress/menus,
+  collections/workspace/file-picker and clipboard/DnD/file-capability APIs.
+- [x] Protect additive C ABI v1 through snapshots and an old object surviving a
+  forced Rust rebuild and guest link-only execution.
+- [x] Verify native TCC compilation and exact Rust/C pixels through one toolkit.
+- [ ] Keep image/ESP size and future C ABI changes within measured compatibility gates.
 
-Open independently: in-memory `tcc -run` execution/JIT policy. Existing RW→RX
-mprotect does not approve a new executable-memory privilege model. File-based
-`tcc -o` plus native spawn already works. Future C ABI changes follow version/
-compatibility gates; do not duplicate the Rust toolkit.
+- [ ] Decide in-memory tcc -run/JIT policy independently. Existing RW→RX mprotect
+  does not approve a new executable-memory privilege model.
+- [x] Compile with file-based tcc -o and launch through native spawn.
+
+Future C ABI changes follow version/compatibility gates; do not duplicate the
+Rust toolkit.
 
 ### M7.11 — migration completion
 
-Implemented: `calc`, `dufetch` and Monitor native APIs, portable `wc_demo` through
-native C headers, all seven GUI clients on retained SDK controls/shared special
-canvas. Old entry/panic, GUI handshake/buffers, standard controls, font loaders,
-raw PTY and protocol copies were removed with before/after regression checks.
-`dufetch` reads runtime facts; a versioned identity/uname source remains open and
-must not be replaced by invented literals.
+- [x] Migrate calc, dufetch and Monitor to native APIs, and portable wc_demo to C headers.
+- [x] Migrate all seven GUI clients to retained SDK controls and shared special canvas.
+- [x] Remove obsolete entry/panic, GUI handshakes/buffers, standard controls, font
+  loaders, raw PTY and protocol copies with before/after regressions.
+- [x] Use runtime facts in dufetch rather than invented identity literals.
+- [x] Migrate dtop to SDK entry/stream helpers and measured memory/process counters;
+  report CPU usage unavailable and support a terminating --once snapshot.
+- [ ] Define a versioned identity/uname source.
+- [ ] Finish dsh/fsck_dunit and remaining CLI/TUI/service lower-layer migration.
+- [ ] Replace raw image viewers only after parity.
+- [ ] Deliver SDK thread/synchronization APIs and standalone distribution.
+- [ ] Close final M7 acceptance with real cargo dunit apps and completed source-of-
+  truth migration, without duplicate raw entry/GUI lifecycle/hit-test.
 
-Open: `dsh`, `dtop`, `fsck_dunit`, raw image-viewer replacement and remaining
-CLI/TUI/service lower-layer migration; thread/sync and standalone distribution
-also prevent SDK completion. Preserve each program's existing outputs/markers
-before removal of its old implementation; keep dynamic counters variable while
-checking their format. SDK migration must improve usability while preserving
-behavior, not merely rename wrappers. Final M7 acceptance requires real apps
-built/run through cargo dunit, no duplicate raw entry/GUI lifecycle/hit-test and
-remaining source-of-truth migration completed.
+Preserve each program's existing outputs/markers when removing its implementation;
+keep changing counters variable while validating their format. Migration must
+improve usability while preserving behavior, not just rename wrappers.
 
 M7 order: wait-set/runtime decisions → tooling/manifest → typed UI/themes/widgets
 → shared protocol → transfers → compositor styles/decision → C bindings → full
@@ -440,54 +492,67 @@ Ordinary apps never obtain raw NIC/MMIO/DMA authority.
 
 ### N0 — E1000 packet I/O
 
-Open: reset/register/MAC/link setup, common DMA API, RX/TX descriptors and head/
-tail/barriers/recycling, MSI/MSI-X with legacy fallback, bounded interrupt drain/
-moderation; polling only for diagnostics. Handle malformed/oversize frames, link
-changes, stalls/exhaustion/reset and counters for packets/bytes/drop causes/
-checksums/full queues/resets/transitions. Acceptance: bidirectional frame path,
+- [ ] Implement reset/register/MAC/link setup and a common DMA API.
+- [ ] Own RX/TX descriptors, heads/tails, barriers and recycling.
+- [ ] Support MSI/MSI-X with legacy fallback and bounded IRQ drain/moderation;
+  polling is diagnostic only.
+- [ ] Handle malformed/oversize frames, link changes, stalls/exhaustion/reset.
+- [ ] Count packets/bytes/drop causes/checksums/full queues/resets/transitions.
+
+Acceptance: bidirectional frame path,
 ring wrap/starvation/completion/link-toggle/interrupt-storm/reset tests and
 10-minute flood without DMA corruption/leaks; guards and ownership assertions.
 
 ### N1 — Ethernet, ARP, IPv4 and ICMP
 
-Open: checked Ethernet II sizes/padding/types, reject bad/unknown frames before
-deep parsing; bounded ARP INCOMPLETE/REACHABLE/STALE retry/expiry/poisoning policy;
-IPv4 version/IHL/length/checksum/TTL/protocol/address validation, connected/default
-routes and longest-prefix selection; explicit MTU/TX-fragment and bounded-or-
-deferred RX-reassembly policy; rate-limited ICMP echo/unreachable/time-exceeded
-and logical loopback. Acceptance: ping gateway/host on ARP miss/hit/expiry,
+- [ ] Validate Ethernet II sizes/padding/types; reject bad/unknown frames early.
+- [ ] Bound ARP INCOMPLETE/REACHABLE/STALE retry/expiry/poisoning policy.
+- [ ] Validate IPv4 version/IHL/length/checksum/TTL/protocol/address.
+- [ ] Provide connected/default routes and longest-prefix selection.
+- [ ] Define MTU/TX fragmentation and bounded-or-deferred RX reassembly.
+- [ ] Rate-limit ICMP echo/unreachable/time-exceeded and provide logical loopback.
+
+Acceptance: ping gateway/host on ARP miss/hit/expiry,
 bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service panic.
 
 ### N2 — UDP, DHCPv4 and DNS
 
-Open: port demultiplexing/ephemeral allocation/checksums/bounded queues;
-datagram bind/connect/send-to/receive-from, nonblocking/timeouts/readiness;
-DHCP INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING with lease/link reset;
-validate offers/options and atomically apply address/prefix/gateway/DNS with
-rollback. Revalidate cached leases after reboot. DNS A/AAAA/CNAME, bounded
-compression pointers/TTL cache, query validation/retry/timeouts and TCP truncated
-fallback. Define static→DHCP→admin/user precedence. Acceptance: DHCP loss/NAK/
+- [ ] Implement port demultiplexing/ephemeral allocation/checksums/bounded UDP queues.
+- [ ] Provide datagram bind/connect/send-to/receive-from and nonblocking/timeouts/readiness.
+- [ ] Implement DHCP INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING and link reset.
+- [ ] Validate offers/options, atomically apply address/prefix/gateway/DNS with rollback,
+  and revalidate cached leases after reboot.
+- [ ] Implement bounded DNS A/AAAA/CNAME, compression pointers/TTL cache, query
+  validation/retry/timeouts and TCP truncated-response fallback.
+- [ ] Define static→DHCP→admin/user configuration precedence.
+
+Acceptance: DHCP loss/NAK/
 renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
 
 ### N3 — TCP
 
-Open: active/passive CLOSED→TIME_WAIT state machine, 4-tuple/sequence/ack/flag/
-header/checksum/window checks, SYN/data retries, RTT/RTO and duplicate ACK;
-bounded send/receive/out-of-order queues, half-close/FIN/RST, monotonic timers
-and wrap/jump handling. Start with one tested congestion algorithm such as Reno;
-Internet release requires congestion control. Backlog/accept, ephemeral ports,
-SO_REUSEADDR/keepalive/TCP_NODELAY, quotas and rare-option boundaries must be
-explicit. Acceptance: multi-MiB streams under loss/reorder/duplicates, handshake/
+- [ ] Implement TCP CLOSED→TIME_WAIT active/passive state transitions and 4-tuple/
+  sequence/ACK/flag/header/checksum/window validation.
+- [ ] Implement SYN/data retries, RTT/RTO and duplicate ACK handling.
+- [ ] Bound send/receive/out-of-order queues, half-close/FIN/RST, monotonic timers
+  and sequence wrap/jump behavior.
+- [ ] Test an initial congestion algorithm such as Reno before Internet release.
+- [ ] Define backlog/accept, ephemeral ports, SO_REUSEADDR/keepalive/TCP_NODELAY,
+  quotas and rare-option boundaries.
+
+Acceptance: multi-MiB streams under loss/reorder/duplicates, handshake/
 zero-window/reset/simultaneous-close/TIME_WAIT/SYN exhaustion without leaks.
 
 ### N4 and N5 — native sockets and musl adaptation
 
-Open: versioned open/bind/connect/listen/accept/send/receive/send-to/receive-from/
-shutdown/typed-option and resolver lookup service APIs with typed IPv4/IPv6
-endpoints, partial I/O/EOF/reset/timeout/would-block/cancellation semantics and
-common socket/IPC/timer/file readiness. Rights separate CONNECT/BIND_LOW_PORT/
-LISTEN/RAW/CONFIGURE_INTERFACE/OBSERVE_ALL; bound sockets/queued bytes/DNS/backlog
-per process. Transfer/revocation and netd restart errors must be deterministic.
+- [ ] Define versioned native open/bind/connect/listen/accept/send/receive/send-to/
+  receive-from/shutdown/options/resolver APIs with typed IPv4/IPv6 endpoints.
+- [ ] Preserve partial I/O, EOF/reset/timeout/would-block/cancellation and common
+  socket/IPC/timer/file readiness.
+- [ ] Separate CONNECT/BIND_LOW_PORT/LISTEN/RAW/CONFIGURE_INTERFACE/OBSERVE_ALL rights.
+- [ ] Bound per-process sockets/queued bytes/DNS/backlog, and define deterministic
+  transfer/revocation and netd-restart errors.
+- [ ] Adapt POSIX socket/resolver calls and poll/pselect to native semantics.
 
 Translate POSIX socket calls, sockaddr/options/flags/errors and getaddrinfo/
 getnameinfo through native adapters, never Linux structs. Blocking/nonblocking
@@ -499,14 +564,15 @@ working semantics. N5 may use host reference mocks before native integration.
 
 ### N6 — TLS, HTTP and browser network service
 
-Open prerequisites: secure entropy, valid realtime and updateable read-only
-certificate store with version/rotation/rollback. Port proven TLS/crypto;
-do not invent cryptography. HTTP/1.1 needs bounded redirects/chunked/content-
-length/compression/reuse; HTTP/2 follows validated TLS/TCP. A sandboxed browser
-network process owns origin/proxy/download policy, quotas, trust, bounded atomic
-user cache/cookies; it sends response bodies/status via IPC/shared buffers.
-Renderer/content has no ambient sockets and browser UI remains an ordinary GUI
-client without display/input/network master rights.
+- [ ] Supply secure entropy and an updateable read-only certificate store with
+  version/rotation/rollback.
+- [x] Provide valid-boot-UTC realtime; missing boot UTC returns an error.
+- [ ] Port established TLS/crypto rather than inventing cryptography.
+- [ ] Implement bounded HTTP/1.1 redirects/chunking/content-length/compression/reuse;
+  HTTP/2 follows validated TLS/TCP.
+- [ ] Isolate browser network origin/proxy/download policy, quotas/trust and bounded
+  atomic cache/cookies in a sandboxed service with IPC/shared-buffer response bodies.
+- [ ] Deny ambient sockets to renderers/content; browser UI uses ordinary GUI rights.
 
 Acceptance: deterministic local HTTPS/test-root fetch then GUI response viewer;
 expired/wrong-host/invalid certificates, redirect loops, truncated framing,
@@ -515,10 +581,11 @@ HTML/CSS/JS engine is M10, not a prerequisite for netd.
 
 ### N7 — IPv6 and multiple interfaces
 
-Open after the stable IPv4 vertical slice: multicast, IPv6/ICMPv6/NDP/DAD,
-link-local/SLAAC/router advertisements/DNS; DHCPv6 only for demonstrated need.
-Reuse socket/UDP/TCP paths, with per-interface addresses/routes/DNS/metrics/link
-failover. Happy Eyeballs belongs in resolver/client policy after dual-stack.
+- [ ] After IPv4, implement multicast/IPv6/ICMPv6/NDP/DAD/link-local/SLAAC/RA/DNS;
+  add DHCPv6 only for demonstrated need.
+- [ ] Reuse socket/UDP/TCP with per-interface addresses/routes/DNS/metrics/failover.
+- [ ] Add Happy Eyeballs in resolver/client policy after dual-stack.
+
 Acceptance: IPv4-only/IPv6-only/dual-stack use the same app APIs.
 
 ### Configuration, security and network acceptance
@@ -543,33 +610,42 @@ malformed-traffic containment all work; only permitted config/state survives reb
 
 ### Other platform services and packages
 
-Open audio: HDA discovery/DMA→userspace mixer→per-app streams/permissions.
-Open USB: xHCI enumeration/descriptors/endpoints→HID keyboard/mouse→mass storage/
-hotplug. Modern VirtIO block/net and interrupt-driven transport need separate
-I/O/reset/feature tests. Reboot/poweroff work; ACPI battery/thermal/suspend/resume
-remain open. Reference QEMU devices and one published reference PC precede broad
-hardware/driver tiers; PCI detection alone is not support. Wi-Fi is a future
-hardware target, not a first desktop-release dependency.
+- [ ] Provide HDA discovery/DMA, userspace mixing and per-app streams/permissions.
+- [ ] Complete xHCI enumeration/descriptors/endpoints, HID keyboard/mouse, USB mass
+  storage and hotplug.
+- [ ] Add modern VirtIO block/net and interrupt-driven transport with I/O/reset/feature tests.
+- [x] Implement reboot/poweroff.
+- [ ] Add ACPI battery/thermal/suspend/resume.
+- [ ] Publish one reference PC and tested QEMU devices before broader driver tiers.
+- [ ] Treat Wi-Fi as future hardware, not a first desktop-release dependency.
 
-Packages are open native signed bundles, shared by Rust/C and Minimal/DWM,
-built reproducibly with SDK/app manifests. Specify ID/version/architecture/minimum
-ABI, executables/resources/services/GUI version, bounded dependencies, capability
-requests, data/config/cache ownership, hashes/signatures/publisher/trust. Offline
-local packages first; validate before writes, stage→verify→activate→rollback,
-persistent local database and interruption-safe install/update/remove. Uninstall
-must never silently delete user data. Online repositories depend on storage,
-network/TLS/time/trust/key rotation. Reject incompatible ABI/missing authority
-before activation; no ambient-privilege maintainer scripts or Linux package-format
-compatibility strategy. All platform services need I/O and denial/recovery tests.
+PCI discovery alone is not working device support.
+
+- [ ] Define native signed bundles shared by Rust/C and Minimal/DWM, built
+  reproducibly from SDK/app manifests.
+- [ ] Specify ID/version/architecture/minimum ABI, executables/resources/services/
+  GUI version, bounded dependencies and requested capabilities.
+- [ ] Record data/config/cache ownership, hashes/signatures and publisher/trust.
+- [ ] Support offline local packages first, validate before writes and perform
+  stage→verify→activate→rollback with a persistent local database.
+- [ ] Make install/update/remove interruption-safe and preserve user data on uninstall.
+- [ ] Add online repositories after storage/network/TLS/time/trust/key rotation.
+- [ ] Reject incompatible ABI or missing authority before activation.
+- [ ] Keep maintainer scripts free of ambient privileges; do not use Linux package
+  formats as the platform compatibility strategy.
+
+All platform services need real I/O, denial and recovery acceptance.
 
 ## M9 — useful SDK applications
 
-Open new apps: `rock` nano-level editor (open/edit/save, cursor/selection, search/
-replace, undo/redo, status/shortcuts), TUI first then GUI over the same buffer;
-GUI text editor, SDK image viewer (Files open, zoom/fit, shared BMP then PNG/JPEG
-decoders), read-only text/Markdown viewer with shared typography. Existing GUI
-polish/config/themes/Lua/SVG/SDK transfers is implemented; further application
-usability and full remaining migration are separate tasks.
+- [ ] Build rock: a nano-level editor with open/edit/save, cursor/selection, search/
+  replace, undo/redo and status/shortcuts; TUI first, then GUI on the same buffer.
+- [ ] Provide a GUI text editor.
+- [ ] Provide an SDK image viewer with Files integration, zoom/fit, shared BMP then
+  PNG/JPEG decoders; replace raw bmp_viewer only after parity.
+- [ ] Provide a read-only text/Markdown viewer with shared typography.
+- [x] Implement existing GUI configuration/themes/Lua/SVG/SDK transfers.
+- [ ] Continue application usability and remaining migration as separate work.
 
 Depends on M7 widgets/themes/tools/C SDK and M6 on-device TCC/file/spawn.
 Acceptance: cargo dunit build/run, standard SDK controls without custom duplicate
@@ -582,11 +658,11 @@ the app list indefinitely.
 
 ## M10 — browser
 
-Open. The first task at this milestone is a human choice of scope/engine:
-minimal HTTPS text/simplified-HTML viewer without JS, lightweight existing-engine
-port, or a new engine. Do not preselect NetSurf or promise a complete engine.
-Define acceptance with that choice; porting and writing HTML/CSS/JS each have
-large dependency/security/size costs.
+- [ ] Choose browser scope/engine with the human: a minimal HTTPS text/simplified-
+  HTML viewer without JS, an existing lightweight engine port, or a new engine.
+- [ ] Define acceptance for that choice before committing to HTML/CSS/JS scope.
+  Do not preselect NetSurf; porting/writing an engine has substantial dependency,
+  security and artifact-size costs.
 
 Requires M7, M8 netd/TCP/DNS/TLS/sandboxed network service, secure entropy/trust/
 valid clock, text shaping/kerning/wrapping/complex scripts and PNG/JPEG/GIF/WebP
@@ -606,14 +682,22 @@ Sysroots/images rebuild from pinned compiler/fork/ABI sources, not opaque blobs.
 Reproducible releases, provenance/license metadata, ABI cadence, compatibility
 and upgrade rollback remain release goals.
 
-Remaining cross-cutting work: split oversized kernel/syscall/process/compositor
-files by responsibility; reduce existing warnings within CI budgets; finish safe
-ownership/locking and recovery-console-only Terminal path; version all remaining
-config/FS/release contracts; structured levels and bounded persistent logs; GDB
-stub, tracing/profiling/crash dumps; accessibility/shaping/IME/localization;
-swap after robust VM/storage; GPU after measured software correctness/limits.
-OP1–OP3 already replaced raw VFS backend pointers/global paths and task references;
-completed protocol centralization must not remain listed as missing debt.
+- [x] Share Minimal/DWM kernel, ABI and image-composition manifests.
+- [x] Remove raw VFS backend/global-path/task-reference escapes in OP1–OP3 and
+  centralize protocol definitions.
+- [x] Remove fake kernel package/thread/device/proc backends, duplicate asset reads
+  and the unused bootloader crate; consolidate English manuals and review findings.
+- [x] Fix bounded asset reads, Unicode strings, malformed padding/weighted grow and
+  invalid subtree translation; verify host and native behavior.
+- [x] Lower the checked kernel/userspace warning subset to zero.
+- [ ] Split oversized kernel/syscall/process/compositor modules by responsibility.
+- [ ] Finish safe ownership/locking and a recovery-console-only Terminal path.
+- [ ] Extend warning coverage beyond the checker's current userspace subset.
+- [ ] Version remaining configuration/filesystem/release contracts.
+- [ ] Add structured log levels and bounded persistent logs.
+- [ ] Provide GDB stub, tracing/profiling/crash dumps.
+- [ ] Add accessibility/shaping/IME/localization.
+- [ ] Add swap after robust VM/storage, and GPU after measured software limits.
 
 Must-have release foundations are truthful contracts, runtime isolation/events,
 GUI composition/parity, recoverable disk-root/init and persistence. SDK/native
@@ -634,15 +718,17 @@ or a full browser.
 
 ## Human decisions
 
-Accepted: native no_std+alloc SDK; call-scoped WaitSetWait; queued pointer input
-and negotiated lifecycle/modifier/mode additions; manifest v1 with requested
-capabilities; path-to-text and attenuated file/directory transfer authority;
-compositor-hosted shell/shared DSS; thin generated C runtime with additive v1
-compatibility. Preserve existing approved contracts.
+- [x] Accept the native no_std+alloc SDK and call-scoped WaitSetWait.
+- [x] Accept queued pointer input and negotiated lifecycle/modifier/mode additions.
+- [x] Accept manifest v1 with requested capabilities.
+- [x] Accept path-to-text and attenuated file/directory transfer authority.
+- [x] Keep the compositor-hosted shell on shared DSS.
+- [x] Accept the thin generated C runtime with additive v1 compatibility.
+- [ ] Decide edge/persistent wait-set and identity/uname contracts.
+- [ ] Approve future network objects/rights/scopes and executable-memory/TCC-run policy.
+- [ ] Define signal/fork/dynamic and installed-root/format/privilege contracts.
+- [ ] Choose browser scope/engine at M10.
 
-Pending: edge/persistent wait-set and identity/uname API, future network object/
-rights/scopes, new executable-memory/TCC-run policy, signal/fork/dynamic contracts,
-on-disk root/format/privilege changes and browser engine/scope. Present options
-and recommendations when required, proceed on independent work and do not treat
-this roadmap as blanket approval. The browser decision belongs at M10; existing
-RW→RX alone is not approval for a new JIT policy.
+Preserve approved contracts. Present options/recommendations when needed and
+continue independent work; this roadmap is not blanket approval. Existing RW→RX
+does not approve a new JIT policy.
