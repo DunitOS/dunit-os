@@ -715,20 +715,3 @@ but integration waits for approved object/ABI contracts. OP0–OP9 is the indepe
 SMP/performance track; AP dispatch waits for its safety gates. A reliable first
 UP software-composited installed desktop need not wait for SMP/GPU/dynamic/Wi-Fi
 or a full browser.
-
-## Human decisions
-
-- [x] Accept the native no_std+alloc SDK and call-scoped WaitSetWait.
-- [x] Accept queued pointer input and negotiated lifecycle/modifier/mode additions.
-- [x] Accept manifest v1 with requested capabilities.
-- [x] Accept path-to-text and attenuated file/directory transfer authority.
-- [x] Keep the compositor-hosted shell on shared DSS.
-- [x] Accept the thin generated C runtime with additive v1 compatibility.
-- [ ] Decide edge/persistent wait-set and identity/uname contracts.
-- [ ] Approve future network objects/rights/scopes and executable-memory/TCC-run policy.
-- [ ] Define signal/fork/dynamic and installed-root/format/privilege contracts.
-- [ ] Choose browser scope/engine at M10.
-
-Preserve approved contracts. Present options/recommendations when needed and
-continue independent work; this roadmap is not blanket approval. Existing RW→RX
-does not approve a new JIT policy.
