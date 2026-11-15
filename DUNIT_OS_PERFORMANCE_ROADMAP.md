@@ -30,7 +30,7 @@ measurements do not establish per-event tails or input-to-photon latency.
 | OP0 | Partial | KVM runner, remaining scenes, full telemetry, budgets/noise |
 | OP1 | Partial | Remote lifecycle/cancellation and IRQ/preemption/idle model |
 | OP2 | Partial | Timer event model, x2APIC/KVM/hardware platform coverage |
-| OP3 | In progress | Display/device ownership, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
+| OP3 | In progress | Remaining input/device ownership, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
 | OP4 | Prepared only | AP application dispatch, remote wakeups, migration and overlapping execution |
 | OP5 | Not started | Scheduler scaling, accounting and latency |
 | OP6–OP8 | Open | New profile-driven input, rendering, memory and I/O work |
@@ -161,11 +161,19 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   competing requests cannot steal a line and wake callbacks run after unlock.
   Host concurrency and native interactive/interrupt/re-exec regressions cover this scope.
 
+- [x] Serialize display leases, scanout geometry, pixel writes and modesets under
+  one device lock. Console rendering uses current pitch and bounded row/glyph
+  scopes; kernel-shell rendering keeps IRQs enabled. Repeated display acquisition
+  retains ownership until the last handle closes. The backend owns its boot-lifetime
+  VRAM mapping; rejected modes restore registers or quarantine scanout after failed
+  rollback. Host contention/fault injection and native lease/GUI modeset checks cover
+  the current Limine/Bochs path.
+
 Remaining gates, in order:
 
-- [ ] Coordinate console framebuffer writes with display-master acquisition/release
-  and modeset/mapping retirement; bound full repaint IRQ-off time and finish
-  remaining driver/heap edges.
+- [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining
+  driver/heap edges, including input-master repeated-acquire/final-close ownership.
+  Kernel-console lock changes alone do not make syscalls interruptible.
 - [ ] Remote cancellation/stop acknowledgements and group finalization. Publish
   waitable exit only after executors stop and cleanup completes; cover nested
   dispatch, join/detach and cancelling waits. Check/register identity alone

@@ -2,7 +2,7 @@
   "description": "Executable link between WORKING claims in docs/architecture/current-state.md and the serial markers that prove them. tools/qemu_test.py --markers-file tools/boot_markers.json fails the run if any required marker is missing or any forbidden marker appears. This is the M0 CI budget: a status claim is only allowed to say WORKING if a marker here traces it to a real boot.",
   "run": {
     "config": "limine_test_terminal.conf",
-    "cmd": ["exec /app/runtime_stress", "exec /app/ipc_parent", "exec /app/calc", "exec /app/./calc", "exec /app/ipc_parent"],
+    "cmd": ["exec /app/runtime_stress", "exec /app/ipc_parent", "exec /app/calc", "exec /app/./calc", "exec /app/ipc_parent", "exec /app/handle_test"],
     "command_actions": {
       "exec /app/calc": [
         {"wait_marker": "calc> "},
@@ -25,6 +25,9 @@
     }
   },
   "required": [
+    {"marker": "[DISPLAY-LEASE] repeated acquire survives first close and revokes on last close OK", "claim": "display ownership survives multiple handles until final release", "source": "userspace/system_apps/handle_test/src/main.rs; kernel/src/drivers/display/mod.rs"},
+    {"marker": "[DISPLAY-ACCESS] padded record, copy errors, clipped rect and revoked write OK", "claim": "display record and user-copy boundaries preserve ABI and ownership", "source": "userspace/system_apps/handle_test/src/main.rs; kernel/src/syscall/display.rs"},
+    {"marker": "handle_test: OK", "claim": "capability and file contracts survive display ownership changes", "source": "userspace/system_apps/handle_test/src/main.rs"},
     {"marker": "[STDOUT] 413", "claim": "foreground terminal stdin supplies a complete expression", "source": "kernel/src/process/terminal_stdin.rs; userspace/system_apps/calc/src/main.rs"},
     {"marker": "[STDOUT] 701", "claim": "a second terminal line reaches the same foreground reader", "source": "kernel/src/process/lifecycle.rs"},
     {"marker": "calc: bye", "claim": "interactive foreground application exits and returns console ownership", "source": "kernel/src/lib.rs; kernel/src/command.rs"},

@@ -1,109 +1,266 @@
-//! Механизм дисплея ядра: подключаемые бэкенды смены видеорежима.
-//!
-//! Ядро предоставляет только механизм (задать режим, present, перечислить
-//! режимы); политика (какое разрешение и когда) живёт в userspace/конфиге.
-//!
-//! Бэкенды:
-//! - [`Backend::Limine`] — фиксированный фреймбуфер от Limine/GOP. Смена режима
-//!   не поддерживается (`set_mode` → `Unsupported`), `present` — no-op (эмулятор
-//!   сканирует `KERNEL_FB_ADDR` напрямую). Fallback и путь для реального железа.
-//! - [`Backend::Bochs`] — Bochs VBE/DISPI (устройство QEMU `-vga std`): смена
-//!   режима на ходу через порты ввода-вывода и маппинг PCI framebuffer VRAM.
-//!
-//! Глобалы `KERNEL_FB_{ADDR,WIDTH,HEIGHT,PITCH}` остаются единственным источником
-//! геометрии фреймбуфера; `set_mode` — единственный писатель после загрузки.
+//! Display ownership, scanout geometry and backend programming.
+//! Display policy stays in userspace. All pixel access and modesets use STATE;
+//! no callback may take a task/VM lock or retain a framebuffer pointer.
 
-use crate::sync::SpinLock;
-use crate::syscall::{KERNEL_FB_HEIGHT, KERNEL_FB_WIDTH};
-use core::sync::atomic::Ordering;
+use crate::sync::{InterruptGuard, SpinLock};
 
 pub mod bochs;
 
-/// Видеорежим (pitch выводится как width*4, формат XRGB8888).
 #[derive(Clone, Copy)]
 pub struct Mode {
     pub width: u32,
     pub height: u32,
 }
 
-/// Ошибка операции с дисплеем.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayError {
-    /// Бэкенд не умеет менять режим (например, фиксированный фреймбуфер Limine).
     Unsupported,
-    /// Запрошенный режим неприемлем (нулевой/превышает бюджет).
     InvalidMode,
-    /// Аппаратная ошибка при программировании.
     Io,
+    AccessDenied,
+    Unavailable,
+    DeviceLost,
 }
 
-/// Активный бэкенд. Enum-диспетчеризация вместо `dyn` — без alloc, в стиле ядра.
+/// Kernel mapping descriptor. Copying it grants no pixel access; use the
+/// scoped callbacks below while its owner and geometry are locked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Framebuffer {
+    pub address: usize,
+    pub width: u32,
+    pub height: u32,
+    pub pitch: u32,
+}
+
+impl Framebuffer {
+    pub(super) fn byte_len(self) -> Option<usize> {
+        (self.pitch as usize).checked_mul(self.height as usize)
+    }
+}
+
 enum Backend {
     Limine,
     Bochs(bochs::BochsVbe),
 }
 
-static ACTIVE: SpinLock<Backend> = SpinLock::new(Backend::Limine);
+struct DisplayState {
+    owner: u64,
+    leases: usize,
+    backend_initialized: bool,
+    framebuffer: Option<Framebuffer>,
+    backend: Backend,
+}
 
-/// Пробует бэкенды и активирует лучший доступный. Вызывается из
-/// `drivers::init()` после `pci::init()`. При неудаче остаётся `Limine`, и
-/// фреймбуфер Limine продолжает работать как прежде.
+// IRQ handlers never acquire this lock, and timer preemption only switches
+// CPL3. Kernel console rendering can therefore leave interrupts enabled.
+// Task/AS -> display is permitted; display -> task/AS is prohibited.
+static STATE: SpinLock<DisplayState> = SpinLock::new(DisplayState {
+    owner: 0,
+    leases: 0,
+    backend_initialized: false,
+    framebuffer: None,
+    backend: Backend::Limine,
+});
+
+/// # Safety
+/// The boot mapping must remain writable for the kernel lifetime. Call once
+/// before device initialization, AP work or application dispatch.
+pub unsafe fn init_boot(address: usize, width: u32, height: u32, pitch: u32) -> bool {
+    let framebuffer = Framebuffer {
+        address,
+        width,
+        height,
+        pitch,
+    };
+    if address == 0
+        || address & 3 != 0
+        || pitch & 3 != 0
+        || width == 0
+        || height == 0
+        || width.checked_mul(4).is_none_or(|bytes| bytes > pitch)
+        || framebuffer
+            .byte_len()
+            .and_then(|bytes| address.checked_add(bytes))
+            .is_none()
+    {
+        return false;
+    }
+    let mut state = STATE.lock();
+    assert!(
+        state.framebuffer.is_none(),
+        "boot framebuffer initialized twice"
+    );
+    state.framebuffer = Some(framebuffer);
+    true
+}
+
+/// Device detection and full-VRAM mapping happen once, before userspace. The
+/// selected backend owns its MMIO mapping for the entire published lifetime.
 pub fn init() {
-    let boot_w = KERNEL_FB_WIDTH.load(Ordering::Relaxed);
-    let boot_h = KERNEL_FB_HEIGHT.load(Ordering::Relaxed);
-    if boot_w == 0 || boot_h == 0 {
+    let boot = {
+        let mut state = STATE.lock();
+        assert!(
+            !state.backend_initialized,
+            "display backend initialized twice"
+        );
+        state.backend_initialized = true;
+        state.framebuffer
+    };
+    let Some(boot) = boot else {
         crate::serial_write("[DISPLAY] no boot framebuffer — backend: none\r\n");
         return;
-    }
-    if let Some(dev) = bochs::BochsVbe::detect(boot_w, boot_h) {
-        *ACTIVE.lock() = Backend::Bochs(dev);
+    };
+    if let Some(device) = bochs::BochsVbe::detect(boot) {
+        let framebuffer = device.boot_framebuffer(boot);
+        let mut state = STATE.lock();
+        state.framebuffer = Some(framebuffer);
+        state.backend = Backend::Bochs(device);
+        drop(state);
         crate::serial_write("[DISPLAY] backend: bochs-vbe\r\n");
     } else {
         crate::serial_write("[DISPLAY] backend: limine (fixed)\r\n");
     }
 }
 
-/// Может ли активный бэкенд менять режим на ходу.
-pub fn can_modeset() -> bool {
-    matches!(&*ACTIVE.lock(), Backend::Bochs(_))
+pub fn owner() -> u64 {
+    STATE.lock().owner
 }
 
-/// Перечисляет доступные режимы в `out`, возвращает их количество.
-pub fn query_modes(out: &mut [Mode]) -> usize {
-    match &*ACTIVE.lock() {
-        Backend::Limine => {
-            if out.is_empty() {
-                0
-            } else {
-                out[0] = Mode {
-                    width: KERNEL_FB_WIDTH.load(Ordering::Relaxed),
-                    height: KERNEL_FB_HEIGHT.load(Ordering::Relaxed),
-                };
-                1
-            }
+pub fn try_acquire(pid: u64) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let mut state = STATE.lock();
+    if state.owner != 0 && state.owner != pid {
+        return false;
+    }
+    let Some(leases) = state.leases.checked_add(1) else {
+        return false;
+    };
+    state.leases = leases;
+    state.owner = pid;
+    true
+}
+
+pub fn release(pid: u64) {
+    let mut state = STATE.lock();
+    if pid != 0 && state.owner == pid {
+        state.leases -= 1;
+        if state.leases == 0 {
+            state.owner = 0;
         }
-        Backend::Bochs(d) => d.query_modes(out),
     }
 }
 
-/// Переключает scanout на `w`×`h`. Обновляет глобалы фреймбуфера как побочный
-/// эффект. Бэкенд Limine возвращает `Unsupported`.
-pub fn set_mode(w: u32, h: u32) -> Result<(), DisplayError> {
-    // PS/2 IRQs must not clamp against old bounds after scanout has changed.
-    let _interrupts = crate::sync::InterruptGuard::new();
-    match &mut *ACTIVE.lock() {
-        Backend::Limine => Err(DisplayError::Unsupported),
-        Backend::Bochs(d) => d.set_mode(w, h),
-    }?;
-    crate::input::set_mouse_bounds(w as usize, h as usize);
+pub(crate) fn framebuffer_snapshot() -> Option<Framebuffer> {
+    STATE.lock().framebuffer
+}
+
+pub(crate) fn get_framebuffer(pid: u64) -> Result<Framebuffer, DisplayError> {
+    with_framebuffer(pid, |framebuffer| *framebuffer)
+}
+
+pub(crate) fn with_framebuffer<R>(
+    pid: u64,
+    op: impl FnOnce(&Framebuffer) -> R,
+) -> Result<R, DisplayError> {
+    let state = STATE.lock();
+    if pid == 0 || state.owner != pid {
+        return Err(DisplayError::AccessDenied);
+    }
+    Ok(op(state
+        .framebuffer
+        .as_ref()
+        .ok_or(DisplayError::Unavailable)?))
+}
+
+pub(crate) fn with_console_framebuffer(op: impl FnOnce(&Framebuffer)) {
+    let state = STATE.lock();
+    if state.owner != 0 {
+        return;
+    }
+    if let Some(framebuffer) = state.framebuffer.as_ref() {
+        op(framebuffer);
+    }
+}
+
+pub fn query_modes(out: &mut [Mode]) -> usize {
+    let state = STATE.lock();
+    match &state.backend {
+        Backend::Limine => {
+            let Some(framebuffer) = state.framebuffer else {
+                return 0;
+            };
+            if out.is_empty() {
+                return 0;
+            }
+            out[0] = Mode {
+                width: framebuffer.width,
+                height: framebuffer.height,
+            };
+            1
+        }
+        Backend::Bochs(device) => device.query_modes(out),
+    }
+}
+
+pub fn set_mode(pid: u64, width: u32, height: u32) -> Result<(), DisplayError> {
+    // Mask PS/2 only for programming/publication. The callback cannot wait on
+    // an IRQ, task or VM owner. No serial output runs inside this scope.
+    {
+        let mut state = STATE.lock();
+        let _irq = InterruptGuard::new();
+        if pid == 0 || state.owner != pid {
+            return Err(DisplayError::AccessDenied);
+        }
+        let result = match &mut state.backend {
+            Backend::Limine => return Err(DisplayError::Unsupported),
+            Backend::Bochs(device) => device
+                .set_mode(width, height)
+                .map(|()| device.framebuffer(width, height)),
+        };
+        match result {
+            Ok(framebuffer) => {
+                state.framebuffer = Some(framebuffer);
+                crate::input::set_mouse_bounds(width as usize, height as usize);
+            }
+            Err(DisplayError::DeviceLost) => {
+                // Failed rollback leaves hardware geometry unknown. Retain the
+                // device mapping, refuse all pixel access until a valid modeset.
+                state.framebuffer = None;
+                crate::input::set_mouse_bounds(0, 0);
+                return Err(DisplayError::DeviceLost);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    crate::serial_write("[DISPLAY] bochs set_mode ");
+    crate::serial::write_dec(width as u64);
+    crate::serial_write("x");
+    crate::serial::write_dec(height as u64);
+    crate::serial_write("\r\n");
     Ok(())
 }
 
-/// Выталкивает текущий backing на физический дисплей. `None` = весь экран.
-/// Для Limine/Bochs — no-op (запись уже сканируется). Хук для virtio-gpu.
-pub fn present(rect: Option<(u32, u32, u32, u32)>) -> Result<(), DisplayError> {
-    match &mut *ACTIVE.lock() {
+/// Copy and backend publication share the same owner/geometry scope. Source
+/// validation and its VM pin must already exist before entering this callback.
+pub(crate) fn present(
+    pid: u64,
+    rect: Option<(u32, u32, u32, u32)>,
+    copy: impl FnOnce(&Framebuffer),
+) -> Result<(), DisplayError> {
+    let mut state = STATE.lock();
+    if pid == 0 || state.owner != pid {
+        return Err(DisplayError::AccessDenied);
+    }
+    copy(
+        state
+            .framebuffer
+            .as_ref()
+            .ok_or(DisplayError::Unavailable)?,
+    );
+    match &mut state.backend {
         Backend::Limine => Ok(()),
-        Backend::Bochs(d) => d.present(rect),
+        Backend::Bochs(device) => device.present(rect),
     }
 }

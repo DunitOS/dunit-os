@@ -6,10 +6,8 @@
 //! создаётся до запуска userspace, поэтому режим не ограничен boot-разрешением.
 //! Без подходящего PCI BAR сохраняется безопасный бюджет маппинга Limine.
 
-use super::{DisplayError, Mode};
-use crate::{hal, drivers::pci, memory::vmm};
-use crate::syscall::{KERNEL_FB_ADDR, KERNEL_FB_HEIGHT, KERNEL_FB_PITCH, KERNEL_FB_WIDTH};
-use core::sync::atomic::Ordering;
+use super::{DisplayError, Framebuffer, Mode};
+use crate::{drivers::pci, hal, memory::vmm};
 
 const VBE_DISPI_IOPORT_INDEX: u16 = 0x01CE;
 const VBE_DISPI_IOPORT_DATA: u16 = 0x01CF;
@@ -19,6 +17,9 @@ const VBE_DISPI_INDEX_XRES: u16 = 1;
 const VBE_DISPI_INDEX_YRES: u16 = 2;
 const VBE_DISPI_INDEX_BPP: u16 = 3;
 const VBE_DISPI_INDEX_ENABLE: u16 = 4;
+const VBE_DISPI_INDEX_VIRT_WIDTH: u16 = 6;
+const VBE_DISPI_INDEX_X_OFFSET: u16 = 8;
+const VBE_DISPI_INDEX_Y_OFFSET: u16 = 9;
 const VBE_DISPI_INDEX_VIDEO_MEMORY_64K: u16 = 10;
 const VBE_DISPI_GETCAPS: u16 = 2;
 
@@ -30,8 +31,15 @@ const VBE_DISPI_BPP_32: u16 = 32;
 
 /// Common scanout modes, filtered against actual device limits and VRAM.
 const CANDIDATE_MODES: &[(u32, u32)] = &[
-    (1024, 768), (1280, 720), (1366, 768), (1600, 900), (1920, 1080),
-    (2560, 1440), (2560, 1600), (2880, 1800), (3072, 1920),
+    (1024, 768),
+    (1280, 720),
+    (1366, 768),
+    (1600, 900),
+    (1920, 1080),
+    (2560, 1440),
+    (2560, 1600),
+    (2880, 1800),
+    (3072, 1920),
 ];
 
 fn write_reg(index: u16, value: u16) {
@@ -48,7 +56,36 @@ fn read_reg(index: u16) -> u16 {
     }
 }
 
+struct MmioMapping {
+    address: usize,
+    bytes: usize,
+}
+
+impl Drop for MmioMapping {
+    fn drop(&mut self) {
+        assert!(
+            vmm::unmap_mmio_region(self.address, self.bytes),
+            "display MMIO retirement failed"
+        );
+    }
+}
+
+enum Backing {
+    Boot(usize),
+    Mmio(MmioMapping),
+}
+
+impl Backing {
+    fn address(&self) -> usize {
+        match self {
+            Self::Boot(address) => *address,
+            Self::Mmio(mapping) => mapping.address,
+        }
+    }
+}
+
 pub struct BochsVbe {
+    backing: Backing,
     /// Maximum scanout pixels within the mapped framebuffer.
     budget_px: u32,
     max_w: u32,
@@ -57,7 +94,7 @@ pub struct BochsVbe {
 
 impl BochsVbe {
     /// Детектит BGA по регистру ID (0xB0C0..=0xB0C5).
-    pub fn detect(boot_w: u32, boot_h: u32) -> Option<Self> {
+    pub(super) fn detect(boot: Framebuffer) -> Option<Self> {
         let id = read_reg(VBE_DISPI_INDEX_ID);
         if !(0xB0C0..=0xB0C5).contains(&id) {
             return None;
@@ -67,7 +104,8 @@ impl BochsVbe {
         let max_w = read_reg(VBE_DISPI_INDEX_XRES) as u32;
         let max_h = read_reg(VBE_DISPI_INDEX_YRES) as u32;
         write_reg(VBE_DISPI_INDEX_ENABLE, enabled);
-        let mut budget_px = boot_w.saturating_mul(boot_h);
+        let mut budget_px = (boot.byte_len()? / 4).min(u32::MAX as usize) as u32;
+        let mut mapping_owner = None;
         // DISPI is also available without PCI. Only claim extra memory when a
         // matching VGA resource is measured and successfully mapped.
         pci::for_each_device(|dev| {
@@ -82,20 +120,35 @@ impl BochsVbe {
             };
             let reported = read_reg(VBE_DISPI_INDEX_VIDEO_MEMORY_64K) as u64 * 65536;
             let bytes = resource.size.min(reported);
-            if bytes < boot_w as u64 * boot_h as u64 * 4 || bytes > usize::MAX as u64 {
+            if mapping_owner.is_some()
+                || bytes < boot.byte_len().unwrap() as u64
+                || bytes > usize::MAX as u64
+            {
                 return;
             }
-            if let Some(mapping) = vmm::map_framebuffer_region(physical as usize, bytes as usize,
-                KERNEL_FB_ADDR.load(Ordering::Relaxed) as usize) {
-                KERNEL_FB_ADDR.store(mapping as u64, Ordering::Relaxed);
+            if let Some(mapping) =
+                vmm::map_framebuffer_region(physical as usize, bytes as usize, boot.address)
+            {
+                mapping_owner = Some(MmioMapping {
+                    address: mapping,
+                    bytes: bytes as usize,
+                });
                 budget_px = (bytes / 4).min(u32::MAX as u64) as u32;
             }
         });
-        Some(BochsVbe { budget_px, max_w, max_h })
+        Some(BochsVbe {
+            backing: mapping_owner.map_or(Backing::Boot(boot.address), Backing::Mmio),
+            budget_px,
+            max_w,
+            max_h,
+        })
     }
 
     fn accepts(&self, w: u32, h: u32) -> bool {
-        w != 0 && h != 0 && w <= self.max_w && h <= self.max_h
+        w != 0
+            && h != 0
+            && w <= self.max_w
+            && h <= self.max_h
             && w as u64 * h as u64 <= self.budget_px as u64
     }
 
@@ -106,45 +159,84 @@ impl BochsVbe {
                 break;
             }
             if self.accepts(w, h) {
-                out[n] = Mode { width: w, height: h };
+                out[n] = Mode {
+                    width: w,
+                    height: h,
+                };
                 n += 1;
             }
         }
         n
     }
 
-    pub fn set_mode(&mut self, w: u32, h: u32) -> Result<(), DisplayError> {
-        if !self.accepts(w, h) {
+    pub(super) fn boot_framebuffer(&self, boot: Framebuffer) -> Framebuffer {
+        Framebuffer {
+            address: self.backing.address(),
+            ..boot
+        }
+    }
+
+    pub(super) fn framebuffer(&self, width: u32, height: u32) -> Framebuffer {
+        let address = self.backing.address();
+        Framebuffer {
+            address,
+            width,
+            height,
+            pitch: width * 4,
+        }
+    }
+
+    pub fn set_mode(&mut self, width: u32, height: u32) -> Result<(), DisplayError> {
+        if !self.accepts(width, height) {
             return Err(DisplayError::InvalidMode);
         }
-        write_reg(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
-        write_reg(VBE_DISPI_INDEX_XRES, w as u16);
-        write_reg(VBE_DISPI_INDEX_YRES, h as u16);
-        write_reg(VBE_DISPI_INDEX_BPP, VBE_DISPI_BPP_32);
-        write_reg(
-            VBE_DISPI_INDEX_ENABLE,
+        let previous = [
+            read_reg(VBE_DISPI_INDEX_XRES),
+            read_reg(VBE_DISPI_INDEX_YRES),
+            read_reg(VBE_DISPI_INDEX_BPP),
+            read_reg(VBE_DISPI_INDEX_ENABLE),
+            read_reg(VBE_DISPI_INDEX_VIRT_WIDTH),
+            read_reg(VBE_DISPI_INDEX_X_OFFSET),
+            read_reg(VBE_DISPI_INDEX_Y_OFFSET),
+        ];
+        if program_mode([
+            width as u16,
+            height as u16,
+            VBE_DISPI_BPP_32,
             VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED,
-        );
-        // Проверяем, что устройство приняло геометрию.
-        if read_reg(VBE_DISPI_INDEX_XRES) != w as u16 || read_reg(VBE_DISPI_INDEX_YRES) != h as u16 {
-            return Err(DisplayError::Io);
+            width as u16,
+            0,
+            0,
+        ]) {
+            return Ok(());
         }
-        // База LFB неизменна; двигаются только размеры scanout. Обновляем глобалы,
-        // чтобы все пути отрисовки (sys_fb_present) использовали новую геометрию.
-        // KERNEL_FB_ADDR remains the kernel-owned framebuffer mapping.
-        KERNEL_FB_WIDTH.store(w, Ordering::Relaxed);
-        KERNEL_FB_HEIGHT.store(h, Ordering::Relaxed);
-        KERNEL_FB_PITCH.store(w.saturating_mul(4), Ordering::Relaxed);
-        crate::serial_write("[DISPLAY] bochs set_mode ");
-        crate::serial::write_dec(w as u64);
-        crate::serial_write("x");
-        crate::serial::write_dec(h as u64);
-        crate::serial_write("\r\n");
-        Ok(())
+        if program_mode(previous) {
+            Err(DisplayError::Io)
+        } else {
+            Err(DisplayError::DeviceLost)
+        }
     }
 
     pub fn present(&mut self, _rect: Option<(u32, u32, u32, u32)>) -> Result<(), DisplayError> {
-        // std VGA сканирует KERNEL_FB_ADDR напрямую — выталкивать нечего.
+        // Limine/Bochs scan the device backing directly; no flush command exists.
         Ok(())
     }
+}
+
+fn program_mode(registers: [u16; 7]) -> bool {
+    write_reg(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    write_reg(VBE_DISPI_INDEX_XRES, registers[0]);
+    write_reg(VBE_DISPI_INDEX_YRES, registers[1]);
+    write_reg(VBE_DISPI_INDEX_BPP, registers[2]);
+    write_reg(VBE_DISPI_INDEX_VIRT_WIDTH, registers[4]);
+    write_reg(VBE_DISPI_INDEX_X_OFFSET, registers[5]);
+    write_reg(VBE_DISPI_INDEX_Y_OFFSET, registers[6]);
+    write_reg(VBE_DISPI_INDEX_ENABLE, registers[3]);
+    read_reg(VBE_DISPI_INDEX_XRES) == registers[0]
+        && read_reg(VBE_DISPI_INDEX_YRES) == registers[1]
+        && read_reg(VBE_DISPI_INDEX_BPP) == registers[2]
+        && read_reg(VBE_DISPI_INDEX_ENABLE) == registers[3]
+        && read_reg(VBE_DISPI_INDEX_VIRT_WIDTH) == registers[4]
+        && read_reg(VBE_DISPI_INDEX_X_OFFSET) == registers[5]
+        && read_reg(VBE_DISPI_INDEX_Y_OFFSET) == registers[6]
 }

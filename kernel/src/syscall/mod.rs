@@ -1,3 +1,7 @@
+mod display;
+pub use display::FbInfo;
+use display::{sys_get_framebuffer, sys_get_terminal_cursor, sys_draw_pixel,
+    sys_draw_rect, sys_fb_present, sys_set_video_mode};
 mod native_fd;
 mod pointer_input;
 mod file_cap;
@@ -12,7 +16,8 @@ use core::fmt::Write;
 use core::cell::UnsafeCell;
 #[cfg(feature = "boot-smoke-tests")]
 use core::sync::atomic::AtomicBool;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+#[cfg(feature = "boot-smoke-tests")]
+use core::sync::atomic::Ordering;
 
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,21 +248,6 @@ pub const EPERM: i64 = -1;
 pub const EBUSY: i64 = -16;
 pub const EPIPE: i64 = -32;
 
-/// Параметры фреймбуфера ядра. Раньше четыре `pub static mut` скаляра,
-/// записываемые один раз из `lib.rs` и читаемые из системных вызовов display;
-/// теперь атомики — простые скаляры не нуждаются в локе.
-pub static KERNEL_FB_ADDR: AtomicU64 = AtomicU64::new(0);
-pub static KERNEL_FB_WIDTH: AtomicU32 = AtomicU32::new(0);
-pub static KERNEL_FB_HEIGHT: AtomicU32 = AtomicU32::new(0);
-pub static KERNEL_FB_PITCH: AtomicU32 = AtomicU32::new(0);
-
-#[repr(C)]
-pub struct FbInfo {
-    pub addr: u64,
-    pub width: u32,
-    pub height: u32,
-    pub pitch: u32,
-}
 
 #[repr(C)]
 pub struct TerminalCursorInfo {
@@ -1890,61 +1880,6 @@ fn sys_abi_query(query: usize, arg: usize) -> i64 {
     }
 }
 
-fn sys_get_framebuffer(info: *mut FbInfo) -> i64 {
-    // Raw framebuffer access is reserved for the display-master owner — the
-    // userspace compositor, or a full-screen app that acquired the display.
-    // Other processes must go through the compositor. Mirrors sys_fb_present so
-    // there is one ownership rule for the framebuffer, not a back door.
-    let pid = match crate::process::with_current_process(|process| process.pid.0) {
-        Some(value) => value,
-        None => return EINVAL,
-    };
-    if pid == 0 || crate::handle::display_owner() != pid {
-        return EACCES;
-    }
-    unsafe {
-        if KERNEL_FB_ADDR.load(Ordering::Relaxed) == 0 {
-            return EINVAL;
-        }
-        let fb = FbInfo {
-            addr: KERNEL_FB_ADDR.load(Ordering::Relaxed),
-            width: KERNEL_FB_WIDTH.load(Ordering::Relaxed),
-            height: KERNEL_FB_HEIGHT.load(Ordering::Relaxed),
-            pitch: KERNEL_FB_PITCH.load(Ordering::Relaxed),
-        };
-        let bytes = core::slice::from_raw_parts(
-            &fb as *const FbInfo as *const u8,
-            core::mem::size_of::<FbInfo>(),
-        );
-        if let Err(error) = copy_buffer_to_user(info as *mut u8, bytes) {
-            return error;
-        }
-    }
-    0
-}
-
-fn sys_get_terminal_cursor(info: *mut TerminalCursorInfo) -> i64 {
-    let Some(cursor) = crate::terminal::get_cursor_info() else {
-        return EINVAL;
-    };
-    let user_info = TerminalCursorInfo {
-        x: cursor.x,
-        y: cursor.y,
-        char_width: cursor.char_width,
-        char_height: cursor.char_height,
-    };
-    let bytes = unsafe {
-        core::slice::from_raw_parts(
-            &user_info as *const TerminalCursorInfo as *const u8,
-            core::mem::size_of::<TerminalCursorInfo>(),
-        )
-    };
-    if let Err(error) = copy_buffer_to_user(info as *mut u8, bytes) {
-        return error;
-    }
-    0
-}
-
 fn sys_get_system_stats(info: *mut SystemStats) -> i64 {
     let process = crate::process::process_stats();
     let (pmm_total, pmm_free) = match crate::memory::pmm::get_pmm() {
@@ -1998,139 +1933,6 @@ fn sys_get_system_stats(info: *mut SystemStats) -> i64 {
         return error;
     }
     0
-}
-
-fn sys_draw_pixel(x: u32, y: u32, color: u32) -> i64 {
-    // Same ownership rule as sys_get_framebuffer / sys_fb_present: only the
-    // display-master owner may poke the raw framebuffer.
-    let pid = match crate::process::with_current_process(|process| process.pid.0) {
-        Some(value) => value,
-        None => return EINVAL,
-    };
-    if pid == 0 || crate::handle::display_owner() != pid {
-        return EACCES;
-    }
-    unsafe {
-        if KERNEL_FB_ADDR.load(Ordering::Relaxed) == 0 {
-            return EINVAL;
-        }
-        let fb = KERNEL_FB_ADDR.load(Ordering::Relaxed) as *mut u32;
-        let w = KERNEL_FB_WIDTH.load(Ordering::Relaxed) as usize;
-        let h = KERNEL_FB_HEIGHT.load(Ordering::Relaxed) as usize;
-        if (x as usize) < w && (y as usize) < h {
-            let pitch_pixels = KERNEL_FB_PITCH.load(Ordering::Relaxed) as usize / 4;
-            core::ptr::write_volatile(fb.add(y as usize * pitch_pixels + x as usize), color);
-        }
-    }
-    0
-}
-
-fn sys_draw_rect(x: u32, y: u32, w: u32, h: u32, color: u32) -> i64 {
-    // Same display-owner gate as sys_draw_pixel / sys_fb_present: only the
-    // display-master owner (the userspace compositor) may poke the raw
-    // framebuffer. Without this a background app could scribble on the screen.
-    let pid = match crate::process::with_current_process(|process| process.pid.0) {
-        Some(value) => value,
-        None => return EINVAL,
-    };
-    if pid == 0 || crate::handle::display_owner() != pid {
-        return EACCES;
-    }
-    unsafe {
-        if KERNEL_FB_ADDR.load(Ordering::Relaxed) == 0 {
-            return EINVAL;
-        }
-        let fb = KERNEL_FB_ADDR.load(Ordering::Relaxed) as *mut u32;
-        let fb_w = KERNEL_FB_WIDTH.load(Ordering::Relaxed) as usize;
-        let fb_h = KERNEL_FB_HEIGHT.load(Ordering::Relaxed) as usize;
-        let pitch_pixels = KERNEL_FB_PITCH.load(Ordering::Relaxed) as usize / 4;
-        for dy in 0..h as usize {
-            for dx in 0..w as usize {
-                let px = x as usize + dx;
-                let py = y as usize + dy;
-                if px < fb_w && py < fb_h {
-                    core::ptr::write_volatile(fb.add(py * pitch_pixels + px), color);
-                }
-            }
-        }
-    }
-    0
-}
-
-fn sys_fb_present(src: *const u8, width: u32, height: u32, dst_x: u32, dst_y: u32) -> i64 {
-    // Только владелец дисплея (compositor в userspace) может выводить в
-    // фреймбуфер. Политика композитинга живёт в userspace — ядро даёт лишь
-    // механизм блита. Владельца отслеживает глобальный DISPLAY_MASTER_OWNER.
-    let pid = match crate::process::with_current_process(|process| process.pid.0) {
-        Some(value) => value,
-        None => return EINVAL,
-    };
-    if pid == 0 || crate::handle::display_owner() != pid {
-        return EACCES;
-    }
-    if KERNEL_FB_ADDR.load(Ordering::Relaxed) == 0 {
-        return EINVAL;
-    }
-    let (w, h) = (width as usize, height as usize);
-    let Some(bytes) = w.checked_mul(h).and_then(|px| px.checked_mul(4)) else {
-        return EINVAL;
-    };
-    const MAX_FB_PRESENT: usize = 64 * 1024 * 1024;
-    if bytes == 0 || bytes > MAX_FB_PRESENT {
-        return EINVAL;
-    }
-    if !is_valid_user_pointer(src as u64, bytes) {
-        return EFAULT;
-    }
-    // Validate every source page once (present, user-readable), then blit
-    // directly from user memory. A userspace compositor presents a full-screen
-    // frame every tick, so the old copy-into-a-Vec path allocated and byte-copied
-    // several MiB per frame; reading the source in place removes that per-frame
-    // allocation and halves the memory traffic.
-    let copied=user_memory::with_mapping(src as u64,bytes,false,|mapping| {
-    let fb = KERNEL_FB_ADDR.load(Ordering::Relaxed) as *mut u8;
-    let fb_w = KERNEL_FB_WIDTH.load(Ordering::Relaxed) as usize;
-    let fb_h = KERNEL_FB_HEIGHT.load(Ordering::Relaxed) as usize;
-    let pitch = KERNEL_FB_PITCH.load(Ordering::Relaxed) as usize;
-    let (dx, dy) = (dst_x as usize, dst_y as usize);
-    let copy_width=w.min(fb_w.saturating_sub(dx));
-    let copy_height=h.min(fb_h.saturating_sub(dy));
-    if copy_width!=0 {
-        for row in 0..copy_height {
-            let destination=unsafe {fb.add((dy+row)*pitch+dx*4)} as *mut u32;
-            unsafe {mapping.copy_words_volatile(row*w*4,destination,copy_width);}
-        }
-    }
-    Ok(())
-    });
-    if let Err(error)=copied {return error;}
-    // Вытолкнуть кадр на физический дисплей. Для сканаут-прямых бэкендов
-    // (Limine/Bochs) — no-op; для virtio-gpu — TRANSFER_TO_HOST_2D + FLUSH.
-    let _ = crate::drivers::display::present(None);
-    0
-}
-
-/// Смена видеорежима на ходу. Только владелец дисплея (userspace-compositor).
-/// Возвращает 0 при успехе, EOPNOTSUPP если активный бэкенд не умеет менять
-/// режим (фиксированный фреймбуфер Limine/GOP), EINVAL при недопустимом размере,
-/// EIO при аппаратной ошибке.
-fn sys_set_video_mode(width: u32, height: u32) -> i64 {
-    let pid = match crate::process::with_current_process(|process| process.pid.0) {
-        Some(value) => value,
-        None => return EINVAL,
-    };
-    if pid == 0 || crate::handle::display_owner() != pid {
-        return EACCES;
-    }
-    if !crate::drivers::display::can_modeset() {
-        return EOPNOTSUPP;
-    }
-    match crate::drivers::display::set_mode(width, height) {
-        Ok(()) => 0,
-        Err(crate::drivers::display::DisplayError::InvalidMode) => EINVAL,
-        Err(crate::drivers::display::DisplayError::Unsupported) => EOPNOTSUPP,
-        Err(crate::drivers::display::DisplayError::Io) => EIO,
-    }
 }
 
 fn sys_get_key() -> i64 {

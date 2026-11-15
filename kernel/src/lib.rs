@@ -657,14 +657,10 @@ pub extern "C" fn kernel_main(
                 log.fb = Some((fb_addr, width));
                 log.y = early_log_y;
             }
-            crate::syscall::KERNEL_FB_ADDR
-                .store(fb.address as u64, core::sync::atomic::Ordering::Relaxed);
-            crate::syscall::KERNEL_FB_WIDTH
-                .store(fb.width as u32, core::sync::atomic::Ordering::Relaxed);
-            crate::syscall::KERNEL_FB_HEIGHT
-                .store(fb.height as u32, core::sync::atomic::Ordering::Relaxed);
-            crate::syscall::KERNEL_FB_PITCH
-                .store(fb.pitch as u32, core::sync::atomic::Ordering::Relaxed);
+            unsafe {
+                assert!(drivers::display::init_boot(fb.address as usize, fb.width as u32,
+                    fb.height as u32, fb.pitch as u32), "invalid boot framebuffer");
+            }
             input::set_mouse_bounds(width, height);
         }
         screen_log_early(fb_addr, width, early_log_y, "[KERNEL] screen log ready");
@@ -944,16 +940,9 @@ pub extern "C" fn kernel_main(
         let fb_for_terminal = unsafe { fb_ptr.as_ref() };
         screen_log("[ OK ] Framebuffer reference obtained", false);
 
-        if let Some(fb) = fb_for_terminal {
-            screen_log("[ .. ] Extracting framebuffer parameters", false);
-            let fb_addr = fb.address as *mut u32;
-            let width = fb.width as usize;
-            let height = fb.height as usize;
-            let pitch = fb.pitch as usize;
-            screen_log("[ OK ] Framebuffer parameters extracted", false);
-
+        if fb_for_terminal.is_some() {
             screen_log("[ .. ] Calling terminal::init()", false);
-            unsafe { terminal::init(fb_addr, width, height, pitch); }
+            terminal::init();
             screen_log("[ OK ] terminal::init() returned", false);
 
             screen_log("[ .. ] Getting console instance", false);

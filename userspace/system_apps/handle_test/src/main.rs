@@ -181,6 +181,38 @@ pub extern "C" fn _start(argc:usize,argv:*const *const u8,envp:*const *const u8)
         fail("display rights");
     }
 
+    // Repeated acquire creates independent handles to the same exclusive lease.
+    let second = libdunit::handle_display_acquire();
+    if second <= 0 || second as u32 == hd { fail("second display acquire"); }
+    if libdunit::handle_close(hd) != 0 { fail("first display close"); }
+    let mut framebuffer = libdunit::FbInfo { addr: 0, width: 0, height: 0, pitch: 0 };
+    if !libdunit::get_framebuffer(&mut framebuffer) || framebuffer.width == 0 {
+        fail("display lease lost after first close");
+    }
+    let mode = libdunit::set_video_mode(framebuffer.width, framebuffer.height);
+    if mode != 0 && mode != libdunit::EOPNOTSUPP { fail("display self modeset"); }
+    let mut record = [0xffu8; 24];
+    if libdunit::syscall1(libdunit::SYSCALL_GET_FRAMEBUFFER, record.as_mut_ptr() as usize) != 0
+        || record[20..] != [0; 4] { fail("framebuffer record padding"); }
+    if libdunit::syscall1(libdunit::SYSCALL_GET_FRAMEBUFFER, 1) != libdunit::EFAULT {
+        fail("framebuffer bad destination");
+    }
+    if libdunit::syscall5(libdunit::SYSCALL_DRAW_RECT, u32::MAX as usize,
+        u32::MAX as usize, u32::MAX as usize, u32::MAX as usize, 0) != 0 {
+        fail("clipped display rectangle");
+    }
+    if libdunit::syscall5(libdunit::SYSCALL_FB_PRESENT, 1, 1, 1, 0, 0) != libdunit::EFAULT {
+        fail("display invalid source");
+    }
+    if !libdunit::get_framebuffer(&mut framebuffer) { fail("display access after copy error"); }
+    if libdunit::handle_close(second as u32) != 0 { fail("last display close"); }
+    if libdunit::get_framebuffer(&mut framebuffer) { fail("display access after last close"); }
+    if libdunit::syscall5(libdunit::SYSCALL_DRAW_RECT, 0, 0, 1, 1, 0) != libdunit::EACCES {
+        fail("display draw after last close");
+    }
+    libdunit::println("[DISPLAY-LEASE] repeated acquire survives first close and revokes on last close OK");
+    libdunit::println("[DISPLAY-ACCESS] padded record, copy errors, clipped rect and revoked write OK");
+
     // 11) TRANSFER (себе): хэндл-источник становится невалидным, а объект
     // доступен под новым хэндлом с теми же данными.
     let moved = libdunit::handle_transfer(hmem, pid);

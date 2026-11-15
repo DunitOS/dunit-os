@@ -1,15 +1,11 @@
-use crate::sync::IrqSafeSpinLock;
+use crate::drivers::display;
+use crate::sync::SpinLock;
 // Every scanout-writing primitive honors the existing display-master lease.
 // Terminal history and serial output continue while userspace owns the display.
 
-struct Framebuffer {
-    address: *mut u32,
+pub(crate) struct FbConsole {
     width: usize,
     height: usize,
-}
-
-pub(crate) struct FbConsole {
-    fb: Framebuffer,
     scrollback: ScrollbackState,
     cursor_x: usize,
     cursor_y: usize,
@@ -17,7 +13,6 @@ pub(crate) struct FbConsole {
     char_height: usize,
     fg_color: u32,
     bg_color: u32,
-    stride: usize,
     /// Active 16-color ANSI palette (0..=7 normal, 8..=15 bright), fed by the
     /// configured theme (`term_theme`). Stored as 0x00RRGGBB (framebuffer is
     /// XRGB), so SGR 30-37/90-97 index straight into it.
@@ -101,25 +96,10 @@ pub struct CursorInfo {
 }
 
 impl FbConsole {
-    /// # Safety
-    /// The framebuffer must stay writable and valid until this console is
-    /// dropped. Concurrent pixel writers require separate display ownership.
-    /// A zero-sized framebuffer may use a null pointer while unpublished.
-    pub(crate) const unsafe fn new(
-        fb_addr: *mut u32,
-        width: usize,
-        height: usize,
-        pitch: usize,
-    ) -> Self {
-        let stride = pitch / 4;
-        let fb = Framebuffer {
-            address: fb_addr,
+    pub(crate) const fn new(width: usize, height: usize) -> Self {
+        Self {
             width,
             height,
-        };
-
-        Self {
-            fb,
             scrollback: ScrollbackState::new(),
             cursor_x: 0,
             cursor_y: 0,
@@ -127,7 +107,6 @@ impl FbConsole {
             char_height: 16,
             fg_color: rgb(term_theme::DEFAULT.fg),
             bg_color: rgb(term_theme::DEFAULT.bg),
-            stride,
             palette: palette_from(term_theme::DEFAULT),
             default_fg: rgb(term_theme::DEFAULT.fg),
             bold: false,
@@ -140,11 +119,11 @@ impl FbConsole {
     }
 
     fn max_chars(&self) -> usize {
-        (self.fb.width / self.char_width).min(MAX_COLS)
+        (self.width / self.char_width).min(MAX_COLS)
     }
 
     fn visible_rows(&self) -> usize {
-        self.fb.height / self.char_height
+        self.height / self.char_height
     }
 
     fn reset_scrollback(&mut self) {
@@ -161,17 +140,27 @@ impl FbConsole {
     }
 
     fn clear_pixels(&mut self) {
-        if crate::handle::display_owner() != 0 {
-            return;
-        }
-        unsafe {
-            let ptr = self.fb.address;
-            let color = self.bg_color;
-            let count = self.fb.height * self.stride;
+        self.clear_pixel_rows(self.height);
+    }
 
-            for i in 0..count {
-                ptr.add(i).write_volatile(color);
-            }
+    fn clear_pixel_rows(&mut self, rows: usize) {
+        // One bounded row per display lease, so acquisition/modeset need not
+        // wait for an entire viewport clear. Use current geometry while writing.
+        for row in 0..rows.min(self.height) {
+            display::with_console_framebuffer(|framebuffer| {
+                if row >= framebuffer.height as usize {
+                    return;
+                }
+                let width = self.width.min(framebuffer.width as usize);
+                let offset = row * framebuffer.pitch as usize / 4;
+                for column in 0..width {
+                    unsafe {
+                        (framebuffer.address as *mut u32)
+                            .add(offset + column)
+                            .write_volatile(self.bg_color);
+                    }
+                }
+            });
         }
     }
 
@@ -287,18 +276,7 @@ impl FbConsole {
     }
 
     pub fn clear_top_area(&mut self, lines: usize) {
-        if crate::handle::display_owner() != 0 {
-            return;
-        }
-        unsafe {
-            let ptr = self.fb.address;
-            let color = self.bg_color;
-            let count = lines * self.char_height * self.stride;
-
-            for i in 0..count {
-                ptr.add(i).write_volatile(color);
-            }
-        }
+        self.clear_pixel_rows(lines.saturating_mul(self.char_height));
     }
 
     pub fn cursor_info(&self) -> CursorInfo {
@@ -517,37 +495,33 @@ impl FbConsole {
     }
 
     fn draw_glyph_color(&mut self, char_x: usize, char_y: usize, ch: u8, fg_color: u32) {
-        if crate::handle::display_owner() != 0 {
-            return;
-        }
         let glyph = get_font_glyph(ch);
         let px_x = char_x * self.char_width;
         let px_y = char_y * self.char_height;
-
-        unsafe {
+        display::with_console_framebuffer(|framebuffer| {
             for row in 0..self.char_height {
-                if px_y + row >= self.fb.height {
+                if px_y + row >= framebuffer.height as usize {
                     break;
                 }
                 let glyph_row = glyph[row];
-                let offset = (px_y + row) * self.stride + px_x;
-
+                let offset = (px_y + row) * (framebuffer.pitch as usize / 4) + px_x;
                 for col in 0..self.char_width {
-                    if px_x + col >= self.fb.width {
+                    if px_x + col >= framebuffer.width as usize {
                         break;
                     }
                     let bit = (glyph_row >> (7 - col)) & 1;
                     let color = if bit == 1 { fg_color } else { self.bg_color };
-                    *self.fb.address.add(offset + col) = color;
+                    unsafe {
+                        (framebuffer.address as *mut u32)
+                            .add(offset + col)
+                            .write_volatile(color);
+                    }
                 }
             }
-        }
+        });
     }
 
     pub fn draw_cursor(&mut self, visible: bool) {
-        if crate::handle::display_owner() != 0 {
-            return;
-        }
         let px_x = self.cursor_x * self.char_width;
         let px_y = self.cursor_y * self.char_height;
         let color = if visible {
@@ -555,21 +529,24 @@ impl FbConsole {
         } else {
             self.bg_color
         };
-
-        unsafe {
+        display::with_console_framebuffer(|framebuffer| {
             for row in (self.char_height - 2)..self.char_height {
-                if px_y + row >= self.fb.height {
+                if px_y + row >= framebuffer.height as usize {
                     break;
                 }
                 for col in 0..self.char_width {
-                    if px_x + col >= self.fb.width {
+                    if px_x + col >= framebuffer.width as usize {
                         break;
                     }
-                    let offset = (px_y + row) * self.stride + (px_x + col);
-                    *self.fb.address.add(offset) = color;
+                    let offset = (px_y + row) * (framebuffer.pitch as usize / 4) + px_x + col;
+                    unsafe {
+                        (framebuffer.address as *mut u32)
+                            .add(offset)
+                            .write_volatile(color);
+                    }
                 }
             }
-        }
+        });
     }
 }
 
@@ -580,19 +557,17 @@ fn get_font_glyph(ch: u8) -> &'static [u8; 16] {
     &crate::console_font::FONT_8X16[ch as usize]
 }
 
-// The framebuffer pointer is used only under the console lock. This protects
-// console writers; display-master/modeset ownership is a separate device gate.
-unsafe impl Send for FbConsole {}
-
 struct ConsoleState {
     initialized: bool,
     console: FbConsole,
 }
 
 // Initialize the large history in static storage, never on a boot stack.
-static CONSOLE: IrqSafeSpinLock<ConsoleState> = IrqSafeSpinLock::new(ConsoleState {
+// Timer IRQs never access console state and preempt only CPL3. Rendering on
+// the kernel shell keeps interrupts enabled; console -> display is the lock order.
+static CONSOLE: SpinLock<ConsoleState> = SpinLock::new(ConsoleState {
     initialized: false,
-    console: unsafe { FbConsole::new(core::ptr::null_mut(), 0, 0, 0) },
+    console: FbConsole::new(0, 0),
 });
 
 fn serial_write_text(text: &str) {
@@ -605,24 +580,33 @@ fn serial_write_text(text: &str) {
     }
 }
 
-/// # Safety
-/// The boot framebuffer mapping must remain valid for the kernel's lifetime.
-/// Display lease/modeset coordination remains the caller's device contract.
-pub unsafe fn init(fb_addr: *mut u32, width: usize, height: usize, pitch: usize) {
+pub fn init() -> bool {
+    let Some(framebuffer) = display::framebuffer_snapshot() else {
+        return false;
+    };
     let mut state = CONSOLE.lock();
     assert!(!state.initialized, "terminal initialized twice");
-    state.console.fb = Framebuffer {
-        address: fb_addr,
-        width,
-        height,
-    };
-    state.console.stride = pitch / 4;
+    state.console.width = framebuffer.width as usize;
+    state.console.height = framebuffer.height as usize;
     state.initialized = true;
+    true
 }
 
 fn with_console<R>(f: impl FnOnce(&mut FbConsole) -> R) -> Option<R> {
     let mut state = CONSOLE.lock();
-    state.initialized.then(|| f(&mut state.console))
+    if !state.initialized {
+        return None;
+    }
+    if let Some(framebuffer) = display::framebuffer_snapshot() {
+        let width = framebuffer.width as usize;
+        let height = framebuffer.height as usize;
+        if state.console.width != width || state.console.height != height {
+            state.console.width = width;
+            state.console.height = height;
+            state.console.follow_bottom();
+        }
+    }
+    Some(f(&mut state.console))
 }
 
 /// A shell output handle. Each operation releases ownership before returning;

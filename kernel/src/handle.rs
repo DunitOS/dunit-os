@@ -211,26 +211,17 @@ impl Default for HandleTable {
     }
 }
 
-/// Владелец мастер-права на дисплей: `0` — свободен, иначе pid владельца.
-/// Эксклюзивно на всю систему, поэтому глобальный атомик, а не поле процесса.
-static DISPLAY_MASTER_OWNER: AtomicU64 = AtomicU64::new(0);
-
-/// Пытается захватить дисплей за процессом `pid`. Идемпотентно для текущего
-/// владельца. Возвращает `false`, если дисплеем владеет другой процесс.
+/// Display ownership is serialized with active scanout writes and modesets.
 pub fn try_acquire_display(pid: ProcessId) -> bool {
-    match DISPLAY_MASTER_OWNER.compare_exchange(0, pid.0, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => true,
-        Err(current) => current == pid.0,
-    }
+    crate::drivers::display::try_acquire(pid.0)
 }
 
-/// Освобождает дисплей, если им владеет `pid` (иначе no-op).
 pub fn release_display(pid: ProcessId) {
-    let _ = DISPLAY_MASTER_OWNER.compare_exchange(pid.0, 0, Ordering::AcqRel, Ordering::Acquire);
+    crate::drivers::display::release(pid.0);
 }
 
 pub fn display_owner() -> u64 {
-    DISPLAY_MASTER_OWNER.load(Ordering::Acquire)
+    crate::drivers::display::owner()
 }
 
 /// Владелец мастер-права на ввод: `0` — свободен, иначе pid владельца.

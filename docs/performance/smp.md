@@ -202,7 +202,7 @@ and process mappings use owning address-space scopes. Active-root mutation
 helpers are restricted to early boot smoke tests. This closes the old getter
 item, not the concurrent shared-VM/final-reader acceptance gates.
 
-Console history now belongs to the console under one IRQ-safe lock. Shell and
+Console history now belongs to the console under one spinlock. Shell and
 foreground output use a handle whose operations release the guard before return;
 no console borrow/lock spans shell commands, VFS work, stdin polling or HAL entry.
 Serial output runs outside that lock and long output releases it between bounded
@@ -218,9 +218,43 @@ checks independent history, concurrent handles/snapshots, serial reentry and the
 existing display lease. `tools/boot_markers.json` additionally drives two real
 `calc` input lines, normal exit, Ctrl+C and a subsequent successful exec under
 TCG on one/eight CPUs. These checks exercise UP application dispatch; APs park.
-Full repaint IRQ-off latency, display-master transitions and modeset/mapping
-retirement remain open. An atomic display-owner check alone cannot synchronize
-an in-flight framebuffer write with lease acquisition or mapping destruction.
+Display leases, framebuffer metadata and the active backend now share a device
+spinlock. Console pixel operations hold it for one row/glyph/cursor; no framebuffer
+pointer is cached in the console. Layout refreshes after modesets and each write
+uses the locked current pitch/bounds. Console and display IRQ handlers never
+acquire these locks; timer preemption switches only CPL3, so kernel-shell rendering
+leaves IRQs enabled. `console -> display` and `task/VM -> display` are the relevant
+edges; source mapping pins precede display acquisition, and present/flush share
+that scope. Serial logs and user descriptor copies run after display unlock.
+
+Every acquired display handle contributes a lease; the last close releases the
+owner. The selected Bochs backend owns its full-VRAM mapping for its published
+kernel lifetime. Modesets keep that backing, validate physical/virtual geometry
+and offsets, and publish dimensions/pitch together. A rejected programming attempt
+restores prior registers; failed rollback removes the visible framebuffer while
+retaining backing until a valid recovery modeset. GetFramebuffer keeps the native
+24-byte record and initializes its padding. Rectangle clipping bounds work to the
+visible area before looping.
+
+The host display tests use actual locks/Bochs programming with port/VRAM fixtures:
+2,000 concurrent modesets, 6,000 pinned copy scopes, delayed writer handoff,
+multiple leases, canaries, rollback and failed-rollback recovery. Native handle
+checks cover acquire/close, record padding, copy errors and revoked writes; GUI
+checks cover live resolution reload and the 3K preset/screendump sequence.
+On 15 November, the boot suite passed with one/eight TCG CPUs, GUI smoke passed
+with four CPUs, and the production kernel (without `boot-smoke-tests`) passed
+native TinyCC core/IPC workloads and musl time checks. The real Settings sequence
+passed 3072×1920 → 2880×1800 → 2560×1600 → 2560×1440 → 1920×1080; every P6
+capture had the selected dimensions, a complete pixel payload and a nonblank
+desktop. Its coordinates now target the retained Settings controls and each
+capture waits for the new session's first presented frame, rather than accepting
+a black image immediately after hardware modeset. Requested harness screenshots
+also fail the run on QMP rejection or missing output; host transport/run tests
+cover those failures. ABI and CPU-local generated outputs remain unchanged.
+These cover the current Limine/Bochs mechanism. They do not establish AP application
+dispatch, GPU DMA/hotplug retirement or syscall IRQ-off latency budgets. Full-frame
+user mapping/copy and syscall interruptibility still require the IRQ-progress gate.
+Input-master repeated acquisition/final-close ownership also remains open.
 
 AHCI and Virtio block error paths also need DMA retirement. AHCI command timeout
 can leave a slot active while the next transfer rewrites its command/data backing;
@@ -233,9 +267,8 @@ receipts do not prove delayed/stuck-device behavior.
 The following require implementation or further native proof before AP application
 dispatch:
 
-- Display-master/console/modeset coordination and remaining driver shared-state
-  owners, complete task/VFS/backend/device/heap/PMM/IRQ lock ranking, and bounded
-  IRQ-off work.
+- Remaining driver shared-state owners, complete task/VFS/backend/device/heap/
+  PMM/IRQ lock ranking, and bounded IRQ-off syscall/frame-present work.
 - Interruptible syscall/IPI progress, remote cancellation/group-stop
   acknowledgements and cleanup only after active CPUs hand back execution.
 - Remote runqueues, reschedule/idle notifications, migration and wake/check-sleep

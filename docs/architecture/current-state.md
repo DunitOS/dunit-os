@@ -30,7 +30,7 @@ paths. They must continue to work when userspace initialization fails.
 | Ownership | Task registry pins, exclusive execution admission, deferred dispatch/fd retirement, locked PTY queues and scoped console/stdin transactions | `tools/test_process_resources.py`, `tools/test_pty.py`, `tools/boot_markers.json` |
 | Waiting | Blocking timer/IPC/futex and level-triggered mixed IPC/fd/timer/child wait-set | `tools/waitset_markers.json`, `tools/test_wait_queue.py` |
 | Files | MemFS root, initrd apps/assets, task snapshots, DunitFS v2 at `/persist`, fd duplication/pipes/flags/spawn actions | `tools/m6_fileops_markers.json`, `tools/m6_native_fd_markers.json` |
-| Devices | PS/2 input, queued pointer input, PCI, framebuffer/Bochs display modes, AHCI and virtio-blk | driver-specific and GUI marker contracts |
+| Devices | PS/2 input, queued pointer input, PCI, serialized framebuffer/Bochs display leases and modesets, AHCI and virtio-blk | driver-specific and GUI marker contracts |
 | Runtime | Static native Rust SDK, static Dunit musl, on-device TinyCC and full Lua interpreter | [SDK](../sdk/README.md), [libc tests](../libc-test.md), [Lua](lua-runtime.md) |
 | Desktop | Configurable panels/components, themes, input/focus, text clipboard, scoped file transfers, window motion and isolated Lua workers | [desktop manual](desktop.md), `tools/gui_smoke_markers.json` |
 
@@ -68,9 +68,10 @@ Compatibility entry points are retained where callers still require them.
 ## Open gates
 
 - [OP4 ownership gates](../performance/smp.md#pre-op4-gates): console/stdin scopes
-  and the former global VMM getter are addressed. Display-master/modeset lifetime,
-  driver DMA retirement, remote cancellation, lock ranking/IRQ progress and real
-  concurrent VM/application stress remain open before AP dispatch.
+  and current display-master/Bochs modeset ownership are addressed. Input-master
+  final-close ownership, driver DMA retirement, remote cancellation, lock ranking,
+  syscall IRQ progress and concurrent VM/application stress remain open before AP
+  dispatch. Current scanout backing has a fixed kernel lifetime.
 - Secure entropy is absent. ELF AT_RANDOM bootstrap bytes are not a CSPRNG and
   must not support cryptography or a claim of production hash hardening.
 - Signals/interruption, cancellation, process-image exec/fork, dynamic loader/DTV,
