@@ -138,34 +138,51 @@ class RunResult:
 
 
 class Qmp:
-    """Minimal QMP client over a UNIX socket."""
+    """QMP framing over a UNIX socket or the emulator's local stdio pipes."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, reader=None, writer=None):
         self.path = path
         self.sock: socket.socket | None = None
+        self.reader = reader
+        self.writer = writer
         self._buf = b""
 
     def connect(self, timeout: float = 20.0) -> None:
         deadline = time.monotonic() + timeout
+        if self.reader is not None and self.writer is not None:
+            os.set_blocking(self.reader.fileno(), False)
+            os.set_blocking(self.writer.fileno(), False)
+            self._read_json(timeout)
+            self.execute("qmp_capabilities", timeout=max(0.0, deadline - time.monotonic()))
+            return
         last_err: Exception | None = None
         while time.monotonic() < deadline:
+            s = None
             try:
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 s.connect(str(self.path))
                 self.sock = s
                 break
             except OSError as err:
+                if s is not None:
+                    s.close()
                 last_err = err
                 time.sleep(0.1)
         if self.sock is None:
             raise RuntimeError(f"could not connect to QMP socket: {last_err}")
         # Read the greeting then negotiate capabilities.
-        self._read_json()
-        self.execute("qmp_capabilities")
+        self._read_json(max(0.0, deadline - time.monotonic()))
+        self.execute("qmp_capabilities", timeout=max(0.0, deadline - time.monotonic()))
+
+    @staticmethod
+    def _wait_pipe(stream, event, deadline: float) -> None:
+        with selectors.DefaultSelector() as selector:
+            selector.register(stream, event)
+            if not selector.select(max(0.0, deadline - time.monotonic())):
+                raise TimeoutError("QMP pipe timed out")
 
     def _read_json(self, timeout: float = 20.0) -> dict:
-        assert self.sock is not None
-        self.sock.settimeout(timeout)
+        deadline = time.monotonic() + timeout
         while True:
             nl = self._buf.find(b"\n")
             if nl >= 0:
@@ -174,20 +191,44 @@ class Qmp:
                 if line.strip():
                     return json.loads(line.decode("utf-8", "replace"))
                 continue
-            chunk = self.sock.recv(65536)
+            if self.sock is not None:
+                self.sock.settimeout(max(0.0, deadline - time.monotonic()))
+                chunk = self.sock.recv(65536)
+            else:
+                if self.reader is None:
+                    raise RuntimeError("QMP is not connected")
+                self._wait_pipe(self.reader, selectors.EVENT_READ, deadline)
+                chunk = os.read(self.reader.fileno(), 65536)
             if not chunk:
-                raise RuntimeError("QMP socket closed")
+                raise RuntimeError("QMP transport closed")
             self._buf += chunk
 
-    def execute(self, command: str, arguments: dict | None = None) -> dict:
-        assert self.sock is not None
+    def execute(self, command: str, arguments: dict | None = None, *, timeout: float = 20.0) -> dict:
+        deadline = time.monotonic() + timeout
         msg = {"execute": command}
         if arguments:
             msg["arguments"] = arguments
-        self.sock.sendall((json.dumps(msg) + "\n").encode())
+        payload = (json.dumps(msg) + "\n").encode()
+        if self.sock is not None:
+            self.sock.settimeout(timeout)
+            self.sock.sendall(payload)
+        else:
+            if self.writer is None:
+                raise RuntimeError("QMP is not connected")
+            remaining = memoryview(payload)
+            while remaining:
+                self._wait_pipe(self.writer, selectors.EVENT_WRITE, deadline)
+                try:
+                    written = os.write(self.writer.fileno(), remaining)
+                except BlockingIOError:
+                    continue
+                remaining = remaining[written:]
         # Skip async events until we get a return/error.
         while True:
-            reply = self._read_json()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("QMP response timed out")
+            reply = self._read_json(remaining)
             if "return" in reply or "error" in reply:
                 return reply
 
@@ -210,6 +251,10 @@ class Qmp:
                 self.sock.close()
             finally:
                 self.sock = None
+        for stream in (self.reader, self.writer):
+            if stream is not None:
+                stream.close()
+        self.reader = self.writer = None
 
 
 class SerialTail:
@@ -500,14 +545,14 @@ def resolve_ovmf() -> tuple[Path, Path]:
 
 def build_qemu_command(image: Path, is_disk: bool, accel: str, mem: str,
                        qmp_sock: Path, serial_log: Path, extra: list[str],
-                       display: str = "none") -> list[str]:
+                       display: str = "none", qmp_transport: str = "unix") -> list[str]:
     cmd = [
         "qemu-system-x86_64",
         "-no-reboot",
         "-m", mem,
         "-display", display,
         "-serial", f"file:{serial_log}",
-        "-qmp", f"unix:{qmp_sock},server,nowait",
+        "-qmp", "stdio" if qmp_transport == "stdio" else f"unix:{qmp_sock},server,nowait",
         "-vga", "std", "-global", "VGA.vgamem_mb=32",
     ]
     if display != "none":
@@ -619,8 +664,9 @@ def run(args: argparse.Namespace) -> RunResult:
             extra_args += ["-drive", f"file={scratch},format=raw,if=ide"]
         print(f"[qemu_test] blank scratch disk: {scratch} "
               f"({args.scratch_disk} MiB, bus={args.scratch_bus})", file=sys.stderr)
+    qmp_transport = getattr(args, "qmp_transport", "unix")
     qemu_cmd = build_qemu_command(image, is_disk, args.accel, args.mem, qmp_sock,
-                                  serial_log, extra_args, display)
+                                  serial_log, extra_args, display, qmp_transport)
     print("[qemu_test] launch:", " ".join(qemu_cmd), file=sys.stderr)
 
     metadata = None
@@ -631,11 +677,16 @@ def run(args: argparse.Namespace) -> RunResult:
         metadata = collect(REPO_ROOT, image, qemu_cmd, args.image_profile)
     result = RunResult(ok=False, reason="", booted=False, iso=str(image))
     launch_started = time.monotonic()
-    proc = subprocess.Popen(
-        qemu_cmd, cwd=REPO_ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    with (workdir / "qemu-stderr.log").open("wb") as qemu_stderr:
+        proc = subprocess.Popen(
+            qemu_cmd, cwd=REPO_ROOT, stderr=qemu_stderr,
+            stdout=subprocess.PIPE if qmp_transport == "stdio" else subprocess.DEVNULL,
+            stdin=subprocess.PIPE if qmp_transport == "stdio" else subprocess.DEVNULL,
+            bufsize=0,
+        )
     hard_deadline = time.monotonic() + args.timeout
-    qmp = Qmp(qmp_sock)
+    qmp = (Qmp(qmp_sock, reader=proc.stdout, writer=proc.stdin)
+           if qmp_transport == "stdio" else Qmp(qmp_sock))
     serial = SerialTail(serial_log)
 
     def remaining() -> float:
@@ -892,6 +943,8 @@ def main() -> int:
         help="QEMU acceleration (default auto: kvm if /dev/kvm writable)",
     )
     parser.add_argument("--cpus", type=int, help="explicit guest vCPU count (1..256)")
+    parser.add_argument("--qmp-transport", choices=("unix", "stdio"), default="unix",
+                        help="QMP control channel; stdio uses local pipes without sockets")
     parser.add_argument(
         "--performance-record",
         type=Path,

@@ -44,6 +44,7 @@ if __name__ == '__main__':
     markers = folder / 'markers.json'
     markers.write_text(json.dumps(scene, indent=2) + '\n')
     subprocess.run([sys.executable, str(ROOT / 'tools/qemu_test.py'), '--markers-file', str(markers),
-                    '--accel', args.accel, '--cpus', str(args.cpus), '--timeout', '360',
+                    '--accel', args.accel, '--cpus', str(args.cpus),
+                    '--qmp-transport', args.qmp_transport, '--timeout', '360',
                     '--cmd-timeout', '240', '--boot-timeout', '120', '--workdir', str(folder),
                     '--performance-record', str(folder / 'metadata.json')], cwd=ROOT, check=True)

@@ -32,6 +32,7 @@ def main(make_contract=contract, output_default=ROOT / 'build/performance/vfs-ow
     parser.add_argument('--reuse-image', action='store_true')
     parser.add_argument('--accel', choices=('tcg', 'kvm'), default='tcg')
     parser.add_argument('--cpus', type=int, default=4)
+    parser.add_argument('--qmp-transport', choices=('unix', 'stdio'), default='unix')
     parser.add_argument('--output', type=Path, default=output_default)
     args = parser.parse_args()
     if not 1 <= args.cpus <= 64:
@@ -47,7 +48,8 @@ def main(make_contract=contract, output_default=ROOT / 'build/performance/vfs-ow
                        cwd=ROOT / 'kernel', check=True)
     subprocess.run([sys.executable, str(ROOT / 'tools/qemu_test.py'),
                     *([] if args.reuse_image else ['--build']), '--markers-file', str(markers),
-                    '--accel', args.accel, '--cpus', str(args.cpus), '--timeout', '600',
+                    '--accel', args.accel, '--cpus', str(args.cpus),
+                    '--qmp-transport', args.qmp_transport, '--timeout', '600',
                     '--cmd-timeout', '240', '--boot-timeout', '120', '--workdir', str(args.output),
                     '--performance-record', str(args.output / 'metadata.json')], cwd=ROOT, check=True)
     return args
