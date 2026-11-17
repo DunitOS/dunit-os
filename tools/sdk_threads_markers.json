@@ -1,0 +1,31 @@
+{
+  "description": "Owning native SDK threads, typed return values, futex mutex and condition handoffs; kernel application scheduler remains UP",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "image_profile": "full",
+    "cmd": [
+      "exec /app/sdk_threads_fixture"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[SDK-THREADS] 8 workers, 4000 checked mutex updates and owned results OK",
+    "[SDK-THREADS] 128 condition handoffs without lost notifications OK",
+    "[SDK-THREADS] joining Drop, 24 stack lifecycles and invalid stack rejection OK",
+    "[SDK-THREADS] all checks passed",
+    "[EXEC] /app/sdk_threads_fixture returned code=0",
+    "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK",
+    "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "[SDK-THREADS] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop"
+    },
+    "[TASK-EXECUTION] FAIL",
+    "[FAIL] FS mutation smoke failed"
+  ]
+}

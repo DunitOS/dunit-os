@@ -5,6 +5,7 @@ components and a generated C bridge to the same widget runtime. Ordinary GUI
 applications are independent ELF processes; the compositor owns display/input.
 
 - [Native API](native-api.md): entry, streams, files, time, child processes and wait-set.
+- [Threads and synchronization](threads.md): owning workers, joining handles, mutex and condition variables.
 - [Tooling](tooling.md): cargo dunit, manifests, native tests and desktop discovery.
 - [Components and windows](layout-window.md): rendering, layout, scrolling, workspace and buffer lifetime.
 - [Controls](widgets.md): buttons, choices, numbers, menus, collections and file dialogs.
@@ -17,7 +18,8 @@ applications are independent ELF processes; the compositor owns display/input.
 The manuals describe implemented contracts and their limits. The
 [technical roadmap](../../DUNIT_OS_TECHNICAL_ROADMAP.md) owns remaining work.
 Existing per-call wait-set registrations are level-triggered; persistent/edge
-registrations, thread/sync wrappers and standalone SDK distribution remain open.
+registrations and standalone SDK distribution remain open. Thread/sync limits
+are documented separately; application execution remains UP.
 GUI sessions currently own one process inbox and support one window attempt.
 A future std port, IME, broader POSIX profile or privileged shell protocol needs
 its own contract; this SDK does not supply those facilities.

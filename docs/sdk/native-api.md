@@ -2,7 +2,8 @@
 
 The SDK lives in `runtime/dunit`. It uses `no_std + alloc` and the native
 `libdunit` ABI. It is not a Rust std port. Manifest/tooling and GUI manuals describe the implemented application path.
-Thread/sync wrappers and a standalone distributable SDK remain open.
+[Native threads and synchronization](threads.md) provide owning workers, mutexes
+and condition variables; a standalone distributable SDK remains open.
 
 ## Entry point
 

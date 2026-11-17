@@ -16,7 +16,7 @@ from dunit_manifest import installed_manifest
 def main(fixture=None):
     parser = argparse.ArgumentParser(description=__doc__)
     if fixture is None:
-        parser.add_argument('fixture', choices=('resize', 'canvas', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers', 'transfer', 'matrix', 'clipboard', 'shellprobe'))
+        parser.add_argument('fixture', choices=('resize', 'canvas', 'component', 'theme', 'effects', 'backdrop', 'motion', 'buttons', 'checks', 'input', 'multiline', 'scroll', 'scroll_xy', 'autoscroll', 'slider', 'spinbox', 'vertical_slider', 'progress', 'menus', 'workspace', 'list', 'tree', 'collections', 'lifecycle', 'latency', 'console', 'modifiers', 'transfer', 'matrix', 'clipboard', 'shellprobe', 'threads'))
     parser.add_argument('--accel', choices=('auto', 'kvm', 'tcg'), default='tcg')
     parser.add_argument("--markers-file", type=Path)
     parser.add_argument("--run-dir", type=Path)
@@ -24,6 +24,7 @@ def main(fixture=None):
     parser.add_argument("--cmd-timeout", type=int, default=180)
     parser.add_argument("--timeout", type=int, default=360)
     parser.add_argument("--reuse-image", action="store_true")
+    parser.add_argument("--qemu-arg", action="append", default=[])
     args = parser.parse_args()
     fixture = fixture or args.fixture
     source_name = "sdk_window_resize" if fixture == "resize" else f"sdk_{fixture}"
@@ -62,6 +63,8 @@ def main(fixture=None):
         "--cpus",
         str(args.cpus),
     ]
+    for argument in args.qemu_arg:
+        command.append(f"--qemu-arg={argument}")
     if args.run_dir:
         args.run_dir.mkdir(parents=True, exist_ok=True)
         command += [
@@ -112,6 +115,8 @@ def main(fixture=None):
                 executable = install_fixture(source_name, 'sdk_console_cli', 'Console CLI', 'cli')
                 shutil.copyfile(executable, overlay / 'app/console command')
                 install_fixture(source_name, 'sdk_console_tui', 'Console TUI', 'tui')
+            elif fixture == 'threads':
+                install_fixture(source_name, app_id, 'SDK threads fixture', 'cli')
             elif fixture in ('transfer','clipboard'):
                 executable=install_fixture(source_name,app_id,'Transfer source')
                 target_id=f'sdk_{fixture}_target'
@@ -131,7 +136,7 @@ def main(fixture=None):
                 command[command.index('--markers-file')+1]=str(markers)
                 command[command.index('--timeout')+1]='1800'
                 command[command.index('--cmd-timeout')+1]='1500'
-            else:
+            elif fixture != 'threads':
                 shutil.copyfile(ROOT / f'tools/fixtures/{source_name}.toml', overlay / config_name)
             if fixture in ('theme', 'effects', 'backdrop', 'motion'):
                 profile = (ROOT / 'assets/dwm/sdk/dark.dss').read_text()
@@ -143,7 +148,7 @@ def main(fixture=None):
             # DF/IRQ contracts also need the kernel's boot-smoke checks and
             # their full application composition. Other fixtures use DWM.
             kernel_features=['--features','boot-smoke-tests'] if image_profile=='full' else []
-            subprocess.run([cargo(), 'build', '--release', *kernel_features,
+            subprocess.run([cargo(), 'check', '--release', *kernel_features,
                 '-Z', 'build-std=core,alloc,compiler_builtins', '-Z', 'build-std-features=compiler-builtins-mem',
                 '-Z', 'json-target-spec'], cwd=ROOT / 'kernel', check=True)
             command += ['--build', '--initrd-overlay', str(overlay)]

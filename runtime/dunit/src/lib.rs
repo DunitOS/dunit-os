@@ -13,6 +13,8 @@ pub mod io;
 pub mod process;
 pub mod pty;
 pub mod system;
+pub mod sync;
+pub mod thread;
 pub mod testing;
 #[cfg(feature = "gui")]
 pub mod text_clipboard;
