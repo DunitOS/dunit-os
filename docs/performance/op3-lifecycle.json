@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-17",
+  "base_commit": "57703bd",
+  "scope": "OP3 cleanup fence and exit publication; application dispatch remains UP",
+  "source_sha256": {
+    "kernel/src/process/execution.rs": "1ecc731f70d4a143d478062d6468d5727b9a8ca878bdef5cb4bbe762fc735607",
+    "kernel/src/process/execution_state.rs": "b2399c5b226c3964d601afa495e850b08443214fe72fedf3bf346baf039fc527",
+    "kernel/src/process/execution_smoke.rs": "a3d751299f795c1edc22fb319198a72a7ba24c11d021106838c2abad289acd1b",
+    "kernel/src/process/finalization.rs": "b115d007823711bfa42e3b2b7600087d89f797877ed3f880087b1ad66bc587cd",
+    "kernel/src/process/finalization_smoke.rs": "ba85c0d3bcc6c2ab681bce2308a429d896f6995420ae3b2616ed11267befea58",
+    "kernel/src/process/lifecycle.rs": "16243c9b988d2f0699369b4094b5f7f7c8049b80bc0c87e3d999844a8e79701c",
+    "kernel/src/process/mod.rs": "496921f1645a2b53f53c9ed3b648b2afb3d837e66f709b8236fdcf93229ec4d4",
+    "kernel/src/process/resources.rs": "06c0706f3f2bd0c864b443af3c36a8049ca8d0bb5f000982b4a9a21a6e3d9404",
+    "kernel/src/process/runner.rs": "15e2e8e237452010de4c1f2d156ae824b20fc865dfa6eadb20ba4327411ed596",
+    "kernel/src/process/transitions.rs": "8e4cde1beadfec0a0451f4981f263cdbb70237e3e7f7c6cc78e5f907feec0946",
+    "tools/test_lifecycle_publication.py": "c634e7e0e38c09600708e0d569386853d680ae3296dbcd73863a3d1474795da3",
+    "tools/test_lifecycle_publication_host.rs.in": "35777d603c41c8a9467eb5fc7b6eb07b706ce7f9056c5afe31c559a205a69b01",
+    "tools/test_tls_cleanup_host.rs.in": "2ff4ebe98e7b8af28f875ab1d0d5d105ff8746bbd376e5720ac2f5c222420c98"
+  },
+  "host": {
+    "lifecycle_publication": {
+      "passed": true,
+      "contended_admissions": 8000,
+      "checks": [
+        "one finalizer",
+        "child snapshot blocked throughout cleanup",
+        "HAL Returned required",
+        "lease drop distinct from cleanup completion",
+        "reserved admission revoked",
+        "finishing sibling blocks owner",
+        "notifications and drops outside guards"
+      ]
+    },
+    "tls_cleanup": {
+      "passed": true,
+      "checks": [
+        "partial/unmapped range",
+        "idempotent private cleanup",
+        "one-shot shared ref release",
+        "overlap guard bookkeeping",
+        "invalid range rejection"
+      ]
+    },
+    "existing_execution_ownership": {
+      "passed": 3,
+      "contended_admissions": 8000
+    }
+  },
+  "native": {
+    "status": "passed",
+    "report": "../verification/multitrack-2026-11-17.json",
+    "cpus": [
+      1,
+      4,
+      8
+    ],
+    "required_marker": "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK"
+  },
+  "open": [
+    "remote active-group stop/ack",
+    "interruptible syscall and IRQ progress",
+    "nested remote cancellation",
+    "AP application dispatch",
+    "shared VM / DMA final-reader stress",
+    "KVM scaling"
+  ]
+}

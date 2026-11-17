@@ -1,0 +1,44 @@
+//! Actual TLS cleanup/range validation; the page table and shared-frame transport
+//! are host-owned shims so absent pages and one-shot reference release are visible.
+use std::collections::{BTreeMap,BTreeSet};
+use std::sync::atomic::{AtomicUsize,Ordering};
+const USER_PAGE_SIZE:usize=4096;
+const USER_MMAP_BASE:usize=0x0000_0010_0000_0000;
+const USER_MMAP_END:usize=0x0000_7000_0000_0000;
+#[derive(Debug,PartialEq,Eq)] enum ProcessError {InvalidMemoryRange,NoAddressSpace}
+struct VirtualAddress(usize);
+static SHARED_RELEASES:AtomicUsize=AtomicUsize::new(0);
+fn shared_vm_release(id:u64,count:usize) {
+    assert_eq!(id,17);assert_eq!(count,1);SHARED_RELEASES.fetch_add(1,Ordering::SeqCst);
+}
+@RANGE@
+struct Process {
+    guard_regions:BTreeMap<usize,usize>,shared_pages:BTreeMap<usize,u64>,
+    pages:BTreeSet<usize>,present:bool,unmaps:usize,
+}
+impl Process {
+    fn address_space_mut(&mut self)->Option<&mut Self> {self.present.then_some(self)}
+    fn unmap_user_page(&mut self,page:VirtualAddress)->Result<bool,()> {
+        let removed=self.pages.remove(&page.0);self.unmaps+=usize::from(removed);Ok(removed)
+    }
+    @TLS_CLEANUP@
+}
+fn main() {
+    let base=USER_MMAP_BASE;
+    let mut process=Process {guard_regions:BTreeMap::new(),shared_pages:BTreeMap::new(),
+        pages:[base,base+2*USER_PAGE_SIZE].into_iter().collect(),present:true,unmaps:0};
+    process.shared_pages.insert(base+2*USER_PAGE_SIZE,17);
+    process.guard_regions.insert(base+USER_PAGE_SIZE,USER_PAGE_SIZE);
+    process.guard_regions.insert(base+10*USER_PAGE_SIZE,USER_PAGE_SIZE);
+    process.release_tls_allocation(base,3*USER_PAGE_SIZE).unwrap();
+    assert!(process.pages.is_empty());assert_eq!(process.unmaps,2);
+    assert!(process.shared_pages.is_empty());assert_eq!(SHARED_RELEASES.load(Ordering::SeqCst),1);
+    assert_eq!(process.guard_regions.len(),1); // preserve unrelated guard reservations
+    process.release_tls_allocation(base,3*USER_PAGE_SIZE).unwrap();
+    assert_eq!(process.unmaps,2);assert_eq!(SHARED_RELEASES.load(Ordering::SeqCst),1);
+    assert_eq!(process.release_tls_allocation(base+1,USER_PAGE_SIZE),Err(ProcessError::InvalidMemoryRange));
+    assert_eq!(process.release_tls_allocation(base,0),Err(ProcessError::InvalidMemoryRange));
+    process.present=false;
+    assert_eq!(process.release_tls_allocation(base,USER_PAGE_SIZE),Err(ProcessError::NoAddressSpace));
+    println!("TLS cleanup: partial/unmapped reservations, idempotent page/shared-reference release, guard metadata and invalid-range rejection OK");
+}

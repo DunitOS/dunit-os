@@ -1,0 +1,149 @@
+//! Privileged CPU/IRQ and external cleanup shims; finalization/leases are real.
+#![allow(dead_code)]
+extern crate alloc;
+#[path = @SYNC@] mod actual_sync;
+mod sync {
+    pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
+    pub type IrqSafeSpinLockGuard<'a,T> = crate::actual_sync::SpinLockGuard<'a,T>;
+    pub struct InterruptGuard;
+    impl InterruptGuard { pub fn new() -> Self { Self } }
+}
+mod cpu {
+    std::thread_local! { pub static CPU: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+    pub fn index() -> usize { CPU.with(|cpu| cpu.get()) }
+}
+mod process {
+    use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+    use crate::sync::{InterruptGuard, IrqSafeSpinLock};
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub struct ProcessId(pub u64);
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub enum ProcessState { Prepared,Ready,Running,Blocked,Dead,Reaped }
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub enum ProcessFault { Unknown }
+    #[derive(Clone,Copy,Debug,PartialEq,Eq)] pub enum ProcessExitStatus { Exited(i32),Fault(ProcessFault) }
+    impl ProcessExitStatus {
+        fn exit_code(self) -> i32 { match self {Self::Exited(code)=>code,Self::Fault(_)=>-1} }
+        fn kind_code(self) -> i32 { match self {Self::Exited(_)=>0,Self::Fault(_)=>1} }
+    }
+    #[derive(Clone,Copy)] pub struct ProcessExit { pid:ProcessId,status:ProcessExitStatus }
+    #[derive(Debug,PartialEq,Eq)] pub enum ProcessError { NoSuchProcess,ProcessNotPrepared,NotRunnable,InvalidUserContext,NotChild,NoCurrentProcess }
+    #[derive(Debug,PartialEq,Eq)] pub struct WaitRecord { pid:ProcessId,kind:i32,code:i32 }
+    pub struct Process { pub pid:ProcessId,is_kernel:bool,state:ProcessState,status:Option<ProcessExitStatus> }
+    impl Process {
+        fn exit(&mut self,code:i32) { self.state=ProcessState::Dead;self.status=Some(ProcessExitStatus::Exited(code)); }
+        fn fault(&mut self,fault:ProcessFault) { self.state=ProcessState::Dead;self.status=Some(ProcessExitStatus::Fault(fault)); }
+    }
+    static TASK_DROPS:AtomicUsize=AtomicUsize::new(0);
+    impl Drop for Process {
+        fn drop(&mut self) { let _records=registry::table();TASK_DROPS.fetch_add(1,Ordering::SeqCst); }
+    }
+    pub struct ProcessRecord {
+        pid:ProcessId,owner:Option<ProcessId>,parent:Option<ProcessId>,state:ProcessState,
+        status:Option<ProcessExitStatus>,has_run:bool,waitable:bool,thread_auto_reap:bool,
+        process:Option<registry::Task>,execution:execution::State,
+    }
+    #[path = @REGISTRY@] mod registry;
+    #[path = @EXECUTION@] mod execution;
+    #[path = @FINALIZATION@] mod finalization;
+    use registry::table as process_table;
+    fn process_record_index(table:&[ProcessRecord],pid:ProcessId) -> Option<usize> { table.iter().position(|r|r.pid==pid) }
+    fn with_current_process<R>(read:impl FnOnce(&Process)->R)->Option<R> {
+        let parent=registry::task(ProcessId(1)).ok()?;let guard=parent.lock();Some(read(&guard))
+    }
+    fn log_process_transition(_:ProcessId,_:ProcessState,_:ProcessState,_:&str) {}
+    fn remove_waiter(pid:ProcessId) {
+        let task=registry::task(pid).unwrap();let _guard=task.lock();
+        let _records=registry::table(); // catches notification while task/metadata lock held
+    }
+    static WAKES:AtomicUsize=AtomicUsize::new(0);
+    fn wake_wait_set_waiters() {
+        let records=registry::table();
+        assert!(records.iter().all(|r|r.status.is_none() || !r.execution.finalizing()));
+        WAKES.fetch_add(1,Ordering::SeqCst);
+    }
+    mod scheduler {
+        use super::*;
+        pub fn remove(_:ProcessId) { let _records=registry::table(); }
+        pub fn enqueue_ready(_:ProcessId)->Result<(),ProcessError> { let _records=registry::table();Ok(()) }
+    }
+    @CHILD_SNAPSHOT@
+    fn insert(pid:u64,owner:Option<u64>,auto:bool) {
+        process_table().push(ProcessRecord {
+            pid:ProcessId(pid),owner:owner.map(ProcessId),parent:(pid!=1).then_some(ProcessId(1)),
+            state:ProcessState::Ready,status:None,has_run:false,waitable:owner.is_none(),thread_auto_reap:auto,
+            process:Some(Arc::new(IrqSafeSpinLock::new(Process {pid:ProcessId(pid),is_kernel:pid==1,state:ProcessState::Ready,status:None}))),
+            execution:execution::State::default(),
+        });
+    }
+    fn reserve(pid:u64)->execution::Lease {
+        registry::with_record(ProcessId(pid),|_,r|execution::Lease::reserve(ProcessId(pid),r)).unwrap()
+    }
+    fn exit(pid:u64)->ProcessExit { ProcessExit {pid:ProcessId(pid),status:ProcessExitStatus::Exited(29)} }
+    fn detach(pid:u64) {
+        let record={let mut records=process_table();let index=process_record_index(&records,ProcessId(pid)).unwrap();records.remove(index)};
+        drop(record);
+    }
+    pub fn run() {
+        insert(1,None,false);
+        // A concurrent waiter sees no result during externally-owned cleanup.
+        insert(2,None,false);
+        let pending=exit(2);
+        let begun=Arc::new(AtomicBool::new(false));let finish=Arc::new(AtomicBool::new(false));
+        let released=Arc::new(AtomicBool::new(false));
+        let worker={let begun=begun.clone();let finish=finish.clone();let released=released.clone();std::thread::spawn(move|| {
+            finalization::begin(pending,false).unwrap();begun.store(true,Ordering::Release);
+            while !finish.load(Ordering::Acquire) {std::thread::yield_now();}
+            released.store(true,Ordering::Release); // model external fd/VM cleanup completion
+            finalization::publish(pending).unwrap();
+        })};
+        while !begun.load(Ordering::Acquire) {std::thread::yield_now();}
+        assert_eq!(child_exit_snapshot(ProcessId(2)),Ok(None));
+        assert_eq!(finalization::begin(pending,false),Err(ProcessError::NotRunnable));
+        registry::with_record(ProcessId(2),|_,r| {
+            assert!(r.execution.busy() && r.execution.retirement_blocked());
+            assert!(execution::Lease::reserve(ProcessId(2),r).is_err());Ok(())
+        }).unwrap();
+        finish.store(true,Ordering::Release);
+        while child_exit_snapshot(ProcessId(2)).unwrap().is_none() {std::thread::yield_now();}
+        assert!(released.load(Ordering::Acquire));worker.join().unwrap();detach(2);
+
+        // HAL return, lease release and cleanup publication are separate gates.
+        insert(3,None,false);let mut lease=reserve(3);lease.start().unwrap();
+        assert_eq!(finalization::begin(exit(3),true),Err(ProcessError::NotRunnable));
+        assert_eq!(finalization::begin(exit(3),false),Err(ProcessError::NotRunnable));
+        lease.returned();finalization::begin(exit(3),true).unwrap();
+        assert_eq!(finalization::publish(exit(3)),Err(ProcessError::NotRunnable));
+        drop(lease);assert_eq!(child_exit_snapshot(ProcessId(3)),Ok(None));
+        assert!(execution::group_entered(&process_table(),ProcessId(3)));
+        finalization::publish(exit(3)).unwrap();assert_eq!(child_exit_snapshot(ProcessId(3)).unwrap().unwrap().code,29);detach(3);
+
+        // Reserved admission is revoked; an old frame cannot enter after kill.
+        insert(4,None,false);let mut reserved=reserve(4);
+        finalization::begin(exit(4),false).unwrap();assert_eq!(reserved.start(),Err(ProcessError::NotRunnable));
+        drop(reserved);finalization::publish(exit(4)).unwrap();detach(4);
+
+        // A finishing thread excludes owner teardown even after its lease drops.
+        insert(5,None,false);insert(6,Some(5),true);let mut sibling=reserve(6);sibling.start().unwrap();
+        assert_eq!(finalization::begin(exit(5),false),Err(ProcessError::NotRunnable));
+        sibling.returned();finalization::begin(exit(6),true).unwrap();drop(sibling);
+        assert_eq!(finalization::begin(exit(5),false),Err(ProcessError::NotRunnable));
+        let before=TASK_DROPS.load(Ordering::SeqCst);finalization::publish(exit(6)).unwrap();
+        assert!(registry::task(ProcessId(6)).is_err());assert_eq!(TASK_DROPS.load(Ordering::SeqCst),before+1);
+        finalization::begin(exit(5),false).unwrap();finalization::publish(exit(5)).unwrap();detach(5);
+
+        // Contended finalization admission has exactly one cleanup owner.
+        for id in 10..1010 {
+            insert(id,None,false);let owners=Arc::new(AtomicUsize::new(0));
+            let workers:Vec<_>=(0..8).map(|_| {let owners=owners.clone();std::thread::spawn(move|| {
+                if finalization::begin(exit(id),false).is_ok() {
+                    owners.fetch_add(1,Ordering::SeqCst);std::thread::yield_now();
+                    finalization::publish(exit(id)).unwrap();
+                }
+            })}).collect();
+            for worker in workers {worker.join().unwrap();}
+            assert_eq!(owners.load(Ordering::SeqCst),1);
+            assert_eq!(child_exit_snapshot(ProcessId(id)).unwrap().unwrap().code,29);detach(id);
+        }
+        assert!(WAKES.load(Ordering::SeqCst)>=1005);
+        println!("lifecycle publication: 8000 contended admissions, cleanup fence, HAL/lease handoff, reserved revocation, thread/owner exclusion and reentrant wake/drop OK");
+    }
+}
+fn main() { process::run(); }

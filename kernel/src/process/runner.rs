@@ -100,37 +100,26 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
         fault_irq_smoke::verify();
 
         if take_process_yield_request() {
+            drop(frame); // HAL/FPU return precedes Ready readmission.
         } else {
-            let mut status = ProcessExitStatus::Fault(ProcessFault::Unknown);
+            let status = match take_process_exit_request() {
+                Some((_, status)) => status,
+                None => with_process_mut(next_pid, |finished| {
+                    Ok(finished.status.unwrap_or(ProcessExitStatus::Fault(ProcessFault::Unknown)))
+                })?,
+            };
+            let exit = ProcessExit { pid: next_pid, status };
+            finalization::begin(exit, true)?;
             let is_thread = owner_of(next_pid) != Some(next_pid);
-            let detached_fds = with_process_mut(next_pid, |finished| {
-                status = if let Some((_code, requested_status)) = take_process_exit_request() {
-                    match requested_status {
-                        ProcessExitStatus::Exited(code) => finished.exit(code),
-                        ProcessExitStatus::Fault(fault) => finished.fault(fault),
-                    }
-                    requested_status
-                } else if finished.state != ProcessState::Dead {
-                    finished.fault(ProcessFault::Unknown);
-                    ProcessExitStatus::Fault(ProcessFault::Unknown)
-                } else {
-                    finished
-                        .status
-                        .unwrap_or(ProcessExitStatus::Fault(ProcessFault::Unknown))
-                };
-                Ok(if is_thread { None } else { Some(finished.take_fd_resources()) })
-            })?;
+            let detached_fds = if is_thread { None } else {
+                Some(with_process_mut(next_pid, |finished| Ok(finished.take_fd_resources()))?)
+            };
             let closed = detached_fds.map(|fds| fds.release()).unwrap_or(0);
             if closed > 0 {
                 crate::memory::serial_write("[PROCESS-RUN] cleaned fds=");
                 serial_write_usize(closed);
                 crate::memory::serial_write("\r\n");
             }
-            let exit = ProcessExit {
-                pid: next_pid,
-                status,
-            };
-            mark_process_finished(exit);
             if is_thread {
                 release_finished_thread(next_pid)?;
             } else {
@@ -149,12 +138,14 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
                 serial_write_usize(reaped_children);
                 crate::memory::serial_write("\r\n");
             }
+            // Release stack/FPU/AS/task pins as well as the execution ticket.
+            // The cleanup fence remains busy until status publication below.
+            drop(frame);
+            finalization::publish(exit)?;
             if next_pid == root_pid {
                 return Ok(exit);
             }
         }
-
-        drop(frame); // release execution only after HAL return and exit bookkeeping
 
         let hinted = take_schedule_hint()
             .filter(|candidate| *candidate != next_pid && is_pid_runnable(*candidate));

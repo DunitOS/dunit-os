@@ -79,13 +79,18 @@ pub fn run_execution_ownership_smoke() -> bool {
         autoreap_process(pid, "execution-smoke-done")?;
         Ok(())
     }
-    if check().is_ok() {
+    let result = check().map_err(|error| ("admission", error))
+        .and_then(|_| finalization_smoke::check().map_err(|error| ("finalization", error)));
+    if result.is_ok() {
         crate::memory::serial_write(
             "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK\r\n",
         );
         true
     } else {
-        crate::memory::serial_write("[TASK-EXECUTION] FAIL\r\n");
+        let (stage, error) = result.unwrap_err();
+        crate::memory::serial_write(&alloc::format!(
+            "[TASK-EXECUTION] FAIL stage={} error={:?}\r\n", stage, error,
+        ));
         false
     }
 }

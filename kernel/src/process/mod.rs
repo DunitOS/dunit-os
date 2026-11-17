@@ -2,6 +2,7 @@ mod fd;
 mod runner;
 pub use runner::{exit_current_process, request_current_user_exit, request_current_user_fault, user_fault_escape_requested, preempt_switch_requested, clear_preempt_switch, set_preemption_enabled, preemption_enabled, preemption_count, reset_preemption_count, enter_user_process};
 mod lifecycle;
+mod finalization;
 pub(crate) use lifecycle::{wake_wait_set_waiters, child_exit_snapshot, is_pid_waiting_for_dispatch};
 pub use lifecycle::{allocate_pid, current_tid, current_thread_pointer, set_current_thread_pointer, set_terminal_foreground_process, set_foreground_process, current_process_output_sink, current_process_is_terminal_foreground, request_terminal_stdin_for_current, terminal_stdin_waiting_pid, provide_terminal_stdin, take_terminal_stdin_for_current, get_process_snapshots, process_stats, insert_process_record, create_user_process_record, current_is_privileged, current_may_kill, create_user_thread, request_thread_auto_reap, wait_thread, wake_ipc_waiters, wake_poll_waiters, terminal_input_ready, wake_pipe_waiters, wake_expired_waiters, is_pid_blocked, reap_process, process_exists, thread_count_for_pid, kill_process, is_pid_runnable, wait_for_child, cleanup_prepared_children, autoreap_process, snapshot_processes, init_current_kernel_process};
 use lifecycle::{process_address_space, process_record_index, log_process_transition, current_entity_id, owner_of, current_pid, release_finished_thread, cleanup_owned_threads, remove_waiter};
@@ -16,10 +17,12 @@ mod execution;
 #[cfg(feature = "boot-smoke-tests")]
 mod execution_smoke;
 #[cfg(feature = "boot-smoke-tests")]
+mod finalization_smoke;
+#[cfg(feature = "boot-smoke-tests")]
 pub use execution_smoke::run_execution_ownership_smoke;
 pub use transitions::{mark_process_prepared_as_ready, mark_process_ready,
     save_current_user_context_for_yield,
-    mark_process_finished, timer_preempt_save_and_schedule};
+    timer_preempt_save_and_schedule};
 pub(crate) use parking::{block_current, pipe_block_current, poll_block_current, wait_set_block_current};
 use parking::wake_entry;
 mod terminal_stdin;

@@ -17,6 +17,7 @@ enum Phase {
 pub(crate) struct State {
     generation: u64,
     held: Option<(Ticket, Phase)>,
+    finalizing: bool,
 }
 impl State {
     pub(crate) fn reserve(&mut self, cpu: usize) -> Option<Ticket> {
@@ -35,7 +36,7 @@ impl State {
         Some(ticket)
     }
     pub(crate) fn start(&mut self, ticket: Ticket, cpu: usize) -> bool {
-        if ticket.cpu != cpu || self.held != Some((ticket, Phase::Reserved)) {
+        if self.finalizing || ticket.cpu != cpu || self.held != Some((ticket, Phase::Reserved)) {
             return false;
         }
         self.held = Some((ticket, Phase::Active));
@@ -68,7 +69,38 @@ impl State {
         true
     }
     pub(crate) fn busy(&self) -> bool {
-        self.held.is_some()
+        self.held.is_some() || self.finalizing
+    }
+    pub(crate) fn finalizing(&self) -> bool {
+        self.finalizing
+    }
+    /// Cleanup is a separate ownership interval after hardware return. An
+    /// external finalizer may revoke Reserved admission, never Active/Returned.
+    pub(crate) fn begin_finalization(&mut self, returned_cpu: Option<usize>) -> bool {
+        if self.finalizing {
+            return false;
+        }
+        match (returned_cpu, self.held) {
+            (Some(cpu), Some((ticket, Phase::Returned))) if ticket.cpu == cpu => {}
+            (None, None | Some((_, Phase::Reserved))) => {
+                self.held = None;
+            }
+            _ => return false,
+        }
+        self.finalizing = true;
+        true
+    }
+    /// Publishing a waitable result requires all dispatch backing to have been
+    /// released. Lease drop clears held, but cannot clear the cleanup fence.
+    pub(crate) fn complete_finalization(&mut self) -> bool {
+        if !self.finalizing || self.held.is_some() {
+            return false;
+        }
+        self.finalizing = false;
+        true
+    }
+    pub(crate) fn retirement_blocked(&self) -> bool {
+        self.entered() || self.finalizing
     }
     /// Reserved frames may be revoked by retirement; entered frames must finish
     /// their HAL return and dispatcher bookkeeping before external retirement.

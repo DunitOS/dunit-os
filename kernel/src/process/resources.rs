@@ -121,6 +121,30 @@ impl Drop for VmResources {
     }
 }
 impl Process {
+    /// Release the kernel's TLS reservation during teardown. Unlike the public
+    /// munmap contract, an already removed page is normal: a process can unmap
+    /// part or all of its TLS before the corresponding thread exits.
+    pub(super) fn release_tls_allocation(&mut self, start: usize, length: usize) -> Result<(), ProcessError> {
+        let end = vm_range_end(start, length)?;
+        // An application may have replaced pages in the old reservation with
+        // a guarded mapping. Retiring that reservation must also retire guard
+        // metadata that would otherwise describe partly absent backing.
+        self.guard_regions.retain(|usable, len| {
+            let reserved_start = usable.saturating_sub(USER_PAGE_SIZE);
+            let reserved_end = usable.saturating_add(*len).saturating_add(USER_PAGE_SIZE);
+            start >= reserved_end || end <= reserved_start
+        });
+        for page in (start..end).step_by(USER_PAGE_SIZE) {
+            self.address_space_mut().ok_or(ProcessError::NoAddressSpace)?
+                .unmap_user_page(VirtualAddress(page))
+                .map_err(|_| ProcessError::InvalidMemoryRange)?;
+            if let Some(id) = self.shared_pages.remove(&page) {
+                shared_vm_release(id, 1);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn take_fd_resources(&mut self) -> FdResources {
         FdResources {
             entries: core::mem::take(&mut self.fd_table),

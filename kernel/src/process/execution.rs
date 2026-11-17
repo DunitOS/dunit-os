@@ -8,7 +8,7 @@ pub(super) use state::{State, Ticket};
 
 pub(super) fn group_entered(table: &[ProcessRecord], owner: ProcessId) -> bool {
     table.iter().any(|record| {
-        (record.pid == owner || record.owner == Some(owner)) && record.execution.entered()
+        (record.pid == owner || record.owner == Some(owner)) && record.execution.retirement_blocked()
     })
 }
 

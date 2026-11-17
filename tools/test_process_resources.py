@@ -17,6 +17,7 @@ def contract():
     result['required'].append('[TASK-REGISTRY] callback pin, detached cleanup, dispatch pin and reentry OK')
     result['forbidden'].append('[TASK-REGISTRY] FAIL')
     result['required'].append('[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK')
+    result['required'].append('[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK')
     result['forbidden'].append('[TASK-EXECUTION] FAIL')
     result['required'].append('[PARKING] checkpoint, stale wake and registration identity OK')
     result['forbidden'].append('[PARKING] FAIL')

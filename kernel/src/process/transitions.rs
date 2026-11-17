@@ -56,28 +56,6 @@ pub fn save_current_user_context_for_yield(next: ProcessId) -> Result<ProcessId,
     Ok(pid)
 }
 
-pub fn mark_process_finished(exit: ProcessExit) {
-    let _irq = InterruptGuard::new();
-    remove_waiter(exit.pid);
-    let from = with_task_record(exit.pid, |process, record| {
-        let from = record.state;
-        record.state = ProcessState::Dead;
-        record.status = Some(exit.status);
-        record.has_run = true;
-        process.state = ProcessState::Dead;
-        process.status = Some(exit.status);
-        Ok(from)
-    })
-    .ok();
-    scheduler::remove(exit.pid);
-    if let Some(from) = from {
-        if from != ProcessState::Dead {
-            log_process_transition(exit.pid, from, ProcessState::Dead, "finished");
-        }
-    }
-    wake_wait_set_waiters();
-}
-
 pub fn timer_preempt_save_and_schedule(frame: &crate::interrupts::InterruptFrame) {
     if !PREEMPTION_ENABLED.load(Ordering::SeqCst) {
         return;
