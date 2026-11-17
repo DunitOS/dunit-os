@@ -50,12 +50,11 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
     entries: dict[str, bytes] = {}
     profile = load_profile(getattr(args, "profile", "full"))
 
-    def add(vfs_path: str, host_path: Path) -> None:
+    def add(vfs_path: str, host_path: Path, *, executable: bool = False) -> None:
         payload = host_path.read_bytes()
-        # Symbols are host debugging data, not executable payload. Strip only
-        # ELF executables (never SDK archives/relocatable objects); keep the
-        # original build artifact intact for symbolication.
-        if payload[:4] == b"\x7fELF" and len(payload) >= 18 and payload[16:18] == b"\x02\x00":
+        # Strip declared programs, keeping host symbols for debugging. Assets,
+        # SDK objects and explicit overlays are file data, even with ELF magic.
+        if executable and payload[:4] == b"\x7fELF" and len(payload) >= 18 and payload[16:18] == b"\x02\x00":
             with tempfile.TemporaryDirectory(prefix="dunit-strip-") as folder:
                 output = Path(folder) / "executable"
                 subprocess.run(["strip", "--strip-all", "-o", str(output), str(host_path)], check=True)
@@ -67,7 +66,7 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                [userspace / name for name in profile["apps"] + profile.get("c_apps", [])])
     for source in sources:
         if source.is_file():
-            add(f"/app/{source.name}", source)
+            add(f"/app/{source.name}", source, executable=True)
         elif profile["apps"] is not None:
             raise RuntimeError(f"missing required {profile['name']} application: {source}")
     entries["/system/share/dunit-image.json"] = (json.dumps(profile, sort_keys=True) + "\n").encode()
@@ -143,9 +142,9 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
         # System Lua is a normal executable; its complete source SDK permits a real
         # on-device rebuild through the same TCC, with no shell/command-size tricks.
         if args.lua_bin is not None:
-            add("/system/bin/lua", Path(args.lua_bin))
+            add("/system/bin/lua", Path(args.lua_bin), executable=True)
         if args.luac_bin is not None:
-            add("/system/bin/luac", Path(args.luac_bin))
+            add("/system/bin/luac", Path(args.luac_bin), executable=True)
         if args.lua_dir is not None:
             source = Path(args.lua_dir)
             for path in sorted(source.iterdir()):
@@ -174,7 +173,7 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
         if args.tcc_bin is not None:
             tcc_bin = Path(args.tcc_bin)
             if tcc_bin.is_file():
-                add("/system/bin/tcc", tcc_bin)
+                add("/system/bin/tcc", tcc_bin, executable=True)
 
     overlay = getattr(args, "overlay_dir", None)
     if overlay is not None:

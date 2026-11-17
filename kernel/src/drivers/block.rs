@@ -1,6 +1,3 @@
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use crate::sync::SpinLock;
 
 const MAX_BLOCK_DEVICES: usize = 8;
@@ -39,26 +36,17 @@ struct BlockDeviceRegistration {
     write_block: fn(u64, &[u8]) -> Result<usize, BlockError>,
 }
 
-static BLOCK_LOCK: AtomicBool = AtomicBool::new(false);
-
-/// Таблица блочных устройств. Была двумя `static mut` (массив + счётчик); теперь
-/// одна структура за `UnsafeCell`, доступ к которой всегда под `BLOCK_LOCK`.
 struct BlockTable {
     devices: [Option<BlockDeviceRegistration>; MAX_BLOCK_DEVICES],
     count: usize,
 }
 
-struct BlockTableCell(UnsafeCell<BlockTable>);
-unsafe impl Sync for BlockTableCell {}
-
-static BLOCK_TABLE: BlockTableCell = BlockTableCell(UnsafeCell::new(BlockTable {
+static BLOCK_TABLE: SpinLock<BlockTable> = SpinLock::new(BlockTable {
     devices: [None; MAX_BLOCK_DEVICES],
     count: 0,
-}));
+});
 
-/// Бэкенд RAM-диска ramblk0. Раньше `static mut [u8; N]` без всякого лока (опора
-/// на кооперативность); теперь `SpinLock` — коллбеки чтения/записи блока трогают
-/// его вне `BLOCK_LOCK`, а копия блока быстрая.
+// Device callbacks run after the registry guard has been dropped.
 static RAMBLK0_DATA: SpinLock<[u8; RAMBLK0_BYTES]> = SpinLock::new([0; RAMBLK0_BYTES]);
 
 pub fn init() {
@@ -89,20 +77,11 @@ pub fn register_device(
 }
 
 pub fn snapshot(out: &mut [Option<BlockDeviceInfo>]) -> usize {
-    lock_block();
-
-    let count = unsafe {
-        let table = &*BLOCK_TABLE.0.get();
-        let count = table.count.min(out.len());
-        let mut index = 0usize;
-        while index < count {
-            out[index] = table.devices[index].map(|device| device.info);
-            index += 1;
-        }
-        count
-    };
-
-    BLOCK_LOCK.store(false, Ordering::Release);
+    let table = BLOCK_TABLE.lock();
+    let count = table.count.min(out.len());
+    for (target, device) in out[..count].iter_mut().zip(&table.devices[..count]) {
+        *target = device.map(|device| device.info);
+    }
     count
 }
 
@@ -117,57 +96,28 @@ pub fn write_block(name: &str, lba: u64, buf: &[u8]) -> Result<usize, BlockError
     let Some(device) = find_device(name) else {
         return Err(BlockError::NotFound);
     };
+    if device.info.readonly {
+        return Err(BlockError::Io);
+    }
     (device.write_block)(lba, buf)
 }
 
 fn register(device: BlockDeviceRegistration) {
-    lock_block();
-
-    unsafe {
-        let table = &mut *BLOCK_TABLE.0.get();
-        let mut index = 0usize;
-        while index < table.count {
-            if let Some(existing) = table.devices[index] {
-                if existing.info.name == device.info.name {
-                    table.devices[index] = Some(device);
-                    BLOCK_LOCK.store(false, Ordering::Release);
-                    publish_device(device.info);
-                    return;
-                }
-            }
-            index += 1;
-        }
-
-        if table.count < table.devices.len() {
-            table.devices[table.count] = Some(device);
-            table.count += 1;
-        }
-    }
-
-    BLOCK_LOCK.store(false, Ordering::Release);
+    let mut table = BLOCK_TABLE.lock();
+    let existing = table.devices[..table.count].iter()
+        .position(|entry| entry.is_some_and(|entry| entry.info.name == device.info.name));
+    let index = existing.unwrap_or(table.count);
+    if index == table.devices.len() { return; }
+    table.devices[index] = Some(device);
+    if existing.is_none() { table.count += 1; }
+    drop(table);
     publish_device(device.info);
 }
 
 fn find_device(name: &str) -> Option<BlockDeviceRegistration> {
-    lock_block();
-
-    let mut found = None;
-    unsafe {
-        let table = &*BLOCK_TABLE.0.get();
-        let mut index = 0usize;
-        while index < table.count {
-            if let Some(device) = table.devices[index] {
-                if device.info.name == name {
-                    found = Some(device);
-                    break;
-                }
-            }
-            index += 1;
-        }
-    }
-
-    BLOCK_LOCK.store(false, Ordering::Release);
-    found
+    let table = BLOCK_TABLE.lock();
+    table.devices[..table.count].iter().flatten()
+        .find(|device| device.info.name == name).copied()
 }
 
 fn publish_device(info: BlockDeviceInfo) {
@@ -218,13 +168,4 @@ fn ramblk0_write(lba: u64, buf: &[u8]) -> Result<usize, BlockError> {
     let mut data = RAMBLK0_DATA.lock();
     data[offset..offset + RAMBLK0_BLOCK_SIZE].copy_from_slice(&buf[..RAMBLK0_BLOCK_SIZE]);
     Ok(RAMBLK0_BLOCK_SIZE)
-}
-
-fn lock_block() {
-    while BLOCK_LOCK
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
-    }
 }

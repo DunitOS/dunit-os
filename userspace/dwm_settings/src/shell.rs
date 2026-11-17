@@ -618,7 +618,6 @@ pub fn from_legacy(settings: &Settings, apps: &Applications) -> ShellConfig {
         c.size = 8;
         c.width = 8;
         let c = shell.component_mut("legacy-quicksettings");
-        c.width = 28;
         c.size = settings.layout.panel_h;
     }
     for c in &mut shell.components {

@@ -1,27 +1,10 @@
-#[path = "ps2_wheel.rs"]
-mod ps2_wheel;
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+//! IRQ-driven PS/2 mouse. Packet assembly and its negotiated format share a lock.
+#[path = "ps2_packet.rs"]
+mod ps2_packet;
+use crate::sync::IrqSafeSpinLock;
 
-static PACKET_SIZE: AtomicUsize = AtomicUsize::new(3);
-
-/// Буфер собираемого PS/2-пакета мыши. Был двумя `static mut` (массив + индекс);
-/// теперь одна структура за `UnsafeCell`, доступ к которой всегда сериализован
-/// `PACKET_LOCK` (см. `push_packet_byte`). `init` трогает индекс один раз при
-/// загрузке, до появления гонок.
-struct MousePacket {
-    bytes: [u8; 4],
-    index: usize,
-}
-
-struct MousePacketCell(UnsafeCell<MousePacket>);
-unsafe impl Sync for MousePacketCell {}
-
-static PACKET: MousePacketCell = MousePacketCell(UnsafeCell::new(MousePacket {
-    bytes: [0; 4],
-    index: 0,
-}));
-static PACKET_LOCK: AtomicBool = AtomicBool::new(false);
+static PACKET: IrqSafeSpinLock<ps2_packet::Decoder> =
+    IrqSafeSpinLock::new(ps2_packet::Decoder::new());
 
 pub fn init() {
     unsafe {
@@ -49,95 +32,20 @@ pub fn init() {
         mouse_write(0xF2);
         let _ = mouse_read_ack();
         let device_id = mouse_read_ack();
-        if device_id == 3 {
-            PACKET_SIZE.store(4, Ordering::Relaxed);
-        } else {
-            PACKET_SIZE.store(3, Ordering::Relaxed);
-        }
-
         mouse_write(0xF4);
         let enabled = mouse_read_ack();
         crate::input::set_mouse_relative_source(enabled==0xFA);
 
         drain_output();
-        (*PACKET.0.get()).index = 0;
-    }
-}
-
-pub fn set_bounds(width: usize, height: usize) {
-    crate::input::set_mouse_bounds(width, height);
-}
-
-pub fn set_position(x: i32, y: i32) {
-    crate::input::set_mouse_position(x, y);
-}
-
-pub fn update() {
-    unsafe {
-        crate::hal::hal_disable_interrupts();
-        while (inb(0x64) & 0x01) != 0 {
-            let status = inb(0x64);
-            let byte = inb(0x60);
-            if (status & 0x20) == 0 {
-                // This byte came from the keyboard, not the mouse (status bit
-                // 0x20 is clear). The PS/2 controller multiplexes both devices
-                // onto port 0x60, so route it to the keyboard buffer instead of
-                // dropping it — otherwise polling here races IRQ1 and eats keys
-                // whenever the mouse is idle.
-                crate::drivers::keyboard::push_scancode(byte);
-                continue;
-            }
-
-            push_packet_byte(byte);
-        }
-        crate::hal::hal_enable_interrupts();
+        PACKET.lock().reset(device_id == 3);
     }
 }
 
 pub fn push_packet_byte(byte: u8) {
-    while PACKET_LOCK
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
+    let mut decoder = PACKET.lock();
+    if let Some(packet) = decoder.push(byte) {
+        crate::input::push_mouse_relative(packet.dx, packet.dy, packet.buttons, packet.wheel);
     }
-    push_packet_byte_locked(byte);
-    PACKET_LOCK.store(false, Ordering::Release);
-}
-
-fn push_packet_byte_locked(byte: u8) {
-    unsafe {
-        let packet = &mut *PACKET.0.get();
-        if packet.index == 0 && (byte & 0x08) == 0 {
-            return;
-        }
-
-        packet.bytes[packet.index] = byte;
-        packet.index += 1;
-
-        let packet_size = PACKET_SIZE.load(Ordering::Relaxed);
-        if packet.index == packet_size {
-            let dx = packet.bytes[1] as i8 as i32;
-            let dy = -(packet.bytes[2] as i8 as i32);
-            let wheel = if packet_size == 4 {
-                ps2_wheel::intellimouse_wheel(packet.bytes[3])
-            } else { 0 };
-            crate::input::push_mouse_relative(dx, dy, packet.bytes[0] & 0x07, wheel);
-            packet.index = 0;
-        }
-    }
-}
-
-pub fn get_position() -> (i32, i32) {
-    crate::input::mouse_position()
-}
-
-pub fn get_buttons() -> u8 {
-    crate::input::mouse_buttons()
-}
-
-pub fn take_scroll_delta() -> i32 {
-    crate::input::take_mouse_scroll_delta()
 }
 
 unsafe fn inb(port: u16) -> u8 {

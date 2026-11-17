@@ -16,7 +16,6 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::process::ProcessId;
 
@@ -224,31 +223,12 @@ pub fn display_owner() -> u64 {
     crate::drivers::display::owner()
 }
 
-/// Владелец мастер-права на ввод: `0` — свободен, иначе pid владельца.
-/// Как и дисплей, эксклюзивен на всю систему, поэтому глобальный атомик.
-static INPUT_MASTER_OWNER: AtomicU64 = AtomicU64::new(0);
-
-/// Пытается захватить источник ввода за процессом `pid`. Идемпотентно для
-/// текущего владельца. Возвращает `false`, если вводом владеет другой процесс.
+/// Every acquired input handle retains the exclusive device lease.
 pub fn try_acquire_input(pid: ProcessId) -> bool {
-    let _irq = crate::sync::InterruptGuard::new();
-    match INPUT_MASTER_OWNER.compare_exchange(0, pid.0, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => {
-            crate::input::reset_pointer_queue();
-            true
-        },
-        Err(current) => current == pid.0,
-    }
+    crate::input::try_acquire(pid.0)
 }
 
-/// Освобождает источник ввода, если им владеет `pid` (иначе no-op).
+/// Final release clears the old queue before another owner can acquire it.
 pub fn release_input(pid: ProcessId) {
-    let _irq = crate::sync::InterruptGuard::new();
-    if INPUT_MASTER_OWNER.compare_exchange(pid.0, 0, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-        crate::input::clear_pointer_queue();
-    }
-}
-
-pub fn input_owner() -> u64 {
-    INPUT_MASTER_OWNER.load(Ordering::Acquire)
+    crate::input::release(pid.0);
 }

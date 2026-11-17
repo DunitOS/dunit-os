@@ -68,6 +68,18 @@ pub extern "C" fn _start(
     expect(1279, 719, 0);
     await_state("[POINTER] WAIT grown-bottom-right", 1919, 1079, 0);
     libdunit::println("[POINTER] PASS grow reaches edge");
+    libdunit::get_mouse_state(); // Drain any earlier compatibility wheel input.
+    libdunit::println("[POINTER] WAIT wheel while sleeping");
+    libdunit::sleep_ms(1500);
+    if libdunit::syscall1(libdunit::SYSCALL_GET_MOUSE_STATE, 0) != libdunit::EFAULT {
+        fail("snapshot invalid destination");
+    }
+    let state = libdunit::get_mouse_state();
+    if (state.x, state.y, state.buttons) != (1919, 1079, 0) || state.wheel.abs() != 1 {
+        fail("snapshot error lost wheel or changed pointer packet");
+    }
+    if libdunit::get_mouse_state().wheel != 0 { fail("snapshot wheel drained twice"); }
+    libdunit::println("[POINTER] PASS snapshot fault preserves wheel");
     libdunit::println("[POINTER] PASS all");
     libdunit::exit(0);
 }

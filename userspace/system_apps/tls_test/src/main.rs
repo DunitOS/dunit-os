@@ -80,8 +80,8 @@ pub extern "C" fn _start() -> ! {
         fail("set/get TP");
     }
     if libdunit::set_thread_pointer(usize::MAX) != libdunit::EINVAL { fail("invalid TP"); }
-    let top_a = unsafe { (core::ptr::addr_of_mut!(STACK_A) as *mut u8).add(STACK_BYTES) };
-    let top_b = unsafe { (core::ptr::addr_of_mut!(STACK_B) as *mut u8).add(STACK_BYTES) };
+    let top_a = unsafe { (core::ptr::addr_of_mut!(STACK_A.0) as *mut u8).add(STACK_BYTES) };
+    let top_b = unsafe { (core::ptr::addr_of_mut!(STACK_B.0) as *mut u8).add(STACK_BYTES) };
     let a = libdunit::thread_create(worker, top_a, 7);
     let b = libdunit::thread_create(worker, top_b, 9);
     if a <= 0 || b <= 0 { fail("thread create"); }

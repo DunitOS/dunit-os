@@ -1,51 +1,13 @@
 #!/usr/bin/env python3
-"""AI-driven QEMU test harness for Dunit OS.
+"""Build Dunit images and verify guest behavior through QEMU/QMP.
 
-Purpose
--------
-Lets an AI (or a human) build the OS, boot it head-less inside QEMU, type
-commands into the emulated terminal, capture what the system prints on the
-serial line, optionally grab a framebuffer screenshot, and force the VM to
-shut down after a chosen time budget. This makes it possible to keep working
-on the OS unattended.
+Keyboard input uses PS/2 scancodes; the guest has no serial input console.
+Serial captures boot diagnostics and userspace stdout/stderr. Kernel-terminal
+builtins draw to the framebuffer, so check screenshots for their output.
+Marker manifests define commands, input actions and required/forbidden output.
+Every automated run shuts down its VM and retains the serial log.
 
-Why keystrokes instead of "just pipe into serial"
---------------------------------------------------
-The Dunit terminal reads its input from the emulated PS/2 keyboard (IRQ1),
-NOT from the serial port. There is no serial console. So to "run a command"
-we inject scancodes through the QEMU QMP `send-key` command, exactly as if a
-user typed them.
-
-What is observable on serial
-----------------------------
-- All boot/init logs (`serial_write` in the kernel).
-- Everything a userspace program writes to stdout/stderr while it runs under
-  `exec` (the kernel mirrors STDOUT/STDERR to serial).
-- Process / scheduler / syscall / IPC diagnostics.
-
-What is NOT on serial
----------------------
-Pure kernel-terminal builtins (`ls`, `ps`, `cat`, ...) render only to the
-framebuffer. Use `--screenshot` to capture those visually, or drive `exec`
-programs whose output is mirrored to serial.
-
-Examples
---------
-Build the terminal-test ISO, boot it, run the canonical regression app, grab a
-screenshot, and hard-quit after 60s:
-
-    python3 tools/qemu_test.py --build \
-        --cmd "exec runtime_stress" \
-        --cmd "exec ipc_parent" \
-        --screenshot out.ppm \
-        --timeout 60
-
-Use an already-built ISO and just watch boot for 20s with no commands:
-
-    python3 tools/qemu_test.py --iso build/microkernel.iso --timeout 20
-
-Machine-readable result:
-
+    python3 tools/qemu_test.py --build --markers-file tools/boot_markers.json
     python3 tools/qemu_test.py --build --cmd "exec args_test one two" --json
 """
 
@@ -61,6 +23,7 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -104,7 +67,7 @@ def char_to_keys(ch: str) -> list[str] | None:
         return ["ret"]
     if ch in _BASE:
         return [_BASE[ch]]
-    if ch.isalpha() and ch.isupper():
+    if "A" <= ch <= "Z":
         return ["shift", _BASE[ch.lower()]]
     if ch in _SHIFTED:
         return ["shift", _SHIFTED[ch]]
@@ -129,6 +92,7 @@ class RunResult:
     commands: list[CommandResult] = field(default_factory=list)
     screenshot: str | None = None
     full_serial_len: int = 0
+    full_serial_log: str | None = None
     exit_code: int | None = None
     # Marker budget (M0): required markers that were missing and forbidden
     # markers that showed up. Empty lists mean the marker budget passed.
@@ -238,11 +202,19 @@ class Qmp:
 
     def screendump(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        reply = self.execute("screendump", {"filename": str(path)})
-        if "error" in reply:
-            raise RuntimeError(f"screendump failed: {reply['error']}")
-        if not path.is_file() or path.stat().st_size == 0:
-            raise RuntimeError(f"screendump produced no image: {path}")
+        descriptor, filename = tempfile.mkstemp(prefix=".capture-", suffix="-" + path.name,
+                                                dir=path.parent)
+        os.close(descriptor)
+        capture = Path(filename)
+        try:
+            reply = self.execute("screendump", {"filename": str(capture)})
+            if "error" in reply:
+                raise RuntimeError(f"screendump failed: {reply['error']}")
+            if not capture.is_file() or capture.stat().st_size == 0:
+                raise RuntimeError(f"screendump produced no image: {path}")
+            capture.replace(path)
+        finally:
+            capture.unlink(missing_ok=True)
 
     def quit(self) -> None:
         try:
@@ -430,12 +402,13 @@ def build_disk(config: str, workdir: Path) -> Path:
 
 
 def type_command(qmp: Qmp, text: str, key_interval: float = 0.05, submit: bool = True) -> None:
+    sequence = []
     for ch in text:
         keys = char_to_keys(ch)
         if keys is None:
-            # Unsupported char: skip but keep going.
-            print(f"[qemu_test] warning: cannot type {ch!r}", file=sys.stderr)
-            continue
+            raise ValueError(f"cannot type {ch!r} with the guest US keyboard layout")
+        sequence.append(keys)
+    for keys in sequence:
         qmp.send_key(keys)
         # send-key replies before its timed key release. Overlapping the next
         # character can leave Shift held after an underscore/quote and corrupt
@@ -497,6 +470,10 @@ def run_command_actions(qmp: Qmp, serial: SerialTail, steps: list[dict],
                 raise ValueError("input action delay must be between 0 and 5000 ms")
             time.sleep(min(delay, max(0, deadline - time.monotonic())))
         elif "execute" in step:
+            if step["execute"] == "screendump":
+                path = Path(step["arguments"]["filename"])
+                qmp.screendump(path if path.is_absolute() else REPO_ROOT / path)
+                continue
             reply = qmp.execute(step["execute"], step.get("arguments"))
             if "error" in reply:
                 raise RuntimeError(f"command action QMP failed: {reply['error']}")
@@ -780,10 +757,11 @@ def run(args: argparse.Namespace) -> RunResult:
                 timed_out=(dur >= cmd_budget - 0.05),
             ))
 
-        # Boot-scene actions have their own step deadlines and the run budget.
+        # Boot-scene waits can refer to this VM's startup output. Command waits
+        # above remain scoped to their own launch.
         # The per-command budget applies only to command_actions above.
         run_command_actions(qmp, serial, run_defaults.get("actions", []),
-                            len(serial.text), hard_deadline)
+                            0, hard_deadline)
 
         if args.screenshot:
             shot = Path(args.screenshot)
@@ -816,9 +794,12 @@ def run(args: argparse.Namespace) -> RunResult:
         result.exit_code = proc.returncode
         # Persist the full serial log alongside the run for later inspection.
         try:
-            (workdir / "qemu-serial.full.log").write_text(serial.text, encoding="utf-8")
-        except Exception:
-            pass
+            full_serial_log = workdir / "qemu-serial.full.log"
+            full_serial_log.write_text(serial.text, encoding="utf-8")
+            result.full_serial_log = str(full_serial_log)
+        except OSError as error:
+            result.ok = False
+            result.reason += f"; cannot save full serial log: {error}"
 
         # Marker budget (M0): required markers must all appear and forbidden
         # markers must not. This is what ties a WORKING claim to real evidence.
@@ -874,7 +855,7 @@ def print_human(result: RunResult) -> None:
     print(f"ISO       : {result.iso}")
     print(f"Booted    : {result.booted}")
     print(f"Result    : {'OK' if result.ok else 'FAIL'} ({result.reason})")
-    print(f"Serial log: build/qemu-serial.full.log ({result.full_serial_len} bytes)")
+    print(f"Serial log: {result.full_serial_log or 'unavailable'} ({result.full_serial_len} bytes)")
     if result.markers_checked:
         if not result.missing_markers and not result.forbidden_hits:
             print("Markers   : OK (marker budget satisfied)")

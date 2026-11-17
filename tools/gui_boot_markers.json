@@ -1,22 +1,70 @@
 {
-  "description": "Clean-boot budget for the userspace-DWM desktop (limine_dwm.conf). Proves the acceptance goal of Phase 1: the plain desktop kernel embeds assets/dwm/default.toml (empty [startup]), so gui_server boots into an interactive but WINDOWLESS session — panel/dock/launcher/wallpaper/widgets are live and presenting — without autostarting any test windows or a terminal. `startup=0` traces the empty startup list to the resolved config; `desktop ready` proves the compositor reached a presenting state; the forbidden `served two untrusted clients OK` proves NO test clients were autostarted (that isolation smoke lives only in the boot-smoke-tests kernel / test.toml). Run: tools/qemu_test.py --build --markers-file tools/gui_boot_markers.json --ready-marker 'gui_server: desktop ready'. The GUI kernel never prints [TERM-007], so --ready-marker MUST be overridden as shown.",
+  "description": "Windowless DWM startup with widgets enabled by a test overlay derived from assets/dwm/default.toml. Production defaults remain unchanged. Run: python3 tools/test_dwm_window_actions.py --scene boot [--uefi]. The helper preserves these assertions, builds through qemu_test.py, waits for gui_server: desktop ready and captures the desktop.",
   "run": {
     "config": "limine_dwm.conf"
   },
   "required": [
-    { "marker": "gui_server: start", "claim": "compositor process launched by the kernel GUI branch", "source": "userspace/system_apps/gui_server/src/main.rs" },
-    { "marker": "gui_server: no startup apps to autostart", "claim": "empty [startup] honored — no test windows/terminal autostarted", "source": "userspace/system_apps/gui_server/src/main.rs" },
-    { "marker": "startup=0", "claim": "resolved DWM config has an empty startup list (data-driven clean boot)", "source": "assets/dwm/default.toml" },
-    { "marker": "gui_server: config schema_version=2 supported=1", "claim": "M4 schema versioning: legacy schema_version=1 migrates to schema_version=2 and this build supports it (version travels through the same parse path as every table)", "source": "userspace/dwm_settings/src/lib.rs" },
-    { "marker": "gui_server: schema guard ok (rejects future)", "claim": "M4 forward-compat guard: version_supported() accepts the current version, rejects a hypothetical future version and the invalid 0 — a newer document falls back to last-known-good instead of mis-parsing", "source": "userspace/dwm_settings/src/lib.rs" },
-    { "marker": "gui_server: session restore=1 entries=0", "claim": "M4 window/session restore: [session] restore=true honored and the RAM session store starts empty on a clean boot (no windows to remember yet)", "source": "userspace/system_apps/gui_server/src/main.rs" },
-    { "marker": "gui_server: panel edge=top tray edge=top tray_size=28", "claim": "Phase 5 panel/tray edges resolved from [panel]/[tray] in default.toml (default top/top → byte-identical layout)", "source": "assets/dwm/default.toml" },
-    { "marker": "gui_server: widgets enabled=1 clock=1 monitor=1", "claim": "Phase 6 desktop-widget set resolved from the per-widget files (widgets/clock.toml + widgets/monitor.toml present & enabled → both drawn); removing a widget = deleting its file, single source of truth (no [widgets] clock/monitor bool)", "source": "assets/dwm/widgets/" },
-    { "marker": "gui_server: desktop ready", "claim": "desktop reached an interactive, presenting state with zero windows", "source": "userspace/system_apps/gui_server/src/main.rs" }
+    {
+      "marker": "gui_server: start",
+      "claim": "init launched the compositor process",
+      "source": "userspace/system_apps/gui_server/src/main.rs"
+    },
+    {
+      "marker": "gui_server: no startup apps to autostart",
+      "claim": "empty startup list did not launch applications",
+      "source": "userspace/system_apps/gui_server/src/protocol_runtime.rs"
+    },
+    {
+      "marker": "startup=0",
+      "claim": "fixture retains the authoritative empty startup list",
+      "source": "assets/dwm/default.toml"
+    },
+    {
+      "marker": "gui_server: config schema_version=2 supported=1",
+      "claim": "schema 1 configuration resolves to supported schema 2",
+      "source": "userspace/dwm_settings/src/lib.rs"
+    },
+    {
+      "marker": "gui_server: schema guard ok (rejects future)",
+      "claim": "version guard rejects zero and future schema versions",
+      "source": "userspace/dwm_settings/src/lib.rs"
+    },
+    {
+      "marker": "gui_server: session restore=1 entries=0",
+      "claim": "enabled session restore starts empty on a fresh VM",
+      "source": "userspace/system_apps/gui_server/src/main.rs"
+    },
+    {
+      "marker": "gui_server: panel edge=top tray edge=top tray_size=28",
+      "claim": "panel and tray retain the default top-edge configuration",
+      "source": "assets/dwm/default.toml"
+    },
+    {
+      "marker": "gui_server: widgets enabled=1 clock=1 monitor=1",
+      "claim": "test overlay enables the widget master; packaged clock and monitor files enable both widgets",
+      "source": "tools/test_dwm_window_actions.py"
+    },
+    {
+      "marker": "gui_server: desktop ready",
+      "claim": "first desktop frame presented with no application windows",
+      "source": "userspace/system_apps/gui_server/src/desktop_painter.rs"
+    }
   ],
   "forbidden": [
-    { "marker": "served two untrusted clients OK", "why": "test-client autostart must NOT happen on the clean desktop; the M3 isolation smoke belongs to the boot-smoke-tests kernel (test.toml)", "source": "userspace/system_apps/gui_server/src/main.rs" },
-    { "marker": "[PANIC]", "why": "kernel panic during desktop bring-up", "source": "kernel/src/lib.rs" },
-    { "marker": "gui_server: FAIL", "why": "any gui_server self-test failure during bring-up", "source": "userspace/system_apps/gui_server/src/main.rs" }
+    {
+      "marker": "served two untrusted clients OK",
+      "why": "clean startup must not launch isolation-test clients",
+      "source": "userspace/system_apps/gui_server/src/protocol_runtime.rs"
+    },
+    {
+      "marker": "[PANIC]",
+      "why": "kernel panic during desktop bring-up",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "gui_server: FAIL",
+      "why": "any gui_server self-test failure during bring-up",
+      "source": "userspace/system_apps/gui_server/src/main.rs"
+    }
   ]
 }

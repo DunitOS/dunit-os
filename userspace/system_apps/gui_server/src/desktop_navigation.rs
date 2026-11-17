@@ -159,16 +159,12 @@ pub(super) fn raise_window(z: &mut Vec<usize>, wi: usize) {
 /// above it shifts down by one to track the `Vec::remove` compaction. `drag`
 /// carries a `(win, off_x, off_y)` tuple; the other two are bare indices.
 pub(super) fn adjust_indices_after_removal(
-    drag: &mut Option<(usize, i32, i32)>,
+    drag: &mut Option<Capture>,
     pressed_win: &mut Option<usize>,
     input_focus: &mut Option<usize>,
     wi: usize,
 ) {
-    match *drag {
-        Some((i, ..)) if i == wi => *drag = None,
-        Some((i, ox, oy)) if i > wi => *drag = Some((i - 1, ox, oy)),
-        _ => {}
-    }
+    Capture::remove_window(drag, wi);
     for opt in [pressed_win, input_focus] {
         match *opt {
             Some(i) if i == wi => *opt = None,
@@ -187,7 +183,7 @@ pub(super) fn reap_windows_of(
     pid: u32,
     wins: &mut Vec<Win>,
     z: &mut Vec<usize>,
-    drag: &mut Option<(usize, i32, i32)>,
+    drag: &mut Option<Capture>,
     pressed_win: &mut Option<usize>,
     input_focus: &mut Option<usize>,
 ) {

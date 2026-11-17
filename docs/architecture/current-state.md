@@ -1,6 +1,6 @@
 # Current system state
 
-Source review: 15 November 2026, before OP4. This page describes implemented
+Source review: 16 November 2026, before OP4. This page describes implemented
 behavior and its limits. Test contracts describe how to verify it; their presence
 is not evidence of a fresh run. The [technical roadmap](../../DUNIT_OS_TECHNICAL_ROADMAP.md)
 and [performance roadmap](../../DUNIT_OS_PERFORMANCE_ROADMAP.md) own future work.
@@ -30,7 +30,7 @@ paths. They must continue to work when userspace initialization fails.
 | Ownership | Task registry pins, exclusive execution admission, deferred dispatch/fd retirement, locked PTY queues and scoped console/stdin transactions | `tools/test_process_resources.py`, `tools/test_pty.py`, `tools/boot_markers.json` |
 | Waiting | Blocking timer/IPC/futex and level-triggered mixed IPC/fd/timer/child wait-set | `tools/waitset_markers.json`, `tools/test_wait_queue.py` |
 | Files | MemFS root, initrd apps/assets, task snapshots, DunitFS v2 at `/persist`, fd duplication/pipes/flags/spawn actions | `tools/m6_fileops_markers.json`, `tools/m6_native_fd_markers.json` |
-| Devices | PS/2 input, queued pointer input, PCI, serialized framebuffer/Bochs display leases and modesets, AHCI and virtio-blk | driver-specific and GUI marker contracts |
+| Devices | PS/2 input, serialized pointer queues/input-master leases, PCI, serialized framebuffer/Bochs display leases and modesets, AHCI and virtio-blk | driver-specific and GUI marker contracts |
 | Runtime | Static native Rust SDK, static Dunit musl, on-device TinyCC and full Lua interpreter | [SDK](../sdk/README.md), [libc tests](../libc-test.md), [Lua](lua-runtime.md) |
 | Desktop | Configurable panels/components, themes, input/focus, text clipboard, scoped file transfers, window motion and isolated Lua workers | [desktop manual](desktop.md), `tools/gui_smoke_markers.json` |
 
@@ -65,12 +65,40 @@ proposal/status documents no longer form competing sources of current truth.
 Upstream license/provenance text and JSON measurement receipts are retained.
 Compatibility entry points are retained where callers still require them.
 
+The follow-up removed unused userspace keyboard/mouse drivers and duplicate
+calculator parsing, separated configuration/session parsing and compositor
+protocol/lifecycle/painting, and added edge/corner resizing with per-app minimums.
+Rapid maximize/restore preserves the pending resize; Escape dismisses Quick
+Settings. Calculator overrides inherited keypad padding so every button fits
+its 192×308 minimum. Tray and monitor counts include waiting processes and
+exclude exited/reaped records. Disabled session restore prevents both mirror
+updates and writes.
+Input leases and generation-checked copies retain queued events across repeated
+acquisition and reject stale reads. Block registries and PCI transactions are
+locked; AHCI/VirtIO quarantine uncertain DMA and refuse further transfers.
+VirtIO checks the entire requested LBA range before issuing its first sector.
+It honors read-only feature negotiation; block writes and installer validation
+reject the target without changing its data or taking reads offline. Queue-size
+and allocation failures preserve handshake state while publishing FAILED.
+Unbuilt Multiboot entry/linker files and the broken GRUB image target are removed.
+
+The unused Rust bootloader dependency and bootimage runner are also removed.
+Eleven initial kernel property files contained separate scheduler, interrupt,
+memory, IPC, syscall and VFS simulations; those models and their proptest
+dependency are retired. Actual-module and native checks remain. ELF parsing now
+lives in its own kernel module and rejects unsupported encoding/version/header
+size and invalid program tables before loading. Real heap tests found a failed
+growth mapping returned only one frame; rollback now returns the entire block.
+The unused early ELF launch wrapper is removed. The initrd packer strips only
+declared programs, preserving asset and overlay file bytes.
+
 ## Open gates
 
 - [OP4 ownership gates](../performance/smp.md#pre-op4-gates): console/stdin scopes
-  and current display-master/Bochs modeset ownership are addressed. Input-master
-  final-close ownership, driver DMA retirement, remote cancellation, lock ranking,
-  syscall IRQ progress and concurrent VM/application stress remain open before AP
+  and current display-master/Bochs modeset and input-master lease ownership are
+  addressed. Block DMA quarantine is implemented; broader completion/recovery
+  coverage, remote cancellation, lock ranking, syscall IRQ progress and concurrent
+  VM/application stress remain open before AP
   dispatch. Current scanout backing has a fixed kernel lifetime.
 - Secure entropy is absent. ELF AT_RANDOM bootstrap bytes are not a CSPRNG and
   must not support cryptography or a claim of production hash hardening.
@@ -105,12 +133,54 @@ user-memory, harness/tooling, image/configuration and DWM/component regressions
 also passed. Bounded-reader tests cover short reads, exact limits, oversize,
 mid-read EIO and invalid transfer counts; native cases verify fd cleanup.
 
-Kernel production/smoke checks emitted zero warnings. The warning checker's
-listed userspace subset also measured zero, and its budget was lowered to zero.
-That subset does not cover every packaged app; existing warnings in other
-apps are not evidence of a clean whole-repository warning inventory. Fresh
-receipts are under `build/performance/pre-op4-*` and
+Earlier kernel production/smoke checks emitted zero warnings. The old warning
+checker covered only a userspace subset; that zero was not a whole-image result.
+Those receipts are under `build/performance/pre-op4-*` and
 `build/performance/pre-op4-review/`; they are generated artifacts, not source docs.
+
+The earlier follow-up passed the DWM host suite, storage host regressions, ABI/protocol
+checks and real production desktop actions with four TCG CPUs. Captures show all
+eight resize directions, the Calculator minimum and `12+3=15`, Terminal output,
+Files navigation, workspaces, switcher and Quick Settings dismissal. UEFI GUI
+smoke passed with resize/recycle and live resolution reload; the windowless widget
+fixture retained the original boot assertions. SDK resize-during-paint recovered
+its frame, restored placement and closed cleanly, with captured frames. The 24
+harness host tests include rejecting unsupported text before partial injection.
+Both AHCI and VirtIO
+passed installer rollback/fsck and complete VM stop/start readback of 131072 bytes
+with hash `b4c071280fb62325`. Its `/tmp/dunit-review` artifacts were temporary
+and are no longer present in the current workspace.
+These are correctness checks; AP dispatch, KVM performance and broad hardware
+failure recovery remain unverified.
+
+On 16 November, all 19 expanded storage host tests passed, including delayed/late
+AHCI completion and active-command task-file errors. The production read-only
+VirtIO scenario passed with four TCG CPUs: device mode, refused write/install,
+subsequent read and an unchanged complete-image SHA-256. Inspected frames and
+serial are in `build/virtio-readonly` and `build/review-nov16/readonly-current`.
+ABI/protocol checks passed.
+Both writable installer suites passed with four TCG CPUs, including rollback,
+fsck and automount. VirtIO's initial 350-second boot budget expired during ESP
+copy; the unchanged contract passed with a longer budget. Thread/wait/TLS/futex
+checks passed, with no unexpected fault after terminal readiness.
+Separate write/shutdown/start/readback runs on both buses again verified 131072
+bytes with hash `b4c071280fb62325` and clean VFS handles. Their logs and inspected
+frames are in `build/review-nov16/{ahci,virtio}-persist-{write,verify}`.
+
+The fresh UEFI desktop scenes passed with four TCG CPUs. All 29 window-action
+captures were inspected, including `15` from a mouse click on the minimum-sized
+Calculator's equals button. Nine lifecycle captures show minimize/dock restore,
+close/reopen, shortcut close and continued Terminal use. The tray changes
+3→7→6→7→6 live processes; `dtop --once` reports seven while its own process runs.
+Logs and frames are in `build/review-nov16/dwm-uefi-final` and
+`build/review-nov16/dwm-lifecycle-final`. The harness reports each run's actual
+serial path and fails if it cannot save the log; 18 action/build host tests passed.
+
+The warning gate now obtains the compiler and full-profile app list from Makefile,
+fails on missing crates and refuses an upward `--update`. A fresh check measured
+zero warnings in the kernel and all 67 packaged Rust apps; six host tests cover
+the gate. This excludes upstream C diagnostics and unpackaged crates. Logs are in
+`build/review-nov16/warnings.log` and `warnings-tests.log`.
 
 ## Historical validation
 

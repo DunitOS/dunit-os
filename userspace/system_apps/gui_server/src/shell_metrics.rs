@@ -8,8 +8,6 @@ pub fn layout(base: &Layout, skin: &Visuals) -> Layout {
         border: skin.layout_border,
         panel_h: skin.layout_panel_h,
         launcher_w: skin.layout_launcher_w,
-        taskbtn_w: skin.layout_taskbtn_w,
-        taskbtn_gap: skin.layout_taskbtn_gap,
         menu_w: skin.layout_menu_w,
         menu_item_h: skin.layout_menu_item_h,
         dock_w: skin.layout_dock_w,

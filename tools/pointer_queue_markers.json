@@ -245,7 +245,12 @@
     "[POINTERQ] handover and queue OK",
     "[EXEC] /app/pointer_queue_test returned code=0",
     "[POINTERQ] start",
-    "[POINTERQ] modifier snapshots survive key releases and failed v2 copy OK"
+    "[POINTERQ] modifier snapshots survive key releases and failed v2 copy OK",
+    {
+      "marker": "[INPUT-LEASE] repeated acquire, first/final close and exit/kill cleanup OK",
+      "claim": "Multiple handles retain input authority until final close or process exit/kill; the next owner receives a fresh stream",
+      "source": "userspace/system_apps/pointer_queue_test/src/main.rs; kernel/src/input/mod.rs"
+    }
   ],
   "forbidden": [
     "[PANIC]",

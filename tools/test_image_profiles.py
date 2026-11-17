@@ -119,16 +119,44 @@ class ImageProfiles(unittest.TestCase):
         obj.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(["cc", "-c", "-g", str(source), "-o", str(obj)], check=True)
         object_bytes = obj.read_bytes()
+        self.args.overlay_dir = self.root / "overlay"
+        self.write("assets/elf-copy", original)
+        self.write("overlay/tests/elf-copy", original)
+        for tool in ("lua", "luac", "tcc"):
+            self.write("toolchain/" + tool, original)
+            setattr(self.args, tool + "_bin", self.root / "toolchain" / tool)
         entries = dict(collect(self.args))
         self.assertLess(len(entries["/app/dsh"]), len(original))
         self.assertEqual(executable.read_bytes(), original)
         self.assertEqual(entries["/system/lib/crt1.o"], object_bytes)
         self.assertEqual(entries["/system/tcc/crt1.o"], object_bytes)
+        self.assertEqual(entries["/assets/elf-copy"], original)
+        self.assertEqual(entries["/tests/elf-copy"], original)
+        for tool in ("lua", "luac", "tcc"):
+            self.assertLess(len(entries["/system/bin/" + tool]), len(original))
+            self.assertEqual((self.root / "toolchain" / tool).read_bytes(), original)
         packaged = self.root / "packaged"
         packaged.write_bytes(read_archive(pack(sorted(entries.items())))["/app/dsh"])
         packaged.chmod(0o700)
         result = subprocess.run([str(packaged)], capture_output=True)
         self.assertEqual((result.returncode, result.stdout), (7, b"packed ELF works\n"))
+
+    def test_elf_data_assets_and_explicit_overlays_keep_exact_bytes(self):
+        payload = bytearray(64)
+        payload[:4] = b"\x7fELF"
+        payload[4:7] = b"\x02\x02\x01"  # Unsupported big-endian ELF fixture.
+        payload[16:18] = b"\x02\x00"
+        payload = bytes(payload)
+        self.args.profile = "full"
+        self.args.overlay_dir = self.root / "overlay"
+        self.write("assets/elf-fixture", payload)
+        self.write("overlay/tests/elf-fixture", payload)
+        self.write("overlay/app/dsh", payload)
+        original_app = (self.args.userspace_dir / "dsh").read_bytes()
+        entries = read_archive(pack(collect(self.args)))
+        for path in ("/assets/elf-fixture", "/tests/elf-fixture", "/app/dsh"):
+            self.assertEqual(entries[path], payload)
+        self.assertEqual((self.args.userspace_dir / "dsh").read_bytes(), original_app)
 
     def test_archive_rejects_corruption_and_duplicate_paths(self):
         valid = pack([("/app/a", b"a")])

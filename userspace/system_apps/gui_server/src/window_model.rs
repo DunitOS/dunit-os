@@ -1,11 +1,6 @@
 //! Window placement, decorations, shared hit geometry and session persistence.
 use super::*;
-/// Opcode of an outbound protocol packet (offset 8, little-endian u16).
-/// Reserved screen margins (px) that the shell strips subtract from the usable
-/// desktop, one accumulator per edge. `reserved_insets` fills it from the
-/// configured panel/tray/dock edges, and every geometry
-/// computation (work area, spawn/drag clamps, dock strip origin) reads from here
-/// so "what real estate is free" has a single source of truth.
+/// Screen margins reserved by configured shell surfaces.
 #[derive(Clone, Copy)]
 pub(super) struct Insets {
     pub(super) top: i32,
@@ -23,17 +18,6 @@ pub(super) fn add_edge(ins: &mut Insets, edge: Edge, size: i32) {
         Edge::Right => ins.right += size,
     }
 }
-
-/// Resolve the configured shell layout into reserved per-edge margins:
-/// - the panel reserves `ly.panel_h` on `panel_edge`;
-/// - the dock reserves its thickness and outer margin on `ly.dock_edge`;
-/// - the tray reserves `tray_size` on `tray_edge`, but ONLY when it does not
-///   share the panel's edge — a same-edge tray rides *inside* the panel strip
-///   (the classic top-panel readout) and reserves nothing extra.
-///
-/// Margins accumulate, so the default (panel=top, tray=top, dock=left) yields
-/// `{top: panel_h, left: dock_w, bottom: 0, right: 0}` — byte-identical to the
-/// pre-Phase-5 fixed layout.
 
 /// The screen rect `(x, y, w, h)` of a shell strip `thickness` px thick on `edge`,
 /// offset `off` px inward from that edge. Horizontal strips (top/bottom) span the
@@ -81,12 +65,9 @@ pub(super) fn work_area(bw: usize, bh: usize, ly: &Layout, ins: &Insets) -> (i32
 /// size. This is the single window-state transition used by the title-bar chip,
 /// the macOS-style drag-to-restore, and the headless self-test. Leaving `Floating`
 /// snapshots the current `(cx,cy,sw,sh)` into `restore`; returning to `Floating`
-/// replays that snapshot. The *position* is applied here immediately (so the
-/// decoration follows at once); the *size* only actually changes once the owning
-/// client re-imports at the CONFIGURE'd geometry (mirrored back by the per-frame
-/// Win<->ClientState sync), so a client that ignores CONFIGURE keeps its size while
-/// its position still updates — harmless. Reapplying Maximized refreshes the
-/// work area after a display change; other unchanged states are a no-op.
+/// replays that snapshot. Geometry follows the request immediately; the current
+/// buffer stays owned and scales until its replacement is acknowledged.
+/// Reapplying Maximized refreshes the work area after a display change.
 pub(super) fn set_window_state(
     server: &mut Server,
     clients: &mut [ClientState],
@@ -97,8 +78,6 @@ pub(super) fn set_window_state(
     ly: &Layout,
     ins: &Insets,
 ) {
-    // STATE_ACTIVATED — the surface stays focused across the reconfigure.
-    const STATE_ACTIVATED: u32 = 1;
     if win.state == new_state && new_state != WinState::Maximized {
         return;
     }
@@ -112,19 +91,9 @@ pub(super) fn set_window_state(
         WinState::Floating => win.restore.take(),
     };
     win.motion = None;
-    win.desired_size = None;
     win.state = new_state;
-    if let Some((tx, ty, tw, th)) = target {
-        win.cx = tx;
-        win.cy = ty;
-        reconfigure_client(
-            server,
-            clients,
-            win.pid,
-            tw as u32,
-            th as u32,
-            STATE_ACTIVATED,
-        );
+    if let Some(target) = target {
+        request_window_geometry(server, clients, win, target);
     }
 }
 
@@ -146,12 +115,88 @@ pub(super) fn toggle_maximize(
     set_window_state(server, clients, win, next, bw, bh, ly, ins);
 }
 
-// ---------------------------------------------------------------------------
-// Window/session persistence (M4). Geometry is remembered per APP id (not per
-// pid, which is ephemeral), so reopening an app restores where its window last
-// sat. The store is `settings::SESSION_PATH`, pre-created writable in the kernel
-// VFS; it is RAM-only until DunitFS v2, then the same path survives reboots.
-// ---------------------------------------------------------------------------
+/// Restore a tiled window under the same proportional title-bar grip.
+pub(super) fn begin_window_move(
+    server: &mut Server, clients: &mut [ClientState], win: &mut Win, window: usize,
+    point: (i32, i32), screen: (usize, usize), ly: &Layout, ins: &Insets,
+) -> Capture {
+    let (x, y) = point;
+    win.motion = None;
+    if win.is_tiled() {
+        let old_width = win.sw.max(1);
+        let grip_x = (x - win.cx).clamp(0, old_width);
+        let grip_y = (y - win.cy + win.title_h).clamp(0, (win.title_h - 1).max(0));
+        let restored_width = win.restore.map(|r| r.2).unwrap_or(old_width).max(1);
+        set_window_state(server, clients, win, WinState::Floating, screen.0, screen.1, ly, ins);
+        win.cx = x - (grip_x as i64 * restored_width as i64 / old_width as i64) as i32;
+        win.cy = y - grip_y + win.title_h;
+    }
+    let outer = win.outer();
+    Capture::Move { window, offset: (x - outer.0, y - outer.1) }
+}
+
+pub(super) fn advance_window_capture(
+    server: &mut Server, clients: &mut [ClientState], win: &mut Win, capture: Capture,
+    point: (i32, i32), screen: (usize, usize), ins: &Insets,
+    minimum: (i32, i32),
+) {
+    let bounds = (ins.left, ins.top, (screen.0 as i32 - ins.left - ins.right).max(1),
+                  (screen.1 as i32 - ins.top - ins.bottom).max(1));
+    let minimum = (minimum.0 + 2 * win.border,
+                   minimum.1 + win.title_h + 2 * win.border);
+    let rect = capture.geometry(win.outer(), point, bounds, minimum);
+    let position = (rect.0 + win.border, rect.1 + win.title_h + win.border);
+    let size = ((rect.2 - 2 * win.border).max(1),
+                (rect.3 - win.title_h - 2 * win.border).max(1));
+    if (win.sw, win.sh) == size {
+        win.cx = position.0;
+        win.cy = position.1;
+    } else {
+        request_window_geometry(server, clients, win, (position.0, position.1, size.0, size.1));
+    }
+}
+
+pub(super) fn restore_floating_geometry(
+    server: &mut Server, clients: &mut [ClientState], win: &mut Win,
+    geometry: (i32, i32, i32, i32), screen: (usize, usize), ly: &Layout, ins: &Insets,
+    minimum: (i32, i32),
+) {
+    let area = work_area(screen.0, screen.1, ly, ins);
+    let width = geometry.2.clamp(minimum.0.max(1).min(area.2), area.2);
+    let height = geometry.3.clamp(minimum.1.max(1).min(area.3), area.3);
+    request_window_geometry(server, clients, win,
+        (geometry.0.clamp(area.0, area.0 + area.2 - width),
+         geometry.1.clamp(area.1, area.1 + area.3 - height), width, height));
+}
+
+pub(super) fn window_minimum(
+    win: &Win, skin: &dunit_style::shell::Visuals,
+    policy: &settings::policy::PolicyConfig, apps: &Applications,
+) -> (i32, i32) {
+    let app = win_app_id(apps, win.app).unwrap_or("");
+    let resolved = policy.for_app(app);
+    (resolved.min_width.unwrap_or(skin.window_min_width).max(skin.window_min_width),
+     resolved.min_height.unwrap_or(skin.window_min_height).max(skin.window_min_height))
+}
+
+fn request_window_geometry(
+    server: &mut Server, clients: &mut [ClientState], win: &mut Win,
+    geometry: (i32, i32, i32, i32),
+) {
+    let (x, y, width, height) = geometry;
+    let pending = win.desired_size.is_some();
+    win.cx = x;
+    win.cy = y;
+    win.sw = width;
+    win.sh = height;
+    win.desired_size = (pending || (win.surface_w, win.surface_h) != (width, height))
+        .then_some((width, height));
+    if win.desired_size.is_some() {
+        reconfigure_client(server, clients, win.pid, width as u32, height as u32, 1);
+    }
+}
+
+// The session path is in MemFS. Reboot persistence remains a separate gate.
 
 /// The registered app id for a window (its join key into the session store), or
 /// `None` when the window's app is unregistered / id-less (nothing to remember).
@@ -168,7 +213,7 @@ pub(super) fn win_app_id<'a>(apps: &'a Applications, app: u8) -> Option<&'a str>
 /// its app id. A maximized window records its pre-maximize floating rect (from
 /// `restore`) plus the `maximized` flag, so a later restore reopens it maximized
 /// yet with a sane un-maximize size. No-op for id-less windows.
-pub(super) fn session_remember(session: &mut Vec<settings::WinGeom>, apps: &Applications, w: &Win) {
+pub(super) fn session_remember(session: &mut Session, apps: &Applications, w: &Win) {
     let Some(id) = win_app_id(apps, w.app) else {
         return;
     };
@@ -178,26 +223,19 @@ pub(super) fn session_remember(session: &mut Vec<settings::WinGeom>, apps: &Appl
     };
     let maximized = w.state == WinState::Maximized;
     let ge = settings::WinGeom::new(id, gx, gy, gw, gh, maximized);
-    if let Some(e) = session.iter_mut().find(|e| e.id.as_str() == id) {
-        *e = ge;
-    } else if session.len() < settings::MAX_SESSION {
-        session.push(ge);
-    }
+    session.remember(ge);
 }
 
 /// Find a remembered geometry for the app `app` (registry index) in the mirror.
 pub(super) fn session_lookup(
-    session: &[settings::WinGeom],
+    session: &Session,
     apps: &Applications,
     app: u8,
 ) -> Option<settings::WinGeom> {
     let id = win_app_id(apps, app)?;
-    session.iter().find(|e| e.id.as_str() == id).copied()
+    session.lookup(id)
 }
 
-// Hardware make-codes the switcher watches. The trigger key (Tab) and the cancel
-// key (Esc) are keyboard-protocol invariants, not desktop policy — only which
-// MODIFIER arms the switcher is config (`[shortcuts] switch_mod`).
 /// Human-readable window title for a window's registry index (`Win.app`), looked
 /// up in the live application registry. An unknown index (0xFF, e.g. a client
 /// spawned for an app not in the registry) falls back to a generic "Window".
@@ -208,14 +246,7 @@ pub(super) fn win_title<'a>(apps: &'a Applications, app: u8) -> &'a str {
         .unwrap_or("Window")
 }
 
-/// Layout state of a top-level window. `Floating` is the free-form default every
-/// client is created in; `Maximized` fills the work area (screen minus the
-/// reserved panel + dock). Modelled as an enum, not a `maximized: bool`, so the
-/// same state machine (`set_window_state`) extends to `Fullscreen` / tiled layouts
-/// later without touching every call site — a window is always in exactly one
-/// state, and `Win::restore` holds the floating geometry to return to. This also
-/// keeps "maximize" (a window *state*) cleanly separate from "resize" (the
-/// protocol CONFIGURE mechanism that *any* state change drives).
+/// Floating geometry, a Lua tile or the maximized work area.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum WinState {
     Tiled,
@@ -229,6 +260,7 @@ pub(super) enum WinState {
 pub(super) struct Placement {
     pub(super) cx: i32,
     pub(super) cy: i32,
+    pub(super) size: (i32, i32),
     pub(super) state: WinState,
     pub(super) restore: Option<(i32, i32, i32, i32)>,
     pub(super) lua_floating: bool,
@@ -288,10 +320,8 @@ pub(super) struct Win {
     /// floating state, so returning to `Floating` restores the exact pre-maximize
     /// position and size. `None` while the window is floating.
     pub(super) restore: Option<(i32, i32, i32, i32)>,
-    /// Self-test choreography step (config-gated `[startup] self_test`, test.toml
-    /// only): 0 = not yet maximized, 1 = maximized (awaiting restore), 2 = restored.
-    /// Lets the headless harness drive a full maximize->restore round trip without a
-    /// mouse. Always 0 on the real desktop (`self_test` is false in `default.toml`).
+    /// Resize probe: 0=request maximize, 1=await maximize, 2=await restore,
+    /// 3=settled. Enabled only by the test desktop configuration.
     pub(super) st_step: u8,
     /// Absolute deadline for the resize self-test's existing four-second grace.
     /// A resumed probe receives a fresh deadline after display-session re-entry.
@@ -305,6 +335,23 @@ pub(super) struct Win {
 }
 
 impl Win {
+    pub(super) fn from_client(client: &ClientState, origin: (i32, i32), ly: &Layout, now: u64, ws: usize) -> Self {
+        let (sw, sh) = (client.surf_w as i32, client.surf_h as i32);
+        Self {
+            pid: client.pid, cx: origin.0, cy: origin.1, sw, sh,
+            surface_w: sw, surface_h: sh, desired_size: None,
+            buf_ptr: client.buf_ptr, buf_size: client.buf_size, alive: true,
+            traffic_lights: ly.traffic_lights, title_h: ly.title_h, border: ly.border,
+            app: client.app, opacity: 255, rule_applied: false, ws, born: now,
+            minimized: false, motion: None, state: WinState::Floating,
+            lua_floating: false, restore: None, st_step: 0, st_deadline: None,
+            format: client.format,
+        }
+    }
+    pub(super) fn resize_edges(&self, x: i32, y: i32, skin: &dunit_style::shell::Visuals) -> Option<window_gesture::Edges> {
+        if self.state != WinState::Floating { return None; }
+        window_gesture::resize_edges(self.outer(), (x, y), skin.window_resize_grip)
+    }
     /// Full outer rect (border + title bar + content) in screen space.
     pub(super) fn outer(&self) -> (i32, i32, i32, i32) {
         let x = self.cx - self.border;

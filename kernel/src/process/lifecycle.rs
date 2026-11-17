@@ -484,6 +484,19 @@ pub fn is_pid_blocked(pid: ProcessId) -> bool {
         .any(|record| record.pid == pid && record.state == ProcessState::Blocked)
 }
 
+/// Foreground retry predicate, not execution admission. Observe both states
+/// together so an IRQ wake from Blocked to Ready cannot fall between queries.
+pub(crate) fn is_pid_waiting_for_dispatch(pid: ProcessId) -> bool {
+    let table = process_table();
+    process_record_index(&table, pid)
+        .map(|index| {
+            let record = &table[index];
+            record.process.is_some()
+                && matches!(record.state, ProcessState::Ready | ProcessState::Blocked)
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn remove_waiter(entity: ProcessId) {
     let _irq = InterruptGuard::new();
     let pending = with_task_record(entity, |process, record| {

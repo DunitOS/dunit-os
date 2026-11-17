@@ -6,55 +6,10 @@ edition = "2021"
 [lib]
 crate-type = ["staticlib"]
 
-[[test]]
-name = "scheduler_properties"
-harness = true
-
-[[test]]
-name = "interrupt_properties"
-harness = true
-
-[[test]]
-name = "process_isolation_properties"
-harness = true
-
-[[test]]
-name = "pmm_properties"
-harness = true
-
-[[test]]
-name = "vmm_properties"
-harness = true
-
-[[test]]
-name = "allocator_properties"
-harness = true
-
-[[test]]
-name = "syscall_properties"
-harness = true
-
-[[test]]
-name = "ipc_message_properties"
-harness = true
-
-[[test]]
-name = "ipc_shared_memory_properties"
-harness = true
-
-[[test]]
-name = "elf_properties"
-harness = true
-
-[[test]]
-name = "vfs_properties"
-harness = true
-
 [dependencies]
 dunit_file_cap_abi = { path = "../abi/file-cap" }
 dunit_pointer_abi = { path = "../abi/pointer-input" }
 dunit_wait_abi = { path = "../abi/wait-set" }
-bootloader = "0.9"
 bitflags = "2.11"
 # Shared terminal color-theme presets (single source of truth), also linked by
 # the userspace stack (dwm_settings -> gui_terminal). Pure const data, no_std.
@@ -63,9 +18,6 @@ term_theme = { path = "../runtime/term_theme" }
 [features]
 default = []
 boot-smoke-tests = []
-
-[dev-dependencies]
-proptest = "1.4"
 
 [profile.dev]
 panic = "abort"

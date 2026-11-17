@@ -47,7 +47,7 @@ impl InstallError {
             Self::InvalidPayload => "installer payload is invalid",
             Self::BiosPayloadUnavailable => "BIOS installer payload is unavailable",
             Self::InvalidBiosPayload => "BIOS installer payload is invalid",
-            Self::UnsupportedDevice => "installer currently requires a writable AHCI disk",
+            Self::UnsupportedDevice => "installer requires a writable AHCI or VirtIO disk",
             Self::DiskTooSmall => "target disk is too small",
             Self::AlreadyMounted => "a DunitFS volume is already mounted",
             Self::Partitioning => "failed to write GPT",
@@ -355,7 +355,7 @@ fn serial_write_u64(mut value: u64) {
 }
 /// Boot-smoke installer self-test (feature `boot-smoke-tests`). Runs in
 /// `drivers::init` BEFORE auto_mount, in the Live/ISO environment where the
-/// installer ESP/BIOS payloads are present. Targets a BLANK scratch AHCI disk
+/// installer ESP/BIOS payloads are present. Targets a blank AHCI or VirtIO scratch disk
 /// (never one that already carries a Dunit partition), so it can never touch a
 /// real installed system. Phase A: a fault-injected transaction must leave the
 /// scratch's partition table byte-for-byte as it was (rollback proof). Phase B:
@@ -469,7 +469,7 @@ pub fn installer_self_test() -> bool {
     });
     ok
 }
-/// Pick the first writable AHCI disk that does NOT already carry a valid GPT —
+/// Pick the first writable supported disk that does not carry a valid GPT —
 /// a blank scratch target. A disk with any readable partition table (an
 /// installed system, or a disk this test already provisioned) is skipped, so the
 /// self-test can only ever run against a pristine scratch disk.

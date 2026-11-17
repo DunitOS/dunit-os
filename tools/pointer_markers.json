@@ -141,6 +141,43 @@
           }
         },
         {
+          "wait_marker": "[POINTER] WAIT wheel while sleeping"
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "wheel-up",
+                  "down": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "delay_ms": 40
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              {
+                "type": "btn",
+                "data": {
+                  "button": "wheel-up",
+                  "down": false
+                }
+              }
+            ]
+          }
+        },
+        {
+          "wait_marker": "[POINTER] PASS snapshot fault preserves wheel"
+        },
+        {
           "wait_marker": "[POINTER] PASS all"
         }
       ]
@@ -176,6 +213,11 @@
       "marker": "[POINTER] PASS all",
       "claim": "Pointer regression app completed successfully",
       "source": "userspace/system_apps/pointer_test/src/main.rs"
+    },
+    {
+      "marker": "[POINTER] PASS snapshot fault preserves wheel",
+      "claim": "An invalid compatibility snapshot destination retains wheel input until a successful 16-byte copy, then drains it exactly once",
+      "source": "userspace/system_apps/pointer_test/src/main.rs; kernel/src/input/mod.rs"
     }
   ],
   "forbidden": [

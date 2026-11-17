@@ -17,6 +17,15 @@
           "timeout": 60
         },
         {
+          "delay_ms": 1000
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-resize/ready.ppm"
+          }
+        },
+        {
           "execute": "send-key",
           "arguments": {
             "keys": [
@@ -94,6 +103,15 @@
           "timeout": 60
         },
         {
+          "delay_ms": 1000
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-resize/maximized.ppm"
+          }
+        },
+        {
           "delay_ms": 300
         },
         {
@@ -156,6 +174,15 @@
         {
           "wait_marker": "[SDKRESIZE] restored placement OK",
           "timeout": 60
+        },
+        {
+          "delay_ms": 1000
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/sdk-resize/restored.ppm"
+          }
         },
         {
           "execute": "input-send-event",

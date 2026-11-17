@@ -129,7 +129,7 @@ pub fn run_foreground_exec(
         match process::enter_user_process(pid) {
             Ok(exit) => break Ok(exit),
             Err(ProcessError::SchedulerUnavailable)
-                if process::is_pid_runnable(pid) || process::is_pid_blocked(pid) =>
+                if process::is_pid_waiting_for_dispatch(pid) =>
             {
                 if let Some(waiting) = process::terminal_stdin_waiting_pid() {
                     // Only the foreground tree can request this input. A child

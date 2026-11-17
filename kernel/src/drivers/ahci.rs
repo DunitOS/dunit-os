@@ -1,4 +1,3 @@
-use core::cell::UnsafeCell;
 use core::sync::atomic::{fence, AtomicBool, AtomicUsize, Ordering};
 
 use crate::drivers::block::{self, BlockDeviceInfo, BlockError};
@@ -7,6 +6,7 @@ use crate::memory::pmm::{get_pmm, PhysicalAddress};
 use crate::memory::vmm;
 use crate::serial::{write_dec, write_hex};
 use crate::serial_write;
+use crate::sync::SpinLock;
 
 const AHCI_CLASS: u8 = 0x01;
 const AHCI_SUBCLASS: u8 = 0x06;
@@ -19,7 +19,7 @@ const PAGE_SIZE: usize = 4096;
 const DATA_PAGES: usize = 16;
 const DATA_BUFFER_SIZE: usize = PAGE_SIZE * DATA_PAGES;
 const SECTOR_SIZE: usize = 512;
-const TIMEOUT_SPINS: usize = 10_000_000;
+const TIMEOUT_SPINS: usize = if cfg!(test) { 64 } else { 10_000_000 };
 
 const HBA_CAP: usize = 0x00;
 const HBA_GHC: usize = 0x04;
@@ -74,18 +74,14 @@ const COMMAND_HEADER_SIZE: usize = 32;
 const COMMAND_TABLE_CFIS: usize = 0;
 const COMMAND_TABLE_PRDT: usize = 128;
 
-static AHCI_LOCK: AtomicBool = AtomicBool::new(false);
+static AHCI_STARTED: AtomicBool = AtomicBool::new(false);
 static AHCI_FOUND: AtomicUsize = AtomicUsize::new(0);
 static AHCI_INITIALIZED: AtomicUsize = AtomicUsize::new(0);
 static AHCI_DISK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static AHCI_LAST_ERROR: AtomicUsize = AtomicUsize::new(0);
-/// Таблица обнаруженных AHCI-дисков. Был `static mut` массив; теперь за
-/// `UnsafeCell`. Обращения времени выполнения (`disk_transfer`) идут под
-/// `AHCI_LOCK`; обращения на этапе обнаружения (сброс, публикация, регистрация)
-/// сериализованы загрузкой.
-struct DisksCell(UnsafeCell<[Option<AhciDisk>; MAX_DISKS]>);
-unsafe impl Sync for DisksCell {}
-static DISKS: DisksCell = DisksCell(UnsafeCell::new([None; MAX_DISKS]));
+// Polling keeps IRQs enabled. No interrupt handler takes this device lock.
+static DISKS: SpinLock<[Option<AhciDisk>; MAX_DISKS]> =
+    SpinLock::new([const { None }; MAX_DISKS]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AhciError {
@@ -167,9 +163,9 @@ struct DmaPage {
     virt: usize,
 }
 
-#[derive(Clone, Copy)]
 struct AhciDisk {
     port: usize,
+    failed: bool,
     capacity_sectors: u64,
     command_list: DmaPage,
     _received_fis: DmaPage,
@@ -178,11 +174,9 @@ struct AhciDisk {
 }
 
 pub fn init() {
-    AHCI_FOUND.store(0, Ordering::Relaxed);
-    AHCI_INITIALIZED.store(0, Ordering::Relaxed);
-    AHCI_DISK_COUNT.store(0, Ordering::Relaxed);
-    AHCI_LAST_ERROR.store(0, Ordering::Relaxed);
-    unsafe { *DISKS.0.get() = [None; MAX_DISKS] };
+    if AHCI_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
 
     pci::for_each_device(|dev| {
         if dev.class_code != AHCI_CLASS
@@ -287,12 +281,13 @@ fn bring_up_controller(dev: PciDevice) -> Result<(), AhciError> {
                 // Controller discovery is serialized, so publishing the disk
                 // before advancing the count makes 0..count always contiguous.
                 let index = AHCI_DISK_COUNT.load(Ordering::Relaxed);
-                unsafe { (*DISKS.0.get())[index] = Some(disk) };
-                AHCI_DISK_COUNT.store(index + 1, Ordering::Relaxed);
+                let capacity = disk.capacity_sectors;
+                DISKS.lock()[index] = Some(disk);
+                AHCI_DISK_COUNT.store(index + 1, Ordering::Release);
                 serial_write("[AHCI] SATA disk port=");
                 write_dec(port_number as u64);
                 serial_write(" sectors=");
-                write_dec(disk.capacity_sectors);
+                write_dec(capacity);
                 serial_write("\r\n");
             }
             Err(error) => {
@@ -388,32 +383,37 @@ fn setup_disk(port: usize, port_number: u8, supports_64bit: bool) -> Result<Ahci
     serial_write(" sig=");
     write_hex(signature as u64, 8);
     serial_write("\r\n");
-    if signature != SATA_SIG_ATA {
-        let _ = stop_port(port);
-        free_dma_page(command_list);
-        free_dma_page(received_fis);
-        free_dma_page(command_table);
-        free_dma_pages(data);
-        return Err(AhciError::UnsupportedDevice);
-    }
-
     let mut disk = AhciDisk {
         port,
+        failed: false,
         capacity_sectors: 0,
         command_list,
         _received_fis: received_fis,
         command_table,
         data,
     };
+    if signature != SATA_SIG_ATA {
+        retire_disk(disk);
+        return Err(AhciError::UnsupportedDevice);
+    }
     if let Err(error) = identify(&mut disk) {
-        let _ = stop_port(port);
-        free_dma_page(command_list);
-        free_dma_page(received_fis);
-        free_dma_page(command_table);
-        free_dma_pages(data);
+        retire_disk(disk);
         return Err(error);
     }
     Ok(disk)
+}
+
+fn retire_disk(disk: AhciDisk) {
+    if stop_port(disk.port).is_ok() {
+        free_dma_page(disk.command_list);
+        free_dma_page(disk._received_fis);
+        free_dma_page(disk.command_table);
+        free_dma_pages(disk.data);
+    } else {
+        // CR/FR still owns these addresses. Keep the pages allocated until
+        // reboot; returning them to PMM would let DMA corrupt another owner.
+        serial_write("[AHCI] port stop failed; DMA pages quarantined\r\n");
+    }
 }
 
 fn stop_port(port: usize) -> Result<(), AhciError> {
@@ -474,13 +474,14 @@ unsafe fn transfer(
         return Err(BlockError::BufferTooSmall);
     }
     let sectors = (length / SECTOR_SIZE) as u64;
-    lock_ahci();
+    let mut disks = DISKS.lock();
     let result = unsafe {
-        let Some(disk) = (*DISKS.0.get())[index].as_mut() else {
-            AHCI_LOCK.store(false, Ordering::Release);
+        let Some(disk) = disks.get_mut(index).and_then(Option::as_mut) else {
             return Err(BlockError::NotFound);
         };
-        if lba
+        if disk.failed {
+            Err(BlockError::Io)
+        } else if lba
             .checked_add(sectors)
             .map(|end| end > disk.capacity_sectors)
             .unwrap_or(true)
@@ -522,7 +523,6 @@ unsafe fn transfer(
             io_result.map(|_| length)
         }
     };
-    AHCI_LOCK.store(false, Ordering::Release);
     result
 }
 
@@ -533,13 +533,15 @@ fn issue_data(
     write: bool,
     sector_count: u16,
 ) -> Result<(), AhciError> {
+    if disk.failed { return Err(AhciError::CommandTimeout); }
     prepare_command(disk, command, lba, write, true, sector_count);
-    issue_slot(disk.port)
+    issue_slot(disk)
 }
 
 fn issue_nodata(disk: &mut AhciDisk, command: u8) -> Result<(), AhciError> {
+    if disk.failed { return Err(AhciError::CommandTimeout); }
     prepare_command(disk, command, 0, false, false, 0);
-    issue_slot(disk.port)
+    issue_slot(disk)
 }
 
 fn prepare_command(
@@ -598,7 +600,22 @@ fn prepare_command(
     fence(Ordering::SeqCst);
 }
 
-fn issue_slot(port: usize) -> Result<(), AhciError> {
+fn issue_slot(disk: &mut AhciDisk) -> Result<(), AhciError> {
+    let result = poll_slot(disk.port);
+    if let Err(error) = result {
+        disk.failed = true;
+        AHCI_LAST_ERROR.store(error.code(), Ordering::Release);
+        let _ = stop_port(disk.port);
+        // A failed command takes the disk offline even if stopping succeeds.
+        // Its command/data pages remain owned and cannot be reused by a retry.
+        serial_write("[AHCI] disk offline after ");
+        serial_write(error.as_str());
+        serial_write("; DMA retained\r\n");
+    }
+    result
+}
+
+fn poll_slot(port: usize) -> Result<(), AhciError> {
     wait_until(
         || (read32(port, PX_TFD) & (TFD_BSY | TFD_DRQ)) == 0,
         AhciError::DeviceBusy,
@@ -628,7 +645,7 @@ fn issue_slot(port: usize) -> Result<(), AhciError> {
 fn register_disks() {
     let count = AHCI_DISK_COUNT.load(Ordering::Relaxed).min(MAX_DISKS);
     for index in 0..count {
-        let Some(disk) = (unsafe { (*DISKS.0.get())[index] }) else {
+        let Some(capacity) = DISKS.lock()[index].as_ref().map(|disk| disk.capacity_sectors) else {
             continue;
         };
         let (name, read_fn, write_fn): (
@@ -646,7 +663,7 @@ fn register_disks() {
                 name,
                 driver: "ahci",
                 block_size: SECTOR_SIZE,
-                blocks: disk.capacity_sectors,
+                blocks: capacity,
                 readonly: false,
             },
             read_fn,
@@ -752,21 +769,12 @@ fn wait_until<F: Fn() -> bool>(condition: F, error: AhciError) -> Result<(), Ahc
     Err(error)
 }
 
-fn lock_ahci() {
-    while AHCI_LOCK
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
-    }
-}
-
 fn read32(base: usize, offset: usize) -> u32 {
-    unsafe { core::ptr::read_volatile((base + offset) as *const u32) }
+    unsafe { crate::hal::mmio_read32((base + offset) as *const u32) }
 }
 
 fn write32(base: usize, offset: usize, value: u32) {
-    unsafe { core::ptr::write_volatile((base + offset) as *mut u32, value) }
+    unsafe { crate::hal::mmio_write32((base + offset) as *mut u32, value) }
 }
 
 fn write_address(base: usize, low: usize, high: usize, address: u64) {

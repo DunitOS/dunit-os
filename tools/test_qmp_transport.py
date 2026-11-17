@@ -73,6 +73,11 @@ class StdioTests(unittest.TestCase):
                 qmp.screendump(path.with_name('rejected.ppm'))
             with self.assertRaisesRegex(RuntimeError, 'produced no image'):
                 qmp.screendump(path.with_name('missing.ppm'))
+            old = path.with_name('missing.ppm')
+            old.write_bytes(path.read_bytes())
+            with self.assertRaisesRegex(RuntimeError, 'produced no image'):
+                qmp.screendump(old)
+            self.assertEqual(old.read_bytes(), path.read_bytes())
 
     def test_silent_peer_has_a_deadline(self):
         qmp = self.peer('import time; time.sleep(10)')

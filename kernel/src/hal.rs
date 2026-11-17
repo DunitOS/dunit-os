@@ -1,5 +1,17 @@
 pub use crate::interrupts::InterruptFrame;
 
+/// Read an aligned, mapped device register. The caller owns its mapping lifetime.
+#[inline]
+pub unsafe fn mmio_read32(register: *const u32) -> u32 {
+    core::ptr::read_volatile(register)
+}
+
+/// Write an aligned, mapped device register. Device ordering belongs to the driver.
+#[inline]
+pub unsafe fn mmio_write32(register: *mut u32, value: u32) {
+    core::ptr::write_volatile(register, value);
+}
+
 extern "C" {
     pub fn hal_init();
     pub fn hal_boot_epoch_seconds() -> i64;

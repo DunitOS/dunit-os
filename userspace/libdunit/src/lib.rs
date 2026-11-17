@@ -104,6 +104,15 @@ pub struct SystemStats {
 }
 
 impl SystemStats {
+    /// Live processes, including those waiting for input or another task.
+    /// Excludes exited and reaped records.
+    pub fn live_processes(&self) -> u64 {
+        self.process_prepared
+            .saturating_add(self.process_ready)
+            .saturating_add(self.process_running)
+            .saturating_add(self.process_blocked)
+    }
+
     /// PMM allocated pages / usable pages, including kernel reservations.
     /// This is physical allocation, not the separate kernel heap occupancy.
     pub fn memory_used_percent(&self) -> u32 {

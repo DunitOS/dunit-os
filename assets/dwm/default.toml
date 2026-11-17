@@ -8,12 +8,9 @@
 # Colors are #RRGGBB or #AARRGGBB (alpha defaults to opaque). Geometry is in
 # pixels.
 
-# Config document metadata. `schema_version` is the ONLY compatibility knob:
-# gui_server accepts a document iff dwm_settings::version_supported() is true
-# (currently 1..=1). A future build that bumps SCHEMA_VERSION migrates an older
-# doc forward on load; a doc declaring a newer version than the running build is
-# rejected (last-known-good baseline is used) rather than mis-parsed. Omit to
-# assume the current version.
+# System desktop profile, loaded from /system/share/dwm/default.toml.
+# Invalid reloads keep the previous state. Colors are RGB/ARGB; sizes are pixels.
+# Schema 1 is migrated by the shared parser; future schemas are rejected.
 [meta]
 schema_version = 1
 
@@ -33,15 +30,11 @@ taskbtn = "#36363A"
 taskbtn_focused = "#54545A"
 menu = "#252527"
 menu_hover = "#3D506C"
-# Title-bar / taskbar label text. `title_text_focused` is the crisp TTF title on
-# the active window (and the focused taskbar button); `_unfocused` is the dimmer
-# variant on inactive windows. Were hardcoded 0xEAF2EC / 0xA8B4AC in gui_server.
+# Title colors inherit through shared DSS tokens.
 title_text_focused = "#F2F2F4"
 title_text_unfocused = "#98989E"
 
-# Compositor geometry, in pixels. `max_windows` is a safety cap on how many
-# client windows may be composited at once, not a pixel count. Malformed or
-# out-of-range values reject the document with a diagnostic.
+# Window decorations and shell geometry.
 [layout]
 dock_tile_alpha = 0
 show_workspaces = false
@@ -56,25 +49,16 @@ border = 1
 panel_h = 26
 # App-menu button width (holds the "Dunit" wordmark; workspace pips follow it).
 launcher_w       = 92
-# Vestigial after REF-2 (top taskbar → dock task-switcher + centered title);
-# kept for config round-trip stability.
-taskbtn_w        = 120
-taskbtn_gap      = 4
 menu_w           = 130
 menu_item_h      = 26
 dock_w = 68
 ws_w             = 22
 max_windows      = 8
-# Point sizes for the compositor's TTF text. `title_font_px` sizes window-title
-# and system-tray text; `panel_font_px` sizes the taskbar-button labels. Were
-# hardcoded 14.0 / 13.0. Accepted range: 6..=64.
+# Shell font sizes: 6..64.
 title_font_px    = 14
 panel_font_px    = 13
 
-# Compositor visual effects (concept §5). Every effect is tunable or can be
-# switched off here without a rebuild. `corner_radius`/`shadow`/`blur_radius` are
-# pixels; the `*_alpha` values are 0-255 opacity; `blur`/`gradient`/`anim` are
-# booleans (true/false/1/0). Setting an effect to 0/false restores the flat look.
+# Set an effect to false or zero for the flat look.
 [effects]
 corner_radius = 8
 shadow = 16
@@ -88,74 +72,39 @@ gradient = true
 anim = true
 anim_ms = 180
 
-# Asset paths — everything the desktop loads by path, so it is fully config-
-# driven (no hardcoded asset locations). `wallpaper` is an SVG or legacy 24-bit BMP
-# painted as the backdrop (absent/invalid → gradient fallback). `icon_theme` is a
-# theme name under /assets/icons/<name>/, or absolute manifest path. The shared
-# loader resolves theme.toml, ZIP/index.theme and aliases (or flat SVG/RGBA files
-# for Aqua/legacy Breeze). `font` is the TrueType font
-# every GUI app renders text with (missing/unparseable → explicit load failure).
-# Paths must exist in the VFS; assets under /assets/ come from initrd.
+# Assets come from initrd/VFS. Icon themes support manifests, SVG and RGBA.
 [desktop]
 wallpaper = "/assets/wallpapers/mojave.svg"
 icon_theme = "breeze-round-chameleon-dark"
 font             = "/assets/fonts/DejaVuSans.ttf"
 sdk_theme = "/assets/dwm/sdk/dark.dss"
-# App-menu wordmark logo: a 32x32 straight-alpha RGBA with a circular mask baked
-# in. Blitted left of the "Dunit" wordmark on the panel (absent/mis-sized → the
-# wordmark draws its flat accent mark instead).
+# Missing logo falls back to the panel accent mark.
 logo             = "/assets/images/logo.rgba"
 themes = "/assets/dwm/themes"
 palette          = "/assets/dwm/palettes/default.toml"
 
-# Desktop widget card: a translucent plasmoid painted on the wallpaper (behind
-# windows). `[widgets]` holds only desktop-wide policy: `enabled` is the master
-# on/off for the whole plasmoid, and `corner` is the default screen corner
-# (0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right) inherited by a
-# widget whose file omits `corner`. WHICH widgets appear is owned per-widget by
-# /system/share/dwm/widgets/<name>.toml (clock, monitor, …) — remove a widget by
-# deleting its file or setting `enabled = false` there, not by a bool here.
+# Master switch and default corner: 0=TL, 1=TR, 2=BL, 3=BR.
+# Individual widgets live in /system/share/dwm/widgets/*.toml.
 [widgets]
 enabled = false
 corner  = 1
 
-# Runtime display resolution. `0/0` keeps the boot (Limine) resolution — the
-# default, so nothing changes unless you set a real size. When both are non-zero
-# the compositor asks the kernel to switch scanout to width×height at session
-# start and on live reload; on a fixed GOP framebuffer (no mode-set backend) the
-# request is ignored and the boot resolution stays.
+# Zero keeps the boot mode. A fixed framebuffer keeps its mode on request.
 [display]
 width  = 0
 height = 0
 
-# Panel placement. `pos`: which screen edge the panel (wordmark + workspace pips +
-# focused-window title + tray) docks to — "top" | "bottom" | "left" | "right".
-# Top/bottom are full text bars; left/right are narrow icon + pip bars.
-# Dock placement is independent, through [layout] dock_edge.
+# Panel and dock edges are independent.
 [panel]
 pos = "top"
 
-# System tray placement. When `pos` matches the panel edge the tray rides the end
-# of the panel (the classic top-right clock — the default look); a different edge
-# gives the tray its own acrylic strip. `size` is that strip's thickness (px).
+# Matching panel/tray edges share one strip; otherwise the tray gets its own.
 [tray]
 pos  = "top"
 size = 28
 
-# Keyboard-shortcut policy. `switcher` toggles the Alt/Super-Tab window switcher
-# overlay; the trigger key is always Tab (a UI invariant), only the held modifier
-# is policy. `switch_mod` = "alt" (classic Alt-Tab) | "super" (GNOME-style
-# Super-Tab). The compositor tests the live modifier against this, never a
-# constant.
-#
-# `cmd_mod` is the global desktop command modifier (the tiling-WM `$mod` key):
-# "super" (default) | "alt". The action keys it arms are UI invariants, not
-# policy — only whether each action is on and which modifier fires it are config:
-#   cmd_mod + 1..N   → switch to that virtual workspace   (ws_switch)
-#   cmd_mod + Space  → open the app launcher menu          (launcher)
-#   cmd_mod + Q      → close the focused window            (win_close)
-#   cmd_mod + M      → maximize/restore the focused window (win_max)
-# The launcher menu is keyboard-navigable once open (Up/Down + Enter, Esc closes).
+# Default bindings: modifier + 1..N/Space/Q/M for workspace/launcher/close/maximize.
+# Launcher navigation uses Up/Down, Enter and Escape.
 [shortcuts]
 switcher   = true
 switch_mod = "alt"
@@ -165,39 +114,21 @@ launcher   = true
 win_close  = true
 win_max    = true
 
-# Quick-settings applet. When enabled, the panel offers an applet whose flyout
-# toggles live effect/widget flags. The flags themselves stay in [effects] /
-# [widgets] (single source of truth); this only gates whether the applet appears.
+# Panel popup; toggles the live effect/widget flags. Escape dismisses it.
 [quicksettings]
 enabled = true
 
-# Desktop notifications. Transient toasts the compositor posts (e.g. app-launch
-# feedback). `timeout_ms` is the auto-dismiss delay (clamped 500..30000); `corner`
-# is where toasts stack, same 0=TL/1=TR/2=BL/3=BR convention as [widgets] corner.
+# Toast lifetime in milliseconds; corners use the widget convention.
 [notifications]
 enabled    = true
 timeout_ms = 3000
 corner     = 1
 
-# Window/session restore. When on, the compositor remembers each window's
-# geometry (keyed by app id) in the session store and re-applies it the next time
-# that app opens. RAM-only (survives a reload/reconnect within a boot) until
-# DunitFS v2 provides a persistent user-config partition, then it spans reboots.
+# Remember floating geometry by app ID. Persistence needs mounted /persist.
 [session]
 restore = true
 
-# ============================================================================
-# Application registry + desktop composition (data-driven; concept: no app
-# names/exec paths/icons are baked into gui_server). Each `[application.<id>]`
-# table registers one launchable app. `<id>` is the registry key AND the default
-# for both `exec` (the ELF spawned from /app) and `icon` (the stem resolved as
-# <icon_theme>/<stem>.svg (legacy .rgba fallback), or an absolute VFS path if it contains '/'), so a
-# minimal entry needs only a `name`. `label` is the 1-4 char dock/menu initials
-# fallback when no icon renders (derived from `name`, upper-cased, when omitted).
-# Adding an app to the desktop is adding a table here — gui_server is never
-# edited. Registration order fixes each app's index; the dock/launcher/startup
-# lists below reference apps by id, so their order is independent.
-# ============================================================================
+# App IDs resolve against installed metadata; these tables supply desktop labels.
 [application.gui_client]
 name  = "Window"
 label = "WIN"
@@ -228,34 +159,25 @@ open_formats = ["application/x-dunit-file-list"]
 name  = "Settings"
 label = "SET"
 
-# Pinned dock icons, ordered along its configured edge. Ids resolve to registry
-# entries; unknown ids reject the document. Omit to pin the whole registry.
+# Ordered pinned app IDs. Unknown IDs reject the document.
 [dock]
 entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
 
-# Launcher-menu entries (the hamburger dropdown), top-to-bottom. Same id rules
-# as `[dock]`; omit to list the whole registry.
+# Ordered launcher entries.
 [launcher]
 terminal = "/app/gui_terminal"
 entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
 
-# Autostart: apps spawned at desktop bring-up, in order (ids may repeat). EMPTY
-# by design — the production desktop boots CLEAN into an interactive but window-
-# less session (panel/dock/launcher/wallpaper/widgets are live; the user launches
-# apps from the dock or launcher). The cross-process isolation smoke lives in
-# `test.toml` (selected at build time by the `boot-smoke-tests` kernel feature),
-# which autostarts two gui_clients instead. Add ids here to pin startup apps.
+# Start with no windows. test.toml owns the isolation smoke.
 [startup]
 entries = []
 
-# Virtual workspace count (the panel switcher lays out this many pips). Accepted
-# range: 1..=9; invalid values reject the document.
+# Workspace count: 1..9.
 [workspaces]
 count = 5
 
 
-# Optional Lua tiling policy. Runs in a separate process with a deadline.
-# Disable to keep floating window placement. Paths and timeout are editable in setup.
+# Optional Lua tiling worker, isolated with a deadline.
 [scripts]
 enabled = false
 runner = "/app/dwm_lua"
@@ -266,3 +188,9 @@ timeout_ms = 500
 [transfers]
 timeout_ms = 5000
 drag_threshold_px = 6
+
+# Keep the full keypad usable when resizing Calculator.
+[rules.calculator]
+app = "gui_calc"
+min_width = 192
+min_height = 308

@@ -111,7 +111,7 @@ pub extern "C" fn _start() -> ! {
     }
 
     // 3) Wake: worker parks on FUTEX_WORD == OLD; main flips it and wakes.
-    let top_w = unsafe { (core::ptr::addr_of_mut!(STACK_W) as *mut u8).add(STACK_BYTES) };
+    let top_w = unsafe { (core::ptr::addr_of_mut!(STACK_W.0) as *mut u8).add(STACK_BYTES) };
     let w = libdunit::thread_create(worker, top_w, 0);
     if w <= 0 {
         fail("thread create");
@@ -135,8 +135,8 @@ pub extern "C" fn _start() -> ! {
     // readiness flags precede wait, so yield enough for both to actually park.
     WORKER_READY.store(0, Ordering::SeqCst);
     FUTEX_WORD.store(OLD, Ordering::SeqCst);
-    let top2 = unsafe { (core::ptr::addr_of_mut!(STACK_W2) as *mut u8).add(STACK_BYTES) };
-    let top3 = unsafe { (core::ptr::addr_of_mut!(STACK_W3) as *mut u8).add(STACK_BYTES) };
+    let top2 = unsafe { (core::ptr::addr_of_mut!(STACK_W2.0) as *mut u8).add(STACK_BYTES) };
+    let top3 = unsafe { (core::ptr::addr_of_mut!(STACK_W3.0) as *mut u8).add(STACK_BYTES) };
     let w2 = libdunit::thread_create(worker, top2, 0);
     let w3 = libdunit::thread_create(worker, top3, 0);
     if w2 <= 0 || w3 <= 0 {

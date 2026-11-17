@@ -1,4 +1,4 @@
-.PHONY: cpu-layout all clean hal kernel userspace iso disk-image run run-gui run-dwm iso-dwm iso-minimal iso-release
+.PHONY: cpu-layout all clean hal kernel userspace list-cargo list-userspace-apps iso disk-image run run-gui run-dwm iso-dwm iso-minimal iso-release
 
 CC = gcc
 AS = nasm
@@ -164,6 +164,12 @@ $(BUILD_DIR)/kernel.elf: kernel cpu-layout
 	/usr/bin/ld.lld --gc-sections -T $(KERNEL_DIR)/linker.ld -o $@ $(HAL_OBJS) $(BUILD_DIR)/kernel.o
 	python3 tools/check_kernel_elf.py $@
 
+list-cargo:
+	@printf '%s\n' $(CARGO)
+
+list-userspace-apps:
+	@printf '%s\n' $(USERSPACE_APPS)
+
 userspace:
 	mkdir -p $(USERSPACE_BUILD_DIR)
 	rm -f $(USERSPACE_BUILD_DIR)/*
@@ -303,14 +309,6 @@ iso-release:
 
 disk-image: all userspace
 	python3 tools/install_disk.py $(BUILD_DIR)/dunit-disk.img --config $(LIMINE_CONFIG) --profile $(IMAGE_PROFILE) --no-build --yes-i-know-this-erases-the-disk
-
-grub-iso: $(BUILD_DIR)/kernel.elf
-	rm -rf $(BUILD_DIR)/iso_grub
-	mkdir -p $(BUILD_DIR)/iso_grub/boot/grub
-	cp $(BUILD_DIR)/kernel.elf $(BUILD_DIR)/iso_grub/boot/
-	cp grub.cfg $(BUILD_DIR)/iso_grub/boot/grub/
-	grub-mkrescue -o $(BUILD_DIR)/os.iso $(BUILD_DIR)/iso_grub
-	@echo "GRUB ISO created at $(BUILD_DIR)/os.iso"
 
 run: iso
 	$(QEMU) $(QEMU_ACCEL) $(QEMU_EXTRA) -boot d -cdrom $(ISO_PATH) -m $(QEMU_MEM) -serial stdio -display $(QEMU_DISPLAY) $(QEMU_VGA) $(QEMU_USB_INPUT) -boot menu=on

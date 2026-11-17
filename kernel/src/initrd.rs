@@ -1,7 +1,6 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+use crate::sync::{OnceCell, SpinLock};
 
 /// Archive magic. Must match the header written by tools/pack_initrd.py.
 const MAGIC: [u8; 8] = *b"DUNITRD1";
@@ -23,23 +22,11 @@ impl Initrd {
         Self { files: Vec::new() }
     }
 
-    pub fn add_file(&mut self, name: String, data: &'static [u8]) {
-        self.files.push(InitrdFile { name, data });
-    }
-
-    pub fn get_file(&self, name: &str) -> Option<&'static [u8]> {
-        self.files.iter().find(|f| f.name == name).map(|f| f.data)
-    }
-
     /// Every file in the archive, in packed (path-sorted) order. The VFS walks
     /// this to populate the root MemFS without the kernel knowing any app or
     /// asset name — the paths come entirely from the archive.
     pub fn entries(&self) -> &[InitrdFile] {
         &self.files
-    }
-
-    pub fn list_files(&self) -> impl Iterator<Item = &str> {
-        self.files.iter().map(|f| f.name.as_str())
     }
 
     pub fn file_count(&self) -> usize {
@@ -55,20 +42,14 @@ impl Initrd {
 /// memory/pmm.rs). The module therefore lives for the kernel's whole lifetime,
 /// so slices into it are sound to hand out as `&'static [u8]` — exactly the
 /// pattern `storage::installer::payload()` already relies on.
-static MODULE_PTR: AtomicPtr<u8> = AtomicPtr::new(core::ptr::null_mut());
-static MODULE_LEN: AtomicUsize = AtomicUsize::new(0);
+static MODULE: OnceCell<(usize, usize)> = OnceCell::new();
 
 pub fn set_module(ptr: *const u8, len: usize) {
-    MODULE_PTR.store(ptr as *mut u8, Ordering::SeqCst);
-    MODULE_LEN.store(len, Ordering::SeqCst);
+    assert!(MODULE.set((ptr as usize, len)).is_ok(), "initrd module already published");
 }
 
-/// Синглтон initrd. Раньше `static mut Option<..>`; теперь `UnsafeCell`-newtype
-/// без `static mut`. Инициализируется один раз в `init` при загрузке, дальше к
-/// нему обращается лишь кооперативный путь на одном CPU.
-struct InitrdCell(UnsafeCell<Option<Initrd>>);
-unsafe impl Sync for InitrdCell {}
-static INITRD_INSTANCE: InitrdCell = InitrdCell(UnsafeCell::new(None));
+static INITRD_INSTANCE: OnceCell<Initrd> = OnceCell::new();
+static INITRD_INIT: SpinLock<()> = SpinLock::new(());
 
 fn read_u32_le(buf: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]])
@@ -78,14 +59,19 @@ fn read_u32_le(buf: &[u8], at: usize) -> u32 {
 /// no module was handed over or the archive is malformed/truncated; every
 /// length is bounds-checked against the module size before it is trusted.
 fn parse_module() -> Option<Initrd> {
-    let ptr = MODULE_PTR.load(Ordering::SeqCst);
-    let len = MODULE_LEN.load(Ordering::SeqCst);
-    if ptr.is_null() || len < 12 {
+    let &(ptr, len) = MODULE.get()?;
+    if ptr == 0 || len < 12 {
         return None;
     }
-    // SAFETY: see MODULE_PTR docs — module memory is never freed, so a slice of
+    // SAFETY: see MODULE docs — module memory is never freed, so a slice of
     // the reported length is valid for 'static.
-    let module: &'static [u8] = unsafe { core::slice::from_raw_parts(ptr, len) };
+    let module: &'static [u8] = unsafe { core::slice::from_raw_parts(ptr as *const u8, len) };
+    parse_archive(module)
+}
+
+fn parse_archive(module: &'static [u8]) -> Option<Initrd> {
+    let len = module.len();
+    if len < 12 { return None; }
 
     if module[0..8] != MAGIC {
         return None;
@@ -108,7 +94,7 @@ fn parse_module() -> Option<Initrd> {
         off += name_len;
         let data = &module[off..off + data_len];
         off += data_len;
-        initrd.add_file(String::from(name), data);
+        initrd.files.push(InitrdFile { name: String::from(name), data });
     }
     Some(initrd)
 }
@@ -118,24 +104,19 @@ fn parse_module() -> Option<Initrd> {
 /// boot log reports that measured count. Called BEFORE `fs::vfs::init`, which
 /// populates the root MemFS from `get_initrd().entries()`.
 pub fn init() -> usize {
+    let _init = INITRD_INIT.lock();
+    if let Some(archive) = INITRD_INSTANCE.get() { return archive.file_count(); }
     let initrd = parse_module().unwrap_or_else(Initrd::new);
     let count = initrd.file_count();
-    unsafe {
-        *INITRD_INSTANCE.0.get() = Some(initrd);
-    }
+    assert!(INITRD_INSTANCE.set(initrd).is_ok());
     count
 }
 
 /// Number of files currently held by the initrd store, or 0 before init.
 pub fn file_count() -> usize {
-    unsafe {
-        (*INITRD_INSTANCE.0.get())
-            .as_ref()
-            .map(Initrd::file_count)
-            .unwrap_or(0)
-    }
+    INITRD_INSTANCE.get().map(Initrd::file_count).unwrap_or(0)
 }
 
-pub fn get_initrd() -> Option<&'static mut Initrd> {
-    unsafe { (*INITRD_INSTANCE.0.get()).as_mut() }
+pub fn get_initrd() -> Option<&'static Initrd> {
+    INITRD_INSTANCE.get()
 }

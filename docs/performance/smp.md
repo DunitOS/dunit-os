@@ -1,6 +1,6 @@
 # SMP foundations and remaining safety gates
 
-Current state: 15 November 2026. Applications and pthreads execute on BSP:
+Current state: 16 November 2026. Applications and pthreads execute on BSP:
 `scheduler=up dispatch_cpus=1`. APs initialize private hardware state, run
 isolated hardware, PMM and TLB probes, then park. More online CPUs do not
 establish parallel applications or a speedup. OP0–OP3 remain partial; OP4
@@ -107,6 +107,12 @@ Every producer advances the generation even without waiters. A producer winning
 the gap causes an existing syscall restart/Ready transition without parking;
 the execution lease prevents reentry before HAL returns. Expired deadlines also
 avoid parking. Conservative global notifications may retry unrelated waits.
+
+Foreground exec observes Ready/Blocked together under the registry lock. An IRQ
+wake between separate queries could previously reject a live waiting process as
+an ELF launch failure. Host checks reproduce that gap and exercise 50,000 locked
+observations against concurrent transitions; non-waiting or missing tasks fail
+the retry predicate. Execution admission remains a separate check.
 
 Wake selection removes a generation-tagged registration under its own lock,
 then changes task state and admits it after releasing guards. A pass is bounded
@@ -254,15 +260,63 @@ cover those failures. ABI and CPU-local generated outputs remain unchanged.
 These cover the current Limine/Bochs mechanism. They do not establish AP application
 dispatch, GPU DMA/hotplug retirement or syscall IRQ-off latency budgets. Full-frame
 user mapping/copy and syscall interruptibility still require the IRQ-progress gate.
-Input-master repeated acquisition/final-close ownership also remains open.
 
-AHCI and Virtio block error paths also need DMA retirement. AHCI command timeout
-can leave a slot active while the next transfer rewrites its command/data backing;
-boot failure cleanup ignores a failed port stop before freeing DMA pages. Virtio
-timeout leaves the same descriptors/request/status reusable before completion.
-Locks serialize callers but do not revoke device ownership. Quiescence/reset or
-device quarantine must precede reuse/reclaim; current happy-path persistence
-receipts do not prove delayed/stuck-device behavior.
+Input-master handles now retain counted leases; owner, generation, pointer facts,
+display bounds and event queue share one IRQ-safe lock. A repeated acquire keeps
+the current stream. Final close clears it atomically; the next owner receives a
+fresh LOST_BEFORE baseline. Exit/kill cleanup retires each outstanding handle.
+Handle authorization captures a generation under task metadata; output mapping
+pin/validation precedes input acquisition, then generation revalidation, fixed
+32/40/56-byte copy and pop share the device scope. This removes input -> task/VM
+edges and rejects delayed reads across same-PID reacquisition. Keyboard modifier
+snapshots happen before input acquisition; display -> input only publishes bounds.
+Legacy keyboard/snapshot calls retain their previous access policy. The 16-byte
+GetMouseState compatibility adapter now pins output before input, copies one
+coherent state and drains its wheel accumulator only on success; EFAULT preserves
+wheel input and neither result consumes the native event queue.
+
+Host tests use the actual SpinLock with platform IRQ behavior replaced. They
+check 2,000 contended lease epochs alongside 5,000 device updates, coherent
+positions, delayed-copy/final-close handoff, failed copies and stale same-PID
+tokens. Native pointer checks retain short clicks and Shift/Ctrl snapshots while
+sleeping, verify denial to a competing child after the first close, and reacquire
+after exit/kill of a child holding two handles. Host and native wheel injection
+also cover failed compatibility copies and exactly-once wheel drain. These narrow device transactions
+do not make end-to-end syscalls interruptible or establish remote application
+execution/cancellation safety.
+
+Block/device registries now use one lock each. Registration publishes VFS nodes
+after unlocking; I/O copies the callback before dispatch. PCI CF8/CFC pairs and
+BAR probes are serialized. Command-register writes preserve W1C status bits.
+Initrd publishes one immutable parsed archive; repeated initialization does not
+replace storage held by readers. Unused userspace keyboard/mouse drivers were removed.
+
+AHCI keeps a locked disk table and marks uncertain commands offline before any
+retry can rewrite descriptors/data. Initialization failure frees DMA only after
+observing both CR and FR stopped; a failed stop retains the pages until reboot.
+VirtIO owns a contiguous queue, observes reset, validates used-index/head identity,
+and takes timeout/invalid-completion devices offline with all backing retained.
+Its full-range LBA check precedes the first sector submission. Neither path
+claims recovery or allows a late completion to re-enable the device.
+
+The 19 host storage regressions cover AHCI busy-TFD timeout, delayed/late CI
+completion, active-command task-file errors, failed CR/FR stop and exact page
+release; VirtIO late/stuck/invalid completion, stuck reset, PFN-zero ownership,
+full-range rejection, read-only negotiation and invalid-queue/OOM failure;
+PCI contention/BAR restoration, callback reentry and immutable initrd publication.
+VirtIO failure status preserves earlier handshake bits. A read-only device rejects
+writes before touching DMA, and the block registry refuses its write callback.
+
+On 16 November, native AHCI and VirtIO install/rollback/fsck suites passed with
+four TCG CPUs. Separate stop/start VMs verified 131072 bytes with hash
+`b4c071280fb62325` and clean VFS handles on both buses. Logs and inspected frames
+are in `build/review-nov16/{ahci,virtio}-persist-{write,verify}`.
+The production read-only VirtIO scenario
+showed `ro`, rejected block writes and installation, and read the original bytes
+again. The complete 256 MiB image SHA-256 remained unchanged; screenshots and
+serial are in `build/virtio-readonly` and `build/review-nov16/readonly-current`.
+Hardware recovery, full lock order
+and IRQ progress stay open.
 
 The following require implementation or further native proof before AP application
 dispatch:

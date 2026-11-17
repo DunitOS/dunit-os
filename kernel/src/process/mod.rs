@@ -2,7 +2,7 @@ mod fd;
 mod runner;
 pub use runner::{exit_current_process, request_current_user_exit, request_current_user_fault, user_fault_escape_requested, preempt_switch_requested, clear_preempt_switch, set_preemption_enabled, preemption_enabled, preemption_count, reset_preemption_count, enter_user_process};
 mod lifecycle;
-pub(crate) use lifecycle::{wake_wait_set_waiters, child_exit_snapshot};
+pub(crate) use lifecycle::{wake_wait_set_waiters, child_exit_snapshot, is_pid_waiting_for_dispatch};
 pub use lifecycle::{allocate_pid, current_tid, current_thread_pointer, set_current_thread_pointer, set_terminal_foreground_process, set_foreground_process, current_process_output_sink, current_process_is_terminal_foreground, request_terminal_stdin_for_current, terminal_stdin_waiting_pid, provide_terminal_stdin, take_terminal_stdin_for_current, get_process_snapshots, process_stats, insert_process_record, create_user_process_record, current_is_privileged, current_may_kill, create_user_thread, request_thread_auto_reap, wait_thread, wake_ipc_waiters, wake_poll_waiters, terminal_input_ready, wake_pipe_waiters, wake_expired_waiters, is_pid_blocked, reap_process, process_exists, thread_count_for_pid, kill_process, is_pid_runnable, wait_for_child, cleanup_prepared_children, autoreap_process, snapshot_processes, init_current_kernel_process};
 use lifecycle::{process_address_space, process_record_index, log_process_transition, current_entity_id, owner_of, current_pid, release_finished_thread, cleanup_owned_threads, remove_waiter};
 pub mod scheduler;
@@ -879,12 +879,9 @@ impl Process {
     }
 
     pub fn handle_dup(&mut self, handle: Handle, new_rights: u32) -> Result<Handle, HandleError> {
-        // Display/Input — эксклюзивные системные singleton'ы с единым глобальным
-        // учётом владельца. Дубликат создал бы второй хэндл при одном owner-токене:
-        // закрытие первой копии обнулило бы владельца (release_display/input), пока
-        // процесс ещё держит вторую и пишет в ресурс, а другой процесс смог бы
-        // повторно захватить его. Поэтому дублирование singleton'ов запрещено
-        // (перенос уже блокируется в handle_take_for_transfer).
+        // Master handles remain non-duplicable under the existing capability
+        // contract. Repeated acquisition retains independent device leases;
+        // it does not grant transfer or duplication rights.
         if let Ok(entry) = self.handle_table.get(handle) {
             if matches!(entry.object, HandleObject::Display | HandleObject::Input) {
                 return Err(HandleError::WrongType);
@@ -1055,15 +1052,13 @@ impl Process {
             .insert(HandleObject::Display, RIGHT_DISPLAY_MASTER))
     }
 
-    /// Validate both the caller's handle and the exclusive seat owner.
-    pub fn require_input_master(&self, handle: Handle) -> Result<(), HandleError> {
+    /// Validate the handle and capture the exclusive seat generation together.
+    pub(crate) fn require_input_master(&self, handle: Handle) -> Result<crate::input::ReadToken, HandleError> {
         let entry = self.handle_table.require(handle, RIGHT_INPUT_MASTER)?;
-        if !matches!(entry.object, HandleObject::Input)
-            || crate::handle::input_owner() != self.pid.0
-        {
+        if !matches!(entry.object, HandleObject::Input) {
             return Err(HandleError::AccessDenied);
         }
-        Ok(())
+        crate::input::read_token(self.pid.0).ok_or(HandleError::AccessDenied)
     }
 
     /// Захватывает мастер-право на источник ввода (эксклюзивно). Возвращает хэндл

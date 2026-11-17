@@ -7,11 +7,14 @@ trap 'rm -rf "$test_dir"' EXIT
 rustc --edition=2021 --crate-type rlib --crate-name dunit_pointer_abi abi/pointer-input/src/lib.rs -o "$test_dir/libdunit_pointer_abi.rlib"
 rustc --edition=2021 --crate-type rlib --crate-name dunit_file_cap_abi abi/file-cap/src/lib.rs -o "$test_dir/libdunit_file_cap_abi.rlib"
 rustc --edition=2021 --crate-type rlib --crate-name dunit_style runtime/dunit-style/src/lib.rs -o "$test_dir/libdunit_style.rlib"
-for source in tools/test_file_caps_host.rs kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
+for source in tools/test_memory_host.rs tools/test_storage_host.rs tools/test_window_session_host.rs tools/test_file_caps_host.rs kernel/tests/input_geometry.rs kernel/tests/terminal_stdin.rs \
     kernel/src/drivers/keyboard_queue.rs \
     kernel/src/drivers/ps2_wheel.rs \
+    kernel/src/drivers/ps2_packet.rs \
     userspace/system_apps/gui_server/src/lua_policy.rs \
     userspace/system_apps/gui_server/src/shell_geometry.rs \
+    userspace/system_apps/gui_server/src/window_gesture.rs \
+    userspace/system_apps/gui_calc/src/calculator.rs \
     userspace/system_apps/gui_terminal/src/terminal_model_tests.rs \
     userspace/system_apps/gui_server/src/composite.rs \
     userspace/system_apps/gui_server/src/damage_plan.rs \

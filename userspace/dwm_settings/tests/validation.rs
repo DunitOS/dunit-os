@@ -200,6 +200,8 @@ app="*"
 workspace=1
 width=800
 height=600
+min_width=192
+min_height=96
 opacity=200
 [rules.editor]
 app="editor"
@@ -210,6 +212,7 @@ animation="genie"
 [rules.editor-size]
 app="editor"
 width=1000
+min_height=308
 "#;
     validate(text).unwrap();
     let mut apps = dwm_settings::Applications::baseline();
@@ -223,6 +226,8 @@ width=1000
     assert_eq!(policy.workspace, Some(2));
     assert_eq!(policy.width, Some(1000));
     assert_eq!(policy.height, Some(600));
+    assert_eq!(policy.min_width, Some(192));
+    assert_eq!(policy.min_height, Some(308));
     assert_eq!(policy.opacity, Some(200));
     assert_eq!(policy.x, Some(-10));
     assert_eq!(policy.floating, Some(true));
@@ -241,6 +246,8 @@ fn policy_rejects_missing_fields_invalid_actions_and_duplicate_chords() {
         "[bindings.a]\nscancode=18\naction=\"launcher\"\n[bindings.b]\nscancode=18\naction=\"close\"",
         "[rules.a]\napp=\"missing\"\nwidth=300",
         "[rules.a]\napp=\"*\"\nwidth=0",
+        "[rules.a]\napp=\"*\"\nmin_width=0",
+        "[rules.a]\napp=\"*\"\nmin_height=16385",
         "[rules.a]\napp=\"*\"\nopacity=256",
         "[rules.a]\napp=\"*\"\nworkspace=0",
         "[rules.a]\nwidth=300",

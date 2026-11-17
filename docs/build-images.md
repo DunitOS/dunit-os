@@ -42,6 +42,11 @@ size. Each archive records its profile in `/system/share/dunit-image.json`.
 DWM includes the compositor's current shared-buffer helper and all applications
 registered in the default desktop configuration.
 
+The packer strips debugging symbols from declared applications and system tools
+while retaining their original host binaries. Assets, SDK objects and explicit
+`--initrd-overlay` files keep their exact bytes, including ELF files used as data
+or failure fixtures.
+
 The internal `full` profile preserves the existing developer test payload and
 smoke fixtures. `make iso LIMINE_CONFIG=limine_test_terminal.conf` still writes
 `build/microkernel.iso` for those tests. This internal image is not a third

@@ -1,19 +1,9 @@
-//! Куча ядра.
-//!
-//! Изначально куча жила в фиксированном 2 MiB массиве в BSS и не могла расти —
-//! при исчерпании аллокации просто отказывали, что было потолком для растущего
-//! числа процессов и ФС. Теперь маленький BSS-блок используется только как
-//! bootstrap до готовности PMM/VMM, а дальше куча растёт по требованию: берёт у
-//! PMM непрерывный блок физических фреймов и адресует его через HHDM (все
-//! физические фреймы уже линейно отображены в верхней половине, разделяемой
-//! всеми адресными пространствами), поэтому правка таблиц страниц не нужна.
-//!
-//! Доступ к free-list защищён [`IrqSafeSpinLock`]: это убирает гонку с любым
-//! возможным аллокатором из контекста прерывания и является частью единой
-//! стратегии синхронизации ядра (см. `crate::sync`). Дизайн рассчитан на
-//! будущий userspace поверх libc, которому нужна честная растущая куча.
+//! Kernel heap: a BSS bootstrap region, then contiguous PMM blocks through HHDM.
+//! The IRQ-safe lock protects the free list; headers retain alignment padding
+//! and small tails so deallocation can return the complete allocation.
 
 use core::alloc::{GlobalAlloc, Layout};
+#[cfg(not(test))]
 use core::cell::UnsafeCell;
 use core::ptr;
 
@@ -21,8 +11,7 @@ use crate::sync::IrqSafeSpinLock;
 
 const PAGE_SIZE: usize = 4096;
 
-/// Гранула роста кучи: при нехватке памяти куча просит у PMM непрерывный блок
-/// как минимум такого размера (или больше, если запрошенная аллокация крупнее).
+// Minimum physical block requested when the free list cannot satisfy a layout.
 const HEAP_GROW_CHUNK: usize = 1024 * 1024;
 
 struct FreeBlock {
@@ -36,8 +25,7 @@ struct AllocationHeader {
     block_size: usize,
 }
 
-/// Защищённое локом состояние кучи. Головной указатель free-list хранится как
-/// `usize`, чтобы структура была `Send` (сырой указатель им не является).
+// Addresses are used only under the owning allocator's lock.
 struct HeapInner {
     free_list: usize,
     total_bytes: usize,
@@ -61,8 +49,7 @@ impl HeapInner {
         self.total_bytes = heap_size;
     }
 
-    /// Вставляет свободный регион в отсортированный по адресу free-list и
-    /// сливает его с соседями.
+    /// Insert by address and coalesce adjacent free regions.
     unsafe fn add_free_region(&mut self, start: usize, size: usize) {
         let block = start as *mut FreeBlock;
         (*block).size = size;
@@ -81,13 +68,12 @@ impl HeapInner {
             (*previous).next = block;
         }
 
-        // Слить с последующим соседом.
+        // Merge the following region before checking the preceding region.
         let next = (*block).next;
         if !next.is_null() && start + size == next as usize {
             (*block).size += (*next).size;
             (*block).next = (*next).next;
         }
-        // Слить с предыдущим соседом.
         if !previous.is_null() && (previous as usize) + (*previous).size == block as usize {
             (*previous).size += (*block).size;
             (*previous).next = (*block).next;
@@ -127,8 +113,7 @@ impl HeapInner {
                     (*next).next = current.next;
                     (requested_end, next)
                 } else {
-                    // Хвост, в который не помещается FreeBlock, принадлежит этой
-                    // аллокации и восстанавливается через AllocationHeader.
+                    // A tail too small for FreeBlock belongs to this allocation.
                     (block_end, current.next)
                 };
 
@@ -159,9 +144,7 @@ impl HeapInner {
         self.add_free_region(block_start, size);
     }
 
-    /// Расширяет кучу, запрашивая у PMM непрерывный блок фреймов и добавляя его
-    /// в free-list через HHDM. Возвращает `false`, если PMM недоступен или в
-    /// системе нет непрерывного блока нужного размера.
+    /// Acquire contiguous frames and publish their HHDM region to the free list.
     unsafe fn grow(&mut self, min_bytes: usize) -> bool {
         let want = match align_up_checked(min_bytes.max(HEAP_GROW_CHUNK), PAGE_SIZE) {
             Some(value) => value,
@@ -179,7 +162,11 @@ impl HeapInner {
         };
         let virt = crate::memory::vmm::phys_to_virt(phys.as_usize());
         if virt == 0 {
-            pmm.free_frame(phys);
+            for page in 0..frames {
+                pmm.free_frame(crate::memory::pmm::PhysicalAddress::from_usize(
+                    phys.as_usize() + page * PAGE_SIZE,
+                ));
+            }
             return false;
         }
 
@@ -243,7 +230,7 @@ unsafe impl GlobalAlloc for KernelAllocator {
         let mut inner = self.inner.lock();
         let mut result = inner.alloc_from_free_list(layout);
         if result.is_null() {
-            // Заголовок + возможное выравнивание + запас на разбиение блока.
+            // Include the header, alignment padding and a possible free-list tail.
             let required = layout
                 .size()
                 .saturating_add(layout.align())
@@ -281,16 +268,17 @@ pub fn init_heap(heap_start: usize, heap_size: usize) {
     ALLOCATOR.init(heap_start, heap_size);
 }
 
-/// Статическое хранилище под начальную кучу ядра. Обёрнуто в `UnsafeCell`-newtype
-/// вместо `static mut`, чтобы не было `&'static mut`-алиасинга: `init` читает лишь
-/// адрес и размер буфера один раз при загрузке, а дальше памятью распоряжается
-/// сам аллокатор через сырые указатели.
+// Boot initializes the allocator with this buffer once, using raw pointers.
 #[repr(align(4096))]
+#[cfg(not(test))]
 struct AlignedHeap(UnsafeCell<[u8; 2 * 1024 * 1024]>);
+#[cfg(not(test))]
 unsafe impl Sync for AlignedHeap {}
 
+#[cfg(not(test))]
 static KERNEL_HEAP: AlignedHeap = AlignedHeap(UnsafeCell::new([0; 2 * 1024 * 1024]));
 
+#[cfg(not(test))]
 pub fn init() {
     crate::memory::serial_write("[HEAP] START\r\n");
 

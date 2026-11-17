@@ -40,7 +40,7 @@ pub extern "C" fn _start() -> ! {
     if libdunit::ipc_recv(&mut empty) != libdunit::EAGAIN { fail("empty queue"); }
     if libdunit::wait_ipc_event(20) != 0 { fail("timeout wait"); }
     if libdunit::ipc_recv(&mut empty) != libdunit::EAGAIN { fail("timeout received data"); }
-    let top = unsafe { (core::ptr::addr_of_mut!(STACK) as *mut u8).add(STACK_BYTES) };
+    let top = unsafe { (core::ptr::addr_of_mut!(STACK.0) as *mut u8).add(STACK_BYTES) };
     let tid = libdunit::thread_create(worker, top, 0);
     if tid <= 0 { fail("thread create"); }
     let mut message = [0u8; 16];

@@ -242,3 +242,19 @@ fn all_new_paint_details_are_overridable_and_rejected_atomically() {
         );
     }
 }
+
+#[test]
+fn titles_stay_clear_of_controls_at_every_supported_window_width() {
+    let skin = visuals(DARK, "[widgets]\nenabled=false");
+    for traffic in [false, true] {
+        for width in [128, 230, 480, 1918] {
+            let content = (100, 100, width, 240);
+            let (x, y, w, h) = skin.title_rect(content, 32, traffic);
+            assert!(w >= 0 && y == 68 && h == 32);
+            for role in 0..3 {
+                let (cx, _, cw, _) = skin.control_rect(content, 32, traffic, role);
+                assert!(w == 0 || x + w <= cx || x >= cx + cw);
+            }
+        }
+    }
+}

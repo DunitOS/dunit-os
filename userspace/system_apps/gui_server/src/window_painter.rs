@@ -151,9 +151,7 @@ pub fn paint(
             }
         }
     }
-    // Window title text (TTF), left-aligned in the title bar, clear of the
-    // close chip. Drawn only once the card is nearly solid so it appears
-    // with the surface rather than through the grow-in blend.
+    // Keep the title clear of controls, including on a narrow window.
     if a > 0 {
         if let Some(f) = font {
             let px = ly.title_font_px as f32;
@@ -164,12 +162,13 @@ pub fn paint(
                 theme.title_text_unfocused & 0x00FF_FFFF
             };
             let title = win_title(&apps, w.app);
+            let clip = skin.title_rect((w.cx, w.cy, w.sw, w.sh), w.title_h, w.traffic_lights);
             let tx = if w.traffic_lights {
-                w.cx + (w.sw - text_width_ttf(f, title, px)) / 2
+                (w.cx + (w.sw - text_width_ttf(f, title, px)) / 2).max(clip.0)
             } else {
-                w.cx + skin.title_text_inset
+                clip.0
             };
-            draw_text_ttf_alpha(back, bw, bh, f, tx, baseline, px, title, txtcol, a as u32);
+            draw_text_ttf_alpha_clipped(back, bw, bh, f, tx, baseline, px, title, txtcol, a as u32, clip);
         }
     }
     // Client surface. Held back until the frame is nearly solid so the

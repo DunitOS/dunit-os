@@ -1,6 +1,6 @@
 use crate::serial::{write_dec, write_hex, write_hex16, write_hex8};
 use crate::{hal, serial_write};
-use core::cell::UnsafeCell;
+use crate::sync::SpinLock;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 const PCI_CONFIG_ADDRESS: u16 = 0xCF8;
@@ -64,11 +64,7 @@ pub struct PciBarInfo {
     pub size: u64,
 }
 
-static PCI_LOCK: AtomicBool = AtomicBool::new(false);
 static PCI_SCAN_READY: AtomicBool = AtomicBool::new(false);
-/// Кэш результатов сканирования PCI. Был массивом + шестью счётчиками в
-/// `static mut`; теперь одна структура за `UnsafeCell`, доступ к которой всегда
-/// под `PCI_LOCK`.
 struct PciCache {
     devices: [Option<PciDevice>; MAX_SNAPSHOT_DEVICES],
     total_devices: usize,
@@ -79,10 +75,7 @@ struct PciCache {
     msix_devices: usize,
 }
 
-struct PciCacheCell(UnsafeCell<PciCache>);
-unsafe impl Sync for PciCacheCell {}
-
-static PCI_CACHE: PciCacheCell = PciCacheCell(UnsafeCell::new(PciCache {
+static PCI_CACHE: SpinLock<PciCache> = SpinLock::new(PciCache {
     devices: [None; MAX_SNAPSHOT_DEVICES],
     total_devices: 0,
     stored_devices: 0,
@@ -90,7 +83,7 @@ static PCI_CACHE: PciCacheCell = PciCacheCell(UnsafeCell::new(PciCache {
     network_controllers: 0,
     msi_devices: 0,
     msix_devices: 0,
-}));
+});
 
 pub fn init() {
     crate::drivers::registry::register("pci", crate::drivers::registry::DeviceClass::Bus, "pci");
@@ -131,9 +124,8 @@ pub fn snapshot() -> PciSnapshot {
         return scan_raw_into_snapshot();
     }
 
-    lock_cache();
-    unsafe {
-        let cache = &*PCI_CACHE.0.get();
+    {
+        let cache = PCI_CACHE.lock();
         snapshot.total_devices = cache.total_devices;
         snapshot.stored_devices = cache.stored_devices;
         snapshot.usb_controllers = cache.usb_controllers;
@@ -147,7 +139,6 @@ pub fn snapshot() -> PciSnapshot {
             index += 1;
         }
     }
-    PCI_LOCK.store(false, Ordering::Release);
 
     snapshot
 }
@@ -155,9 +146,8 @@ pub fn snapshot() -> PciSnapshot {
 pub fn refresh_cache() {
     let snapshot = scan_raw_into_snapshot();
 
-    lock_cache();
-    unsafe {
-        let cache = &mut *PCI_CACHE.0.get();
+    {
+        let mut cache = PCI_CACHE.lock();
         cache.devices = snapshot.devices;
         cache.total_devices = snapshot.total_devices;
         cache.stored_devices = snapshot.stored_devices;
@@ -167,7 +157,6 @@ pub fn refresh_cache() {
         cache.msix_devices = snapshot.msix_devices;
     }
     PCI_SCAN_READY.store(true, Ordering::Release);
-    PCI_LOCK.store(false, Ordering::Release);
 }
 
 pub fn for_each_device<F: FnMut(PciDevice)>(mut visitor: F) {
@@ -196,7 +185,12 @@ pub fn read_bar(bus: u8, device: u8, function: u8, index: u8) -> u32 {
 }
 
 pub fn read_bar_decoded(dev: PciDevice, index: u8) -> PciBar {
-    let raw = read_bar(dev.bus, dev.device, dev.function, index);
+    decode_bar(&mut CONFIG.lock(), dev, index)
+}
+
+fn decode_bar(config: &mut ConfigPorts, dev: PciDevice, index: u8) -> PciBar {
+    if index >= 6 { return PciBar::None; }
+    let raw = config.read(dev.bus, dev.device, dev.function, 0x10 + index * 4);
     if raw == 0 {
         return PciBar::None;
     }
@@ -207,7 +201,7 @@ pub fn read_bar_decoded(dev: PciDevice, index: u8) -> PciBar {
 
     match raw & 0x6 {
         0x4 if index < 5 => {
-            let high = read_bar(dev.bus, dev.device, dev.function, index + 1) as u64;
+            let high = config.read(dev.bus, dev.device, dev.function, 0x10 + (index + 1) * 4) as u64;
             PciBar::Memory64((high << 32) | ((raw & !0xF) as u64))
         }
         _ => PciBar::Memory32(raw & !0xF),
@@ -215,15 +209,19 @@ pub fn read_bar_decoded(dev: PciDevice, index: u8) -> PciBar {
 }
 
 pub fn read_bar_info(dev: PciDevice, index: u8) -> PciBarInfo {
-    let bar = read_bar_decoded(dev, index);
+    let mut config = CONFIG.lock();
+    let bar = decode_bar(&mut config, dev, index);
+    let command = config.read(dev.bus, dev.device, dev.function, 0x04) as u16;
+    config.command(dev, command & !(COMMAND_IO_SPACE | COMMAND_MEMORY_SPACE));
     let size = match bar {
         PciBar::None => 0,
-        PciBar::Io(_) => size_bar32(dev, index, 0xFFFF_FFFC) as u64,
-        PciBar::Memory32(_) => size_bar32(dev, index, 0xFFFF_FFF0) as u64,
-        PciBar::Memory64(_) if index < 5 => size_bar64(dev, index),
+        PciBar::Io(_) => size_bar32(&mut config, dev, index, 0xFFFF_FFFC) as u64,
+        PciBar::Memory32(_) => size_bar32(&mut config, dev, index, 0xFFFF_FFF0) as u64,
+        PciBar::Memory64(_) if index < 5 => size_bar64(&mut config, dev, index),
         PciBar::Memory64(_) => 0,
     };
 
+    config.command(dev, command);
     PciBarInfo { bar, size }
 }
 
@@ -232,20 +230,21 @@ pub fn command(dev: PciDevice) -> u16 {
 }
 
 pub fn set_command(dev: PciDevice, value: u16) {
-    let current = read_config(dev.bus, dev.device, dev.function, 0x04);
-    let next = (current & 0xFFFF_0000) | value as u32;
-    write_config(dev.bus, dev.device, dev.function, 0x04, next);
+    CONFIG.lock().command(dev, value);
+}
+
+fn enable_command(dev: PciDevice, bits: u16) {
+    let mut config = CONFIG.lock();
+    let current = config.read(dev.bus, dev.device, dev.function, 0x04) as u16;
+    config.command(dev, current | bits);
 }
 
 pub fn enable_mmio_bus_master(dev: PciDevice) {
-    set_command(
-        dev,
-        command(dev) | COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER,
-    );
+    enable_command(dev, COMMAND_MEMORY_SPACE | COMMAND_BUS_MASTER);
 }
 
 pub fn enable_io_bus_master(dev: PciDevice) {
-    set_command(dev, command(dev) | COMMAND_IO_SPACE | COMMAND_BUS_MASTER);
+    enable_command(dev, COMMAND_IO_SPACE | COMMAND_BUS_MASTER);
 }
 
 fn scan_raw_into_snapshot() -> PciSnapshot {
@@ -363,12 +362,12 @@ fn read_capabilities(bus: u8, device: u8, function: u8) -> PciCapabilities {
     }
 }
 
-fn size_bar32(dev: PciDevice, index: u8, mask: u32) -> u32 {
+fn size_bar32(config: &mut ConfigPorts, dev: PciDevice, index: u8, mask: u32) -> u32 {
     let offset = 0x10 + index * 4;
-    let original = read_config(dev.bus, dev.device, dev.function, offset);
-    write_config(dev.bus, dev.device, dev.function, offset, 0xFFFF_FFFF);
-    let probe = read_config(dev.bus, dev.device, dev.function, offset);
-    write_config(dev.bus, dev.device, dev.function, offset, original);
+    let original = config.read(dev.bus, dev.device, dev.function, offset);
+    config.write(dev.bus, dev.device, dev.function, offset, 0xFFFF_FFFF);
+    let probe = config.read(dev.bus, dev.device, dev.function, offset);
+    config.write(dev.bus, dev.device, dev.function, offset, original);
 
     let masked = probe & mask;
     if masked == 0 {
@@ -378,24 +377,24 @@ fn size_bar32(dev: PciDevice, index: u8, mask: u32) -> u32 {
     }
 }
 
-fn size_bar64(dev: PciDevice, index: u8) -> u64 {
+fn size_bar64(config: &mut ConfigPorts, dev: PciDevice, index: u8) -> u64 {
     let low_offset = 0x10 + index * 4;
     let high_offset = low_offset + 4;
-    let original_low = read_config(dev.bus, dev.device, dev.function, low_offset);
-    let original_high = read_config(dev.bus, dev.device, dev.function, high_offset);
+    let original_low = config.read(dev.bus, dev.device, dev.function, low_offset);
+    let original_high = config.read(dev.bus, dev.device, dev.function, high_offset);
 
-    write_config(dev.bus, dev.device, dev.function, low_offset, 0xFFFF_FFFF);
-    write_config(dev.bus, dev.device, dev.function, high_offset, 0xFFFF_FFFF);
-    let probe_low = read_config(dev.bus, dev.device, dev.function, low_offset);
-    let probe_high = read_config(dev.bus, dev.device, dev.function, high_offset);
-    write_config(
+    config.write(dev.bus, dev.device, dev.function, low_offset, 0xFFFF_FFFF);
+    config.write(dev.bus, dev.device, dev.function, high_offset, 0xFFFF_FFFF);
+    let probe_low = config.read(dev.bus, dev.device, dev.function, low_offset);
+    let probe_high = config.read(dev.bus, dev.device, dev.function, high_offset);
+    config.write(
         dev.bus,
         dev.device,
         dev.function,
         high_offset,
         original_high,
     );
-    write_config(dev.bus, dev.device, dev.function, low_offset, original_low);
+    config.write(dev.bus, dev.device, dev.function, low_offset, original_low);
 
     let masked = ((probe_high as u64) << 32) | ((probe_low & 0xFFFF_FFF0) as u64);
     if masked == 0 {
@@ -405,30 +404,44 @@ fn size_bar64(dev: PciDevice, index: u8) -> u64 {
     }
 }
 
-pub fn read_config(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
-    let address = 0x8000_0000u32
-        | ((bus as u32) << 16)
-        | ((device as u32) << 11)
-        | ((function as u32) << 8)
-        | ((offset as u32) & 0xFC);
+// CF8 selects a register for CFC. Keep the pair and multi-register probes
+// under one guard so another CPU cannot redirect a read or observe a probe.
+struct ConfigPorts;
+static CONFIG: SpinLock<ConfigPorts> = SpinLock::new(ConfigPorts);
 
-    unsafe {
-        hal::hal_outl(PCI_CONFIG_ADDRESS, address);
-        hal::hal_inl(PCI_CONFIG_DATA)
+impl ConfigPorts {
+    fn address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
+        0x8000_0000u32 | ((bus as u32) << 16) | ((device as u32) << 11)
+            | ((function as u32) << 8) | ((offset as u32) & 0xFC)
+    }
+    fn read(&mut self, bus: u8, device: u8, function: u8, offset: u8) -> u32 {
+        unsafe {
+            hal::hal_outl(PCI_CONFIG_ADDRESS, Self::address(bus, device, function, offset));
+            hal::hal_inl(PCI_CONFIG_DATA)
+        }
+    }
+    fn write(&mut self, bus: u8, device: u8, function: u8, offset: u8, value: u32) {
+        unsafe {
+            hal::hal_outl(PCI_CONFIG_ADDRESS, Self::address(bus, device, function, offset));
+            hal::hal_outl(PCI_CONFIG_DATA, value);
+        }
+    }
+    fn command(&mut self, dev: PciDevice, value: u16) {
+        // Status shares this dword and is W1C. A command change writes only its
+        // low half, preserving pending status instead of acknowledging it.
+        unsafe {
+            hal::hal_outl(PCI_CONFIG_ADDRESS, Self::address(dev.bus, dev.device, dev.function, 0x04));
+            hal::hal_outw(PCI_CONFIG_DATA, value);
+        }
     }
 }
 
-pub fn write_config(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
-    let address = 0x8000_0000u32
-        | ((bus as u32) << 16)
-        | ((device as u32) << 11)
-        | ((function as u32) << 8)
-        | ((offset as u32) & 0xFC);
+pub fn read_config(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
+    CONFIG.lock().read(bus, device, function, offset)
+}
 
-    unsafe {
-        hal::hal_outl(PCI_CONFIG_ADDRESS, address);
-        hal::hal_outl(PCI_CONFIG_DATA, value);
-    }
+pub fn write_config(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
+    CONFIG.lock().write(bus, device, function, offset, value);
 }
 
 fn empty_snapshot() -> PciSnapshot {
@@ -449,15 +462,6 @@ fn empty_capabilities() -> PciCapabilities {
         count: 0,
         has_msi: false,
         has_msix: false,
-    }
-}
-
-fn lock_cache() {
-    while PCI_LOCK
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
     }
 }
 

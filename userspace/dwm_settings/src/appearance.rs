@@ -26,8 +26,6 @@ pub(crate) fn overrides(document: &str, settings: &Settings) -> String {
                     ("layout", "border") => settings.layout.border as i32,
                     ("layout", "panel_h") => settings.layout.panel_h as i32,
                     ("layout", "launcher_w") => settings.layout.launcher_w as i32,
-                    ("layout", "taskbtn_w") => settings.layout.taskbtn_w as i32,
-                    ("layout", "taskbtn_gap") => settings.layout.taskbtn_gap as i32,
                     ("layout", "menu_w") => settings.layout.menu_w as i32,
                     ("layout", "menu_item_h") => settings.layout.menu_item_h as i32,
                     ("layout", "dock_w") => settings.layout.dock_w as i32,

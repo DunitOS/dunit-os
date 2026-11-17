@@ -35,10 +35,19 @@ pub extern "C" fn _start() -> ! {
         syscall3(SYSCALL_READ_POINTER_EVENT, handle as usize, 0, 40),
         libdunit::EFAULT
     );
-    assert_eq!(syscall3(SYSCALL_READ_POINTER_EVENT,handle as usize,0,56),libdunit::EFAULT);
+    assert_eq!(
+        syscall3(SYSCALL_READ_POINTER_EVENT, handle as usize, 0, 56),
+        libdunit::EFAULT
+    );
     let initial = pointer::read(handle as u32).unwrap().unwrap();
     assert_eq!(initial.flags, pointer::LOST_BEFORE);
     assert_eq!(pointer::read(handle as u32), Ok(None));
+    let second = libdunit::handle_input_acquire();
+    assert!(second > 0 && second != handle);
+    assert_eq!(pointer::read(second as u32), Ok(None));
+    assert_eq!(libdunit::handle_close(handle as u32), 0);
+    assert_eq!(pointer::read(handle as u32), Err(libdunit::EACCES));
+    let handle = second;
     // A child has no INPUT_MASTER handle even when the parent's numeric ID is known.
     let child = libdunit::spawn("/app/pointer_queue_denied");
     assert!(child > 0);
@@ -114,6 +123,47 @@ pub extern "C" fn _start() -> ! {
     assert_eq!(fresh_event.modifiers, 0);
     assert_eq!(pointer::read_with_modifiers(fresh as u32), Ok(None));
     assert_eq!(libdunit::handle_close(fresh as u32), 0);
+    for kill in [false, true] {
+        let child = libdunit::process::spawn_args(
+            "/app/pointer_queue_denied",
+            &["pointer_queue_denied", "lease"],
+        );
+        assert!(child > 0);
+        let request: &[u8] = if kill { b"kill" } else { b"exit" };
+        assert_eq!(
+            libdunit::ipc_send(child as u32, request),
+            request.len() as isize
+        );
+        let mut ready = [0; 5];
+        let mut sender = 0;
+        assert_eq!(
+            libdunit::ipc_recv_blocking_from(&mut ready, &mut sender, 5000),
+            5
+        );
+        assert_eq!((sender, ready), (child as u32, *b"ready"));
+        if kill {
+            assert!(libdunit::handle_input_acquire() < 0);
+            assert_eq!(libdunit::kill(child as u32), 0);
+        }
+        let mut status = libdunit::WaitStatus::empty();
+        for _ in 0..1000 {
+            if libdunit::wait(child as u32, &mut status) >= 0 && status.exited() {
+                break;
+            }
+            libdunit::sleep_ms(10);
+        }
+        assert!(status.exited());
+        assert_eq!(status.code, if kill { -9 } else { 0 });
+        let fresh = libdunit::handle_input_acquire();
+        assert!(fresh > 0);
+        assert_eq!(
+            pointer::read(fresh as u32).unwrap().unwrap().flags,
+            pointer::LOST_BEFORE
+        );
+        assert_eq!(pointer::read(fresh as u32), Ok(None));
+        assert_eq!(libdunit::handle_close(fresh as u32), 0);
+    }
+    libdunit::println("[INPUT-LEASE] repeated acquire, first/final close and exit/kill cleanup OK");
     libdunit::println("[POINTERQ] handover and queue OK");
     libdunit::exit(0)
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the actual current-access module to enforce non-escaping borrows."""
+"""Compile actual task access and registry predicates against host fixtures."""
 import json
 import os
 from pathlib import Path
@@ -11,6 +11,12 @@ from dunit_cli import ROOT
 
 class Access(unittest.TestCase):
     def compile(self, body, run=False):
+        lifecycle = (ROOT / 'kernel/src/process/lifecycle.rs').read_text()
+        predicates = []
+        for name in ('process_record_index', 'is_pid_waiting_for_dispatch'):
+            start = lifecycle.rindex('pub(', 0, lifecycle.index('fn ' + name))
+            end = lifecycle.index('\n}', start) + 2
+            predicates.append(lifecycle[start:end])
         source = r'''
 #![allow(dead_code)]
 extern crate alloc;
@@ -37,11 +43,13 @@ mod process {
         }
         fn add_pending_signal(&mut self,value:u64) { self.signals=self.signals.saturating_add(value); }
     }
-    pub struct ProcessRecord {pid:ProcessId,process:Option<std::sync::Arc<crate::sync::IrqSafeSpinLock<Process>>>}
+    #[derive(Clone,Copy)] pub enum ProcessState { Prepared,Ready,Running,Blocked,Dead,Reaped }
+    pub struct ProcessRecord {pid:ProcessId,state:ProcessState,process:Option<std::sync::Arc<crate::sync::IrqSafeSpinLock<Process>>>}
     // This fixture exercises access/futex scopes, not dispatch/teardown.
     mod execution { pub fn group_entered(_: &[super::ProcessRecord],_:super::ProcessId)->bool { false } }
     #[path=@REGISTRY@] pub mod registry;
     use registry::table as process_table;
+    @PREDICATES@
     pub static DROPS:AtomicU64=AtomicU64::new(0);
     impl Drop for Process {
         fn drop(&mut self) {
@@ -57,11 +65,11 @@ mod process {
             Arc::new(crate::sync::IrqSafeSpinLock::new(Process {pid:4,cwd:String::new(),
                 cap:Arc::new(4),pending:false,signals:0,retired:Vec::new()}))
         }
-        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        registry::table().push(ProcessRecord {pid:ProcessId(4),state:ProcessState::Ready,process:Some(object())});
         let pin=registry::task(ProcessId(4)).unwrap();let weak=Arc::downgrade(&pin);
         let retired={registry::table().pop().unwrap()};
         assert_eq!(registry::validate(ProcessId(4),&pin),Err(ProcessError::NoSuchProcess));
-        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        registry::table().push(ProcessRecord {pid:ProcessId(4),state:ProcessState::Ready,process:Some(object())});
         assert_eq!(registry::validate(ProcessId(4),&pin),Err(ProcessError::ProcessNotPrepared));
         drop(retired);assert!(weak.upgrade().is_some());drop(pin);assert!(weak.upgrade().is_none());
         assert_eq!(DROPS.load(Ordering::SeqCst),1);
@@ -90,7 +98,7 @@ mod process {
         while !entered.load(Ordering::SeqCst) {std::thread::yield_now();}
         let retired={registry::table().pop().unwrap()};drop(retired);
         assert!(weak.upgrade().is_some());assert_eq!(DROPS.load(Ordering::SeqCst),1);
-        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        registry::table().push(ProcessRecord {pid:ProcessId(4),state:ProcessState::Ready,process:Some(object())});
         with_process_mut(ProcessId(4),|p| {p.signals=100;Ok(())}).unwrap();
         finish.store(true,Ordering::SeqCst);assert_eq!(worker.join().unwrap(),8002);
         assert!(weak.upgrade().is_none());assert_eq!(DROPS.load(Ordering::SeqCst),2);
@@ -102,12 +110,45 @@ mod process {
         let waiter=std::thread::spawn(||with_process_mut(ProcessId(4),|p| {p.signals=999;Ok(())}));
         while Arc::strong_count(&pin)<3 {std::thread::yield_now();}
         let retired={registry::table().pop().unwrap()};
-        registry::table().push(ProcessRecord {pid:ProcessId(4),process:Some(object())});
+        registry::table().push(ProcessRecord {pid:ProcessId(4),state:ProcessState::Ready,process:Some(object())});
         drop(retired);drop(guard);
         assert_eq!(waiter.join().unwrap(),Err(ProcessError::ProcessNotPrepared));
         assert_eq!(current_access::with_process(ProcessId(4),|p|p.signals),Ok(0));
         drop(pin);
         println!("registry: real locks, 8000 mutations, reentry, pinned retirement and blocked stale lease rejected OK");
+    }
+    pub fn probe_foreground_retry() {
+        let pid=ProcessId(1);
+        for state in [ProcessState::Prepared,ProcessState::Running,ProcessState::Dead,ProcessState::Reaped] {
+            process_table()[0].state=state;
+            assert!(!is_pid_waiting_for_dispatch(pid));
+        }
+        assert!(!is_pid_waiting_for_dispatch(ProcessId(99)));
+        for state in [ProcessState::Ready,ProcessState::Blocked] {
+            process_table()[2].state=state;
+            assert!(!is_pid_waiting_for_dispatch(ProcessId(3))); // no prepared backing
+            process_table()[0].state=state;
+            assert!(is_pid_waiting_for_dispatch(pid));
+        }
+        // Reproduce the split-observation failure with a wake between queries.
+        let ready=matches!(process_table()[0].state,ProcessState::Ready);
+        std::thread::spawn(|| {process_table()[0].state=ProcessState::Ready;}).join().unwrap();
+        let blocked=matches!(process_table()[0].state,ProcessState::Blocked);
+        assert!(!ready && !blocked);
+        assert!(is_pid_waiting_for_dispatch(pid));
+        let start=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer={let start=start.clone();std::thread::spawn(move|| {
+            start.wait();
+            for _ in 0..25000 {
+                process_table()[0].state=ProcessState::Blocked;
+                std::thread::yield_now();
+                process_table()[0].state=ProcessState::Ready;
+            }
+        })};
+        start.wait();
+        for _ in 0..50000 {assert!(is_pid_waiting_for_dispatch(pid));}
+        writer.join().unwrap();
+        println!("foreground retry: split-query wake reproduced, 50000 locked observations and non-waiting/missing tasks OK");
     }
     pub static CURRENT:AtomicU64=AtomicU64::new(2);
     pub static WAKES:AtomicU64=AtomicU64::new(0);
@@ -118,9 +159,9 @@ mod process {
         assert_eq!(current_access::with_current_process(|p|p.pending),Some(false));
     }
     pub fn init() {
-        for n in 1..=2 { process_table().push(ProcessRecord {pid:ProcessId(n),process:Some(std::sync::Arc::new(crate::sync::IrqSafeSpinLock::new(Process {
+        for n in 1..=2 { process_table().push(ProcessRecord {pid:ProcessId(n),state:ProcessState::Ready,process:Some(std::sync::Arc::new(crate::sync::IrqSafeSpinLock::new(Process {
             pid:n,cwd:format!("task{n}"),cap:std::sync::Arc::new(n),pending:false,signals:0,retired:Vec::new() })))}); }
-        process_table().push(ProcessRecord {pid:ProcessId(3),process:None});
+        process_table().push(ProcessRecord {pid:ProcessId(3),state:ProcessState::Prepared,process:None});
     }
     pub fn read_missing(read: impl for<'a> FnOnce(&'a Process)->u64)->Result<u64,ProcessError> {
         current_access::with_process(ProcessId(99),read)
@@ -132,7 +173,7 @@ fn main() {
 process::init();
 @BODY@
 }
-'''.replace('@SYNC@', json.dumps(str(ROOT / 'kernel/src/sync.rs'))).replace('@REGISTRY@', json.dumps(str(ROOT / 'kernel/src/process/registry.rs'))).replace('@ACCESS@', json.dumps(str(ROOT / 'kernel/src/process/current_access.rs'))).replace('@BODY@', body)
+'''.replace('@SYNC@', json.dumps(str(ROOT / 'kernel/src/sync.rs'))).replace('@REGISTRY@', json.dumps(str(ROOT / 'kernel/src/process/registry.rs'))).replace('@ACCESS@', json.dumps(str(ROOT / 'kernel/src/process/current_access.rs'))).replace('@PREDICATES@', '\n'.join(predicates)).replace('@BODY@', body)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'access.rs'
             path.write_text(source)
@@ -200,6 +241,10 @@ println!("task scopes: owner/thread routing, error notifications, self/cross-tar
 
     def test_registry_pins_exclusion_reentry_and_retirement(self):
         result=self.compile('process::probe_registry();',run=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_foreground_retry_survives_blocked_to_ready_wake(self):
+        result=self.compile('process::probe_foreground_retry();',run=True)
         self.assertEqual(result.returncode,0,result.stderr)
 
     def test_retired_owners_reenter_after_error_and_missing_callback(self):

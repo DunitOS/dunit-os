@@ -1,6 +1,6 @@
 # Dunit OS performance and SMP roadmap
 
-Updated 15 November 2026. OP0–OP3 are partial; the next stage is to finish OP3
+Updated 16 November 2026. OP0–OP3 are partial; the next stage is to finish OP3
 safety gates before OP4 application dispatch. This track complements the
 [technical roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md); it does not close M7.
 Implementation details and evidence are in [SMP](docs/performance/smp.md),
@@ -30,7 +30,7 @@ measurements do not establish per-event tails or input-to-photon latency.
 | OP0 | Partial | KVM runner, remaining scenes, full telemetry, budgets/noise |
 | OP1 | Partial | Remote lifecycle/cancellation and IRQ/preemption/idle model |
 | OP2 | Partial | Timer event model, x2APIC/KVM/hardware platform coverage |
-| OP3 | In progress | Remaining input/device ownership, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
+| OP3 | In progress | DMA fault coverage, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
 | OP4 | Prepared only | AP application dispatch, remote wakeups, migration and overlapping execution |
 | OP5 | Not started | Scheduler scaling, accounting and latency |
 | OP6–OP8 | Open | New profile-driven input, rendering, memory and I/O work |
@@ -160,7 +160,8 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   supplied bytes and readiness share one lock; partial reads retain ownership,
   competing requests cannot steal a line and wake callbacks run after unlock.
   Host concurrency and native interactive/interrupt/re-exec regressions cover this scope.
-
+- [x] Observe foreground Ready/Blocked retry states under one registry guard;
+  IRQ wakeups cannot fall between separate queries and reject a waiting exec.
 - [x] Serialize display leases, scanout geometry, pixel writes and modesets under
   one device lock. Console rendering uses current pitch and bounded row/glyph
   scopes; kernel-shell rendering keeps IRQs enabled. Repeated display acquisition
@@ -168,11 +169,27 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   VRAM mapping; rejected modes restore registers or quarantine scanout after failed
   rollback. Host contention/fault injection and native lease/GUI modeset checks cover
   the current Limine/Bochs path.
+- [x] Serialize input-master leases and pointer facts/queue under one IRQ-safe
+  lock. Repeated acquisition retains unread events until final close; exit/kill
+  retires all leases. Task-scoped generation validation, a prior user mapping pin
+  and bounded copying prevent stale reads from draining a later session or
+  acquiring VM/task locks under input. Host contention and native pointer/GUI
+  regressions cover the current mechanism without changing input ABI or policy.
+- [x] Lock block/device registries, publish nodes and invoke I/O after unlocking;
+  serialize PCI address/data pairs and preserve W1C status during BAR probes.
+  Publish immutable initrd contents once and remove unused userspace input drivers.
+- [x] Take AHCI/VirtIO offline after uncertain completion; retain DMA backing and
+  reject retries. AHCI initialization frees pages only after observed CR/FR stop;
+  VirtIO observes reset, owns contiguous queues and validates completion identity.
+  Host failure tests and native install/fsck/stop-start persistence cover these slices.
+- [x] Inject AHCI delayed/late CI completion and active-command task-file errors
+  in host tests; verify no retry rewrites backing or releases live DMA pages.
+  VirtIO read-only negotiation and invalid-queue/OOM failure paths are also covered.
 
 Remaining gates, in order:
 
 - [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining
-  driver/heap edges, including input-master repeated-acquire/final-close ownership.
+  driver/heap edges.
   Kernel-console lock changes alone do not make syscalls interruptible.
 - [ ] Remote cancellation/stop acknowledgements and group finalization. Publish
   waitable exit only after executors stop and cleanup completes; cover nested
@@ -188,8 +205,8 @@ Remaining gates, in order:
 - [ ] Real remote CPL3/shared-VM/W^X fault, concurrent exit, migration and page-reclaim
   stress, with fault injection. Existing isolated AP probes and UP regressions
   do not replace this matrix.
-- [ ] Quiesce or quarantine AHCI/VirtIO after timeout/error before DMA descriptors,
-  buffers or pages are reused/freed; test delayed/stuck completion and failed stop.
+- [ ] Validate AHCI/VirtIO controller recovery and final DMA retirement on hardware.
+  Host completion faults cover quarantine; they do not prove recovery.
 
 Acceptance: no stale mappings, double frees, deadlocks or capability leaks.
 General AP userspace dispatch is prohibited until these gates pass.

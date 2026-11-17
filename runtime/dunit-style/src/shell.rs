@@ -67,6 +67,9 @@ visuals! {
     control_right_gap: "shell-control-right-gap", 0, 1024;
     control_glyph_min: "shell-control-glyph-min", 1, 1024;
     control_glyph_stroke: "shell-control-glyph-stroke", 1, 1024;
+    window_resize_grip: "shell-window-resize-grip", 1, 64;
+    window_min_width: "shell-window-min-width", 1, 16384;
+    window_min_height: "shell-window-min-height", 1, 16384;
     title_baseline_offset: "shell-title-baseline-offset", 0, 1024;
     title_text_inset: "shell-title-text-inset", 0, 1024;
     border_gradient_top: "shell-border-gradient-top", -255, 255;
@@ -105,8 +108,6 @@ visuals! {
     layout_border: "shell-layout-border", 0, 16384;
     layout_panel_h: "shell-layout-panel-h", 0, 16384;
     layout_launcher_w: "shell-layout-launcher-w", 0, 16384;
-    layout_taskbtn_w: "shell-layout-taskbtn-w", 0, 16384;
-    layout_taskbtn_gap: "shell-layout-taskbtn-gap", 0, 16384;
     layout_menu_w: "shell-layout-menu-w", 0, 16384;
     layout_menu_item_h: "shell-layout-menu-item-h", 0, 16384;
     layout_dock_w: "shell-layout-dock-w", 24, 256;
@@ -260,6 +261,19 @@ impl Visuals {
             right - left,
             size,
         )
+    }
+    pub fn title_rect(&self, content: (i32, i32, i32, i32), title_h: i32, traffic: bool)
+        -> (i32, i32, i32, i32)
+    {
+        let (cx, cy, width, _) = content;
+        let mut left = cx + self.title_text_inset.min(width.max(0));
+        let mut right = cx + width - self.title_text_inset.min(width.max(0));
+        for role in 0..3 {
+            let (x, _, w, _) = self.control_rect(content, title_h, traffic, role);
+            if traffic { left = left.max(x + w + self.title_text_inset); }
+            else { right = right.min(x - self.title_text_inset); }
+        }
+        (left, cy - title_h, (right - left).max(0), title_h.max(0))
     }
     pub fn cursor_colors(&self) -> [u32; 2] {
         [self.cursor_outline, self.cursor_fill]

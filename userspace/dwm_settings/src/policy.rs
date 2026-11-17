@@ -51,6 +51,8 @@ pub struct WindowPolicy {
     pub y: Option<i32>,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    pub min_width: Option<i32>,
+    pub min_height: Option<i32>,
     pub floating: Option<bool>,
     pub opacity: Option<u8>,
     pub animation: Option<String>,
@@ -77,7 +79,7 @@ impl PolicyConfig {
             }
             let p = &rule.policy;
             macro_rules! merge { ($($field:ident),*) => { $(if p.$field.is_some() { result.$field = p.$field.clone(); })* }; }
-            merge!(workspace, x, y, width, height, floating, opacity, animation);
+            merge!(workspace, x, y, width, height, min_width, min_height, floating, opacity, animation);
         }
         result
     }
@@ -225,15 +227,17 @@ pub fn resolve(text: &str, apps: &Applications) -> Result<PolicyConfig, ConfigEr
                             rule.policy.y = Some(n);
                         }
                     }
-                    "width" | "height" => {
+                    "width" | "height" | "min_width" | "min_height" => {
                         let n = validation::uint(value, 16384)? as i32;
                         if n < 1 {
                             return Err("window dimension must be positive");
                         }
-                        if key == "width" {
-                            rule.policy.width = Some(n);
-                        } else {
-                            rule.policy.height = Some(n);
+                        match key {
+                            "width" => rule.policy.width = Some(n),
+                            "height" => rule.policy.height = Some(n),
+                            "min_width" => rule.policy.min_width = Some(n),
+                            "min_height" => rule.policy.min_height = Some(n),
+                            _ => unreachable!(),
                         }
                     }
                     "floating" => {

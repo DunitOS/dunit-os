@@ -1,7 +1,7 @@
 //! All configured commands converge on the existing window/protocol operations.
 use super::*;
 pub struct Context<'a> {
-    pub session: &'a mut Vec<settings::WinGeom>,
+    pub session: &'a mut Session,
     pub policy: &'a settings::policy::PolicyConfig,
     pub server: &'a mut Server,
     pub clients: &'a mut Vec<ClientState>,
@@ -144,7 +144,7 @@ pub fn run(action: settings::policy::Action, c: &mut Context) {
     if save {
         if let Some(i) = focus {
             session_remember(c.session, c.apps, &c.wins[i]);
-            settings::save_session(c.session);
+            c.session.persist();
         }
     }
 }

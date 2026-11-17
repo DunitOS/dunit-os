@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
-"""Compiler-warnings budget for Dunit OS (M0 CI budget).
+"""Check Rust warnings in the kernel and every full-profile application.
 
-Builds the kernel (Rust) and the userspace apps (Rust), counts compiler
-warnings that originate in *our* source (not dependencies or the Rust
-sysroot), and compares the total against a committed budget in
-`tools/warnings_budget.json`. The C HAL is compiled with -Wall -Wextra by the
-Makefile and is not part of this Rust warnings budget.
-
-Semantics
----------
-- The build FAILS (exit 2) if the measured count is ABOVE the budget. The bar
-  can only be held or lowered, never silently raised.
-- `--update` ratchets the budget to the freshly measured count and writes it
-  back. Use it to lock in a reduction, or to establish the first baseline.
-- Warnings are re-emitted deterministically by touching each crate root before
-  building, so a warm Cargo cache does not hide them.
-
-This is deliberately a *budget*, not a hard `-D warnings` gate: the kernel
-carries a known backlog of warnings today, and the point of M0 is to stop that
-backlog from growing while the honest baseline is paid down.
+Makefile owns the app list. Touch crate roots to re-emit cached warnings;
+--update may establish or lower tools/warnings_budget.json, never raise it.
+C HAL and upstream C warnings are outside this Rust gate.
 """
 
 from __future__ import annotations
@@ -31,16 +16,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BUDGET_FILE = REPO_ROOT / "tools" / "warnings_budget.json"
-
-# Userspace apps, kept in sync with the Makefile USERSPACE_APPS list.
-USERSPACE_APPS = [
-    "elf_demo", "fs_test", "exit_test", "args_test", "cwd_test", "path_test",
-    "image_demo", "bmp_viewer", "scheduler_test", "spawn_ready_test",
-    "yield_child", "yield_test", "resumable_child", "resumable_test",
-    "ipc_child", "ipc_parent", "runtime_stress", "input_test", "file_api_test",
-    "env_test", "calc", "stdin_test", "fault_pf", "fault_ud",
-    "dtop", "preempt_child", "preempt_test",
-]
 
 KERNEL_BUILD = [
     "cargo", "build", "--release", "--features", "boot-smoke-tests",
@@ -97,14 +72,29 @@ def count_rust_warnings(crate_dir: Path, build_cmd: list[str]) -> int:
 
 
 def measure() -> dict:
+    apps = subprocess.check_output(
+        ["make", "--no-print-directory", "-s", "list-userspace-apps", "IMAGE_PROFILE=full"],
+        cwd=REPO_ROOT, text=True,
+    ).split()
+    if not apps or len(apps) != len(set(apps)):
+        raise ValueError("Makefile must list distinct userspace applications")
+    for app in apps:
+        if not app.isascii() or not all(c.isalnum() or c in "_-" for c in app):
+            raise ValueError(f"invalid userspace app: {app}")
+        if not (REPO_ROOT / "userspace/system_apps" / app / "Cargo.toml").is_file():
+            raise ValueError(f"missing userspace crate: {app}")
+    cargo = subprocess.check_output(
+        ["make", "--no-print-directory", "-s", "list-cargo"],
+        cwd=REPO_ROOT, text=True,
+    ).split()
+    if not cargo:
+        raise ValueError("Makefile must select Cargo")
     counts: dict[str, int] = {}
-    counts["kernel"] = count_rust_warnings(REPO_ROOT / "kernel", KERNEL_BUILD)
+    counts["kernel"] = count_rust_warnings(REPO_ROOT / "kernel", cargo + KERNEL_BUILD[1:])
     userspace_total = 0
-    for app in USERSPACE_APPS:
+    for app in apps:
         app_dir = REPO_ROOT / "userspace" / "system_apps" / app
-        if not app_dir.is_dir():
-            continue
-        userspace_total += count_rust_warnings(app_dir, USERSPACE_BUILD)
+        userspace_total += count_rust_warnings(app_dir, cargo + USERSPACE_BUILD[1:])
     counts["userspace"] = userspace_total
     counts["total"] = counts["kernel"] + counts["userspace"]
     return counts
@@ -130,7 +120,7 @@ def main() -> int:
 
     over = budget_total is not None and counts["total"] > budget_total
 
-    if args.update:
+    if args.update and not over:
         payload = {
             "description": "Compiler-warnings budget (M0). tools/check_warnings.py "
                            "fails if the measured count exceeds these. Ratchet down only.",
@@ -148,15 +138,15 @@ def main() -> int:
         print(f"total     warnings: {counts['total']}")
         if budget_total is not None:
             print(f"budget    total   : {budget_total}")
-        if args.update:
+        if args.update and not over:
             print(f"[check_warnings] budget written to {BUDGET_FILE}")
         elif over:
             print(f"[check_warnings] FAIL: {counts['total']} > budget {budget_total}. "
-                  f"Fix new warnings, or run --update if you intentionally lowered/raised the bar.")
+                  "Fix the warnings; --update cannot raise the budget.")
         elif budget_total is not None:
             print("[check_warnings] OK: within budget.")
 
-    return 2 if (over and not args.update) else 0
+    return 2 if over else 0
 
 
 if __name__ == "__main__":

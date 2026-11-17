@@ -1,5 +1,4 @@
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering};
+use crate::sync::SpinLock;
 
 const MAX_DEVICES: usize = 32;
 
@@ -21,76 +20,32 @@ pub struct DeviceRegistration {
     pub driver: &'static str,
 }
 
-static REGISTRY_LOCK: AtomicBool = AtomicBool::new(false);
-
-/// Device table. Was two `static mut` (array + count); now one struct behind an
-/// `UnsafeCell`, accessed only while `REGISTRY_LOCK` is held — the spinlock
-/// already serialises all readers and writers, the cell just removes the
-/// `static mut` aliasing UB.
 struct RegistryState {
     devices: [Option<DeviceRegistration>; MAX_DEVICES],
     count: usize,
 }
 
-struct RegistryCell(UnsafeCell<RegistryState>);
-unsafe impl Sync for RegistryCell {}
-
-static REGISTRY: RegistryCell = RegistryCell(UnsafeCell::new(RegistryState {
+static REGISTRY: SpinLock<RegistryState> = SpinLock::new(RegistryState {
     devices: [None; MAX_DEVICES],
     count: 0,
-}));
+});
 
 pub fn register(name: &'static str, class: DeviceClass, driver: &'static str) {
-    lock_registry();
-
-    unsafe {
-        let state = &mut *REGISTRY.0.get();
-        let mut index = 0usize;
-        while index < state.count {
-            if let Some(device) = state.devices[index] {
-                if device.name == name {
-                    state.devices[index] = Some(DeviceRegistration {
-                        name,
-                        class,
-                        driver,
-                    });
-                    REGISTRY_LOCK.store(false, Ordering::Release);
-                    publish_dev_node(name);
-                    return;
-                }
-            }
-            index += 1;
-        }
-
-        if state.count < state.devices.len() {
-            state.devices[state.count] = Some(DeviceRegistration {
-                name,
-                class,
-                driver,
-            });
-            state.count += 1;
-        }
-    }
-
-    REGISTRY_LOCK.store(false, Ordering::Release);
+    let mut state = REGISTRY.lock();
+    let existing = state.devices[..state.count].iter()
+        .position(|entry| entry.is_some_and(|entry| entry.name == name));
+    let index = existing.unwrap_or(state.count);
+    if index == state.devices.len() { return; }
+    state.devices[index] = Some(DeviceRegistration { name, class, driver });
+    if existing.is_none() { state.count += 1; }
+    drop(state);
     publish_dev_node(name);
 }
 
 pub fn snapshot(out: &mut [Option<DeviceRegistration>]) -> usize {
-    lock_registry();
-
-    let count = unsafe {
-        let state = &*REGISTRY.0.get();
-        let count = state.count.min(out.len());
-        let mut index = 0usize;
-        while index < count {
-            out[index] = state.devices[index];
-            index += 1;
-        }
-        count
-    };
-
-    REGISTRY_LOCK.store(false, Ordering::Release);
+    let state = REGISTRY.lock();
+    let count = state.count.min(out.len());
+    out[..count].copy_from_slice(&state.devices[..count]);
     count
 }
 
@@ -117,14 +72,5 @@ fn publish_dev_node(name: &str) {
 
     if let Ok(path) = core::str::from_utf8(&path[..prefix.len() + len]) {
         crate::fs::vfs::register_device_node(path);
-    }
-}
-
-fn lock_registry() {
-    while REGISTRY_LOCK
-        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-        .is_err()
-    {
-        core::hint::spin_loop();
     }
 }

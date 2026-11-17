@@ -39,7 +39,7 @@
     { "marker": "Exception handlers registered", "claim": "exception handlers", "source": "kernel/src/lib.rs" },
     { "marker": "[PMM] OK", "claim": "Physical Memory Manager", "source": "kernel/src/memory/pmm.rs" },
     { "marker": "[VMM] OK", "claim": "Virtual Memory Manager", "source": "kernel/src/memory/vmm.rs" },
-    { "marker": "[HEAP] OK (PMM-backed, growable)", "claim": "kernel heap", "source": "kernel/src/memory/heap.rs" },
+    { "marker": "[HEAP] OK (PMM-backed, growable)", "claim": "kernel heap", "source": "kernel/src/allocator.rs" },
     { "marker": "[ADDRSPACE-TEST] OK", "claim": "address-space switching", "source": "kernel/src/memory" },
     { "marker": "[MMIO-ALLOC-TEST] OK", "claim": "MMIO allocator", "source": "kernel/src/memory" },
     { "marker": "[PROCESS-ADDRSPACE-TEST] OK", "claim": "per-process address space", "source": "kernel/src/process/mod.rs" },

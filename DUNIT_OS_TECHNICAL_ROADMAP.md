@@ -1,6 +1,6 @@
 # Dunit OS technical roadmap
 
-Updated 15 November 2026. This is the canonical architecture, dependency and
+Updated 16 November 2026. This is the canonical architecture, dependency and
 acceptance plan. Implemented foundations do not close an entire milestone:
 M4 persistence, M5 installed root, M6 release gates and M7 SDK completion remain
 open. [Current state](docs/architecture/current-state.md) describes the implementation;
@@ -167,6 +167,14 @@ the application widget layer.
   DSS cascade/tokens/states/motion, widgets and software painting.
 - [x] Implement interactive windows, panel/dock/launcher/tray, quick settings,
   notifications, workspaces and the switcher.
+- [x] Resize from every edge/corner with app-specific minimum content sizes;
+  verify raise, move, maximize/restore, minimize, close/reopen and keyboard input
+  through real pointer/key events and captured frames. Calculator's complete
+  keypad remains usable at its configured minimum.
+- [x] Show live processes in tray/monitor counts, including blocked tasks;
+  verify changes across application launch, minimize, close and reopen.
+- [x] Honor disabled session restore for loading, remembering and saving geometry;
+  keep the saved store when toggling the policy off.
 - [x] Ship Terminal, Files, Calculator, Monitor and Settings; run userspace dsh over PTY.
 - [x] Share validated configuration between setup and Settings.
 - [x] Run native Lua/luac and isolated policy/event workers with deadlines and
@@ -204,6 +212,8 @@ kernel rebuild. Brightness UI eventually uses display/power service control.
 - [x] Run transactional validate→partition→format→copy→verify→boot-config→sync
   installation with rollback.
 - [x] Support AHCI/VirtIO installation paths and BIOS/UEFI profile/image manifests.
+- [x] Honor VirtIO read-only disks in device metadata, block writes and installer
+  validation; rejected writes keep reads available and leave the image unchanged.
 - [ ] Preserve partition/device identity, bounds and explicit authorization on real disks.
 
 - [ ] Load root, init, services, apps and assets from the installed system volume.
@@ -687,12 +697,18 @@ and upgrade rollback remain release goals.
   centralize protocol definitions.
 - [x] Remove fake kernel package/thread/device/proc backends, duplicate asset reads
   and the unused bootloader crate; consolidate English manuals and review findings.
+- [x] Remove unbuilt Multiboot entry/linker files and the broken GRUB image target.
+- [x] Retire initial duplicate kernel test models and bootimage runner; test the
+  real heap and ELF parser, including growth rollback and malformed headers.
+- [x] Preserve exact asset/overlay bytes when packaging ELF data; strip only
+  declared applications and system tools.
 - [x] Fix bounded asset reads, Unicode strings, malformed padding/weighted grow and
   invalid subtree translation; verify host and native behavior.
-- [x] Lower the checked kernel/userspace warning subset to zero.
+- [x] Check the kernel and all full-profile Rust apps against a zero-warning budget;
+  use Makefile's compiler/app list and reject budget increases through `--update`.
 - [ ] Split oversized kernel/syscall/process/compositor modules by responsibility.
 - [ ] Finish safe ownership/locking and a recovery-console-only Terminal path.
-- [ ] Extend warning coverage beyond the checker's current userspace subset.
+- [ ] Extend warning coverage to unpackaged Rust crates and C code.
 - [ ] Version remaining configuration/filesystem/release contracts.
 - [ ] Add structured log levels and bounded persistent logs.
 - [ ] Provide GDB stub, tracing/profiling/crash dumps.

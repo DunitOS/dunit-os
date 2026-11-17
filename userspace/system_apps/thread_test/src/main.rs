@@ -91,8 +91,8 @@ pub extern "C" fn _start() -> ! {
     let pid = libdunit::get_pid();
     if libdunit::get_tid() != pid { fail("main TID"); }
     OWNER.store(pid as u64, Ordering::SeqCst);
-    let top_a = unsafe { (core::ptr::addr_of_mut!(STACK_A) as *mut u8).add(STACK_BYTES) };
-    let top_b = unsafe { (core::ptr::addr_of_mut!(STACK_B) as *mut u8).add(STACK_BYTES) };
+    let top_a = unsafe { (core::ptr::addr_of_mut!(STACK_A.0) as *mut u8).add(STACK_BYTES) };
+    let top_b = unsafe { (core::ptr::addr_of_mut!(STACK_B.0) as *mut u8).add(STACK_BYTES) };
     let a = libdunit::thread_create(worker, top_a, 0x5a);
     let b = libdunit::thread_create(worker, top_b, 0xa5);
     if a <= 0 || b <= 0 || a == b || a == pid as isize || b == pid as isize {
@@ -104,15 +104,15 @@ pub extern "C" fn _start() -> ! {
     if libdunit::thread_join(pid, &mut libdunit::WaitStatus::empty()) != libdunit::ECHILD {
         fail("join main thread");
     }
-    let top_d = unsafe { (core::ptr::addr_of_mut!(STACK_D) as *mut u8).add(STACK_BYTES) };
+    let top_d = unsafe { (core::ptr::addr_of_mut!(STACK_D.0) as *mut u8).add(STACK_BYTES) };
     if libdunit::syscall3(libdunit::SYSCALL_THREAD_CREATE, 0, top_d as usize, 0) != libdunit::EFAULT {
         fail("unmapped entry");
     }
-    if libdunit::syscall3(libdunit::SYSCALL_THREAD_CREATE, worker as usize, 0, 0) != libdunit::EINVAL {
+    if libdunit::syscall3(libdunit::SYSCALL_THREAD_CREATE, worker as *const () as usize, 0, 0) != libdunit::EINVAL {
         fail("unmapped stack");
     }
     let faulty = libdunit::syscall3(
-        libdunit::SYSCALL_THREAD_CREATE, returns_without_exit as usize, top_d as usize, 0,
+        libdunit::SYSCALL_THREAD_CREATE, returns_without_exit as *const () as usize, top_d as usize, 0,
     );
     if faulty <= 0 { fail("fault thread create"); }
     let mut fault_status = libdunit::WaitStatus::empty();
@@ -149,7 +149,7 @@ pub extern "C" fn _start() -> ! {
     }
     if !reaped { fail("auto-reap timeout"); }
     libdunit::println("thread_test: legacy negative exit and detached auto-reap OK");
-    let top_c = unsafe { (core::ptr::addr_of_mut!(STACK_C) as *mut u8).add(STACK_BYTES) };
+    let top_c = unsafe { (core::ptr::addr_of_mut!(STACK_C.0) as *mut u8).add(STACK_BYTES) };
     if libdunit::thread_create(unjoined_worker, top_c, 0) <= 0 { fail("orphan create"); }
     libdunit::println("thread_test: OK shared=2 xmm=isolated");
     libdunit::exit(0);

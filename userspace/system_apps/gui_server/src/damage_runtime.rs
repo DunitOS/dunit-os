@@ -60,9 +60,6 @@ pub struct Context<'a> {
     pub widgets: (bool, u64, u32, u64),
 }
 impl Cache {
-    pub fn invalidate(&mut self) {
-        self.previous = None;
-    }
     pub fn new() -> Self {
         Self {
             previous: None,

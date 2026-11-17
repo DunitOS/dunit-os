@@ -98,6 +98,8 @@ and the glyph atlas.
 
 Kinds are launcher, quicksettings, workspaces, apps, app_group, clock,
 analog_clock, tray, title, system_monitor, button, indicator, spacer and container.
+Tray and monitor process counts include prepared, ready, running and blocked
+processes; exited/reaped records are excluded. They are process counts, not CPU usage.
 Common fields are enabled, class, align, size, width, height, grow and gap. Zero
 width/height is intrinsic. Containers take children and horizontal/vertical
 direction. Apps/groups take entries; source is pinned (default), running or both,
@@ -146,11 +148,24 @@ commands are rejected.
 
 Up to 128 rules merge in declaration order, overriding only supplied fields.
 Selector is registry ID or `*`. Fields are workspace, x/y (-16384..16384),
-width/height (1..16384), floating, opacity (0..255) and animation. Rules establish
+width/height and min_width/min_height (1..16384), floating, opacity (0..255) and
+animation. Minimums describe client content, excluding decorations. Rules establish
 initial policy. Manual drag releases Lua tiling; retile returns it to the script.
 Maximized/minimized windows do not participate in layout. Floating restore
 geometry/detachment survive display-session recreation; disabling Lua restores
 remembered floating geometry.
+
+Drag any window edge or corner to resize; the opposite edges stay anchored.
+Manual resizing respects app minimums and the usable work area. Calculator's
+default minimum is 192×308 content pixels, keeping its full keypad visible.
+Title dragging raises/moves the window; dragging a maximized title restores it.
+Minimized windows return through their dock entry. Quick Settings closes after
+a toggle and on Escape.
+
+`[session] restore=false` disables loading, remembering and saving geometry.
+Disabling preserves the stored file; re-enabling loads it. An ordinary reload
+with unchanged policy retains live geometry. Persistence across reboot remains
+a separate acceptance gate.
 
 ## Themes and assets
 
@@ -267,7 +282,7 @@ records. It buffers at most 16 KiB, drains at most four 1 KiB chunks per frame,
 then applies once. It kills/reaps timeout/failure after configured 50..5000 ms.
 
 Workspace/window/work-area/config changes invalidate snapshots and cancel stale
-results. Every cell must fit decorations before commit. Resize uses existing
+results. Every cell must fit decorations and its app minimum before commit. Resize uses existing
 CONFIGURE/ACK/import/commit; `Lua geometry committed` requires actual matching
 client buffers. Failures preserve geometry. Layout runs on snapshot changes,
 not each frame. Drag cancels tracks/detaches placement until retile or reload.
@@ -448,7 +463,11 @@ python3 tools/qemu_test.py --build --markers-file tools/lua_markers.json
 python3 tools/qemu_test.py --markers-file tools/lua_desktop_markers.json
 python3 tools/qemu_test.py --markers-file tools/dwm_engine_v2_markers.json
 python3 tools/qemu_test.py --markers-file tools/settings_ui_markers.json
-python3 tools/qemu_test.py --markers-file tools/gui_smoke_markers.json
+python3 tools/qemu_test.py --markers-file tools/gui_smoke_markers.json --ready-marker 'gui_server: desktop ready'
+python3 tools/test_dwm_window_actions.py --scene windows
+python3 tools/test_dwm_window_actions.py --scene lifecycle --uefi
+python3 tools/test_dwm_window_actions.py --scene quicksettings
+python3 tools/test_dwm_window_actions.py --scene boot --uefi
 python3 tools/qemu_test.py --markers-file tools/themes_terminal_markers.json
 python3 tools/qemu_test.py --markers-file tools/themes_ui_markers.json --ready-marker 'gui_server: desktop ready' --cmd-timeout 150
 python3 tools/qemu_test.py --markers-file tools/svg_markers.json
@@ -470,6 +489,11 @@ records. Native dwm_lua_test bounds PTY polling, kills/reaps failed children and
 checks diagnostics; merged stderr/stdout is not an independent stdout proof.
 Event tests cover subscriptions/scalars/custom curves/commands/widgets,
 persistent state and atomic NaN/invalid data rejection.
+
+The clean-boot scene derives an initrd overlay from the system default and
+enables only the widget master. It runs the original boot marker assertions
+with no startup apps and captures the desktop. Production defaults stay intact.
+Window-action captures need visual inspection alongside serial/geometry checks.
 
 Engine tests exercise actual Genie pixels, fan groups, restore, source editing/
 long paths, invalid-Lua profile rollback, user-profile import, independent panels,

@@ -25,6 +25,15 @@ class TextActions(unittest.TestCase):
         keyboard = Keyboard()
         qemu_test.type_command(keyboard, '', submit=False)
         self.assertEqual(keyboard.keys, [])
+    @patch('qemu_test.time.sleep')
+    def test_unsupported_text_is_rejected_before_any_partial_input_or_submit(self, sleep):
+        for character in ('É', 'Я', 'я', '🙂', '\t'):
+            with self.subTest(character=character):
+                keyboard = Keyboard()
+                with self.assertRaisesRegex(ValueError, 'guest US keyboard layout'):
+                    qemu_test.type_command(keyboard, 'before' + character + 'after')
+                self.assertEqual(keyboard.keys, [])
+                self.assertIsNone(qemu_test.char_to_keys(character))
 
 if __name__ == '__main__':
     unittest.main()

@@ -63,6 +63,8 @@ jobs:
           python3 tools/test_shell_style_source.py
           python3 tools/test_shellprobe_report.py
           python3 tools/test_gui_protocol_source.py
+          rustc --edition=2021 --test tools/test_memory_host.rs -o /tmp/dunit-memory-test
+          /tmp/dunit-memory-test
           rustc --edition=2021 --test kernel/src/drivers/keyboard_queue.rs -o /tmp/dunit-keyboard-queue-test
           /tmp/dunit-keyboard-queue-test
           rustc --edition=2021 --test userspace/system_apps/gui_server/src/damage_plan.rs -o /tmp/dunit-damage-plan-test

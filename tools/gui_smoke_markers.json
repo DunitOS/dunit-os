@@ -1,5 +1,5 @@
 {
-  "description": "Phase 3 resize/maximize/restore smoke budget for the boot-smoke-tests DWM kernel (limine_test_gui.conf embeds assets/dwm/test.toml). test.toml's [startup] autostarts two gui_clients (proving the M3 cross-process isolation invariant — two untrusted clients composited at once) plus gui_terminal + gui_files, and sets `self_test = true`. With self_test on, the compositor drives EVERY live window through the SAME `set_window_state` path the title-bar maximize chip and the macOS-style drag-to-restore use — a server-push CONFIGURE — first MAXIMIZING each window (work-area-sized re-import across a real process boundary), then after a short settle RESTORING it to its floating geometry (the reverse CONFIGURE). Maximizing all windows (not just runtime-pumped ones) keeps the proof independent of which clients present first. `served two untrusted clients OK` + `desktop ready` prove the desktop came up; `acked (self-test)` proves the compositor pushed the maximize; `restored (self-test)` proves the un-maximize round trip works; `gui_terminal/gui_files: reconfigured OK` prove BOTH heavier clients re-negotiated their buffer at the new geometry. Run: tools/qemu_test.py --build --config limine_test_gui.conf --markers-file tools/gui_smoke_markers.json --ready-marker 'gui_server: desktop ready' --timeout 300 --linger 25. The GUI kernel never prints [TERM-007], so --ready-marker MUST be overridden as shown. `--linger` keeps collecting serial past `desktop ready` so the restore leg (which happens a few ticks after the maximize completes, i.e. after the ready milestone) is captured.",
+  "description": "DWM integration smoke using limine_test_gui.conf and assets/dwm/test.toml from initrd. Covers isolated clients, maximize/restore, session roundtrip, notifications, shortcuts, app configuration, resolution reload and close/reopen resource cleanup. Run: python3 tools/qemu_test.py --build --markers-file tools/gui_smoke_markers.json --ready-marker \"gui_server: desktop ready\" --timeout 420 --boot-timeout 120 --post-boot-delay 3 --settle 4. Add --uefi for the firmware variant.",
   "run": {
     "config": "limine_test_gui.conf",
     "actions": [
@@ -17,62 +17,62 @@
     {
       "marker": "gui_server: served two untrusted clients OK",
       "claim": "two untrusted gui_clients composited at once (M3 isolation invariant preserved)",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "source": "userspace/system_apps/gui_server/src/protocol_runtime.rs"
     },
     {
       "marker": "gui_server: desktop ready",
       "claim": "compositor reached an interactive, presenting state",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "source": "userspace/system_apps/gui_server/src/desktop_painter.rs"
     },
     {
       "marker": "gui_server: config schema_version=2 supported=1",
-      "claim": "M4 schema versioning: test.toml declares [meta] schema_version=1 and this build supports it",
+      "claim": "schema 1 test configuration resolves to supported schema 2",
       "source": "userspace/dwm_settings/src/lib.rs"
     },
     {
       "marker": "gui_server: schema guard ok (rejects future)",
-      "claim": "M4 forward-compat guard: version_supported() accepts current, rejects future+0 (newer doc → last-known-good baseline, never mis-parsed)",
+      "claim": "M4 forward-compat guard: version_supported() accepts current, rejects future+0 (newer doc \u2192 last-known-good baseline, never mis-parsed)",
       "source": "userspace/dwm_settings/src/lib.rs"
     },
     {
       "marker": "gui_server: session roundtrip ok",
-      "claim": "M4 window/session restore: the compositor remembered every live window's geometry, wrote the session store, reloaded it, and every id/x/y/w/h matched — the save→persist→reload path works across a real file",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "M4 window/session restore: the compositor remembered every live window's geometry, wrote the session store, reloaded it, and every id/x/y/w/h matched \u2014 the save\u2192persist\u2192reload path works across a real file",
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "gui_server: switcher cycle",
-      "claim": "M4 Alt/Super-Tab window switcher: with [shortcuts] switcher on, the compositor armed the SAME Switcher state the key-drain path uses, advanced off the front window, committed, and raising the highlight made a DIFFERENT window the topmost/focused one — the switch is real, not cosmetic",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "M4 Alt/Super-Tab window switcher: with [shortcuts] switcher on, the compositor armed the SAME Switcher state the key-drain path uses, advanced off the front window, committed, and raising the highlight made a DIFFERENT window the topmost/focused one \u2014 the switch is real, not cosmetic",
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "gui_server: notify posted added=1 corner=1 timeout_ms=3000 ok",
-      "claim": "M4 desktop notifications: with [notifications] enabled, the compositor posted a toast through the SAME notify_post queue the app-launch sites use; policy (corner=1, timeout_ms=3000) came entirely from config, this post enqueued exactly one toast (delta-checked, independent of any client's live startup toast), and the queued toast survived the prune while a synthetic future-tick expired it — the transient is real, not cosmetic",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "M4 desktop notifications: with [notifications] enabled, the compositor posted a toast through the SAME notify_post queue the app-launch sites use; policy (corner=1, timeout_ms=3000) came entirely from config, this post enqueued exactly one toast (delta-checked, independent of any client's live startup toast), and the queued toast survived the prune while a synthetic future-tick expired it \u2014 the transient is real, not cosmetic",
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "gui_server: notify expired (self-test)",
-      "claim": "M4 notification auto-dismiss end-to-end: after timeout_ms monotonic milliseconds the per-frame retain() pruned the posted toast and the queue drained to empty on its own — the config-driven timeout actually fires, not just parses",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "M4 notification auto-dismiss end-to-end: after timeout_ms monotonic milliseconds the per-frame retain() pruned the posted toast and the queue drained to empty on its own \u2014 the config-driven timeout actually fires, not just parses",
+      "source": "userspace/system_apps/gui_server/src/desktop_painter.rs"
     },
     {
       "marker": "gui_server: quicksettings applet enabled=1",
-      "claim": "M4 quick-settings applet: with [quicksettings] enabled, the panel applet flipped the LIVE fx.blur/wg.enabled fields the renderer reads (single source of truth, no shadow copy) and restored them — the toggles drive real compositor state",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "M4 quick-settings applet: with [quicksettings] enabled, the panel applet flipped the LIVE fx.blur/wg.enabled fields the renderer reads (single source of truth, no shadow copy) and restored them \u2014 the toggles drive real compositor state",
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "map=ok effect=ok (self-test)",
-      "claim": "keyboard control: with [shortcuts] cmd_mod policy, match_shortcut() maps cmd_mod+digit→workspace, +Space→launcher, +Q→close, +M→maximize (and bare keys do NOT fire globally), and a behavioural workspace jump applied+read back — the shortcut decision is real, config-driven, and drives live compositor state",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "keyboard control: with [shortcuts] cmd_mod policy, match_shortcut() maps cmd_mod+digit\u2192workspace, +Space\u2192launcher, +Q\u2192close, +M\u2192maximize (and bare keys do NOT fire globally), and a behavioural workspace jump applied+read back \u2014 the shortcut decision is real, config-driven, and drives live compositor state",
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "acked (self-test)",
       "claim": "compositor pushed a server-initiated CONFIGURE to a runtime window via set_window_state (maximize)",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "restored (self-test)",
       "claim": "compositor pushed the reverse CONFIGURE to un-maximize the window back to its floating geometry (the user-visible restore, same path the chip and drag-to-restore drive)",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "source": "userspace/system_apps/gui_server/src/desktop_probes.rs"
     },
     {
       "marker": "gui_terminal: reconfigured OK",
@@ -111,7 +111,7 @@
     },
     {
       "marker": "gui_calc: reconfigured OK",
-      "claim": "the calculator re-imported a work-area-sized buffer in response to CONFIGURE (protocol resize across a process boundary — the modern resizable calculator honours maximize/restore)",
+      "claim": "the calculator re-imported a work-area-sized buffer in response to CONFIGURE (protocol resize across a process boundary \u2014 the modern resizable calculator honours maximize/restore)",
       "source": "userspace/system_apps/gui_calc/src/main.rs"
     },
     {
@@ -126,42 +126,42 @@
     },
     {
       "marker": "gui_demo: notify sent \"gui_demo started\"",
-      "claim": "the demo app posted a NOTIFY control message to the compositor at startup (client→compositor notification request across a process boundary)",
+      "claim": "the demo app posted a NOTIFY control message to the compositor at startup (client\u2192compositor notification request across a process boundary)",
       "source": "userspace/system_apps/gui_demo/src/main.rs"
     },
     {
       "marker": "gui_server: client notify \"gui_demo started\"",
-      "claim": "Subtask 2 end-to-end: the compositor received the demo's NOTIFY message and turned it into a toast through the SAME notify_post path a launch uses — policy ([notifications] enabled/timeout/corner) stayed compositor-owned, the client only named the text (bounds-clamped, untrusted)",
+      "claim": "Subtask 2 end-to-end: the compositor received the demo's NOTIFY message and turned it into a toast through the SAME notify_post path a launch uses \u2014 policy ([notifications] enabled/timeout/corner) stayed compositor-owned, the client only named the text (bounds-clamped, untrusted)",
       "source": "userspace/system_apps/gui_server/src/main.rs"
     },
     {
       "marker": "gui_server: recycle self-test reaped_to=",
-      "claim": "scheduler/resource-leak fix: after closing every window the per-frame reaper pruned the clients Vec (freeing spawn slots + protocol connections + shared-buffer mappings), and relaunching succeeded — closing many windows no longer permanently blocks opening new ones",
+      "claim": "scheduler/resource-leak fix: after closing every window the per-frame reaper pruned the clients Vec (freeing spawn slots + protocol connections + shared-buffer mappings), and relaunching succeeded \u2014 closing many windows no longer permanently blocks opening new ones",
       "source": "userspace/system_apps/gui_server/src/main.rs"
     },
     {
       "marker": "gui_settings: res picker self-test picked 1600x900",
-      "claim": "feature #2 (settings resolution picker): with self_test on, gui_settings actuated the SAME apply(ResNext) path a `>` click drives, walked the picker to a concrete non-boot mode (1600x900), wrote it to [display] and pinged reload — the settings UI edits the live resolution, config-driven, no hardcoded mode",
+      "claim": "feature #2 (settings resolution picker): with self_test on, gui_settings actuated the SAME apply(ResNext) path a `>` click drives, walked the picker to a concrete non-boot mode (1600x900), wrote it to [display] and pinged reload \u2014 the settings UI edits the live resolution, config-driven, no hardcoded mode",
       "source": "userspace/system_apps/gui_settings/src/main.rs"
     },
     {
       "marker": "gui_server: [display] changed on reload",
-      "claim": "feature #2 end-to-end: the compositor received gui_settings' reload ping, diffed the new [display] against the applied mode, and re-entered run_desktop_session to re-apply it — a GUI resolution edit really drives a live session re-entry (the compositor owns the display; the client only edited config)",
+      "claim": "feature #2 end-to-end: the compositor received gui_settings' reload ping, diffed the new [display] against the applied mode, and re-entered run_desktop_session to re-apply it \u2014 a GUI resolution edit really drives a live session re-entry (the compositor owns the display; the client only edited config)",
       "source": "userspace/system_apps/gui_server/src/main.rs"
     },
     {
       "marker": "gui_server: [display] resolution set to 1600x900",
-      "claim": "feature #2 real behavior change: after the re-entry the compositor asked the kernel display backend to mode-set to the picker-chosen 1600x900 (distinct from the 1280x720 boot mode) — the resolution actually changed live via the Settings UI, not just parsed",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "claim": "feature #2 real behavior change: after the re-entry the compositor asked the kernel display backend to mode-set to the picker-chosen 1600x900 (distinct from the 1280x720 boot mode) \u2014 the resolution actually changed live via the Settings UI, not just parsed",
+      "source": "userspace/system_apps/gui_server/src/desktop_resources.rs"
     },
     {
       "marker": "gui_server: argb blit",
       "claim": "the compositor performed a per-pixel src-over composite of a translucent (ARGB8888) client instead of an opaque copy",
-      "source": "userspace/system_apps/gui_server/src/main.rs"
+      "source": "userspace/system_apps/gui_server/src/window_painter.rs"
     },
     {
       "marker": "[DSH-CALC-TEST] OK",
-      "claim": "Subtask 4: a classic terminal-mode program (calc) runs under dsh's cooked line discipline via spawn_external — the exact gui_terminal→dsh→child path — echoing keystrokes and delivering whole lines just like kernel Terminal Mode, so the GUI terminal has backward compatibility with terminal programs",
+      "claim": "Subtask 4: a classic terminal-mode program (calc) runs under dsh's cooked line discipline via spawn_external \u2014 the exact gui_terminal\u2192dsh\u2192child path \u2014 echoing keystrokes and delivering whole lines just like kernel Terminal Mode, so the GUI terminal has backward compatibility with terminal programs",
       "source": "kernel/src/command.rs"
     }
   ],
@@ -205,7 +205,7 @@
     },
     {
       "marker": "[DSH-CALC-TEST] FAIL",
-      "why": "a terminal-mode program (calc) failed to run under dsh's cooked bridge — the GUI terminal would not behave like Terminal Mode",
+      "why": "a terminal-mode program (calc) failed to run under dsh's cooked bridge \u2014 the GUI terminal would not behave like Terminal Mode",
       "source": "kernel/src/command.rs"
     },
     {

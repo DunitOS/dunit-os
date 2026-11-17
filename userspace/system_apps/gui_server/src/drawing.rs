@@ -416,6 +416,15 @@ pub(super) fn draw_text_ttf_alpha(
     color: u32,
     opacity:u32,
 ) -> i32 {
+    draw_text_ttf_alpha_clipped(back, bw, bh, font, x, baseline, px, text, color,
+        opacity, (0, 0, bw as i32, bh as i32))
+}
+
+pub(super) fn draw_text_ttf_alpha_clipped(
+    back: &mut [u32], bw: usize, bh: usize, font: &Font,
+    x: i32, baseline: i32, px: f32, text: &str, color: u32, opacity: u32,
+    clip: (i32, i32, i32, i32),
+) -> i32 {
     let rgb = color & 0x00FF_FFFF;
     let (glyphs, adv) = font.layout_line(text, px);
     for g in glyphs {
@@ -425,7 +434,7 @@ pub(super) fn draw_text_ttf_alpha(
             for row in 0..bmp.height {
                 for col in 0..bmp.width {
                     let cov = bmp.coverage[row * bmp.width + col] as u32*opacity.min(255)/255;
-                    if cov == 0 {
+                    if cov == 0 || !in_rect(clip, ox + col as i32, oy + row as i32) {
                         continue;
                     }
                     blend_pixel(back, bw, bh, ox + col as i32, oy + row as i32, (cov << 24) | rgb);

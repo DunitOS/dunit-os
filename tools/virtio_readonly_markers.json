@@ -1,0 +1,122 @@
+{
+  "description": "Read-only VirtIO on a 256 MiB fixture. Attach through qemu_test.py with readonly=on, disable-modern=on and disable-legacy=off; seed sector zero with DUNIT-READONLY-V1. Compare the complete disk hash before/after. Captures are in build/virtio-readonly. The production terminal avoids boot-smoke writes.",
+  "run": {
+    "config": "limine_sdk_terminal.conf",
+    "actions": [
+      {
+        "type_text": "blk"
+      },
+      {
+        "wait_marker": "268435456  ro",
+        "occurrences": 1,
+        "timeout": 30
+      },
+      {
+        "delay_ms": 1500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "build/virtio-readonly/devices.ppm"
+        }
+      },
+      {
+        "type_text": "blkread vd0 0"
+      },
+      {
+        "wait_marker": "DUNIT-READONLY-V",
+        "occurrences": 1,
+        "timeout": 30
+      },
+      {
+        "delay_ms": 1500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "build/virtio-readonly/read-before.ppm"
+        }
+      },
+      {
+        "type_text": "blkwrite vd0 0"
+      },
+      {
+        "wait_marker": "blkwrite: I/O error",
+        "occurrences": 1,
+        "timeout": 30
+      },
+      {
+        "delay_ms": 1500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "build/virtio-readonly/write-refused.ppm"
+        }
+      },
+      {
+        "type_text": "install.dunit vd0 --yes"
+      },
+      {
+        "wait_marker": "installer requires a writable AHCI or VirtIO disk",
+        "occurrences": 1,
+        "timeout": 30
+      },
+      {
+        "delay_ms": 1500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "build/virtio-readonly/install-refused.ppm"
+        }
+      },
+      {
+        "type_text": "blkread vd0 0"
+      },
+      {
+        "wait_marker": "DUNIT-READONLY-V",
+        "occurrences": 2,
+        "timeout": 30
+      },
+      {
+        "delay_ms": 1500
+      },
+      {
+        "execute": "screendump",
+        "arguments": {
+          "filename": "build/virtio-readonly/read-after.ppm"
+        }
+      }
+    ]
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "production terminal is ready",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[VIRTIO-BLK] registered vd0 sectors=524288 mode=ro",
+      "claim": "driver publishes the advertised read-only flag for the attached fixture",
+      "source": "kernel/src/drivers/virtio_blk.rs"
+    },
+    {
+      "marker": "blkwrite: I/O error",
+      "claim": "direct block write is refused",
+      "source": "kernel/src/drivers/block.rs"
+    },
+    {
+      "marker": "installer requires a writable AHCI or VirtIO disk",
+      "claim": "installer rejects the readonly target before disk writes",
+      "source": "kernel/src/storage/installer.rs"
+    }
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[USER-FAULT]",
+    "[INSTALL] transaction committed",
+    "[INSTALL] rollback",
+    "[VIRTIO-BLK] disk offline"
+  ]
+}

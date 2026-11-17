@@ -58,8 +58,6 @@ panel_h = 44
 launcher_w = 100
 # Vestigial after REF-2 (top taskbar → dock task-switcher + centered title);
 # kept for config round-trip stability.
-taskbtn_w        = 120
-taskbtn_gap      = 4
 menu_w           = 130
 menu_item_h      = 26
 dock_w = 32

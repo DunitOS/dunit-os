@@ -426,8 +426,17 @@ The little-endian record has the following fields:
 Success returns 0 and consumes one event. An empty queue returns EAGAIN;
 wrong length returns EINVAL, invalid user output returns EFAULT, and an
 unauthorised handle returns EACCES. Failed copies and invalid arguments do not
-consume input. Capability acquisition/release must reset the consumer baseline
-and prevent a new owner receiving a previous session's queued input.
+consume input. Every successful input acquisition creates an independently
+retained handle. Repeated acquisition by the current owner preserves pending
+events; closing one handle leaves the others valid. Final close or process
+exit/kill releases the owner and discards its queue before a new acquisition
+publishes one fresh baseline. Duplication and transfer remain prohibited.
+
+Handle authorization captures the current lease generation while task metadata
+is scoped. The syscall pins and validates the output mapping before locking
+input, then rechecks that generation through the bounded record copy and pop.
+A delayed read cannot consume a later session, including reacquisition by the
+same PID. Input callbacks never look up tasks or acquire VM locks.
 
 The queue stays bounded and IRQ-safe. Consecutive pure motion events may be
 coalesced only with identical button state and without discarding wheel deltas.
@@ -437,8 +446,11 @@ a click. The first record on ownership acquisition is also a LOST_BEFORE baselin
 a button already held when the seat is acquired must not synthesize a new press.
 Sequence gaps can also mean motion coalescing; only LOST_BEFORE requests resync. Kernel code stores device facts; userspace chooses cancellation policy.
 
-GetMouseState=60 and its wheel-accumulator semantics remain unchanged. No gui-v1
-wire bytes change. A safe libdunit wrapper exposes Result<Option<PointerEvent>>.
+GetMouseState=60 retains its 16-byte record and access policy. Its coordinates,
+buttons and accumulated wheel are copied under one input scope; an invalid
+output does not drain wheel input. A successful copy clears that accumulator
+without consuming queued native events. No gui-v1 wire bytes change. A safe
+libdunit wrapper exposes Result<Option<PointerEvent>>.
 The compositor consumes one queued record per render iteration and routes
 transitions in order, using that record's coordinates. Remaining records stay
 queued; pure motion coalesces in the kernel. This bounded budget preserves

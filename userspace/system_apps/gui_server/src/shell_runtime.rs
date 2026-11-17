@@ -552,12 +552,12 @@ impl Shell {
             }
             match c.kind {
                 Kind::Clock => self.text_cache[index] = clock_text(&c.format, secs),
-                Kind::Tray=>self.text_cache[index]=alloc::format!("RAM {}%  {} proc  {:02}:{:02}",self.stats.memory_used_percent(),self.stats.process_running,(secs/60)%100,secs%60),
+                Kind::Tray=>self.text_cache[index]=alloc::format!("RAM {}%  {} proc  {:02}:{:02}",self.stats.memory_used_percent(),self.stats.live_processes(),(secs/60)%100,secs%60),
                 Kind::SystemMonitor => {
                     self.text_cache[index] = alloc::format!(
                         "RAM {}%  {} proc",
                         self.stats.memory_used_percent(),
-                        self.stats.process_running
+                        self.stats.live_processes()
                     )
                 }
                 _ => continue,
