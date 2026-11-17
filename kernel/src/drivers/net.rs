@@ -163,14 +163,12 @@ fn probe_nic(dev: PciDevice, kind: NicKind) -> Result<ProbeResult, ProbeError> {
 }
 
 fn probe_e1000(dev: PciDevice) -> Result<ProbeResult, ProbeError> {
-    pci::enable_mmio_bus_master(dev);
-    let mmio_phys = find_mmio_bar(dev)?;
-    let mmio_virt =
-        vmm::map_mmio_region(mmio_phys as usize, E1000_MMIO_MAP_SIZE).ok_or(ProbeError::MmioMap)?;
+    let registers = MappedRegisters::open(dev)?;
+    let mmio_phys = registers.physical;
+    let mmio_virt = registers.base;
 
     let status = read32(mmio_virt, E1000_STATUS);
     if status == 0 || status == 0xFFFF_FFFF {
-        let _ = vmm::unmap_mmio_region(mmio_virt, E1000_MMIO_MAP_SIZE);
         return Err(ProbeError::InvalidRegisters);
     }
 
@@ -185,8 +183,6 @@ fn probe_e1000(dev: PciDevice) -> Result<ProbeResult, ProbeError> {
     serial_write(" mac=");
     write_mac(ral, rah);
     serial_write(" packet-io=not-implemented\r\n");
-
-    let _ = vmm::unmap_mmio_region(mmio_virt, E1000_MMIO_MAP_SIZE);
 
     Ok(ProbeResult {
         mmio_ready: true,
@@ -239,4 +235,146 @@ fn write_pci_addr(dev: PciDevice) {
 
 fn read32(base: usize, offset: usize) -> u32 {
     unsafe { core::ptr::read_volatile((base + offset) as *const u32) }
+}
+
+// Packet bring-up remains private to boot diagnostics until N0 IRQ delivery and
+// the userspace packet-capability contract are implemented and verified.
+#[cfg(feature = "boot-smoke-tests")]
+#[path = "net/dma.rs"]
+mod dma;
+#[cfg(feature = "boot-smoke-tests")]
+#[path = "net/e1000.rs"]
+mod e1000;
+#[cfg(feature = "boot-smoke-tests")]
+#[path = "net/rings.rs"]
+mod rings;
+
+struct MappedRegisters {
+    base: usize,
+    physical: u64,
+    device: PciDevice,
+    original_command: u16,
+}
+impl MappedRegisters {
+    fn open(device: PciDevice) -> Result<Self, ProbeError> {
+        let physical = find_mmio_bar(device)?;
+        let original_command = pci::command(device);
+        // Register discovery needs MEMORY_SPACE, never DMA authority. Keep
+        // firmware bus mastering disabled until an owning driver publishes DMA.
+        pci::set_command(device, (original_command | 2) & !4);
+        match vmm::map_mmio_region(physical as usize, E1000_MMIO_MAP_SIZE) {
+            Some(base) => Ok(Self {
+                base,
+                physical,
+                device,
+                original_command,
+            }),
+            None => {
+                pci::set_command(device, original_command & !4);
+                Err(ProbeError::MmioMap)
+            }
+        }
+    }
+}
+#[cfg(feature = "boot-smoke-tests")]
+impl e1000::Registers for MappedRegisters {
+    fn read(&mut self, offset: usize) -> u32 {
+        read32(self.base, offset)
+    }
+    fn write(&mut self, offset: usize, value: u32) {
+        unsafe {
+            crate::hal::mmio_write32((self.base + offset) as *mut u32, value);
+        }
+    }
+    fn bus_master(&mut self, enabled: bool) -> bool {
+        let command = pci::command(self.device);
+        let requested = if enabled { command | 4 } else { command & !4 };
+        pci::set_command(self.device, requested);
+        (pci::command(self.device) & 4 != 0) == enabled
+    }
+    fn now_ns(&self) -> u64 {
+        crate::clock::monotonic_ns()
+    }
+}
+impl Drop for MappedRegisters {
+    fn drop(&mut self) {
+        // Never restore ambient firmware DMA without a vetted queue owner.
+        pci::set_command(self.device, self.original_command & !4);
+        let _ = vmm::unmap_mmio_region(self.base, E1000_MMIO_MAP_SIZE);
+    }
+}
+
+/// Actual bounded MAC-local packet I/O, not a network service or an IRQ proof.
+/// Run after the monotonic clock has been initialized, with no live netd owner.
+#[cfg(feature = "boot-smoke-tests")]
+pub fn run_packet_smoke() -> bool {
+    let mut reference = None;
+    pci::for_each_device(|dev| {
+        if reference.is_none() && (dev.vendor_id, dev.device_id) == (VENDOR_INTEL, 0x100e) {
+            reference = Some(dev);
+        }
+    });
+    let Some(device) = reference else {
+        serial_write("[NET-N0] no 82540EM reference; diagnostic skipped\r\n");
+        return true;
+    };
+    let result = (|| {
+        let registers = MappedRegisters::open(device).map_err(|_| e1000::Error::Registers)?;
+        let (_, before) = crate::memory::pmm::stats_bytes();
+        let mut controller = e1000::Controller::start(registers)?;
+        let packets = controller.diagnostic();
+        if packets.is_err() {
+            let state = controller.snapshot();
+            serial_write("[NET-N0] diagnostic-state sequence=");
+            write_dec(state.sequence as u64);
+            serial_write(" tx-completed=");
+            write_dec(state.tx_completed);
+            serial_write(" rx-packets=");
+            write_dec(state.rx_packets);
+            serial_write(" rx-dropped=");
+            write_dec(state.rx_dropped);
+            for (offset, value) in state.registers {
+                serial_write(" reg[");
+                write_hex(offset as u64, 4);
+                serial_write("]=");
+                write_hex(value as u64, 8);
+            }
+            serial_write("\r\n");
+        }
+        let stopped = controller.stop();
+        drop(controller);
+        packets?;
+        stopped?;
+        let (_, after) = crate::memory::pmm::stats_bytes();
+        if before != after {
+            return Err(e1000::Error::Stop);
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            serial_write("[NET-N0] e1000 PHY-loopback packets=");
+            write_dec(e1000::TEST_PACKETS as u64);
+            serial_write(" bytes=");
+            write_dec((e1000::TEST_PACKETS * 128) as u64);
+            serial_write(" ring-wrap, payload, reset and DMA reclaim OK\r\n");
+            true
+        }
+        Err(reason) => {
+            serial_write("[NET-N0] FAIL ");
+            serial_write(match reason {
+                e1000::Error::Reset => "reset",
+                e1000::Error::NoMemory => "no-memory",
+                e1000::Error::Registers => "registers",
+                e1000::Error::BusMaster => "bus-master",
+                e1000::Error::Transmit => "transmit",
+                e1000::Error::Receive => "receive",
+                e1000::Error::Timeout => "timeout",
+                e1000::Error::Payload => "payload",
+                e1000::Error::Stop => "stop",
+            });
+            serial_write("\r\n");
+            false
+        }
+    }
 }

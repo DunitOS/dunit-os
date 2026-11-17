@@ -1,0 +1,214 @@
+#![allow(dead_code)]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+static FAIL_ALLOC: AtomicBool = AtomicBool::new(false);
+static PAGES: AtomicUsize = AtomicUsize::new(0);
+mod memory {
+    pub mod pmm {
+        use std::{alloc::{alloc_zeroed, dealloc, Layout}, collections::BTreeMap, sync::Mutex};
+        use super::super::{FAIL_ALLOC, PAGES, Ordering};
+        #[derive(Clone, Copy)] pub struct PhysicalAddress(pub usize);
+        impl PhysicalAddress {pub fn as_usize(self) -> usize {self.0}}
+        static ALLOCS: Mutex<BTreeMap<usize, (usize, Vec<bool>)>> = Mutex::new(BTreeMap::new());
+        pub struct Pmm;
+        static PMM: Pmm = Pmm;
+        pub fn get_pmm() -> Option<&'static Pmm> {Some(&PMM)}
+        impl Pmm {
+            pub fn alloc_contiguous(&self, pages: usize) -> Option<PhysicalAddress> {
+                if FAIL_ALLOC.swap(false, Ordering::SeqCst) {return None;}
+                let p = unsafe {alloc_zeroed(Layout::from_size_align(pages * 4096, 4096).unwrap())} as usize;
+                if p == 0 {return None;}
+                assert!(ALLOCS.lock().unwrap().insert(p, (pages, vec![false; pages])).is_none());
+                PAGES.fetch_add(pages, Ordering::SeqCst);
+                Some(PhysicalAddress(p))
+            }
+            pub fn free_frame(&self, page: PhysicalAddress) {
+                let mut allocations = ALLOCS.lock().unwrap();
+                let (&start, (pages, freed)) = allocations.range_mut(..=page.0).next_back().unwrap();
+                let index = (page.0 - start) / 4096;
+                assert!(index < *pages && !freed[index], "unknown or duplicate free");
+                freed[index] = true;
+                PAGES.fetch_sub(1, Ordering::SeqCst);
+                if freed.iter().all(|value| *value) {
+                    let pages = *pages;
+                    allocations.remove(&start);
+                    unsafe {dealloc(start as *mut u8, Layout::from_size_align(pages * 4096, 4096).unwrap());}
+                }
+            }
+        }
+        // Only fault-test teardown: simulated hardware is destroyed first.
+        pub fn release_quarantine() {
+            for (start, (pages, _)) in std::mem::take(&mut *ALLOCS.lock().unwrap()) {
+                unsafe {dealloc(start as *mut u8, Layout::from_size_align(pages * 4096, 4096).unwrap());}
+            }
+            PAGES.store(0, Ordering::SeqCst);
+        }
+    }
+    pub mod vmm {pub fn phys_to_virt(address: usize) -> usize {address}}
+}
+#[path = "@ROOT@/kernel/src/drivers/net/dma.rs"] mod dma;
+#[path = "@ROOT@/kernel/src/drivers/net/rings.rs"] mod rings;
+#[path = "@ROOT@/kernel/src/drivers/net/e1000.rs"] mod e1000;
+
+#[derive(Default)]
+struct Device {
+    registers: std::collections::BTreeMap<usize,u32>,
+    tx_head: usize,
+    rx_head: usize,
+    now: std::cell::Cell<u64>,
+    resets: usize,
+    stuck_reset: bool,
+    stuck_after_start: bool,
+    hang_tx: bool,
+    corrupt: bool,
+    fail_disable: bool,
+    phy: u16,
+    rx_ready_at: u64,
+}
+impl Device {
+    fn new() -> Self {
+        let mut device = Self::default();
+        device.registers.insert(8, 2);
+        device.phy = 0x1140;
+        device.registers.insert(0x5400, 0x12005452);
+        device.registers.insert(0x5404, 0x80005634);
+        device
+    }
+    fn address(&self, low: usize) -> usize {
+        (self.registers[&low] as u64 | ((self.registers[&(low+4)] as u64)<<32)) as usize
+    }
+    fn transmit(&mut self, tail: usize) {
+        if self.hang_tx || !self.registers.contains_key(&0x3800) {return;}
+        let can_receive = self.phy & (1<<14) != 0 && self.now.get() >= self.rx_ready_at;
+        let tx_ring = self.address(0x3800);
+        let rx_ring = self.address(0x2800);
+        while self.tx_head != tail {
+            unsafe {
+                let tx = (tx_ring + self.tx_head * 16) as *mut u8;
+                let rx = (rx_ring + self.rx_head * 16) as *mut u8;
+                let src = std::ptr::read(tx as *const usize) as *const u8;
+                let len = std::ptr::read(tx.add(8) as *const u16) as usize;
+                let dst = std::ptr::read(rx as *const usize) as *mut u8;
+                if !can_receive {
+                    std::ptr::write_volatile(tx.add(12),1);
+                    self.tx_head=(self.tx_head+1)%rings::COUNT;
+                    continue;
+                }
+                assert_eq!(std::ptr::read(rx.add(12)), 0, "device overwrite before RX recycle");
+                std::ptr::copy_nonoverlapping(src,dst,len);
+                if self.corrupt {*dst.add(40) ^= 1;}
+                std::ptr::write(rx.add(8) as *mut u16,len as u16);
+                std::ptr::write_volatile(rx.add(12),3);
+                std::ptr::write_volatile(tx.add(12),1);
+            }
+            self.tx_head=(self.tx_head+1)%rings::COUNT;
+            self.rx_head=(self.rx_head+1)%rings::COUNT;
+        }
+    }
+}
+impl e1000::Registers for Device {
+    fn read(&mut self, offset: usize) -> u32 {*self.registers.get(&offset).unwrap_or(&0)}
+    fn write(&mut self, offset: usize, value: u32) {
+        if offset==0x20 {
+            assert_eq!((value>>21)&0x1f,1);
+            assert_eq!((value>>16)&0x1f,0);
+            if value & (1<<26)!=0 {self.phy=value as u16;}
+            self.registers.insert(offset,(value&!0xffff)|self.phy as u32|(1<<28));
+        } else if offset==0 && value & (1<<26)!=0 {
+            self.resets+=1;
+            self.registers.insert(offset,if self.stuck_reset || (self.stuck_after_start && self.resets>1) {value} else {value & !(1<<26)});
+            self.tx_head=0;self.rx_head=0;
+        } else {self.registers.insert(offset,value);}
+        if offset==0x100 {self.rx_ready_at=self.now.get()+1_000_000_000;}
+        if offset==0x3818 && self.registers.get(&0x0400).copied().unwrap_or(0)&2!=0 {self.transmit(value as usize);}
+    }
+    fn bus_master(&mut self, enabled: bool) -> bool {enabled || !self.fail_disable}
+    fn now_ns(&self) -> u64 {let value=self.now.get();self.now.set(value+1_000_000);value}
+}
+
+#[test]
+fn actual_controller_wrap_payload_reset_and_reclaim() {
+    assert_eq!(PAGES.load(Ordering::SeqCst),0);
+    let mut controller=e1000::Controller::start(Device::new()).unwrap();
+    assert!(PAGES.load(Ordering::SeqCst)>0);
+    controller.diagnostic().unwrap();
+    controller.stop().unwrap();drop(controller);
+    assert_eq!(PAGES.load(Ordering::SeqCst),0);
+}
+#[test]
+fn actual_ring_full_does_not_overwrite_and_rx_errors_recycle() {
+    let mut ring=rings::Rings::allocate().unwrap();
+    let packet=[0x55;128];
+    for _ in 0..rings::COUNT-1 {ring.transmit(&packet).unwrap();}
+    assert_eq!(ring.transmit(&packet),Err(rings::Error::Full));
+    assert_eq!(ring.counters.tx_full,1);
+    assert_eq!(ring.transmit(&[0;13]),Err(rings::Error::InvalidLength));
+    assert_eq!(ring.transmit(&[0;1519]),Err(rings::Error::InvalidLength));
+    let rx=ring.rx_physical() as *mut u8;
+    let mut output=[0;2048];
+    for (index,status,errors,length) in [(0,1,0,128),(1,3,0,128),(2,3,1,128),(3,3,0,2049),(4,3,0,128)] {
+        unsafe {
+            let desc=rx.add(index*16);
+            std::ptr::write(desc.add(8) as *mut u16,length);
+            std::ptr::write(desc.add(12),status);
+            std::ptr::write(desc.add(13),errors);
+        }
+        let (tail,result)=ring.receive(&mut output).unwrap();assert_eq!(tail,index as u32);
+        if index==4 {assert_eq!(result,Ok(128));} else {assert_eq!(result,Err(rings::Error::Malformed));}
+        assert_eq!(unsafe {std::ptr::read(rx.add(index*16+12))},0);
+    }
+    assert_eq!(ring.counters.rx_dropped,4);
+    assert!(ring.receive(&mut output).is_none());
+    unsafe {
+        std::ptr::write(rx.add(5*16+8) as *mut u16,128);
+        std::ptr::write(rx.add(5*16+12),3);
+    }
+    assert_eq!(ring.receive(&mut [0;16]),Some((5,Err(rings::Error::OutputTooSmall))));
+    unsafe {std::ptr::write((ring.tx_physical() as *mut u8).add(12),3);}
+    assert_eq!(ring.complete(),Err(rings::Error::Completion));
+    assert_eq!(ring.transmit(&packet),Err(rings::Error::Completion));
+    assert_eq!(ring.counters.tx_packets,(rings::COUNT-1) as u64);
+    drop(ring);
+    assert_eq!(PAGES.load(Ordering::SeqCst),0);
+}
+#[test]
+fn reference_receive_requires_phy_loopback_and_one_second_startup() {
+    use e1000::Registers;
+    let mut ring=rings::Rings::allocate().unwrap();
+    let mut model=Device::new();
+    let rx=ring.rx_physical();let tx=ring.tx_physical();
+    for (offset,value) in [(0x2800,rx as u32),(0x2804,(rx>>32) as u32),(0x3800,tx as u32),(0x3804,(tx>>32) as u32),(0x0400,2),(0x0100,2)] {model.write(offset,value);}
+    let packet=[0x55;128];let mut output=[0;2048];
+    model.now.set(2_000_000_000); // RX startup elapsed, but PHY loopback absent
+    model.write(0x3818,ring.transmit(&packet).unwrap());assert!(ring.receive(&mut output).is_none());assert_eq!(ring.complete(),Ok(true));
+    model.write(0x20,(1<<26)|(1<<21)|0x4140); // actual MDIC PHY1 BMCR write
+    model.write(0x0100,2); // QEMU restarts its RX startup gate on every RCTL write
+    model.write(0x3818,ring.transmit(&packet).unwrap());assert!(ring.receive(&mut output).is_none());assert_eq!(ring.complete(),Ok(true));
+    model.now.set(3_010_000_000);
+    model.write(0x3818,ring.transmit(&packet).unwrap());assert_eq!(ring.receive(&mut output),Some((0,Ok(128))));assert_eq!(&output[..128],&packet);
+    drop(model);drop(ring);assert_eq!(PAGES.load(Ordering::SeqCst),0);
+}
+#[test]
+fn init_oom_and_unresponsive_device_release_no_live_backing() {
+    FAIL_ALLOC.store(true,Ordering::SeqCst);
+    assert!(matches!(e1000::Controller::start(Device::new()),Err(e1000::Error::NoMemory)));
+    let mut model=Device::new();model.stuck_reset=true;
+    assert!(matches!(e1000::Controller::start(model),Err(e1000::Error::Reset)));
+    assert_eq!(PAGES.load(Ordering::SeqCst),0);
+}
+#[test]
+fn stalled_corrupt_and_uncertain_dma_fail_closed() {
+    for corrupt in [false,true] {
+        let mut model=Device::new();model.hang_tx=!corrupt;model.corrupt=corrupt;
+        let mut controller=e1000::Controller::start(model).unwrap();
+        assert_eq!(controller.diagnostic(),Err(if corrupt {e1000::Error::Payload} else {e1000::Error::Timeout}));
+        assert_eq!(controller.diagnostic(),Err(e1000::Error::Stop));
+        controller.stop().unwrap();drop(controller);assert_eq!(PAGES.load(Ordering::SeqCst),0);
+    }
+    for failed_reset in [false,true] {
+        let mut model=Device::new();model.fail_disable=!failed_reset;model.stuck_after_start=failed_reset;
+        let mut controller=e1000::Controller::start(model).unwrap();
+        controller.diagnostic().unwrap();assert_eq!(controller.stop(),Err(e1000::Error::Stop));
+        drop(controller);assert!(PAGES.load(Ordering::SeqCst)>0,"uncertain DMA backing must remain allocated");
+        memory::pmm::release_quarantine();
+    }
+}
