@@ -1,6 +1,6 @@
 # Dunit OS performance and SMP roadmap
 
-Updated 16 November 2026. OP0–OP3 are partial; the next stage is to finish OP3
+Updated 17 November 2026. OP0–OP3 are partial; the next stage is to finish OP3
 safety gates before OP4 application dispatch. This track complements the
 [technical roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md); it does not close M7.
 Implementation details and evidence are in [SMP](docs/performance/smp.md),
@@ -39,6 +39,18 @@ measurements do not establish per-event tails or input-to-photon latency.
 A completed subtask below is a narrow implementation with evidence. It does
 not imply acceptance of its whole stage. `[x]` marks that completed subtask;
 `[ ]` marks work or acceptance that remains open.
+
+## 17 November checkpoint
+
+`e74aebc` adds the post-cleanup exit-publication fence; OP3 remains in progress.
+The parallel SDK track (`c08a900`) adds owning threads/mutex/condition APIs, and
+the networking track (`80c53ef`) proves private E1000 PHY-loopback DMA. These
+changes do not enable AP application dispatch or establish performance scaling.
+[Integrated receipts](docs/verification/multitrack-2026-11-17.json) record native
+SDK on four CPUs, E1000 boot on one, strict resources/SDK on eight, thread faults
+on four and GUI on eight, with separate image hashes and repaired attempts.
+Next OP3 work remains remote stop/cancel, IRQ progress and the full lock-order/
+VM/DMA final-reader gates listed below.
 
 ## Measurement contract
 
@@ -185,6 +197,12 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
 - [x] Inject AHCI delayed/late CI completion and active-command task-file errors
   in host tests; verify no retry rewrites backing or releases live DMA pages.
   VirtIO read-only negotiation and invalid-queue/OOM failure paths are also covered.
+
+- [x] [Fence exit publication through cleanup](docs/performance/op3-lifecycle.md):
+  revoke unused execution admission, exclude wait/reap/replace during finalization,
+  release fd/TLS/VM/HAL backing before publishing status, and keep private TLS
+  cleanup idempotent without weakening public munmap. This does not stop a remote
+  active executor or close the remote cancellation gate.
 
 Remaining gates, in order:
 

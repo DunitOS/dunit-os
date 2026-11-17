@@ -1,0 +1,439 @@
+{
+  "date": "2026-11-17",
+  "base_commit": "57703bd",
+  "scope": "Parallel agent implementation; OS builds and VMs serialized. OP3 exit finalization, SDK owning threads/sync, private E1000 diagnostic. Applications remain UP.",
+  "source_sha256": {
+    "kernel/src/drivers/net.rs": "a06859102d705dcbdb4d5c572d4a488f7d410917562433ef66fb4253b5993ce7",
+    "kernel/src/drivers/net/dma.rs": "385077238fe90075d22db7d6493bd4b5183a04c99725df5da5831123094a25c3",
+    "kernel/src/drivers/net/e1000.rs": "0010495838793472b46421e4fd1b459565c5b5fe38b6814b56de1cd6b274ea62",
+    "kernel/src/drivers/net/rings.rs": "78be755384f8aa8ed6f0a3d30aad5326ea43d7ab8578147d69480f11907c9599",
+    "kernel/src/lib.rs": "2d52f4d5662125f33fd0079c9d5a51b088edf67845b8dd724856d6146eac26df",
+    "kernel/src/process/execution.rs": "1ecc731f70d4a143d478062d6468d5727b9a8ca878bdef5cb4bbe762fc735607",
+    "kernel/src/process/execution_smoke.rs": "a3d751299f795c1edc22fb319198a72a7ba24c11d021106838c2abad289acd1b",
+    "kernel/src/process/execution_state.rs": "b2399c5b226c3964d601afa495e850b08443214fe72fedf3bf346baf039fc527",
+    "kernel/src/process/finalization.rs": "b115d007823711bfa42e3b2b7600087d89f797877ed3f880087b1ad66bc587cd",
+    "kernel/src/process/finalization_smoke.rs": "ba85c0d3bcc6c2ab681bce2308a429d896f6995420ae3b2616ed11267befea58",
+    "kernel/src/process/lifecycle.rs": "16243c9b988d2f0699369b4094b5f7f7c8049b80bc0c87e3d999844a8e79701c",
+    "kernel/src/process/mod.rs": "496921f1645a2b53f53c9ed3b648b2afb3d837e66f709b8236fdcf93229ec4d4",
+    "kernel/src/process/resources.rs": "06c0706f3f2bd0c864b443af3c36a8049ca8d0bb5f000982b4a9a21a6e3d9404",
+    "kernel/src/process/runner.rs": "15e2e8e237452010de4c1f2d156ae824b20fc865dfa6eadb20ba4327411ed596",
+    "kernel/src/process/transitions.rs": "8e4cde1beadfec0a0451f4981f263cdbb70237e3e7f7c6cc78e5f907feec0946",
+    "runtime/dunit/src/lib.rs": "385df0f2acb76de507523ab8d00c217ba5e406d9f202a9b9f1be74966ef177cd",
+    "runtime/dunit/src/sync.rs": "45f3c88ae1b2a4ad231e857ecfca630b0700faca917e329980a5c17d5a7b1d38",
+    "runtime/dunit/src/thread.rs": "0f1168222787af333b69438adcd2be7771456aaf3aa541996821196d43ab4718",
+    "runtime/dunit/src/thread/platform.rs": "c2f46fbf1339d75c8c819c19d82a2225a4dd5aa16fbbc8c5cbefb8bd0ee74a7a",
+    "runtime/dunit/src/thread/test_platform.rs": "5706f0bb6eac8d066f3ab7fd76441ff3299c2866016738186d2fe2846db2ab90",
+    "runtime/dunit/tests/check_threads.py": "e94da260e95ea6fbfaa8730611a068a9a3d6a00154f6a910194fcd437ab3b1d3",
+    "runtime/dunit/tests/thread_sync.rs": "a6532cf026ce60face89da4c379011d450054bcddcb970c050960a946048b8cb",
+    "tools/fixtures/sdk_threads.rs": "e0e61568f55ea6a2b165cb74fdba5b2a53089a1f569a0fa73bc58264b571e9f8",
+    "tools/net_n0_markers.json": "80f220143ea74e98026ecf5014d0dd84412930e2794d91cec9953f58c895cf9f",
+    "tools/sdk_threads_markers.json": "a39adf6892bc534d11544751989a77bf00cc0ff08b69deea2a4af801c7ac76b9",
+    "tools/test_lifecycle_publication.py": "c634e7e0e38c09600708e0d569386853d680ae3296dbcd73863a3d1474795da3",
+    "tools/test_lifecycle_publication_host.rs.in": "35777d603c41c8a9467eb5fc7b6eb07b706ce7f9056c5afe31c559a205a69b01",
+    "tools/test_net.py": "d307fbf4a663fb1a85948c80133648476dc72b510c4f9390be47f822418f82b2",
+    "tools/test_net_discovery_host.rs": "0d2ade79f0b6d4a10bf317f0b3359fc0f9c934a30bf923438d66ef38dc1b153d",
+    "tools/test_net_host.rs.in": "03278410ad00f776af0b3f5ada446716dc7695a492e74e3ca9a7579b00dcfa30",
+    "tools/test_process_resources.py": "02b4e103ddfc3b78549d7144f0432bd0e1dae27b5a26f00f04c6bcf73ac260a0",
+    "tools/test_sdk_gui_fixture.py": "9c61029bea01a2ebd69c88e674e2cce7110fab9cb9ca2081319f14969094fa9d",
+    "tools/test_tls_cleanup_host.rs.in": "2ff4ebe98e7b8af28f875ab1d0d5d105ff8746bbd376e5720ac2f5c222420c98"
+  },
+  "host": {
+    "system": "Linux",
+    "release": "6.18.57",
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus": 3,
+    "affinity": [
+      0,
+      1,
+      2
+    ],
+    "cgroup": {
+      "cpu.max": "max 100000",
+      "cpuset.cpus.effective": "0-2",
+      "memory.max": "max"
+    },
+    "kvm_accessible": false
+  },
+  "tools": {
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+    "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+  },
+  "native_runs": [
+    {
+      "receipt": "build/nov17-sdk-threads-final/metadata.json",
+      "started_utc": "2026-11-17T14:42:00.432261+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "2fdd53202a3ca23a9be02bf4c99e169c2785d8fe3beedc8d448129cca4bdc667",
+        "bytes": 266735616,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov17-sdk-threads-final/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov17-sdk-threads-final/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "1f3d5972a97e0923c258df592a7c1b30b92375347e862fb6b0b21bfa75d6ec6c",
+      "observed": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK",
+        "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK",
+        "[NET-N0] no 82540EM reference; diagnostic skipped",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] [SDK-THREADS] 8 workers, 4000 checked mutex updates and owned results OK",
+        "[STDOUT] [SDK-THREADS] 128 condition handoffs without lost notifications OK",
+        "[STDOUT] [SDK-THREADS] joining Drop, 24 stack lifecycles and invalid stack rejection OK",
+        "[STDOUT] [SDK-THREADS] all checks passed"
+      ]
+    },
+    {
+      "receipt": "build/nov17-net-final/metadata.json",
+      "started_utc": "2026-11-17T14:52:55.678242+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "b1569ab8e1804e7e6e100895b3801363761e54967737105afa42aa24c8946967",
+        "bytes": 266739712,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov17-net-final/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov17-net-final/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-nic",
+          "user,model=e1000",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "2c4373e5dbb29d3c0fb44a9a026ba8acbb8da7c6e198352db2e746d10b4745cc",
+      "observed": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK",
+        "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK",
+        "[NET-N0] e1000 PHY-loopback packets=103 bytes=13184 ring-wrap, payload, reset and DMA reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated"
+      ]
+    },
+    {
+      "receipt": "build/nov17-resources-final/metadata.json",
+      "started_utc": "2026-11-17T14:53:24.263715+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "b1569ab8e1804e7e6e100895b3801363761e54967737105afa42aa24c8946967",
+        "bytes": 266739712,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov17-resources-final/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov17-resources-final/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-nic",
+          "user,model=e1000",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "fdb377eb7a7b5b2ec790f14f729f76b91eac4e8054cb469c8088a1f8ea26d5cb",
+      "observed": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK",
+        "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK",
+        "[NET-N0] e1000 PHY-loopback packets=103 bytes=13184 ring-wrap, payload, reset and DMA reclaim OK",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] [PERF-IPC] all checks passed",
+        "[STDOUT] [SDK-THREADS] 8 workers, 4000 checked mutex updates and owned results OK",
+        "[STDOUT] [SDK-THREADS] 128 condition handoffs without lost notifications OK",
+        "[STDOUT] [SDK-THREADS] joining Drop, 24 stack lifecycles and invalid stack rejection OK",
+        "[STDOUT] [SDK-THREADS] all checks passed"
+      ]
+    },
+    {
+      "receipt": "build/nov17-thread-fault/metadata.json",
+      "started_utc": "2026-11-17T14:44:37.706559+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "2fdd53202a3ca23a9be02bf4c99e169c2785d8fe3beedc8d448129cca4bdc667",
+        "bytes": 266735616,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov17-thread-fault/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov17-thread-fault/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "aecb2cf6e44477ffb9c3a08738f6da0ec424ecc406134d4863c9d64a5db41cba",
+      "observed": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK",
+        "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK",
+        "[NET-N0] no 82540EM reference; diagnostic skipped",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated"
+      ]
+    },
+    {
+      "receipt": "build/nov17-gui/metadata.json",
+      "started_utc": "2026-11-17T14:44:49.784922+00:00",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "2fdd53202a3ca23a9be02bf4c99e169c2785d8fe3beedc8d448129cca4bdc667",
+        "bytes": 266735616,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov17-gui/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov17-gui/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "clock": {
+        "guest_source": "hpet",
+        "guest_resolution_ns": 10,
+        "guest_timer_event": "pit-100hz",
+        "host": "time.monotonic",
+        "physical_scanout_measured": false
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "serial_sha256": "d99773f3b06fe89e2777041fc933fc92a5ce7157b5195942a8d4cedb83910acf",
+      "observed": [
+        "[PROCESS-RESOURCES] detach, dup, rollback, kill EOF/cap close before wait OK",
+        "[EXIT-PUBLICATION] wait/reap fenced through cleanup, VM pins and HAL lease return OK",
+        "[TASK-EXECUTION] exclusive admission, return handoff and retirement gates OK",
+        "[NET-N0] no 82540EM reference; diagnostic skipped",
+        "[STDOUT] thread_test: OK shared=2 xmm=isolated"
+      ]
+    }
+  ],
+  "host_checks": {
+    "existing_dwm_host_suite": "passed after freeing generated-image disk space",
+    "sdk_actual_code": {
+      "passed": 10,
+      "compile_negative_passed": 4
+    },
+    "lifecycle_publication": "8000 contended admissions and idempotent TLS cleanup passed",
+    "execution_ownership": "3 passed",
+    "network_actual_code": {
+      "rings_controller": 5,
+      "production_discovery": 1
+    }
+  },
+  "compile_checks": {
+    "boot_smoke_tests": "passed via fixture harness check/build",
+    "production_no_default_features": "passed",
+    "ABI": "94 syscalls,25 errno,7 rights unchanged",
+    "kernel_ELF": "passed"
+  },
+  "repaired_attempts": [
+    {
+      "run": "build/nov17-sdk-threads",
+      "issue": "Initial synthetic finalization probe had zero RIP/RSP; admission correctly rejected it. Boot-marker audit detected failure despite application-only marker success. Probe now owns executable entry/writable stack and SDK contract also requires execution/exit proofs."
+    },
+    {
+      "run": "build/nov17-integration",
+      "issue": "QEMU 82540EM implements PHY BMCR loopback and defers RX for 1000ms. RCTL MAC-loopback plus 100ms deadline timed out. Fixed MDIC/BMCR setup and bounded diagnostic startup settle; per-packet100ms/work/payload/reclaim checks unchanged. Host model now rejects missing PHY loopback and early RX."
+    },
+    {
+      "run": "build/nov17-integration-final",
+      "issue": "All data checks passed but combined budgets conflicted: boot runtime_stress deliberately faults, resource/SDK forbids faults. Reused identical image for separate original N0 boot budget and strict resource/SDK budget, both passed without weakening either."
+    }
+  ],
+  "limits": [
+    "No AP application dispatch/SMP scaling claim; remote cancellation and IRQ progress remain open",
+    "SDK Drop joins; worker faults/panics do not unwind and can leave locks held; no detach/scoped/timed waits/channels/std",
+    "N0 is private diagnostic polling, no IRQ/MSI/netd/socket/capability API or external-traffic acceptance",
+    "No production boot/UEFI/HPET-off repeat for this slice; production compilation only",
+    "KVM unavailable on this runner"
+  ],
+  "source_provenance": "Final-source image: nov17-net-final and nov17-resources-final. Earlier SDK/fault/GUI runs share the final lifecycle implementation but precede the PHY diagnostic repair (default E1000e skips that path); SDK source later had comment-only panic-contract clarifications. Each image hash is retained separately.",
+  "implementation_commits": {
+    "lifecycle": "e74aebc",
+    "sdk_threads_sync": "c08a900",
+    "e1000_diagnostic": "80c53ef"
+  }
+}

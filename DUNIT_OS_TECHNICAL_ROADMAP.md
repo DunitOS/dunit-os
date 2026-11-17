@@ -1,6 +1,6 @@
 # Dunit OS technical roadmap
 
-Updated 16 November 2026. This is the canonical architecture, dependency and
+Updated 17 November 2026. This is the canonical architecture, dependency and
 acceptance plan. Implemented foundations do not close an entire milestone:
 M4 persistence, M5 installed root, M6 release gates and M7 SDK completion remain
 open. [Current state](docs/architecture/current-state.md) describes the implementation;
@@ -314,6 +314,10 @@ fixtures stay on libdunit. Services (`gui_server`, `init`) consume lower shared
 runtime/protocol APIs. Applications migrate fully to SDK, retaining functionality
 and removing duplicate handshakes, unsafe entry and manual standard controls.
 
+The 17 November thread/sync slice (`c08a900`) and initial private E1000
+bring-up (`80c53ef`) have [integrated verification receipts](docs/verification/multitrack-2026-11-17.json).
+Neither closes the remaining M7 or M8 release gates.
+
 ### M7.1 — wait-set
 
 - [x] Implement WaitSetWait (89) for call-scoped level-triggered IPC, timer/deadline,
@@ -339,7 +343,9 @@ Depends on M1; future contract expansion needs approval.
 - [x] Launch CLI/TUI with configured Terminal and separate argv/PTY, without shell
   interpolation.
 - [ ] Distribute the standalone SDK and finish remaining legacy-catalog migration.
-- [ ] Provide SDK thread/synchronization APIs and the future dunit::net backend.
+- [x] Provide owning SDK threads, joining handles, futex mutexes and condition variables
+  over the existing ABI; see [thread/sync limits](docs/sdk/threads.md).
+- [ ] Provide the future dunit::net backend.
 
 Acceptance: generated apps have no unsafe/extern-C/raw entry and cross-build,
 package and run with checked output/window;
@@ -472,7 +478,9 @@ Rust toolkit.
 - [ ] Define a versioned identity/uname source.
 - [ ] Finish dsh/fsck_dunit and remaining CLI/TUI/service lower-layer migration.
 - [ ] Replace raw image viewers only after parity.
-- [ ] Deliver SDK thread/synchronization APIs and standalone distribution.
+- [x] Deliver owning SDK thread/synchronization APIs with guarded stacks, typed
+  results and native join acknowledgement before reclamation.
+- [ ] Deliver standalone SDK distribution.
 - [ ] Close final M7 acceptance with real cargo dunit apps and completed source-of-
   truth migration, without duplicate raw entry/GUI lifecycle/hit-test.
 
@@ -487,8 +495,11 @@ independent design can proceed, but releases cannot bypass these dependencies.
 
 ## M8 — networking and platform services
 
-Networking is unimplemented beyond PCI discovery and E1000 status/MAC;
-`net0` is not packet I/O. First reference device is QEMU E1000. Modern VirtIO-net
+Production networking remains unimplemented; `net0` is discovery, not an
+application packet API. A private boot diagnostic now exercises real E1000
+DMA RX/TX rings and PHY loopback, with reset/reclaim and fail-closed quarantine;
+see [bring-up scope](docs/network/e1000-bringup.md). This is not IRQ/netd or
+external-network acceptance. First reference device is QEMU E1000. Modern VirtIO-net
 follows a proven packet path; RTL8139 is later compatibility.
 
 Kernel: PCI/MMIO, DMA-safe memory, NIC reset/IRQ/moderation, bounded RX/TX rings
@@ -501,6 +512,10 @@ events avoid per-byte syscalls. On netd crash stop/revoke/reset/restart safely.
 Ordinary apps never obtain raw NIC/MMIO/DMA authority.
 
 ### N0 — E1000 packet I/O
+
+- [x] Implement the private reference diagnostic: bounded DMA descriptors/buffers,
+  wrap/payload/completion/reset/reclaim and production discovery without ambient
+  bus mastering. Polling remains diagnostic only; the full N0 gates below stay open.
 
 - [ ] Implement reset/register/MAC/link setup and a common DMA API.
 - [ ] Own RX/TX descriptors, heads/tails, barriers and recycling.
