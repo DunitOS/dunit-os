@@ -316,7 +316,10 @@ and removing duplicate handshakes, unsafe entry and manual standard controls.
 
 The 17 November thread/sync slice (`c08a900`) and initial private E1000
 bring-up (`80c53ef`) have [integrated verification receipts](docs/verification/multitrack-2026-11-17.json).
-Neither closes the remaining M7 or M8 release gates.
+The [follow-up slice](docs/verification/multitrack-progress-2026-11-17.json) adds
+standalone SDK packaging/offline relocation checks, interruptible syscalls and
+private external INTx exchange. Neither slice closes the remaining M7 or M8
+release gates.
 
 ### M7.1 — wait-set
 
@@ -342,7 +345,12 @@ Depends on M1; future contract expansion needs approval.
 - [x] Feed launcher/dock/startup through packaging and a shared userspace catalog.
 - [x] Launch CLI/TUI with configured Terminal and separate argv/PTY, without shell
   interpolation.
-- [ ] Distribute the standalone SDK and finish remaining legacy-catalog migration.
+- [x] Implement deterministic standalone SDK packaging, safe verified installation,
+  offline CLI/TUI/GUI builds and relocation with projects; retain one delegated
+  OS harness for native run/test. See [distribution contract](docs/sdk/standalone.md).
+- [x] Verify standalone native CLI/C execution and GUI run/200-frame tests through
+  the delegated harness, including the unchanged 32 MiB memory budget.
+- [ ] Finish remaining legacy-catalog migration.
 - [x] Provide owning SDK threads, joining handles, futex mutexes and condition variables
   over the existing ABI; see [thread/sync limits](docs/sdk/threads.md).
 - [ ] Provide the future dunit::net backend.
@@ -480,7 +488,9 @@ Rust toolkit.
 - [ ] Replace raw image viewers only after parity.
 - [x] Deliver owning SDK thread/synchronization APIs with guarded stacks, typed
   results and native join acknowledgement before reclamation.
-- [ ] Deliver standalone SDK distribution.
+- [x] Deliver standalone SDK packaging and verified offline relocated builds.
+- [x] Verify native GUI frame/resource acceptance; prepare compositor resources
+  before client bootstrap and publish the first callback after framebuffer present.
 - [ ] Close final M7 acceptance with real cargo dunit apps and completed source-of-
   truth migration, without duplicate raw entry/GUI lifecycle/hit-test.
 
@@ -497,9 +507,12 @@ independent design can proceed, but releases cannot bypass these dependencies.
 
 Production networking remains unimplemented; `net0` is discovery, not an
 application packet API. A private boot diagnostic now exercises real E1000
-DMA RX/TX rings and PHY loopback, with reset/reclaim and fail-closed quarantine;
-see [bring-up scope](docs/network/e1000-bringup.md). This is not IRQ/netd or
-external-network acceptance. First reference device is QEMU E1000. Modern VirtIO-net
+DMA RX/TX rings and PHY loopback, with reset/reclaim and fail-closed quarantine.
+An additional opt-in private INTx path exchanges 103 transformed frames with an
+isolated host socket peer and reclaims its DMA allocation; see
+[bring-up scope](docs/network/e1000-bringup.md). These diagnostics do not provide
+production packet capabilities, netd or Internet connectivity. First reference
+device is QEMU E1000. Modern VirtIO-net
 follows a proven packet path; RTL8139 is later compatibility.
 
 Kernel: PCI/MMIO, DMA-safe memory, NIC reset/IRQ/moderation, bounded RX/TX rings
@@ -515,7 +528,11 @@ Ordinary apps never obtain raw NIC/MMIO/DMA authority.
 
 - [x] Implement the private reference diagnostic: bounded DMA descriptors/buffers,
   wrap/payload/completion/reset/reclaim and production discovery without ambient
-  bus mastering. Polling remains diagnostic only; the full N0 gates below stay open.
+  bus mastering. PHY polling remains diagnostic only.
+- [x] Add a private opt-in bounded INTx drain, CPU receive queue and external
+  transformed-payload exchange through the shared harness. Require both guest
+  success and 103 checked host responses; test ring wrap, reset and DMA reclaim.
+  Native TCG checks cover 2/4/8 vCPUs; full N0 gates below stay open.
 
 - [ ] Implement reset/register/MAC/link setup and a common DMA API.
 - [ ] Own RX/TX descriptors, heads/tails, barriers and recycling.

@@ -30,7 +30,7 @@ measurements do not establish per-event tails or input-to-photon latency.
 | OP0 | Partial | KVM runner, remaining scenes, full telemetry, budgets/noise |
 | OP1 | Partial | Remote lifecycle/cancellation and IRQ/preemption/idle model |
 | OP2 | Partial | Timer event model, x2APIC/KVM/hardware platform coverage |
-| OP3 | In progress | DMA fault coverage, remote stop/cancel, IRQ progress, lock ranking, concurrent VM stress |
+| OP3 | In progress | DMA fault coverage, remote stop/cancel, IRQ-off budgets, lock ranking, concurrent VM stress |
 | OP4 | Prepared only | AP application dispatch, remote wakeups, migration and overlapping execution |
 | OP5 | Not started | Scheduler scaling, accounting and latency |
 | OP6–OP8 | Open | New profile-driven input, rendering, memory and I/O work |
@@ -49,8 +49,16 @@ changes do not enable AP application dispatch or establish performance scaling.
 [Integrated receipts](docs/verification/multitrack-2026-11-17.json) record native
 SDK on four CPUs, E1000 boot on one, strict resources/SDK on eight, thread faults
 on four and GUI on eight, with separate image hashes and repaired attempts.
-Next OP3 work remains remote stop/cancel, IRQ progress and the full lock-order/
-VM/DMA final-reader gates listed below.
+The next parallel slice adds [interruptible syscall return boundaries](docs/performance/irq-progress.md)
+and a generation-tracked ordinary reschedule IPI. Native 2/4/8-vCPU TCG checks
+verify PIT/IPI delivery inside a syscall, IRQ-safe-lock exclusion, post-HAL
+acknowledgement and userspace GPR/SIMD/TLS preservation. This is a progress
+prerequisite, not remote cancellation or AP application scheduling. The network
+track also verifies private external INTx packet exchange; SDK distribution
+checks include offline relocated application builds. [Follow-up receipts](docs/verification/multitrack-progress-2026-11-17.json)
+separate these results and the SDK native acceptance.
+Next OP3 work remains remote stop/cancel, bounded IRQ-off driver/heap work and
+the full lock-order/VM/DMA final-reader gates listed below.
 
 ## Measurement contract
 
@@ -204,19 +212,26 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   cleanup idempotent without weakening public munmap. This does not stop a remote
   active executor or close the remote cancellation gate.
 
+- [x] Enable interrupts only after syscall scratch/FPU state and kernel stack are
+  established, then close an IRQ-disabled return boundary after handler guards
+  unwind. Ordinary reschedule IPI generations distinguish receipt from actual
+  HAL handback; CPL0 IRQs and all NMIs return to their interrupted context.
+  Native probes preserve syscall results, GPR/SIMD/TLS and lock exclusion.
+  This does not authorize remote stop/cancel or reclamation.
+
 Remaining gates, in order:
 
 - [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining
-  driver/heap edges.
-  Kernel-console lock changes alone do not make syscalls interruptible.
+  driver/heap edges. Interruptible handler entry alone does not bound every
+  IRQ-safe critical section.
 - [ ] Remote cancellation/stop acknowledgements and group finalization. Publish
   waitable exit only after executors stop and cleanup completes; cover nested
   dispatch, join/detach and cancelling waits. Check/register identity alone
   does not stop a running CPU.
 - [ ] Complete lock ranking/reentry for registry/task, VFS/task snapshots, waits, IPC/handles,
   heap/PMM/VMM and devices. Never sleep under a spinlock or wait for an ack while
-  holding a lock the receiver needs. Establish interruptible syscall boundaries,
-  bounded IRQ-off sections, IPI progress and remote runqueue notifications.
+  holding a lock the receiver needs. Extend the verified syscall/IPI boundary to
+  bounded IRQ-off sections and remote runqueue notifications.
 - [ ] Prove heap/PMM/shared-frame/handle/device order and final-reader lifetime.
   Address-space/task/execution pins are different contracts; no one pin replaces
   mapping ownership or shared-frame bookkeeping.
