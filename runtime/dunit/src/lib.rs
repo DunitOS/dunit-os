@@ -3,6 +3,7 @@
 #![no_std]
 extern crate alloc;
 pub mod args;
+pub mod display;
 #[cfg(feature = "gui")]
 pub mod canvas;
 pub mod env;
@@ -14,6 +15,7 @@ pub mod io;
 pub mod process;
 pub mod pty;
 pub mod system;
+pub mod terminal;
 pub mod sync;
 pub mod thread;
 pub mod testing;

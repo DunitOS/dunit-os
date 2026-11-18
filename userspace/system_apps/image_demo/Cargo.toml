@@ -8,4 +8,4 @@ name = "image_demo"
 path = "src/main.rs"
 
 [dependencies]
-libdunit = { path = "../../libdunit" }
+dunit = { path = "../../../runtime/dunit" }

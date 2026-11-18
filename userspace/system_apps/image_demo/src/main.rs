@@ -1,7 +1,9 @@
 #![no_std]
 #![no_main]
 
-use core::panic::PanicInfo;
+extern crate alloc;
+
+use dunit::display::Display;
 
 const IMAGE_W: usize = 16;
 const IMAGE_H: usize = 16;
@@ -35,62 +37,59 @@ const IMAGE: [u32; IMAGE_W * IMAGE_H] = [
     TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT, OUTLINE, OUTLINE, OUTLINE, OUTLINE, OUTLINE, OUTLINE, OUTLINE, OUTLINE, TRANSPARENT, TRANSPARENT, TRANSPARENT, TRANSPARENT,
 ];
 
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    loop {
-        unsafe {
-            core::arch::asm!("pause", options(nomem, nostack));
-        }
+fn draw_image(display: &mut Display, x: u32, y: u32) -> dunit::Result<()> {
+    let width = IMAGE_W as u32 * SCALE + 48;
+    let height = IMAGE_H as u32 * SCALE + 48;
+    let origin_x = x.saturating_sub(24);
+    let origin_y = y.saturating_sub(24);
+    let mut pixels = alloc::vec![0x0008_1014; (width * height) as usize];
+    let inner_x = x.saturating_sub(16) - origin_x;
+    let inner_y = y.saturating_sub(16) - origin_y;
+    for row in inner_y..inner_y + IMAGE_H as u32 * SCALE + 32 {
+        let offset = (row * width + inner_x) as usize;
+        pixels[offset..offset + (IMAGE_W as u32 * SCALE + 32) as usize].fill(0x0018_252d);
     }
-}
-
-fn draw_image(x: u32, y: u32) {
     for row in 0..IMAGE_H {
         for col in 0..IMAGE_W {
             let color = IMAGE[row * IMAGE_W + col];
             if color != TRANSPARENT {
-                libdunit::draw_rect(
-                    x + col as u32 * SCALE,
-                    y + row as u32 * SCALE,
-                    SCALE,
-                    SCALE,
-                    color,
-                );
+                for dy in 0..SCALE {
+                    let offset = ((y - origin_y + row as u32 * SCALE + dy) * width
+                        + x - origin_x + col as u32 * SCALE) as usize;
+                    pixels[offset..offset + SCALE as usize].fill(color);
+                }
             }
         }
     }
+    display.present(&pixels, width, height, origin_x, origin_y)
 }
 
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
-    // Full-screen framebuffer demo: acquire the display master before touching
-    // the framebuffer. The kernel gates raw FB access (get_framebuffer/draw_*)
-    // on the display owner, so a stray process can't scribble over the screen.
-    if libdunit::handle_display_acquire() < 0 {
-        libdunit::println("image_demo: display is busy (a compositor owns it)");
-        libdunit::exit(1);
-    }
-    let mut fb = libdunit::FbInfo {
-        addr: 0,
-        width: 0,
-        height: 0,
-        pitch: 0,
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    let code = run()?;
+    dunit::process::exit(code)
+}
+
+fn run() -> dunit::Result<i32> {
+    let mut display = match Display::acquire() {
+        Ok(display) => display,
+        Err(_) => {
+            dunit::println!("image_demo: display is busy (a compositor owns it)")?;
+            return Ok(1);
+        }
     };
-
-    if !libdunit::get_framebuffer(&mut fb) {
-        libdunit::println("image_demo: framebuffer unavailable");
-        libdunit::exit(1);
-    }
-
+    let fb = match display.dimensions() {
+        Ok(fb) => fb,
+        Err(_) => {
+            dunit::println!("image_demo: framebuffer unavailable")?;
+            return Ok(1);
+        }
+    };
     let image_w = IMAGE_W as u32 * SCALE;
     let image_h = IMAGE_H as u32 * SCALE;
     let x = fb.width.saturating_sub(image_w) / 2;
     let y = fb.height.saturating_sub(image_h) / 2;
-
-    libdunit::draw_rect(x.saturating_sub(24), y.saturating_sub(24), image_w + 48, image_h + 48, 0x0008_1014);
-    libdunit::draw_rect(x.saturating_sub(16), y.saturating_sub(16), image_w + 32, image_h + 32, 0x0018_252d);
-    draw_image(x, y);
-
-    libdunit::println("image_demo: rendered embedded 16x16 bitmap");
-    libdunit::exit(0);
+    draw_image(&mut display, x, y)?;
+    dunit::println!("image_demo: rendered embedded 16x16 bitmap")?;
+    Ok(0)
 }

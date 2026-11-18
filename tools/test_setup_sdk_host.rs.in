@@ -1,0 +1,122 @@
+// The SDK streams and setup command/menu implementation are included intact.
+extern crate self as dunit;
+#[path = SETUP_APP_PATH]
+mod setup;
+
+#[test]
+fn setup_menu_paste_keeps_input_and_real_validated_settings() {
+    NATIVE.with(|n| n.borrow_mut().input.extend(b"c\nset effects.anim false\nmenu\nc\nget effects.anim\nquit\n"));
+    let mut console = setup::Console::new(io::stdin(), io::stdout());
+    let mut settings = dwm_settings::Settings::defaults();
+    let mut dirty = false;
+    let mut pending = String::new();
+    assert_eq!(setup::menu(&mut console, &mut settings, &mut dirty, &mut pending), Ok(true));
+    for expected in ["set effects.anim false", "menu", "get effects.anim", "quit"] {
+        let line = console.read_command().unwrap().unwrap();
+        assert_eq!(line, expected);
+        let keep = setup::command(&mut console, &line, &mut settings, &mut dirty, &mut pending).unwrap();
+        assert_eq!(keep, expected != "quit");
+    }
+    assert!(dirty);
+    assert_eq!(dwm_settings::value(&dwm_settings::to_toml(&settings), "effects.anim"), Some("false"));
+    assert_eq!(dwm_settings::apply_overlay(&dwm_settings::Settings::defaults(), &pending)
+        .map(|s| dwm_settings::to_toml(&s)), Ok(dwm_settings::to_toml(&settings)));
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        assert!(String::from_utf8_lossy(&n.output).contains("effects.anim = false"));
+        // The first SDK read prefetched the paste; menus consumed the same buffer.
+        assert_eq!(n.reads.len(), 1);
+    });
+}
+
+#[test]
+fn setup_rejects_real_parser_errors_without_discarding_staged_edits() {
+    let mut console = setup::Console::new(io::stdin(), io::stdout());
+    let mut settings = dwm_settings::Settings::defaults();
+    let mut dirty = false;
+    let mut pending = String::new();
+    setup::command(&mut console, "set effects.anim false", &mut settings, &mut dirty, &mut pending).unwrap();
+    let before = dwm_settings::to_toml(&settings);
+    let patch = pending.clone();
+    for line in ["set effects.anim 4", "set missing.value true", "set effects.anim_ms -1"] {
+        assert!(matches!(setup::command(&mut console, line, &mut settings, &mut dirty, &mut pending), Err(setup::AppError::Command(_))));
+        assert_eq!(before, dwm_settings::to_toml(&settings));
+        assert_eq!(pending, patch);
+        assert!(dirty);
+    }
+}
+
+#[test]
+fn setup_partial_output_failure_keeps_staged_edits_and_reports_native_error() {
+    NATIVE.with(|n| n.borrow_mut().write_status.extend([2, EAGAIN, 3, EPIPE]));
+    let mut console = setup::Console::new(io::stdin(), io::stdout());
+    let mut settings = dwm_settings::Settings::defaults();
+    let mut dirty = false;
+    let mut pending = String::new();
+    assert_eq!(setup::command(&mut console, "set effects.anim false", &mut settings, &mut dirty, &mut pending), Err(setup::AppError::Io(Error(EPIPE))));
+    assert!(dirty);
+    assert!(!pending.is_empty());
+    assert_eq!(dwm_settings::value(&dwm_settings::to_toml(&settings), "effects.anim"), Some("false"));
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        assert_eq!(n.output, b"setup");
+        assert_eq!(n.waits, [(1, wait_set::WRITE)]);
+    });
+}
+
+#[test]
+fn setup_editor_preserves_cr_ctrl_d_backspace_and_whole_line_rules() {
+    NATIVE.with(|n| n.borrow_mut().input.extend("é\u{7f}x\rnext\npartial\u{4}after\n".as_bytes()));
+    let mut console = setup::Console::new(io::stdin(), io::stdout());
+    assert_eq!(console.read_command(), Ok(Some("x".into())));
+    assert_eq!(console.read_command(), Ok(Some("next".into())));
+    assert_eq!(console.read_command(), Ok(None));
+    assert_eq!(console.read_command(), Ok(Some("after".into())));
+    NATIVE.with(|n| n.borrow_mut().input.extend([0xff, b'\n']));
+    assert_eq!(console.read_command(), Err(setup::AppError::Input(Error(EINVAL))));
+    NATIVE.with(|n| n.borrow_mut().input.extend([b'x'; 513]));
+    assert_eq!(console.read_command(), Err(setup::AppError::Input(Error(EINVAL))));
+}
+
+#[test]
+fn setup_menu_input_failure_propagates_without_losing_pending_overlay() {
+    NATIVE.with(|n| n.borrow_mut().read_status.push_back(EIO));
+    let mut console = setup::Console::new(io::stdin(), io::stdout());
+    let mut settings = dwm_settings::Settings::defaults();
+    let mut dirty = true;
+    let mut pending = String::from("[effects]\nanim = false\n");
+    assert_eq!(setup::command(&mut console, "menu", &mut settings, &mut dirty, &mut pending), Err(setup::AppError::Input(Error(EIO))));
+    assert!(dirty);
+    assert_eq!(pending, "[effects]\nanim = false\n");
+}
+
+#[test]
+fn setup_numbered_menu_edits_shared_serializer_fields_and_returns_to_commands() {
+    let mut settings = dwm_settings::Settings::defaults();
+    let document = dwm_settings::to_toml(&settings);
+    let sections: Vec<_> = document.lines().filter_map(|line| line.strip_prefix('[').and_then(|s| s.strip_suffix(']')))
+        .filter(|s| *s != "meta").collect();
+    let section = sections.iter().position(|s| *s == "effects").unwrap() + 1;
+    let mut inside = false;
+    let fields: Vec<_> = document.lines().filter_map(|line| {
+        if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            inside = name == "effects";
+            None
+        } else if inside { line.split_once('=').map(|(k, _)| k.trim()) } else { None }
+    }).collect();
+    let field = fields.iter().position(|k| *k == "anim").unwrap() + 1;
+    let paste = format!("{section}\n{field}\nfalse\nb\nc\nget effects.anim\n");
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        n.input.extend(paste.bytes());
+        n.read_status.push_back(EAGAIN);
+    });
+    let mut console = setup::Console::new(io::stdin(), io::stdout());
+    let mut dirty = false;
+    let mut pending = String::new();
+    assert_eq!(setup::menu(&mut console, &mut settings, &mut dirty, &mut pending), Ok(true));
+    assert!(dirty);
+    assert_eq!(console.read_command(), Ok(Some("get effects.anim".into())));
+    assert_eq!(dwm_settings::value(&dwm_settings::to_toml(&settings), "effects.anim"), Some("false"));
+    NATIVE.with(|n| assert_eq!(n.borrow().waits, [(0, wait_set::READ)]));
+}

@@ -8,4 +8,4 @@ name = "bmp_viewer"
 path = "src/main.rs"
 
 [dependencies]
-libdunit = { path = "../../libdunit" }
+dunit = { path = "../../../runtime/dunit" }

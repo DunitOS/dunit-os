@@ -1,0 +1,130 @@
+//! Actual SDK ownership/geometry code with only native boundaries scripted.
+#![allow(dead_code)]
+extern crate self as libdunit;
+#[path = SDK_DISPLAY_PATH] mod display;
+#[path = SDK_TERMINAL_PATH] mod terminal;
+#[path = SDK_ERROR_PATH] mod error;
+#[path = ERRNO_PATH] mod errno;
+pub use error::{Error, Result};
+pub use errno::*;
+NATIVE_RECORDS
+use std::{cell::RefCell, collections::VecDeque};
+const SYSCALL_GET_FRAMEBUFFER: usize = 1;
+const SYSCALL_GET_TERMINAL_CURSOR: usize = 2;
+const SYSCALL_DRAW_PIXEL: usize = 3;
+const SYSCALL_DRAW_RECT: usize = 4;
+const SYSCALL_FB_PRESENT: usize = 5;
+#[derive(Default)] struct Native {
+    owner: bool, foreign_owner: bool, invalid_handle: bool, next_handle: u32, leases: Vec<u32>, closes: Vec<u32>, geometry_error: isize,
+    draw_error: isize, draws: Vec<Vec<usize>>, presents: Vec<(Vec<u32>, usize, usize, usize, usize)>, keys: VecDeque<u8>,
+}
+thread_local! { static NATIVE: RefCell<Native> = RefCell::new(Native::default()); }
+pub fn error_name(_: isize) -> &'static str { "scripted errno" }
+fn handle_display_acquire() -> isize { NATIVE.with(|state| {
+    let mut state = state.borrow_mut();
+    if state.invalid_handle { 0 } else if state.foreign_owner { EBUSY } else {
+        let handle = 17 + state.next_handle; state.next_handle += 1;
+        state.owner = true; state.leases.push(handle); handle as isize
+    }
+}) }
+fn handle_close(handle: u32) -> isize { NATIVE.with(|state| {
+    let mut state = state.borrow_mut();
+    let index = state.leases.iter().position(|item| *item == handle).expect("live lease");
+    state.leases.remove(index); state.owner = !state.leases.is_empty();
+    state.closes.push(handle); 0
+}) }
+fn syscall1(number: usize, address: usize) -> isize { NATIVE.with(|state| {
+    let state = state.borrow();
+    if state.geometry_error != 0 { return state.geometry_error; }
+    unsafe { match number {
+        SYSCALL_GET_FRAMEBUFFER => {
+            assert!(state.owner);
+            *(address as *mut FbInfo) = FbInfo { addr: 0xfeed_0000, width: 1024, height: 768, pitch: 4096 };
+        }
+        SYSCALL_GET_TERMINAL_CURSOR => {
+            *(address as *mut TerminalCursorInfo) = TerminalCursorInfo { x: 32, y: 80, char_width: 8, char_height: 16 };
+        }
+        _ => panic!("unexpected native call"),
+    }}
+    0
+}) }
+fn syscall3(number: usize, x: usize, y: usize, color: usize) -> isize {
+    assert_eq!(number, SYSCALL_DRAW_PIXEL);
+    NATIVE.with(|state| { let mut state = state.borrow_mut(); assert!(state.owner);
+        state.draws.push(vec![x,y,color]); state.draw_error })
+}
+fn syscall5(number: usize, x: usize, y: usize, w: usize, h: usize, color: usize) -> isize {
+    if number == SYSCALL_FB_PRESENT {
+        return NATIVE.with(|state| { let mut state = state.borrow_mut(); assert!(state.owner);
+            let pixels = unsafe { core::slice::from_raw_parts(x as *const u32, y * w) }.to_vec();
+            state.presents.push((pixels, y, w, h, color)); state.draw_error });
+    }
+    assert_eq!(number, SYSCALL_DRAW_RECT);
+    NATIVE.with(|state| { let mut state = state.borrow_mut(); assert!(state.owner);
+        state.draws.push(vec![x,y,w,h,color]); state.draw_error })
+}
+fn get_key() -> Option<u8> { NATIVE.with(|state| state.borrow_mut().keys.pop_front()) }
+
+#[test]
+fn display_busy_drop_once_and_reacquisition_preserve_capability_lifetime() {
+    NATIVE.with(|state| state.borrow_mut().foreign_owner = true);
+    assert_eq!(display::Display::acquire().unwrap_err(), Error(EBUSY));
+    NATIVE.with(|state| state.borrow_mut().foreign_owner = false);
+    let mut display = display::Display::acquire().unwrap();
+    let mut second = display::Display::acquire().unwrap();
+    assert_eq!(display.dimensions().unwrap(), display::Dimensions { width: 1024, height: 768 });
+    display.draw_pixel(11, 12, 0x123456).unwrap();
+    display.draw_rect(21, 22, 23, 24, 0xabcdef).unwrap();
+    NATIVE.with(|state| assert_eq!(state.borrow().draws, [vec![11,12,0x123456],vec![21,22,23,24,0xabcdef]]));
+    drop(display);
+    NATIVE.with(|state| assert_eq!(state.borrow().closes, [17]));
+    second.draw_pixel(1,2,3).unwrap();
+    drop(second);
+    drop(display::Display::acquire().unwrap());
+    NATIVE.with(|state| assert_eq!(state.borrow().closes, [17,18,19]));
+}
+
+#[test]
+fn display_geometry_and_draw_failures_report_native_errors_and_release() {
+    let mut display = display::Display::acquire().unwrap();
+    NATIVE.with(|state| { let mut state = state.borrow_mut(); state.geometry_error = EIO; state.draw_error = EACCES; });
+    assert_eq!(display.dimensions(), Err(Error(EIO)));
+    assert_eq!(display.draw_pixel(0,0,0), Err(Error(EACCES)));
+    assert_eq!(display.draw_rect(0,0,1,1,0), Err(Error(EACCES)));
+    drop(display);
+    NATIVE.with(|state| assert_eq!(state.borrow().closes, [17]));
+}
+
+#[test]
+fn terminal_geometry_and_nonblocking_scancodes_preserve_releases() {
+    assert_eq!(terminal::cursor().unwrap(), terminal::Cursor { x: 32, y: 80, char_width: 8, char_height: 16 });
+    assert_eq!(terminal::read_scancode(), None);
+    NATIVE.with(|state| state.borrow_mut().keys.extend([0x1e, 0x9e]));
+    assert_eq!(terminal::read_scancode(), Some(0x1e));
+    assert_eq!(terminal::read_scancode(), Some(0x9e));
+    assert_eq!(terminal::read_scancode(), None);
+    NATIVE.with(|state| state.borrow_mut().geometry_error = EINVAL);
+    assert_eq!(terminal::cursor(), Err(Error(EINVAL)));
+}
+
+#[test]
+fn invalid_zero_handle_is_not_adopted_or_closed() {
+    NATIVE.with(|state| state.borrow_mut().invalid_handle = true);
+    assert_eq!(display::Display::acquire().unwrap_err(), Error(EIO));
+    NATIVE.with(|state| assert!(state.borrow().closes.is_empty()));
+}
+
+#[test]
+fn bulk_present_validates_complete_pixel_slice_and_preserves_native_errors() {
+    let mut display = display::Display::acquire().unwrap();
+    let pixels = [0xff0000, 0x00ff00, 0x0000ff, 0xffffff];
+    display.present(&pixels, 2, 2, 40, 60).unwrap();
+    NATIVE.with(|state| assert_eq!(state.borrow().presents, [(pixels.to_vec(), 2, 2, 40, 60)]));
+    for (width, height) in [(0, 2), (2, 0), (1, 2), (3, 2), (u32::MAX, u32::MAX), (4096, 4097)] {
+        assert_eq!(display.present(&pixels, width, height, 0, 0), Err(Error(EINVAL)));
+    }
+    NATIVE.with(|state| {
+        let mut state = state.borrow_mut(); assert_eq!(state.presents.len(), 1); state.draw_error = EACCES;
+    });
+    assert_eq!(display.present(&pixels, 2, 2, 0, 0), Err(Error(EACCES)));
+}

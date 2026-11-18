@@ -50,6 +50,8 @@ Use one generated entry per binary. A dependency must be named `dunit`.
 | `time` | Monotonic `Instant`, `Duration`, checked deadlines and blocking sleep |
 | `process` | `Child::spawn`, id, kill, try/wait/timeout, cached exit status |
 | `pty` | Owned PTY master, explicit argv/env child spawning and bounded pending input |
+| `display` | Owned terminal-mode display lease, dimensions, raster present and checked drawing |
+| `terminal` | Cursor geometry and nonblocking raw scancodes |
 | `canvas` (gui) | Private canvas snapshots and cached configured fonts |
 | `window`, `ui` (gui) | Owned native windows, typed controls and shared transfer integration |
 | `system` | Checked `SystemStats` facts and caller-buffer terminal diagnostics over existing native authority |
@@ -58,6 +60,15 @@ Use one generated entry per binary. A dependency must be named `dunit`.
 
 All fallible operations use `dunit::Result<T>`. `Error::raw_os_error()` is the
 negative Dunit errno, and Display/name return its existing ABI name.
+
+## Terminal display
+
+Use `display::Display::acquire()` for terminal-mode viewers and diagnostics that
+own the display. The lease closes on drop. `present` accepts exactly
+`width * height` packed pixels and submits them with an explicit destination.
+The maximum raster is 64 MiB. For desktop applications, use the GUI SDK's
+`window` and `canvas` modules. Raw scancodes include key releases.
+`terminal::cursor()` returns pixel coordinates and character cell dimensions.
 
 ## Streams and files
 

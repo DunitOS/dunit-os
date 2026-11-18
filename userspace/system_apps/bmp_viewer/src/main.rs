@@ -1,38 +1,18 @@
 #![no_std]
 #![no_main]
 
-use core::panic::PanicInfo;
+extern crate alloc;
+
+use alloc::vec::Vec;
+use dunit::display::{Dimensions, Display};
+use dunit::io::Read;
+use dunit::time::{self, Duration};
+mod bmp;
+use bmp::{parse_bmp, render_plan, BmpInfo};
 
 const DEFAULT_PATH: &str = "/assets/images/logo.bmp";
 const MAX_BMP_SIZE: usize = 8 * 1024 * 1024;
 const READ_CHUNK_SIZE: usize = 4096;
-const PAD_X: u32 = 16;
-const PAD_Y: u32 = 4;
-const MAX_UPSCALE: usize = 12;
-const MIN_USEFUL_HEIGHT_NUM: u32 = 2;
-const MIN_USEFUL_HEIGHT_DEN: u32 = 3;
-
-static mut FILE_BUF: [u8; MAX_BMP_SIZE] = [0; MAX_BMP_SIZE];
-
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    loop {
-        unsafe {
-            core::arch::asm!("pause", options(nomem, nostack));
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct BmpInfo {
-    data_offset: usize,
-    width: usize,
-    height: usize,
-    bpp: u16,
-    top_down: bool,
-    row_stride: usize,
-}
-
 #[derive(Clone, Copy)]
 struct DrawArea {
     x: u32,
@@ -41,136 +21,18 @@ struct DrawArea {
     height: u32,
 }
 
-#[derive(Clone, Copy)]
-struct RenderPlan {
-    x: u32,
-    y: u32,
-    width: usize,
-    height: usize,
-    src_step: usize,
-    dst_scale: usize,
-}
-
-fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes([*data.get(offset)?, *data.get(offset + 1)?]))
-}
-
-fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes([
-        *data.get(offset)?,
-        *data.get(offset + 1)?,
-        *data.get(offset + 2)?,
-        *data.get(offset + 3)?,
-    ]))
-}
-
-fn read_i32(data: &[u8], offset: usize) -> Option<i32> {
-    Some(i32::from_le_bytes([
-        *data.get(offset)?,
-        *data.get(offset + 1)?,
-        *data.get(offset + 2)?,
-        *data.get(offset + 3)?,
-    ]))
-}
-
-fn parse_bmp(data: &[u8]) -> Option<BmpInfo> {
-    if data.len() < 54 || data.get(0) != Some(&b'B') || data.get(1) != Some(&b'M') {
-        return None;
-    }
-
-    let data_offset = read_u32(data, 10)? as usize;
-    let dib_size = read_u32(data, 14)?;
-    if dib_size < 40 {
-        return None;
-    }
-
-    let width = read_i32(data, 18)?;
-    let height = read_i32(data, 22)?;
-    let planes = read_u16(data, 26)?;
-    let bpp = read_u16(data, 28)?;
-    let compression = read_u32(data, 30)?;
-    if width <= 0 || height == 0 || planes != 1 || compression != 0 {
-        return None;
-    }
-    if bpp != 24 && bpp != 32 {
-        return None;
-    }
-
-    let abs_height = height.unsigned_abs() as usize;
-    let width = width as usize;
-    let bytes_per_pixel = (bpp / 8) as usize;
-    let row_stride = ((width * bytes_per_pixel) + 3) & !3;
-    let pixel_bytes = row_stride.checked_mul(abs_height)?;
-    if data_offset.checked_add(pixel_bytes)? > data.len() {
-        return None;
-    }
-
-    Some(BmpInfo {
-        data_offset,
-        width,
-        height: abs_height,
-        bpp,
-        top_down: height < 0,
-        row_stride,
-    })
-}
-
-fn ceil_div(value: usize, by: usize) -> usize {
-    if by == 0 {
-        return value;
-    }
-    (value + by - 1) / by
-}
-
-fn render_plan(info: BmpInfo, fb: &libdunit::FbInfo) -> RenderPlan {
-    let mut cursor = libdunit::TerminalCursorInfo {
-        x: 0,
-        y: 0,
-        char_width: 8,
-        char_height: 16,
-    };
-    let has_cursor = libdunit::get_terminal_cursor(&mut cursor);
-    let x0 = if has_cursor {
-        cursor.char_width.saturating_mul(2)
-    } else {
-        PAD_X
-    };
-    let prompt_y = cursor.y.saturating_add(PAD_Y);
-    let min_useful_h = fb.height.saturating_mul(MIN_USEFUL_HEIGHT_NUM) / MIN_USEFUL_HEIGHT_DEN;
-    let y0 = if has_cursor && fb.height.saturating_sub(prompt_y) >= min_useful_h {
-        prompt_y
-    } else {
-        PAD_Y
-    };
-    let max_w = fb.width.saturating_sub(x0 + PAD_X).max(1) as usize;
-    let max_h = fb.height.saturating_sub(y0 + cursor.char_height + PAD_Y).max(1) as usize;
-    let src_step = ceil_div(info.width, max_w)
-        .max(ceil_div(info.height, max_h))
-        .max(1);
-    let width = (info.width / src_step).max(1);
-    let height = (info.height / src_step).max(1);
-    let max_scale = (max_w / width).min(max_h / height).max(1);
-    let target_width = (max_w * 2 / 3).max(width);
-    let dst_scale = ceil_div(target_width, width)
-        .max(1)
-        .min(max_scale)
-        .min(MAX_UPSCALE);
-
-    RenderPlan {
-        x: x0,
-        y: y0,
-        width,
-        height,
-        src_step,
-        dst_scale,
-    }
-}
-
-fn draw_bmp(data: &[u8], info: BmpInfo, fb: &libdunit::FbInfo) -> DrawArea {
-    let plan = render_plan(info, fb);
+fn draw_bmp(
+    display: &mut Display,
+    data: &[u8],
+    info: BmpInfo,
+    fb: &Dimensions,
+) -> dunit::Result<DrawArea> {
+    let cursor = dunit::terminal::cursor()
+        .ok()
+        .map(|c| (c.y, c.char_width, c.char_height));
+    let plan = render_plan(info, fb.width, fb.height, cursor);
     let image_w = (plan.width * plan.dst_scale) as u32;
     let image_h = (plan.height * plan.dst_scale) as u32;
-    let bytes_per_pixel = (info.bpp / 8) as usize;
     let area = DrawArea {
         x: plan.x.saturating_sub(2),
         y: plan.y.saturating_sub(2),
@@ -178,172 +40,138 @@ fn draw_bmp(data: &[u8], info: BmpInfo, fb: &libdunit::FbInfo) -> DrawArea {
         height: image_h + 4,
     };
 
-    libdunit::draw_rect(
+    let count = (area.width as usize)
+        .checked_mul(area.height as usize)
+        .filter(|count| *count <= 64 * 1024 * 1024 / 4)
+        .ok_or(dunit::Error(dunit::errno::EINVAL))?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(count)
+        .map_err(|_| dunit::Error(dunit::errno::ENOMEM))?;
+    pixels.resize(count, 0x0008_1014);
+    bmp::raster(
+        &data,
+        info,
+        plan,
         area.x,
         area.y,
-        area.width,
-        area.height,
-        0x0008_1014,
-    );
+        area.width as usize,
+        &mut pixels,
+    )
+    .ok_or(dunit::Error(dunit::errno::EINVAL))?;
+    display.present(&pixels, area.width, area.height, area.x, area.y)?;
 
-    for y in 0..plan.height {
-        let src_y = y * plan.src_step;
-        let file_y = if info.top_down {
-            src_y
-        } else {
-            info.height - 1 - src_y
-        };
-        for x in 0..plan.width {
-            let src_x = x * plan.src_step;
-            let offset = info.data_offset + file_y * info.row_stride + src_x * bytes_per_pixel;
-            let b = data[offset] as u32;
-            let g = data[offset + 1] as u32;
-            let r = data[offset + 2] as u32;
-            let color = (r << 16) | (g << 8) | b;
-            let dst_x = plan.x + (x * plan.dst_scale) as u32;
-            let dst_y = plan.y + (y * plan.dst_scale) as u32;
-            if plan.dst_scale == 1 {
-                libdunit::draw_pixel(dst_x, dst_y, color);
-            } else {
-                libdunit::draw_rect(
-                    dst_x,
-                    dst_y,
-                    plan.dst_scale as u32,
-                    plan.dst_scale as u32,
-                    color,
-                );
-            }
-        }
-    }
-
-    area
+    Ok(area)
 }
 
-fn drain_stale_keys() {
+fn drain_stale_keys() -> dunit::Result<()> {
     let mut quiet_ticks = 0usize;
     while quiet_ticks < 8 {
-        if libdunit::get_key().is_some() {
+        if dunit::terminal::read_scancode().is_some() {
             quiet_ticks = 0;
         } else {
             quiet_ticks += 1;
-            libdunit::sleep_ms(10);
+            time::sleep(Duration::from_millis(10))?;
         }
     }
+    Ok(())
 }
 
-fn wait_for_key() {
-    drain_stale_keys();
+fn wait_for_key() -> dunit::Result<()> {
+    drain_stale_keys()?;
     loop {
-        if let Some(scancode) = libdunit::get_key() {
+        if let Some(scancode) = dunit::terminal::read_scancode() {
             if (scancode & 0x80) == 0 {
                 break;
             }
         }
-        libdunit::sleep_ms(20);
+        time::sleep(Duration::from_millis(20))?;
     }
+    Ok(())
 }
 
 fn is_no_wait_arg(arg: &str) -> bool {
     arg.as_bytes() == b"--no-wait"
 }
 
-fn parse_args(argc: usize, argv: libdunit::RawArgv) -> (&'static str, bool) {
+fn parse_args(args: &[alloc::string::String]) -> (&str, bool) {
     let mut path = DEFAULT_PATH;
     let mut wait = true;
-    let mut index = 1usize;
-    while index < argc {
-        if let Some(arg) = unsafe { libdunit::argv_get(argc, argv, index) } {
-            if is_no_wait_arg(arg) {
-                wait = false;
-            } else {
-                path = arg;
-            }
+    for arg in args.iter().skip(1) {
+        if is_no_wait_arg(arg) {
+            wait = false;
+        } else {
+            path = arg;
         }
-        index += 1;
     }
     (path, wait)
 }
 
-fn read_file(path: &str) -> Result<&'static [u8], i32> {
-    let fd = libdunit::open(path, libdunit::OPEN_READ);
-    if fd < 0 {
-        return Err(1);
-    }
-
-    let mut total = 0usize;
+fn read_file(path: &str) -> Result<Vec<u8>, i32> {
+    let mut file = dunit::fs::File::open(path).map_err(|_| 1)?;
+    let mut data = Vec::new();
+    let mut chunk = [0; READ_CHUNK_SIZE];
     loop {
-        if total >= MAX_BMP_SIZE {
-            libdunit::close(fd as usize);
+        // Preserve the existing strict size boundary: a file exactly at the
+        // limit also fails, rather than probing beyond the application budget.
+        if data.len() >= MAX_BMP_SIZE {
             return Err(2);
         }
-        let end = (total + READ_CHUNK_SIZE).min(MAX_BMP_SIZE);
-        let buf = unsafe { &mut FILE_BUF[total..end] };
-        let read = libdunit::read(fd as usize, buf);
-        if read < 0 {
-            libdunit::close(fd as usize);
-            return Err(3);
-        }
-        if read == 0 {
+        let end = chunk.len().min(MAX_BMP_SIZE - data.len());
+        let count = file.read(&mut chunk[..end]).map_err(|_| 3)?;
+        if count == 0 {
             break;
         }
-        total += read as usize;
+        data.extend_from_slice(&chunk[..count]);
     }
-
-    if libdunit::close(fd as usize) != 0 {
-        return Err(4);
-    }
-
-    Ok(unsafe { &FILE_BUF[..total] })
+    file.close().map_err(|_| 4)?;
+    Ok(data)
 }
 
-#[no_mangle]
-pub extern "C" fn _start(
-    argc: usize,
-    argv: libdunit::RawArgv,
-    _envp: libdunit::RawEnvp,
-) -> ! {
-    let (path, wait) = parse_args(argc, argv);
+#[dunit::main]
+fn main() -> dunit::Result<()> {
+    let args = dunit::args::args()?;
+    let (path, wait) = parse_args(&args);
+    let code = run(path, wait)?;
+    dunit::process::exit(code)
+}
 
+fn run(path: &str, wait: bool) -> dunit::Result<i32> {
     let data = match read_file(path) {
         Ok(data) => data,
         Err(code) => {
-            libdunit::println("bmp_viewer: read failed");
-            libdunit::exit(code);
+            dunit::println!("bmp_viewer: read failed")?;
+            return Ok(code);
         }
     };
-
-    let info = match parse_bmp(data) {
+    let info = match parse_bmp(&data) {
         Some(info) => info,
         None => {
-            libdunit::println("bmp_viewer: unsupported BMP");
-            libdunit::exit(5);
+            dunit::println!("bmp_viewer: unsupported BMP")?;
+            return Ok(5);
         }
     };
-
-    // Full-screen framebuffer app: acquire the display master before touching
-    // the framebuffer. The kernel gates raw FB access on the display owner.
-    if libdunit::handle_display_acquire() < 0 {
-        libdunit::println("bmp_viewer: display is busy (a compositor owns it)");
-        libdunit::exit(6);
-    }
-    let mut fb = libdunit::FbInfo {
-        addr: 0,
-        width: 0,
-        height: 0,
-        pitch: 0,
+    let mut display = match Display::acquire() {
+        Ok(display) => display,
+        Err(_) => {
+            dunit::println!("bmp_viewer: display is busy (a compositor owns it)")?;
+            return Ok(6);
+        }
     };
-    if !libdunit::get_framebuffer(&mut fb) {
-        libdunit::println("bmp_viewer: framebuffer unavailable");
-        libdunit::exit(6);
-    }
-
-    let area = draw_bmp(data, info, &fb);
+    let fb = match display.dimensions() {
+        Ok(fb) => fb,
+        Err(_) => {
+            dunit::println!("bmp_viewer: framebuffer unavailable")?;
+            return Ok(6);
+        }
+    };
+    let area = draw_bmp(&mut display, &data, info, &fb)?;
     if wait {
-        libdunit::println("bmp_viewer: rendered BMP, press any key to close");
-        wait_for_key();
-        libdunit::draw_rect(area.x, area.y, area.width, area.height, 0x0000_0000);
+        dunit::println!("bmp_viewer: rendered BMP, press any key to close")?;
+        wait_for_key()?;
+        display.draw_rect(area.x, area.y, area.width, area.height, 0x0000_0000)?;
     } else {
-        libdunit::println("bmp_viewer: rendered BMP");
+        dunit::println!("bmp_viewer: rendered BMP")?;
     }
-    libdunit::exit(0);
+    Ok(0)
 }
