@@ -119,9 +119,10 @@ fn run_desktop_session(
     clients: &mut Vec<ClientState>,
     pending_notifies: &mut Vec<alloc::string::String>,
     first_baseline: Option<settings::Display>,
-    pending_reload: bool,
+    mut pending_reload: bool,
     pointer: &mut PointerSession,
     transfers: &mut transfer_runtime::Runtime,
+    isolation_proven: &mut bool,
 ) -> bool {
     // Apply the configured display mode before sizing framebuffer resources.
     let cfg = settings::load_config();
@@ -286,6 +287,28 @@ fn run_desktop_session(
         session.len()
     ));
 
+    // Ping-pong scratch for the backdrop blur, sized for the largest blurred
+    // region (panel / dock strip / menu) and allocated once.
+    let panel_area = bw * ly.panel_h.max(0) as usize;
+    let dock_area = ly.dock_w.max(0) as usize * bw.max(bh);
+    let menu_area = ly.menu_w.max(0) as usize * (apps.launcher.len() * ly.menu_item_h.max(0) as usize);
+    let scratch_len = panel_area.max(dock_area).max(menu_area).max(1);
+    let mut blur_a: Vec<u32> = alloc::vec![0u32; scratch_len];
+    let mut blur_b: Vec<u32> = alloc::vec![0u32; scratch_len];
+    // Snapshot lower layers before painting an ARGB window frame.
+    let mut win_backing: Vec<u32> = Vec::new();
+    let mut argb_blit_logged = false;
+    // Publish no client presentation until the desktop's persistent framebuffer,
+    // wallpaper, assets, font cache and blur scratch are ready. A client may draw
+    // again as soon as FRAME_DONE arrives; startup must not add these allocations
+    // or their latency to that next frame. Mode changes prepare fresh resources
+    // but never repeat the initial isolation/resize proof.
+    if first_baseline.is_some() {
+        *isolation_proven = crate::bringup::present_clients(
+            server, clients, &apps, &skin, pending_notifies, &mut pending_reload, transfers,
+        );
+    }
+
     // Build the window model from presented clients, tiling them if their slot
     // origins collide, and keeping the title bar on-screen.
     let animation_epoch = animation_time_ms().unwrap_or(0);
@@ -372,17 +395,6 @@ fn run_desktop_session(
     let mut previous_animation_time = animation_epoch;
     let mut menu_was_open = false;
 
-    // Ping-pong scratch for the backdrop blur, sized for the largest blurred
-    // region (panel / dock strip / menu) and allocated once.
-    let panel_area = bw * ly.panel_h.max(0) as usize;
-    let dock_area = ly.dock_w.max(0) as usize * bw.max(bh);
-    let menu_area = ly.menu_w.max(0) as usize * (apps.launcher.len() * ly.menu_item_h.max(0) as usize);
-    let scratch_len = panel_area.max(dock_area).max(menu_area).max(1);
-    let mut blur_a: Vec<u32> = alloc::vec![0u32; scratch_len];
-    let mut blur_b: Vec<u32> = alloc::vec![0u32; scratch_len];
-    // Snapshot lower layers before painting an ARGB window frame.
-    let mut win_backing: Vec<u32> = Vec::new();
-    let mut argb_blit_logged = false;
     // Report elapsed frame periods using the system uptime clock.
     let mut prev_uptime = 0u64;
     let mut prev_tick = 0u32;

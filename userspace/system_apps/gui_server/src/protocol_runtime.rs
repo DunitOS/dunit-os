@@ -723,16 +723,10 @@ pub(super) fn try_launch(
 /// into another's connection), then hand off to the interactive session. What
 /// launches at boot is data (`settings::Applications::startup`), so changing the
 /// startup set needs no gui_server edit. Returns true iff the isolation smoke saw
-/// two clients present at once (the baseline config autostarts three).
+/// two clients present at once (the baseline config autostarts three). The
+/// desktop prepares its resources before spawning and presenting these clients.
 pub(super) fn serve_two_clients(input: u32) -> bool {
     let cfg = settings::load_config();
-    // Startup slots appear before desktop entry, so resolve the same shared
-    // registry here as well. No private placement defaults in the transport.
-    let skin = match crate::shell_theme::prepare(&cfg).and_then(|theme|
-        dunit_style::shell::Visuals::from_tokens(&theme.tokens).map_err(|e|alloc::format!("{:?}",e))) {
-        Ok(skin)=>skin,
-        Err(error)=>{libdunit::println(&alloc::format!("gui_server: shell rejected {}",error));return false;}
-    };
     // The display mode as configured at boot, captured BEFORE any client is spawned
     // — so a settings client that rewrites `[display]` during bring-up cannot move
     // this baseline. Threaded into the first `run_desktop_session` so a bring-up
@@ -741,155 +735,19 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
     let mut server = Server::new();
     let mut transfers=transfer_runtime::Runtime::new(cfg.settings.transfers.timeout_ms as u64);
     let mut clients: Vec<ClientState> = Vec::new();
-    // Notification texts a client posts (NOTIFY_MAGIC) DURING bring-up — before the
-    // interactive desktop loop and its per-tick `pump_clients` exist. An autostart
-    // app can toast the moment it presents (e.g. gui_demo's "I'm up" toast), which
-    // lands here in `serve_two_clients` or the `resize_one_client` resize proof, not
-    // in `run_desktop_session`. Collect them instead of dropping them, and hand them
-    // to the session so it emits each through the SAME config-gated `notify_post`
-    // path once its toast queue exists (single source of truth; nothing is lost to a
-    // bring-up race).
-    let mut pending_notifies: Vec<alloc::string::String> = Vec::new();
-    // A reload pinged by a client (e.g. gui_settings' resolution self-test) while it
-    // presents during bring-up — captured here instead of dropped, then handed to
-    // the first interactive session so the edited `[display]` actually re-applies.
+    // Initial presentations run after desktop resource preparation. Their
+    // notifications and settings reloads remain owned by the session queue.
+    let pending_notifies: Vec<alloc::string::String> = Vec::new();
     let mut bringup_reload = false;
 
-    // Autostart the configured startup apps. Each entry is a registry index; a
-    // stale/out-of-range index is skipped rather than trusted. Initial slots
-    // cascade — the desktop session re-tiles them under the panel/dock anyway.
-    let mut next_id = 1u32;
-    for (k, &ri) in cfg.apps.startup.iter().enumerate() {
-        let Some(entry) = cfg.apps.apps.get(ri) else {
-            continue;
-        };
-        let sx = (skin.startup_origin_x + k as i32 * skin.startup_step_x) as u32;
-        let sy = (skin.startup_origin_y + k as i32 * skin.startup_step_y) as u32;
-        if let Some(c) = spawn_client(&mut server, next_id, sx, sy, ri as u8, entry, cfg.apps.terminal.as_deref()) {
-            clients.push(c);
-            next_id += 1;
-        }
-    }
-    if clients.is_empty() {
-        // No startup apps (or none spawnable): still raise the shell so the
-        // panel/dock/launcher are usable and can spawn apps on demand.
-        libdunit::println("gui_server: no startup apps to autostart");
-        // Loop so a live `[display]` change (which returns `true`) re-enters the
-        // session at the new resolution. The caller owns notifications until
-        // a session has actually processed them, including across mode changes.
-        let mut pn = pending_notifies;
-        let mut baseline = Some(boot_display);
-        let mut pointer = PointerSession { input, ..PointerSession::default() };
-        while run_desktop_session(
-            &mut server,
-            &mut clients,
-            &mut pn,
-            baseline.take(),
-            core::mem::take(&mut bringup_reload),
-            &mut pointer,
-            &mut transfers,
-        ) {}
-        return false;
-    }
-
-    // Pump until the isolation invariant is proven: at least two untrusted
-    // clients presented concurrently (or, with a single startup app, that one).
-    // We break the INSTANT the target count is reached — inside the composite —
-    // so any slower startup app (e.g. the terminal, which sets up a pty first)
-    // stays UNpresented here and becomes a runtime-pumped window in the desktop
-    // loop. That is what later fires "gui_server: desktop input ready", so the
-    // keyboard-ready gate keeps working regardless of client presentation order.
-    let target = clients.len().min(2);
-    let mut rx = [0u8; 256];
-    let mut presented_total = clients.iter().filter(|c| c.presented).count();
-    'pump: for _ in 0..128 {
-        if presented_total >= target {
-            break;
-        }
-        // Route by the kernel-authenticated sender pid; a client cannot spoof
-        // another's identity, so the protocol connections stay isolated.
-        let mut sender: u32 = 0;
-        let mut attached=0;
-        let n = libdunit::ipc_recv_handle_blocking(&mut rx,&mut sender,&mut attached,3000);
-        if n <= 0 {
-            break;
-        }
-        let n = n as usize;
-        let attachment=if attached!=0{Some(unsafe{dunit_transfer::OwnedHandle::adopt(attached)})}else{None};
-        let idx = match clients.iter().position(|c| c.pid == sender) {
-            Some(idx) => idx,
-            None => continue, // message from an unknown pid — ignore
-        };
-        // A settings client can present and run its resolution self-test here (a
-        // bring-up race): capture its reload ping into `bringup_reload` instead of
-        // dropping it, so the first interactive session re-applies the edited
-        // `[display]` (see run_desktop_session's first-entry baseline). NOTIFYs
-        // posted this early are still preserved in `pending_notifies`.
-        dispatch_client_payload(&mut server,&mut clients[idx],&rx[..n],attachment,&mut bringup_reload,&mut pending_notifies,&mut transfers);
-        transfers.flush();
-
-        // A composition tick: route each FRAME_DONE to its client and blit that
-        // client's committed buffer into its own slot.
-        for (fc, fp) in &server.composite() {
-            for c in clients.iter_mut() {
-                if c.conn != *fc {
-                    continue;
-                }
-                libdunit::ipc_send(c.pid, fp);
-                let status = if fp.len() >= 52 {
-                    u32::from_le_bytes([fp[48], fp[49], fp[50], fp[51]])
-                } else {
-                    0
-                };
-                if status != 0 || c.presented {
-                    continue;
-                }
-                if !c.buf_ptr.is_null() && c.surf_w > 0 && c.surf_h > 0 {
-                    // Non-wrapping bounds check against the REAL mapped length
-                    // (c.buf_size came from handle_shared_len, not the client).
-                    let want = c.surf_w as u64 * c.surf_h as u64 * 4;
-                    if want <= c.buf_size as u64 {
-                        let data =
-                            unsafe { core::slice::from_raw_parts(c.buf_ptr, want as usize) };
-                        if libdunit::fb_present(data, c.surf_w, c.surf_h, c.slot_x, c.slot_y) == 0 {
-                            c.presented = true;
-                            presented_total += 1;
-                            // Stop the instant the invariant holds, leaving the
-                            // rest of the startup set for the runtime pump.
-                            if presented_total >= target {
-                                break 'pump;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let both = presented_total >= 2;
-
-    // Hand off to the interactive desktop session: a persistent compositor loop
-    // that owns a full-screen back buffer, decorates each client surface with a
-    // draggable title bar, routes the real mouse (syscall 60) into focus/raise/
-    // drag, and re-presents every tick. This is the M4 userspace DWM taking over
-    // from the linear M3 smoke.
-    if both {
-        // Emit the isolation marker BEFORE the session loop so automated smokes
-        // observe it immediately (headless runs are force-quit after capture).
-        libdunit::println("gui_server: served two untrusted clients OK");
-        // Cross-process resize proof: push a server-initiated CONFIGURE to one
-        // live client and drive its re-negotiation to completion. This exercises
-        // the maximize/fullscreen mechanism across a REAL process boundary (the
-        // client re-allocates its buffer and re-imports it with a fresh object
-        // id), which the in-process compositor self-test cannot cover.
-        crate::bringup::resize_one_client(&mut server, &mut clients, &mut pending_notifies, &mut bringup_reload, &mut transfers);
-    }
+    // Resource preparation in the session precedes the first client callback.
+    // Keep the isolation result across display-mode re-entry.
+    let mut both = false;
     // Loop so a live `[display]` change re-enters the session at the new
     // resolution (rebuilding all buffers); unprocessed notifications survive.
     let mut pn = pending_notifies;
-    // The first session carries the boot display baseline + any reload pinged during
-    // bring-up (serve_two_clients / resize_one_client); re-entries pass None/false
-    // because the config file is authoritative by then.
+    // The first session captures the boot display baseline before pumping
+    // startup clients; re-entries read the current authoritative configuration.
     let mut baseline = Some(boot_display);
     let mut pointer = PointerSession { input, ..PointerSession::default() };
     while run_desktop_session(
@@ -900,6 +758,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         core::mem::take(&mut bringup_reload),
         &mut pointer,
         &mut transfers,
+        &mut both,
     ) {}
 
     for c in clients.iter() {

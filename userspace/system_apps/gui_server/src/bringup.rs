@@ -293,3 +293,91 @@ pub(super) fn resize_one_client(
     }
     libdunit::println("gui_server: FAIL live client resize");
 }
+
+/// Initial authenticated IPC and cross-process isolation proof. The caller has
+/// already prepared desktop resources before sending any bootstrap, so clients
+/// spend their initial protocol deadline on communication rather than asset loading.
+/// Stop as soon as two clients present so slower startup applications remain
+/// pending for the desktop pump and its input-readiness gate.
+pub(super) fn present_clients(
+    server: &mut Server,
+    clients: &mut Vec<ClientState>,
+    apps: &Applications,
+    skin: &dunit_style::shell::Visuals,
+    pending_notifies: &mut Vec<alloc::string::String>,
+    reload_seen: &mut bool,
+    transfers: &mut transfer_runtime::Runtime,
+) -> bool {
+    // Autostart the configured startup apps. Each entry is a registry index; a
+    // stale/out-of-range index is skipped rather than trusted. Initial slots
+    // cascade — the desktop session re-tiles them under the panel/dock anyway.
+    let mut next_id = 1u32;
+    for (k, &ri) in apps.startup.iter().enumerate() {
+        let Some(entry) = apps.apps.get(ri) else {
+            continue;
+        };
+        let sx = (skin.startup_origin_x + k as i32 * skin.startup_step_x) as u32;
+        let sy = (skin.startup_origin_y + k as i32 * skin.startup_step_y) as u32;
+        if let Some(c) = spawn_client(server, next_id, sx, sy, ri as u8, entry, apps.terminal.as_deref()) {
+            clients.push(c);
+            next_id += 1;
+        }
+    }
+    if clients.is_empty() {
+        libdunit::println("gui_server: no startup apps to autostart");
+    }
+    let target = clients.len().min(2);
+    let mut rx = [0u8; 256];
+    let mut presented_total = clients.iter().filter(|c| c.presented).count();
+    for _ in 0..128 {
+        if presented_total >= target {
+            break;
+        }
+        let mut sender = 0;
+        let mut attached = 0;
+        let n = libdunit::ipc_recv_handle_blocking(&mut rx, &mut sender, &mut attached, 3000);
+        if n <= 0 {
+            break;
+        }
+        let attachment = if attached != 0 {
+            Some(unsafe { dunit_transfer::OwnedHandle::adopt(attached) })
+        } else {
+            None
+        };
+        let Some(idx) = clients.iter().position(|c| c.pid == sender) else {
+            continue;
+        };
+        dispatch_client_payload(server, &mut clients[idx], &rx[..n as usize], attachment,
+                                reload_seen, pending_notifies, transfers);
+        transfers.flush();
+
+        // Present each committed image before server.composite() publishes its
+        // FRAME_DONE. This also handles callback-free first commits and updates
+        // from an already presented client while another finishes its handshake.
+        for c in clients.iter_mut().filter(|c| c.ready && !c.buf_ptr.is_null()) {
+            let want = c.surf_w as u64 * c.surf_h as u64 * 4;
+            if c.surf_w == 0 || c.surf_h == 0 || want > c.buf_size as u64 {
+                return false;
+            }
+            let data = unsafe { core::slice::from_raw_parts(c.buf_ptr, want as usize) };
+            if libdunit::fb_present(data, c.surf_w, c.surf_h, c.slot_x, c.slot_y) != 0 {
+                return false;
+            }
+            if !c.presented {
+                c.presented = true;
+                presented_total += 1;
+            }
+        }
+        for (conn, packet) in server.composite() {
+            if let Some(c) = clients.iter().find(|c| c.conn == conn) {
+                libdunit::ipc_send(c.pid, &packet);
+            }
+        }
+    }
+    let both = presented_total >= 2;
+    if both {
+        libdunit::println("gui_server: served two untrusted clients OK");
+        resize_one_client(server, clients, pending_notifies, reload_seen, transfers);
+    }
+    both
+}
