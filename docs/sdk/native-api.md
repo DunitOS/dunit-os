@@ -44,6 +44,7 @@ Use one generated entry per binary. A dependency must be named `dunit`.
 |---|---|
 | `io` | `Read`, `Write`, `BufReader`, stdin/stdout/stderr, formatted output |
 | `fs` | Owned `File`, `OpenOptions`, read/write helpers, metadata, seek, sync, rename/remove, directories and cwd |
+| `fsck` | Checked read-only native DunitFS recovery report; absent partition remains an error |
 | `args` | Owned UTF-8 argument strings from the initialized loader stack |
 | `env` | Owned optional environment value; invalid names return EINVAL |
 | `time` | Monotonic `Instant`, `Duration`, checked deadlines and blocking sleep |
@@ -51,7 +52,7 @@ Use one generated entry per binary. A dependency must be named `dunit`.
 | `pty` | Owned PTY master, explicit argv/env child spawning and bounded pending input |
 | `canvas` (gui) | Private canvas snapshots and cached configured fonts |
 | `window`, `ui` (gui) | Owned native windows, typed controls and shared transfer integration |
-| `system` | Checked access to the existing kernel's `SystemStats` facts |
+| `system` | Checked `SystemStats` facts and caller-buffer terminal diagnostics over existing native authority |
 | `event` | Owning event loop over the native heterogeneous wait-set |
 | `errno` | Re-export of generated native errno definitions; no copied table |
 
@@ -71,6 +72,9 @@ and long lines, and returns None at clean EOF. A returned line excludes LF;
 a final unterminated line is returned once. Invalid UTF-8 returns EINVAL.
 Stdin and stdout/stderr wait for readiness through WaitSetWait on EAGAIN;
 they do not implement a yield/retry polling loop.
+`Stdin::try_read` performs one bounded native read without waiting or prefetching: EAGAIN
+means no input yet, and zero means EOF. A PTY shell can keep a one-byte buffer so
+submitting a command leaves following input for the child.
 
 File ownership is unique. Drop closes its descriptor once; explicit `close`
 reports native close errors. `sync_all` requests the native filesystem flush.
@@ -78,6 +82,17 @@ Helpers do not silently truncate reads or discard partial write errors. Open
 options reject missing access modes and creation/truncation without write
 access. The existing kernel's path, permission and filesystem limits remain in
 effect; `/persist` is DunitFS while the root is MemFS.
+
+`fsck::check()` preserves native recovery counters and verdict codes without
+repairing metadata. `fsck_dunit` uses this API and retains clean/degraded/
+unrecoverable/missing-partition exit codes 0/1/2/3. `dsh` uses SDK streams, files,
+environment, facts, PTYs and child cleanup; quoted argv and cooked child input
+remain covered by native tests. The shell keeps an 8 KiB queue of submitted
+child input, explicitly rejects whole lines when full, and continues servicing
+Ctrl-C and terminal EOF while a child stops reading. Ctrl-C also interrupts an
+incomplete ESC/CSI sequence and leaves subsequent shell commands unread.
+`system::terminal_diagnostic` exposes the existing
+validated native gateway, preserving its capability checks and unsupported errors.
 
 ## Time and children
 

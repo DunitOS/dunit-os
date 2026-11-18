@@ -27,3 +27,13 @@ pub fn display_info() -> Option<DisplayInfo> {
         pitch: info.pitch,
     })
 }
+
+/// Render an existing privileged terminal diagnostic into caller-owned storage.
+/// Native capability checks and command validation remain authoritative.
+pub fn terminal_diagnostic(command: &str, output: &mut [u8]) -> crate::Result<usize> {
+    let count = crate::error::checked(libdunit::terminal_diag(command, output))?;
+    if count > output.len() {
+        return Err(crate::Error(libdunit::EIO));
+    }
+    Ok(count)
+}

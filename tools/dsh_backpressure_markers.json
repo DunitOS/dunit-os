@@ -1,0 +1,17 @@
+{
+  "description": "Real dsh remains interruptible while a nonreading child exhausts its PTY input ring",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": ["exec /app/dsh_backpressure_test"]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[DSH-PRESSURE] full child ring, interrupted CSI, Ctrl-C and shell recovery OK",
+    "[EXEC] /app/dsh_backpressure_test returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    {"marker": "[USER-FAULT]", "after": "[TERM-007] Starting main loop"}
+  ]
+}

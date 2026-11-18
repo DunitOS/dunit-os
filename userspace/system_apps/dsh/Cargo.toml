@@ -11,7 +11,7 @@ edition = "2021"
 
 [dependencies]
 dunit_shell = { path = "../../../runtime/dunit-shell" }
-libdunit = { path = "../../libdunit" }
+dunit = { path = "../../../runtime/dunit" }
 
 [[bin]]
 name = "dsh"

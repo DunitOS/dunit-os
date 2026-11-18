@@ -1,166 +1,197 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 
-//! `fsck_dunit` — пользовательская CLI-утилита проверки целостности DunitFS (M5 item 5).
-//!
-//! Архитектура: сам чекер — это механизм ядра (`dunitfs::fsck` + `sys_fsck`,
-//! syscall 73): DunitFS целиком живёт в ядре и у userspace нет сырого
-//! block-доступа. Эта программа — тонкий инструмент поверх механизма: она
-//! вызывает `libdunit::fsck`, печатает человекочитаемый recovery report и
-//! выходит с кодом вердикта. Так соблюдается граница kernel=mechanism /
-//! userspace=tool из CLAUDE.md.
-//!
-//! Код выхода: 0 = clean, 1 = degraded, 2 = unrecoverable,
-//! 3 = нет Dunit-раздела или ошибка syscall.
-//!
-//! Каждая строка отчёта печатается ОДНИМ вызовом `libdunit::print`,
-//! оканчивающимся на `\n` (ядро дописывает `\r\n` к write_stdout без хвостового
-//! перевода строки, поэтому фрагментировать строку нельзя).
-
-use core::panic::PanicInfo;
+//! Read-only DunitFS checker CLI. The kernel owns filesystem checking; the SDK
+//! owns entry, native error conversion and complete stdout transfers. Exit codes
+//! remain 0=clean, 1=degraded, 2=unrecoverable, 3=missing partition/native failure.
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::format;
+use dunit::fsck::Report;
+use dunit::io::Write;
 
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    loop {
-        core::hint::spin_loop();
-    }
+#[cfg_attr(not(test), dunit::main)]
+fn main() -> dunit::Result<()> {
+    let code = match run(&mut dunit::io::stdout(), dunit::fsck::check()) {
+        Ok(code) => code,
+        // A report that could not be delivered must not claim a clean check.
+        Err(_) => 3,
+    };
+    dunit::process::exit(code)
 }
 
-fn push_u32(s: &mut String, mut v: u32) {
-    if v == 0 {
-        s.push('0');
-        return;
-    }
-    let mut buf = [0u8; 10];
-    let mut i = buf.len();
-    while v > 0 {
-        i -= 1;
-        buf[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-    }
-    s.push_str(unsafe { core::str::from_utf8_unchecked(&buf[i..]) });
-}
-
-fn push_u64(s: &mut String, mut v: u64) {
-    if v == 0 {
-        s.push('0');
-        return;
-    }
-    let mut buf = [0u8; 20];
-    let mut i = buf.len();
-    while v > 0 {
-        i -= 1;
-        buf[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-    }
-    s.push_str(unsafe { core::str::from_utf8_unchecked(&buf[i..]) });
-}
-
-fn push_i64(s: &mut String, v: i64) {
-    if v < 0 {
-        s.push('-');
-    }
-    push_u64(s, v.unsigned_abs());
-}
-
-fn verdict_str(code: u32) -> &'static str {
-    match code {
-        0 => "clean",
-        1 => "degraded",
-        2 => "unrecoverable",
-        _ => "unknown",
-    }
-}
-
-fn yes_no(v: u32) -> &'static str {
-    if v != 0 {
+fn yes_no(value: u32) -> &'static str {
+    if value != 0 {
         "yes"
     } else {
         "no"
     }
 }
 
-fn line_kv(label: &str, body: &str) {
-    let mut line = String::from("[fsck.dunit] ");
-    line.push_str(label);
-    line.push_str(": ");
-    line.push_str(body);
-    line.push('\n');
-    libdunit::print(&line);
+fn line(output: &mut impl Write, text: alloc::string::String) -> dunit::Result<()> {
+    // Keep each short report record together on the native console route.
+    output.write_all(text.as_bytes())
 }
 
-#[no_mangle]
-pub extern "C" fn _start() -> ! {
-    let mut report = libdunit::FsckReport::default();
-    let rc = libdunit::fsck(&mut report);
-    if rc < 0 {
-        // Нет Dunit-раздела (ENOENT) или ошибка копирования отчёта.
-        let mut line = String::from("[fsck.dunit] error: no Dunit partition or syscall failure (rc=");
-        push_i64(&mut line, rc as i64);
-        line.push_str(")\n");
-        libdunit::print(&line);
-        libdunit::exit(3);
-    }
-
-    // Шапка вердикта.
-    {
-        let mut line = String::from("[fsck.dunit] verdict=");
-        line.push_str(verdict_str(report.verdict));
-        line.push_str(" generation=");
-        push_u64(&mut line, report.generation);
-        line.push('\n');
-        libdunit::print(&line);
-    }
-
-    // Суперблоки.
-    {
-        let mut body = String::from("primary=");
-        body.push_str(yes_no(report.primary_ok));
-        body.push_str(" backup=");
-        body.push_str(yes_no(report.backup_ok));
-        body.push_str(" slot_crc=");
-        body.push_str(yes_no(report.slot_crc_ok));
-        line_kv("superblocks", &body);
-    }
-
-    // Статистика по узлам.
-    {
-        let mut body = String::new();
-        push_u32(&mut body, report.nodes_ok);
-        body.push('/');
-        push_u32(&mut body, report.nodes_total);
-        body.push_str(" ok");
-        line_kv("nodes", &body);
-    }
-    {
-        let mut body = String::new();
-        push_u32(&mut body, report.nodes_corrupt);
-        body.push_str(" corrupt, ");
-        push_u32(&mut body, report.duplicate_paths);
-        body.push_str(" duplicate path(s), ");
-        push_u32(&mut body, report.extent_errors);
-        body.push_str(" extent error(s), ");
-        push_u32(&mut body, report.bitmap_errors);
-        body.push_str(" bitmap error(s)");
-        line_kv("issues", &body);
-    }
-
-    // Диагностика (одна строка на вердикт).
-    match report.verdict {
-        0 => line_kv("result", "filesystem is consistent"),
-        1 => line_kv(
-            "result",
-            "filesystem mountable read-only; corrupt nodes will be dropped",
+fn run(output: &mut impl Write, report: dunit::Result<Report>) -> dunit::Result<i32> {
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            line(
+                output,
+                format!(
+                    "[fsck.dunit] error: no Dunit partition or syscall failure (rc={})\n",
+                    error.raw_os_error(),
+                ),
+            )?;
+            return Ok(3);
+        }
+    };
+    let verdict = match report.verdict {
+        0 => "clean",
+        1 => "degraded",
+        2 => "unrecoverable",
+        _ => "unknown",
+    };
+    line(
+        output,
+        format!(
+            "[fsck.dunit] verdict={} generation={}\n",
+            verdict, report.generation
         ),
-        _ => line_kv("result", "filesystem unrecoverable; no valid metadata slot"),
-    }
-
-    libdunit::exit(report.verdict as i32)
+    )?;
+    line(
+        output,
+        format!(
+            "[fsck.dunit] superblocks: primary={} backup={} slot_crc={}\n",
+            yes_no(report.primary_ok),
+            yes_no(report.backup_ok),
+            yes_no(report.slot_crc_ok),
+        ),
+    )?;
+    line(
+        output,
+        format!(
+            "[fsck.dunit] nodes: {}/{} ok\n",
+            report.nodes_ok, report.nodes_total
+        ),
+    )?;
+    line(output, format!(
+        "[fsck.dunit] issues: {} corrupt, {} duplicate path(s), {} extent error(s), {} bitmap error(s)\n",
+        report.nodes_corrupt, report.duplicate_paths, report.extent_errors, report.bitmap_errors,
+    ))?;
+    let result = match report.verdict {
+        0 => "filesystem is consistent",
+        1 => "filesystem mountable read-only; corrupt nodes will be dropped",
+        _ => "filesystem unrecoverable; no valid metadata slot",
+    };
+    line(output, format!("[fsck.dunit] result: {}\n", result))?;
+    Ok(report.verdict as i32)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::{string::String, vec::Vec};
 
+    #[derive(Default)]
+    struct Output(Vec<u8>);
+    impl Write for Output {
+        fn write(&mut self, bytes: &[u8]) -> dunit::Result<usize> {
+            // Force partial writes to verify the CLI delivers the entire report.
+            let count = bytes.len().min(7);
+            self.0.extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+    }
 
+    #[test]
+    fn clean_report_preserves_every_record_and_completes_partial_writes() {
+        let report = Report {
+            primary_ok: 1,
+            backup_ok: 2,
+            slot_crc_ok: 0,
+            generation: u64::MAX,
+            nodes_total: 9,
+            nodes_ok: 8,
+            nodes_corrupt: 1,
+            duplicate_paths: 2,
+            extent_errors: 3,
+            bitmap_errors: 4,
+            verdict: 0,
+        };
+        let mut output = Output::default();
+        assert_eq!(run(&mut output, Ok(report)), Ok(0));
+        assert_eq!(String::from_utf8(output.0).unwrap(), concat!(
+            "[fsck.dunit] verdict=clean generation=18446744073709551615\n",
+            "[fsck.dunit] superblocks: primary=yes backup=yes slot_crc=no\n",
+            "[fsck.dunit] nodes: 8/9 ok\n",
+            "[fsck.dunit] issues: 1 corrupt, 2 duplicate path(s), 3 extent error(s), 4 bitmap error(s)\n",
+            "[fsck.dunit] result: filesystem is consistent\n",
+        ));
+    }
+
+    #[test]
+    fn verdicts_preserve_diagnostics_and_exit_codes() {
+        for (code, name, result) in [
+            (
+                1,
+                "degraded",
+                "filesystem mountable read-only; corrupt nodes will be dropped",
+            ),
+            (
+                2,
+                "unrecoverable",
+                "filesystem unrecoverable; no valid metadata slot",
+            ),
+            (
+                99,
+                "unknown",
+                "filesystem unrecoverable; no valid metadata slot",
+            ),
+        ] {
+            let mut output = Output::default();
+            assert_eq!(
+                run(
+                    &mut output,
+                    Ok(Report {
+                        verdict: code,
+                        ..Report::default()
+                    })
+                ),
+                Ok(code as i32)
+            );
+            let text = String::from_utf8(output.0).unwrap();
+            assert!(text.starts_with(&format!("[fsck.dunit] verdict={} generation=0\n", name)));
+            assert!(text.ends_with(&format!("[fsck.dunit] result: {}\n", result)));
+        }
+    }
+
+    #[test]
+    fn native_failure_keeps_numeric_error_and_exit_three() {
+        let mut output = Output::default();
+        assert_eq!(
+            run(&mut output, Err(dunit::Error(dunit::errno::ENOENT))),
+            Ok(3)
+        );
+        assert_eq!(
+            String::from_utf8(output.0).unwrap(),
+            "[fsck.dunit] error: no Dunit partition or syscall failure (rc=-2)\n"
+        );
+    }
+
+    #[test]
+    fn broken_output_cannot_return_a_clean_verdict() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> dunit::Result<usize> {
+                Ok(0)
+            }
+        }
+        assert_eq!(
+            run(&mut Broken, Ok(Report::default())),
+            Err(dunit::Error(dunit::errno::EIO))
+        );
+    }
+}

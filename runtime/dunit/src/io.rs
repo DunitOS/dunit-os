@@ -154,15 +154,28 @@ fn wait_ready(fd: u32, requested: u32) -> Result<()> {
     .map_err(Error)?;
     Ok(())
 }
+impl Stdin {
+    /// Read currently available bytes without waiting or prefetching. EAGAIN
+    /// means no input yet; zero means EOF. Useful while bridging another stream.
+    pub fn try_read(&mut self, output: &mut [u8]) -> Result<usize> {
+        self.try_read_with(output, |bytes| libdunit::read(0, bytes))
+    }
+    fn try_read_with(
+        &mut self,
+        output: &mut [u8],
+        read: impl FnOnce(&mut [u8]) -> isize,
+    ) -> Result<usize> {
+        let count = output.len().min(TRANSFER_CHUNK);
+        checked(read(&mut output[..count]))
+    }
+}
 impl Read for Stdin {
     fn read(&mut self, output: &mut [u8]) -> Result<usize> {
         loop {
-            let count = output.len().min(TRANSFER_CHUNK);
-            let result = libdunit::read(0, &mut output[..count]);
-            if result != libdunit::EAGAIN {
-                return checked(result);
+            match self.try_read(output) {
+                Err(Error(libdunit::EAGAIN)) => wait_ready(0, libdunit::wait_set::READ)?,
+                result => return result,
             }
-            wait_ready(0, libdunit::wait_set::READ)?;
         }
     }
 }
@@ -189,4 +202,41 @@ pub fn print(arguments: fmt::Arguments<'_>) -> Result<()> {
     // Keep a short formatted record in one native write. Console routing
     // prefixes each write separately; streaming each fmt fragment splits logs.
     stdout().write_all(alloc::fmt::format(arguments).as_bytes())
+}
+
+#[cfg(test)]
+mod stdin_tests {
+    use super::*;
+
+    #[test]
+    fn nonblocking_stdin_preserves_status_and_does_not_prefetch_child_input() {
+        let mut stdin = stdin();
+        let mut byte = [0];
+        let mut queued = b"\nchild input".iter().copied();
+        let count = stdin
+            .try_read_with(&mut byte, |output| {
+                for slot in output.iter_mut() {
+                    *slot = queued.next().unwrap();
+                }
+                output.len() as isize
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(byte, [b'\n']);
+        assert_eq!(queued.collect::<Vec<_>>(), b"child input");
+        assert_eq!(
+            stdin.try_read_with(&mut byte, |_| libdunit::EAGAIN),
+            Err(Error(libdunit::EAGAIN))
+        );
+        assert_eq!(stdin.try_read_with(&mut byte, |_| 0), Ok(0));
+        assert_eq!(
+            stdin.try_read_with(&mut byte, |_| libdunit::EBADF),
+            Err(Error(libdunit::EBADF))
+        );
+        let mut large = [0; TRANSFER_CHUNK + 1];
+        assert_eq!(
+            stdin.try_read_with(&mut large, |output| output.len() as isize),
+            Ok(TRANSFER_CHUNK)
+        );
+    }
 }

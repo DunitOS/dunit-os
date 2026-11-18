@@ -10,13 +10,11 @@
 //! same `ls / cd / pwd / mkdir / touch / cat / rm / tree / echo(>,>>)` FS verbs
 //! and the same `uname / whoami / date / uptime / free / ps` system verbs — so
 //! the GUI terminal behaves "just like a clean terminal". The FS verbs go
-//! through the libdunit filesystem syscalls (resolved against this process's
+//! through the SDK filesystem APIs (resolved against this process's
 //! cwd by the kernel); the system verbs read the read-only counters exposed by
 //! `get_system_stats` (syscall 26). No kernel-internal APIs, no hardcoded
 //! policy: pure userspace. Any other name is resolved through PATH on a private
 //! inner pty whose stdio we bridge until it exits (see `spawn_external`).
-
-use core::panic::PanicInfo;
 
 extern crate alloc;
 mod command_line;
@@ -25,13 +23,15 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use libdunit::{DirEntry, SystemStats};
-
-#[panic_handler]
-fn panic(_: &PanicInfo) -> ! {
-    libdunit::println("dsh: PANIC");
-    libdunit::exit(101)
-}
+use dunit::{
+    env, fs,
+    io::{self, Read, Write},
+    process,
+    pty::{PendingInput, Pty},
+    system,
+    time::{self, Duration},
+    Error, Result,
+};
 
 /// Fallback shell prompt when no `PROMPT` is present in the environment. The
 /// terminal passes its configured `[terminal] prompt` (default "dsh") via the
@@ -39,26 +39,14 @@ fn panic(_: &PanicInfo) -> ! {
 const PROMPT_DEFAULT: &str = "dsh";
 
 fn out(s: &str) {
-    libdunit::write(1, s.as_bytes());
-}
-
-/// Current working directory as a String, defaulting to "/" on error.
-fn cwd() -> String {
-    let mut b = [0u8; 256];
-    let n = libdunit::getcwd(&mut b);
-    if n > 0 {
-        String::from(core::str::from_utf8(&b[..n as usize]).unwrap_or("/"))
-    } else {
-        String::from("/")
+    if io::stdout().write_all(s.as_bytes()).is_err() {
+        // A disconnected or failed terminal cannot display further errors.
+        process::exit(1);
     }
 }
 
-/// A readdir scratch buffer of `n` owned entries (heap, so large listings do
-/// not blow the userspace stack).
-fn dir_buf(n: usize) -> Vec<DirEntry> {
-    let mut v: Vec<DirEntry> = Vec::new();
-    v.resize(n, DirEntry::empty());
-    v
+fn cwd() -> Result<String> {
+    fs::current_dir()
 }
 
 /// Join a directory path and a child name into an absolute path.
@@ -109,7 +97,7 @@ fn split_cmd(line: &str) -> (&str, &str) {
     }
 }
 
-/// Dispatch one command line. FS verbs go through libdunit syscalls (resolved
+/// Dispatch one command line. FS verbs go through SDK APIs (resolved
 /// against this process's cwd by the kernel); system verbs read `get_system_stats`.
 /// External commands use the userspace PATH resolver and preserve argument words.
 fn run(line: &str) {
@@ -121,17 +109,20 @@ fn run(line: &str) {
     match cmd {
         "help" => cmd_help(),
         "echo" => cmd_echo(rest),
-        "pwd" => {
-            out(&cwd());
-            out("\n");
-        }
-        "ls" => builtin_paths(rest,cmd_ls,true),
-        "cd" => builtin_paths(rest,cmd_cd,false),
-        "mkdir" => builtin_paths(rest,cmd_mkdir,true),
-        "touch" => builtin_paths(rest,cmd_touch,true),
-        "cat" => builtin_paths(rest,cmd_cat,true),
-        "rm" => builtin_paths(rest,cmd_rm,true),
-        "tree" => builtin_paths(rest,cmd_tree,true),
+        "pwd" => match cwd() {
+            Ok(path) => {
+                out(&path);
+                out("\n");
+            }
+            Err(error) => out(&format!("pwd: {}\n", error)),
+        },
+        "ls" => builtin_paths(rest, cmd_ls, true),
+        "cd" => builtin_paths(rest, cmd_cd, false),
+        "mkdir" => builtin_paths(rest, cmd_mkdir, true),
+        "touch" => builtin_paths(rest, cmd_touch, true),
+        "cat" => builtin_paths(rest, cmd_cat, true),
+        "rm" => builtin_paths(rest, cmd_rm, true),
+        "tree" => builtin_paths(rest, cmd_tree, true),
         "clear" => out("\x1b[2J\x1b[H"),
         "uname" => cmd_uname(rest),
         "whoami" => out("root\n"),
@@ -149,7 +140,7 @@ fn run(line: &str) {
         // verbatim — identical output to kernel Terminal Mode, one source of truth.
         "lspci" | "usb" | "blk" | "lsblk" | "ahci" | "devs" | "blkread" | "blkwrite"
         | "mkfs.dunit" | "mount.dunit" | "install.dunit" => run_diag(line),
-        "exit" => libdunit::exit(0),
+        "exit" => process::exit(0),
         "exec" => {
             run_external(rest);
         }
@@ -173,54 +164,88 @@ fn cmd_help() {
 fn run_external(line: &str) {
     let words = match command_line::words(line) {
         Ok(words) if !words.is_empty() => words,
-        Ok(_) => { out("exec: missing operand\n"); return; }
-        Err(error) => { out(&format!("dsh: {}\n", error)); return; }
+        Ok(_) => {
+            out("exec: missing operand\n");
+            return;
+        }
+        Err(error) => {
+            out(&format!("dsh: {}\n", error));
+            return;
+        }
     };
     let args: Vec<&str> = words.iter().map(|word| word.as_str()).collect();
-    if !spawn_external(args[0], &args) {
-        out(&format!("dsh: command not found: {}\n", args[0]));
+    match spawn_external(args[0], &args) {
+        Ok(()) => {}
+        Err(Error(dunit::errno::ENOENT)) => out(&format!("dsh: command not found: {}\n", args[0])),
+        Err(error) => out(&format!("dsh: {}: {}\n", args[0], error)),
     }
 }
 
-fn builtin_paths(rest:&str,command:fn(&str),multiple:bool){
-    match command_line::words(rest){
-        Ok(paths) if paths.is_empty()=>command(""),
-        Ok(paths) if multiple||paths.len()==1=>{for path in paths{command(&path);}},
-        Ok(_)=>out("dsh: expected one path\n"),
-        Err(error)=>out(&format!("dsh: {}\n",error)),
+fn builtin_paths(rest: &str, command: fn(&str), multiple: bool) {
+    match command_line::words(rest) {
+        Ok(paths) if paths.is_empty() => command(""),
+        Ok(paths) if multiple || paths.len() == 1 => {
+            for path in paths {
+                command(&path);
+            }
+        }
+        Ok(_) => out("dsh: expected one path\n"),
+        Err(error) => out(&format!("dsh: {}\n", error)),
     }
 }
-fn cmd_echo(rest:&str){
-    let (arguments,destination)=match dunit_shell::echo_arguments(rest){Ok(value)=>value,Err(error)=>{out(&format!("echo: {}\n",error));return;}};
-    let data=format!("{}\n",arguments.join(" "));
-    if let Some((path,append))=destination{
-        let result=if append{libdunit::append_string(&path,&data)}else{libdunit::write_string(&path,&data)};
-        if result.is_err(){out(&format!("echo: {}: write error\n",path));}
-    }else{out(&data);}
+fn cmd_echo(rest: &str) {
+    let (arguments, destination) = match dunit_shell::echo_arguments(rest) {
+        Ok(value) => value,
+        Err(error) => {
+            out(&format!("echo: {}\n", error));
+            return;
+        }
+    };
+    let data = format!("{}\n", arguments.join(" "));
+    if let Some((path, append)) = destination {
+        let result = if append {
+            (|| -> Result<()> {
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .append(true)
+                    .create(true)
+                    .open(&path)?;
+                file.write_all(data.as_bytes())?;
+                file.close()
+            })()
+        } else {
+            fs::write(&path, data.as_bytes())
+        };
+        if result.is_err() {
+            out(&format!("echo: {}: write error\n", path));
+        }
+    } else {
+        out(&data);
+    }
 }
 
 fn cmd_ls(rest: &str) {
     let path = if rest.is_empty() { "." } else { rest };
-    let mut entries = dir_buf(256);
-    let n = libdunit::readdir(path, &mut entries);
-    if n < 0 {
-        out(&format!("ls: {}: {}\n", path, libdunit::error_name(n)));
-        return;
-    }
-    for i in 0..(n as usize) {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) => {
+            out(&format!("ls: {}: {}\n", path, error));
+            return;
+        }
+    };
+    for (i, entry) in entries.iter().enumerate() {
         if i > 0 {
             out("  ");
         }
-        out(entries[i].name());
+        out(&entry.name);
     }
     out("\n");
 }
 
 fn cmd_cd(rest: &str) {
     let path = if rest.is_empty() { "/" } else { rest };
-    let r = libdunit::chdir(path);
-    if r < 0 {
-        out(&format!("cd: {}: {}\n", path, libdunit::error_name(r)));
+    if let Err(error) = fs::set_current_dir(path) {
+        out(&format!("cd: {}: {}\n", path, error));
     }
 }
 
@@ -229,9 +254,8 @@ fn cmd_mkdir(rest: &str) {
         out("mkdir: missing operand\n");
         return;
     }
-    let r = libdunit::mkdir(rest);
-    if r < 0 {
-        out(&format!("mkdir: {}: {}\n", rest, libdunit::error_name(r)));
+    if let Err(error) = fs::create_dir(rest) {
+        out(&format!("mkdir: {}: {}\n", rest, error));
     }
 }
 
@@ -240,11 +264,13 @@ fn cmd_touch(rest: &str) {
         out("touch: missing operand\n");
         return;
     }
-    let fd = libdunit::open(rest, libdunit::OPEN_CREATE | libdunit::OPEN_WRITE);
-    if fd < 0 {
-        out(&format!("touch: {}: {}\n", rest, libdunit::error_name(fd)));
-    } else {
-        libdunit::close(fd as usize);
+    let result = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(rest)
+        .and_then(|file| file.close());
+    if let Err(error) = result {
+        out(&format!("touch: {}: {}\n", rest, error));
     }
 }
 
@@ -253,24 +279,30 @@ fn cmd_cat(rest: &str) {
         out("cat: missing operand\n");
         return;
     }
-    let fd = libdunit::open(rest, libdunit::OPEN_READ);
-    if fd < 0 {
-        out(&format!("cat: {}: {}\n", rest, libdunit::error_name(fd)));
-        return;
-    }
-    let fd = fd as usize;
+    let mut file = match fs::File::open(rest) {
+        Ok(file) => file,
+        Err(error) => {
+            out(&format!("cat: {}: {}\n", rest, error));
+            return;
+        }
+    };
     let mut buf = [0u8; 512];
     loop {
-        let n = libdunit::read(fd, &mut buf);
-        if n <= 0 {
-            break;
-        }
-        match core::str::from_utf8(&buf[..n as usize]) {
-            Ok(s) => out(s),
-            Err(_) => out("<binary>"),
+        match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => match core::str::from_utf8(&buf[..n]) {
+                Ok(text) => out(text),
+                Err(_) => out("<binary>"),
+            },
+            Err(error) => {
+                out(&format!("cat: {}: {}\n", rest, error));
+                break;
+            }
         }
     }
-    libdunit::close(fd);
+    if let Err(error) = file.close() {
+        out(&format!("cat: {}: {}\n", rest, error));
+    }
     out("\n");
 }
 
@@ -279,14 +311,20 @@ fn cmd_rm(rest: &str) {
         out("rm: missing operand\n");
         return;
     }
-    let r = libdunit::unlink(rest);
-    if r < 0 {
-        out(&format!("rm: {}: {}\n", rest, libdunit::error_name(r)));
+    if let Err(error) = fs::remove_file(rest) {
+        out(&format!("rm: {}: {}\n", rest, error));
     }
 }
 
 fn cmd_tree(rest: &str) {
-    let base = normalize(&cwd(), if rest.is_empty() { "." } else { rest });
+    let cwd = match cwd() {
+        Ok(path) => path,
+        Err(error) => {
+            out(&format!("tree: {}\n", error));
+            return;
+        }
+    };
+    let base = normalize(&cwd, if rest.is_empty() { "." } else { rest });
     out(&base);
     out("\n");
     tree_recurse(&base, 1);
@@ -296,21 +334,22 @@ fn tree_recurse(dir: &str, depth: usize) {
     if depth > 16 {
         return;
     }
-    let mut entries = dir_buf(256);
-    let n = libdunit::readdir(dir, &mut entries);
-    if n < 0 {
-        return;
-    }
-    for i in 0..(n as usize) {
-        let name = entries[i].name();
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            out(&format!("tree: {}: {}\n", dir, error));
+            return;
+        }
+    };
+    for entry in entries {
+        let name = &entry.name;
         for _ in 0..depth {
             out("  ");
         }
         out(name);
-        if entries[i].file_type == libdunit::FILE_TYPE_DIRECTORY {
+        if entry.file_type == fs::FileType::Directory {
             out("/\n");
-            let child = join(dir, name);
-            tree_recurse(&child, depth + 1);
+            tree_recurse(&join(dir, name), depth + 1);
         } else {
             out("\n");
         }
@@ -322,9 +361,18 @@ fn cmd_uname(_rest: &str) {
 }
 
 fn cmd_uptime() {
-    let mut s = SystemStats::default();
-    libdunit::get_system_stats(&mut s);
-    let hz = if s.uptime_hz == 0 { 100 } else { s.uptime_hz };
+    let s = match system::stats() {
+        Ok(stats) => stats,
+        Err(error) => {
+            out(&format!("dsh: system statistics unavailable: {}\n", error));
+            return;
+        }
+    };
+    let hz = s.uptime_hz;
+    if hz == 0 {
+        out("uptime: clock frequency unavailable\n");
+        return;
+    }
     let total = s.uptime_ticks / hz;
     let h = total / 3600;
     let m = (total % 3600) / 60;
@@ -336,8 +384,13 @@ fn cmd_uptime() {
 }
 
 fn cmd_free() {
-    let mut s = SystemStats::default();
-    libdunit::get_system_stats(&mut s);
+    let s = match system::stats() {
+        Ok(stats) => stats,
+        Err(error) => {
+            out(&format!("dsh: system statistics unavailable: {}\n", error));
+            return;
+        }
+    };
     let kib = |b: u64| b / 1024;
     out("              total        used        free\n");
     out(&format!(
@@ -356,8 +409,13 @@ fn cmd_free() {
 }
 
 fn cmd_ps() {
-    let mut s = SystemStats::default();
-    libdunit::get_system_stats(&mut s);
+    let s = match system::stats() {
+        Ok(stats) => stats,
+        Err(error) => {
+            out(&format!("dsh: system statistics unavailable: {}\n", error));
+            return;
+        }
+    };
     out(&format!(
         "processes: total={} running={} ready={} prepared={} blocked={} dead={} reaped={}\n",
         s.process_total,
@@ -374,8 +432,13 @@ fn cmd_ps() {
 /// once rather than refreshing): tasks + physical/heap memory + IPC + FS, all
 /// read from the single `get_system_stats` syscall.
 fn cmd_top() {
-    let mut s = SystemStats::default();
-    libdunit::get_system_stats(&mut s);
+    let s = match system::stats() {
+        Ok(stats) => stats,
+        Err(error) => {
+            out(&format!("dsh: system statistics unavailable: {}\n", error));
+            return;
+        }
+    };
     let kib = |b: u64| b / 1024;
     out(&format!(
         "tasks: {} total, {} running, {} ready, {} blocked\n",
@@ -383,18 +446,25 @@ fn cmd_top() {
     ));
     out(&format!(
         "mem KiB:  {} total, {} used, {} free\n",
-        kib(s.pmm_total_bytes), kib(s.pmm_used_bytes), kib(s.pmm_free_bytes)
+        kib(s.pmm_total_bytes),
+        kib(s.pmm_used_bytes),
+        kib(s.pmm_free_bytes)
     ));
     out(&format!(
         "heap KiB: {} total, {} used, {} free ({} blocks)\n",
-        kib(s.heap_total_bytes), kib(s.heap_used_bytes), kib(s.heap_free_bytes),
+        kib(s.heap_total_bytes),
+        kib(s.heap_used_bytes),
+        kib(s.heap_free_bytes),
         s.heap_free_blocks
     ));
     out(&format!(
         "ipc: {} queues, {} queued, {} shared regions\n",
         s.ipc_queue_count, s.ipc_queued_messages, s.ipc_shared_regions
     ));
-    out(&format!("fs: {} files, {} dirs\n", s.fs_files, s.fs_directories));
+    out(&format!(
+        "fs: {} files, {} dirs\n",
+        s.fs_files, s.fs_directories
+    ));
 }
 
 /// Render a PRIVILEGED diagnostic by asking the kernel (which owns the hardware)
@@ -402,11 +472,17 @@ fn cmd_top() {
 /// output to kernel Terminal Mode. 16 KiB covers the largest listing.
 fn run_diag(line: &str) {
     let mut buf = [0u8; 16384];
-    let n = libdunit::terminal_diag(line, &mut buf);
-    if n > 0 {
-        libdunit::write(1, &buf[..n as usize]);
-    } else if n < 0 {
-        out(&format!("dsh: {}: diagnostic unavailable (err {})\n", line, n));
+    match system::terminal_diagnostic(line, &mut buf) {
+        Ok(n) => {
+            if io::stdout().write_all(&buf[..n]).is_err() {
+                process::exit(1);
+            }
+        }
+        Err(error) => out(&format!(
+            "dsh: {}: diagnostic unavailable (err {})\n",
+            line,
+            error.raw_os_error()
+        )),
     }
 }
 
@@ -423,81 +499,117 @@ fn run_diag(line: &str) {
 /// the child when Enter is pressed. Ctrl-C (0x03) kills the child and drops the
 /// pending line. Keeping this discipline in dsh (userspace policy) is what makes
 /// the GUI terminal behave "just like a clean terminal" WITHOUT the kernel pty
-/// (a raw byte mechanism) growing any line discipline of its own. Returns false
-/// if the program could not be spawned (so the caller can print "not found").
-fn spawn_external(path: &str, argv: &[&str]) -> bool {
-    let inner = libdunit::pty_create();
-    if inner < 0 {
-        return false;
-    }
-    let inner = inner as u32;
-    let path_environment = libdunit::getenv("PATH").map(|path| format!("PATH={}", path));
+/// (a raw byte mechanism) growing any line discipline of its own. Spawn and
+/// bridge errors retain their native errno; every started child is reaped.
+fn spawn_external(path: &str, argv: &[&str]) -> Result<()> {
+    let mut inner = Pty::open()?;
+    let path_environment = env::var("PATH")?.map(|path| format!("PATH={}", path));
     let env: Vec<&str> = path_environment.iter().map(|s| s.as_str()).collect();
-    let child = libdunit::process::pty_spawn_args(path, inner, argv, &env);
-    if child < 0 {
-        libdunit::pty_close(inner);
-        return false;
-    }
-    let child = child as u32;
+    let mut child = inner.spawn(path, argv, &env)?;
+    let result = bridge(&mut inner, &mut child);
+    // Always reap, including bridge failures and the exit/kill race.
+    let reaped = if result.is_ok() {
+        child.wait()
+    } else {
+        child.terminate_and_wait()
+    };
+    let closed = inner.close();
+    result.and(reaped.map(|_| ())).and(closed)
+}
+
+fn bridge(inner: &mut Pty, child: &mut process::Child) -> Result<()> {
+    let mut output = io::stdout();
+    let mut input = io::stdin();
     let mut out_buf = [0u8; 512];
-    let mut in_buf = [0u8; 256];
+    let mut in_buf = [0u8; 1];
     let mut line = dunit_shell::CookedLine::new(4096);
-    let mut pending = Vec::new();
-    let mut written = 0;
-    // ESC-sequence state: 0 = normal, 1 = saw ESC (0x1B), 2 = inside CSI (ESC [).
+    // Bound queued complete lines while continuing to service controls when
+    // the child stops reading its native PTY ring.
+    let mut pending = PendingInput::new(8192);
+    let mut interrupted = false;
+    // ESC-sequence state: normal, ESC, CSI. Child input stays cooked.
     let mut esc = 0u8;
     loop {
         let mut progressed = false;
-        // Child stdout -> our stdout (the terminal). EPIPE => child exited and
-        // its output is fully drained: we are done.
-        let n = libdunit::pty_read(inner, &mut out_buf);
-        if n > 0 {
-            libdunit::write(1, &out_buf[..n as usize]);
-            progressed = true;
-        } else if n == libdunit::EPIPE {
-            break;
+        match inner.read(&mut out_buf) {
+            Ok(n) => {
+                output.write_all(&out_buf[..n])?;
+                progressed = n > 0;
+            }
+            Err(Error(dunit::errno::EPIPE)) => return Ok(()),
+            Err(Error(dunit::errno::EAGAIN)) => {}
+            Err(error) => return Err(error),
         }
-        // Retain short writes/EAGAIN and keep draining child output. Never
-        // drop the suffix of a pasted line when the PTY's bounded queue fills.
-        if written < pending.len() {
-            let n = libdunit::pty_write(inner, &pending[written..]);
-            if n > 0 { written += n as usize; progressed = true; }
-            else if n != libdunit::EAGAIN { break; }
-        }
-        if written == pending.len() {
-            pending.clear(); written = 0;
-            let m = libdunit::read(0, &mut in_buf[..1]);
-            if m > 0 {
-                let b = in_buf[0];
-                match esc {
-                    1 => { esc = if b == b'[' { 2 } else { 0 }; continue; }
-                    2 => { if (0x40..=0x7e).contains(&b) { esc = 0; } continue; }
-                    _ => {}
-                }
-                if b == 0x1b { esc = 1; }
-                else {
+        if !interrupted {
+            let had_pending = !pending.is_empty();
+            match pending.drain(|bytes| inner.write(bytes)) {
+                Ok(()) => progressed |= had_pending && pending.is_empty(),
+                Err(Error(dunit::errno::EAGAIN)) => {}
+                Err(error) => return Err(error),
+            }
+            // Always service controls, even when the inner ring and pending
+            // queue are full. Reading only this byte preserves stdin ownership
+            // when the bridge hands control back to the shell editor.
+            match input.try_read(&mut in_buf) {
+                Ok(0) => return Err(Error(dunit::errno::EPIPE)),
+                Ok(_) => {
+                    let b = in_buf[0];
+                    if b == 0x03 {
+                        // Ctrl-C preempts incomplete ESC/CSI sequences.
+                        esc = 0;
+                    } else {
+                        match esc {
+                            1 => {
+                                esc = if b == b'[' { 2 } else { 0 };
+                                continue;
+                            }
+                            2 => {
+                                if (0x40..=0x7e).contains(&b) {
+                                    esc = 0;
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        if b == 0x1b {
+                            esc = 1;
+                            continue;
+                        }
+                    }
                     match line.feed(b) {
                         dunit_shell::CookedEvent::Echo(ch) => {
-                            let mut bytes = [0;4]; out(ch.encode_utf8(&mut bytes));
+                            let mut bytes = [0; 4];
+                            output.write_all(ch.encode_utf8(&mut bytes).as_bytes())?;
                         }
-                        dunit_shell::CookedEvent::Erase => out("\x08 \x08"),
-                        dunit_shell::CookedEvent::Submit(bytes) => { out("\n"); pending = bytes; }
-                        dunit_shell::CookedEvent::Rejected => out("\ninput line too long; discarded\n"),
-                        dunit_shell::CookedEvent::Interrupt => { libdunit::kill(child); }
+                        dunit_shell::CookedEvent::Erase => output.write_all(b"\x08 \x08")?,
+                        dunit_shell::CookedEvent::Submit(bytes) => {
+                            output.write_all(b"\n")?;
+                            if !pending.push(&bytes) {
+                                output.write_all(b"input queue full; line discarded\n")?;
+                            }
+                        }
+                        dunit_shell::CookedEvent::Rejected => {
+                            output.write_all(b"\ninput line too long; discarded\n")?
+                        }
+                        dunit_shell::CookedEvent::Interrupt => {
+                            pending.clear();
+                            child.terminate_and_wait()?;
+                            // Drain the child's output without stealing the
+                            // next shell command after this interrupt byte.
+                            interrupted = true;
+                        }
                         dunit_shell::CookedEvent::None => {}
                     }
+                    progressed = true;
                 }
-                progressed = true;
+                Err(Error(dunit::errno::EAGAIN)) => {}
+                Err(error) => return Err(error),
             }
         }
         if !progressed {
-            libdunit::sleep_ms(5);
+            time::sleep(Duration::from_millis(5))?;
         }
     }
-    let mut st = libdunit::WaitStatus::empty();
-    let _ = libdunit::wait(child, &mut st);
-    libdunit::pty_close(inner);
-    true
 }
 
 /// ANSI escape-parser state for the line editor: bytes arriving from the
@@ -557,9 +669,13 @@ impl Ed {
     }
 
     fn feed_normal(&mut self, byte: u8) {
-        let Some(ch) = self.utf8.push(byte) else { return };
+        let Some(ch) = self.utf8.push(byte) else {
+            return;
+        };
         if !ch.is_ascii() {
-            if !ch.is_control() { self.insert(ch); }
+            if !ch.is_control() {
+                self.insert(ch);
+            }
             return;
         }
         let b = ch as u8;
@@ -567,10 +683,10 @@ impl Ed {
             0x1B => self.esc = EscState::Esc,
             b'\r' | b'\n' => self.submit(),
             0x08 | 0x7F => self.backspace(),
-            0x03 => self.cancel(),                          // Ctrl-C
-            0x0C => self.clear_screen(),                    // Ctrl-L
-            0x01 => self.move_home(),                       // Ctrl-A
-            0x05 => self.move_end(),                        // Ctrl-E
+            0x03 => self.cancel(),       // Ctrl-C
+            0x0C => self.clear_screen(), // Ctrl-L
+            0x01 => self.move_home(),    // Ctrl-A
+            0x05 => self.move_end(),     // Ctrl-E
             0x15 => {
                 // Ctrl-U: kill the whole line
                 self.line.clear();
@@ -690,8 +806,7 @@ impl Ed {
         let entered = core::mem::take(&mut self.line);
         self.cursor = 0;
         let trimmed = entered.trim();
-        if !trimmed.is_empty()
-            && self.history.last().map(|s| s.as_str()) != Some(entered.as_str())
+        if !trimmed.is_empty() && self.history.last().map(|s| s.as_str()) != Some(entered.as_str())
         {
             self.history.push(entered.clone());
         }
@@ -712,42 +827,20 @@ impl Ed {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn _start(
-    argc: usize,
-    argv: *const *const u8,
-    envp: *const *const u8,
-) -> ! {
-    libdunit::init_runtime(argc, argv, envp);
-    // The terminal passes its configured `[terminal] prompt` via the pty-spawn
-    // environment; fall back to the built-in default when launched without one.
-    let prompt_word = libdunit::getenv("PROMPT").unwrap_or(PROMPT_DEFAULT);
-    let mut ed = Ed::new(prompt_word);
+#[dunit::main]
+fn main() -> Result<()> {
+    let prompt_word = env::var("PROMPT")?;
+    let mut ed = Ed::new(prompt_word.as_deref().unwrap_or(PROMPT_DEFAULT));
     ed.start();
 
     // Submission can hand stdin to a synchronous child. Do not prefetch the
     // next command/child input into an editor-private buffer before that handoff.
+    let mut input = io::stdin();
     let mut buf = [0u8; 1];
     loop {
-        let n = libdunit::read(0, &mut buf);
-        if n > 0 {
-            for i in 0..(n as usize) {
-                ed.feed(buf[i]);
-            }
-        } else if n == 0 {
-            // EOF on stdin: the terminal (pty master) went away — exit cleanly.
-            libdunit::exit(0);
-        } else {
-            // EAGAIN or a transient error: nothing to read yet, back off briefly.
-            libdunit::sleep_ms(5);
+        match input.read(&mut buf)? {
+            0 => return Ok(()),
+            _ => ed.feed(buf[0]),
         }
     }
 }
-
-
-
-
-
-
-
-

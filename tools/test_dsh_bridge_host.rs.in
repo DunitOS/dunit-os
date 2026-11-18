@@ -1,0 +1,115 @@
+extern crate self as dunit;
+extern crate dunit_shell;
+use io::{Read, Write};
+use pty::{PendingInput, Pty};
+use time::Duration;
+
+pub mod time {
+    pub use std::time::Duration;
+    pub fn sleep(_: Duration) -> crate::Result<()> {
+        super::PTY.with(|p| {
+            let mut p = p.borrow_mut();
+            p.sleeps += 1;
+            // A gated stdin regression must fail promptly rather than hang.
+            if p.sleeps > 32 { Err(crate::Error(crate::EIO)) } else { Ok(()) }
+        })
+    }
+}
+pub mod process {
+    #[derive(Default)] pub struct Child;
+    impl Child {
+        pub fn terminate_and_wait(&mut self) -> crate::Result<()> {
+            super::PTY.with(|p| { let mut p = p.borrow_mut(); p.kills += 1; p.dead = true; });
+            Ok(())
+        }
+    }
+}
+#[derive(Default)]
+struct PtyState {
+    input: Vec<u8>,
+    blocked: usize,
+    eagain: bool,
+    dead: bool,
+    drained: bool,
+    kills: usize,
+    sleeps: usize,
+}
+thread_local! { static PTY: RefCell<PtyState> = RefCell::new(PtyState::default()); }
+pub mod pty {
+    use super::*;
+    PRODUCTION_QUEUE
+    pub struct Pty;
+    impl Read for Pty {
+        fn read(&mut self, bytes: &mut [u8]) -> Result<usize> {
+            PTY.with(|p| {
+                let mut p = p.borrow_mut();
+                if !p.dead { return Ok(0); }
+                if p.drained { return Err(Error(EPIPE)); }
+                let tail = b"child output after interrupt\n";
+                bytes[..tail.len()].copy_from_slice(tail);
+                p.drained = true;
+                Ok(tail.len())
+            })
+        }
+    }
+    impl Write for Pty {
+        fn write(&mut self, bytes: &[u8]) -> Result<usize> {
+            PTY.with(|p| {
+                let mut p = p.borrow_mut();
+                assert!(!p.dead, "pending input must not reach a terminated child");
+                let count = bytes.len().min(8192 - p.input.len());
+                if count == 0 {
+                    p.blocked += 1;
+                    return if p.eagain { Err(Error(EAGAIN)) } else { Ok(0) };
+                }
+                p.input.extend_from_slice(&bytes[..count]);
+                Ok(count)
+            })
+        }
+    }
+}
+PRODUCTION_BRIDGE
+
+fn full_ring_input() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    // First two lines fill the native ring, later lines overflow the bounded
+    // userspace queue. A child deliberately never consumes this input.
+    for _ in 0..6 { bytes.extend(std::iter::repeat_n(b'x', 4096)); bytes.push(b'\n'); }
+    bytes
+}
+
+#[test]
+fn full_ring_zero_and_eagain_still_service_ctrl_c_inside_csi_and_drain_output() {
+    for eagain in [false, true] {
+        PTY.with(|p| *p.borrow_mut() = PtyState { eagain, ..Default::default() });
+        NATIVE.with(|n| {
+            let mut n = n.borrow_mut();
+            *n = Native::default();
+            n.input.extend(full_ring_input());
+            n.input.extend(b"\x1b[\x03next shell command\n");
+        });
+        bridge(&mut Pty, &mut process::Child).unwrap();
+        PTY.with(|p| {
+            let p = p.borrow();
+            assert_eq!(p.input.len(), 8192);
+            assert!(p.blocked > 0);
+            assert_eq!(p.kills, 1);
+            assert!(p.drained);
+        });
+        NATIVE.with(|n| {
+            let n = n.borrow();
+            assert_eq!(n.input.iter().copied().collect::<Vec<_>>(), b"next shell command\n");
+            let output = std::str::from_utf8(&n.output).unwrap();
+            assert!(output.contains("input queue full; line discarded\n"));
+            assert!(output.ends_with("child output after interrupt\n"));
+            assert!(n.reads.iter().all(|count| *count == 1));
+        });
+    }
+}
+
+#[test]
+fn full_ring_does_not_hide_outer_stdin_eof() {
+    NATIVE.with(|n| n.borrow_mut().input.extend(full_ring_input()));
+    assert_eq!(bridge(&mut Pty, &mut process::Child), Err(Error(EPIPE)));
+    PTY.with(|p| assert!(p.borrow().blocked > 0));
+}

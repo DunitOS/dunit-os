@@ -1,0 +1,124 @@
+//! Only native I/O/readiness is replaced; SDK stream/error code is included intact.
+#![allow(dead_code)]
+extern crate alloc;
+extern crate self as libdunit;
+#[path = SDK_IO_PATH]
+mod io;
+#[path = SDK_ERROR_PATH]
+mod error;
+#[path = ERRNO_PATH]
+mod errno;
+pub use error::{Error, Result};
+pub use errno::*;
+use std::{cell::RefCell, collections::VecDeque};
+
+#[derive(Default)]
+struct Native {
+    input: VecDeque<u8>,
+    reads: Vec<usize>,
+    read_status: VecDeque<isize>,
+    output: Vec<u8>,
+    write_status: VecDeque<isize>,
+    waits: Vec<(u32, u32)>,
+}
+thread_local! { static NATIVE: RefCell<Native> = RefCell::new(Native::default()); }
+pub fn error_name(_: isize) -> &'static str { "scripted errno" }
+pub fn read(fd: usize, out: &mut [u8]) -> isize {
+    assert_eq!(fd, 0);
+    NATIVE.with(|native| {
+        let mut native = native.borrow_mut();
+        native.reads.push(out.len());
+        if let Some(status) = native.read_status.pop_front() { return status; }
+        let count = out.len().min(native.input.len());
+        for byte in &mut out[..count] { *byte = native.input.pop_front().unwrap(); }
+        count as isize
+    })
+}
+pub fn write(fd: usize, bytes: &[u8]) -> isize {
+    assert_eq!(fd, 1);
+    NATIVE.with(|native| {
+        let mut native = native.borrow_mut();
+        let result = native.write_status.pop_front().unwrap_or(bytes.len() as isize);
+        if result > 0 { native.output.extend_from_slice(&bytes[..result as usize]); }
+        result
+    })
+}
+pub mod wait_set {
+    use super::*;
+    pub const READ: u32 = 1;
+    pub const WRITE: u32 = 2;
+    pub const INFINITE: u64 = u64::MAX;
+    #[derive(Default)] pub struct Event;
+    pub struct Interest { fd: u32, requested: u32 }
+    impl Interest {
+        pub fn descriptor(fd: u32, requested: u32, _: u64) -> Self { Self { fd, requested } }
+    }
+    pub fn wait(interests: &[Interest], _: &mut [Event], timeout: u64) -> core::result::Result<usize, isize> {
+        assert_eq!(timeout, INFINITE);
+        assert_eq!(interests.len(), 1);
+        NATIVE.with(|native| native.borrow_mut().waits.push((interests[0].fd, interests[0].requested)));
+        Ok(1)
+    }
+}
+
+#[test]
+fn public_try_read_preserves_native_status_and_leaves_child_input_queued() {
+    NATIVE.with(|n| n.borrow_mut().input.extend(b"\nchild input"));
+    let mut input = io::stdin();
+    let mut byte = [0];
+    assert_eq!(input.try_read(&mut byte), Ok(1));
+    assert_eq!(byte, [b'\n']);
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        assert_eq!(n.input.iter().copied().collect::<Vec<_>>(), b"child input");
+        assert_eq!(n.reads, [1]);
+        assert!(n.waits.is_empty());
+    });
+    for status in [EAGAIN, 0, EBADF, EINTR] {
+        NATIVE.with(|n| n.borrow_mut().read_status.push_back(status));
+        let expected = if status < 0 { Err(Error(status)) } else { Ok(status as usize) };
+        assert_eq!(input.try_read(&mut byte), expected);
+        NATIVE.with(|n| assert!(n.borrow().waits.is_empty()));
+    }
+}
+
+#[test]
+fn blocking_stdin_waits_for_readiness_only_on_eagain_and_reads_no_extra_bytes() {
+    use io::Read;
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        n.input.extend(b"xy");
+        n.read_status.push_back(EAGAIN);
+    });
+    let mut input = io::stdin();
+    let mut byte = [0];
+    assert_eq!(input.read(&mut byte), Ok(1));
+    assert_eq!(byte, [b'x']);
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        assert_eq!(n.waits, [(0, wait_set::READ)]);
+        assert_eq!(n.reads, [1, 1]);
+        assert_eq!(n.input.iter().copied().collect::<Vec<_>>(), b"y");
+    });
+}
+
+#[test]
+fn stdout_retains_short_write_suffix_across_backpressure_and_reports_failure() {
+    use io::Write;
+    NATIVE.with(|n| n.borrow_mut().write_status.extend([2, EAGAIN, 1]));
+    io::stdout().write_all(b"abcdef").unwrap();
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        assert_eq!(n.output, b"abcdef");
+        assert_eq!(n.waits, [(1, wait_set::WRITE)]);
+    });
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        n.output.clear();
+        n.write_status.extend([2, EPIPE]);
+    });
+    assert_eq!(io::stdout().write_all(b"abcdef"), Err(Error(EPIPE)));
+    NATIVE.with(|n| assert_eq!(n.borrow().output, b"ab"));
+    NATIVE.with(|n| n.borrow_mut().write_status.push_back(0));
+    assert_eq!(io::stdout().write_all(b"x"), Err(Error(EIO)));
+}

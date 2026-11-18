@@ -9,6 +9,7 @@ pub mod env;
 mod error;
 pub mod event;
 pub mod fs;
+pub mod fsck;
 pub mod io;
 pub mod process;
 pub mod pty;
