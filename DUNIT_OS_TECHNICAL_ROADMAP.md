@@ -26,8 +26,8 @@ Independent Rust/C ELF processes use `libdunit`, the native SDK or Dunit musl.
 `gui_server` owns display/input master rights and software composition; the
 accepted M7.9 design keeps DWM policy inside that userspace process on shared DSS
 styles. A future external policy client requires layers/struts/policy and recovery
-contracts first. Kernel NIC drivers will feed bounded packet queues to userspace
-`netd`; browsers will use a separate sandboxed network service.
+contracts first. The reference E1000 driver feeds bounded packet queues to
+userspace `netd`. Browsers will use a separate sandboxed network service.
 
 Desktop apps, layout, themes, icons, workspace rules and widgets belong in
 userspace/configuration. The kernel does not contain the removed desktop loop
@@ -51,12 +51,12 @@ all drivers moved to userspace.
 | Boot | Limine BIOS/UEFI, deterministic Terminal/GUI configs, ISO/disk images, real initrd | Normal disk-backed root and complete first-boot profiles |
 | Memory | PMM/VMM/growable heap, isolated ELF, safe user copy, anonymous/private file mmap/unmap/protect, W^X/guards/shared objects | Shared file mappings, demand paging/COW, dynamic loader/TLS, swap |
 | Runtime | Preemptive UP, schedulable threads, FXSAVE x87/MMX/SSE, static TLS, futex, wait queues, clocks | Concurrent AP applications, priorities/accounting, AVX/XSAVE, signals/interruption, process-image exec/fork |
-| Objects/ABI | Generated native ABI, bounded IPC with sender identity, narrowing-only handles, display/input exclusivity | Public release compatibility suite, edge/persistent wait-set, future network contracts |
+| Objects/ABI | Generated native ABI, bounded IPC with sender identity, narrowing-only handles, display/input exclusivity, process-owned Ethernet queues | Public release compatibility suite, edge/persistent wait-set, application sockets |
 | Files | VFS/MemFS root, fd/cwd/file APIs, dup/pipe/fcntl/poll/ioctl and atomic spawn actions | Independent complete DevFS/ProcFS contracts, disk root, ownership/groups/permissions and links |
 | Storage | AHCI DMA, legacy VirtIO polling, GPT policy/CRC, transactional installer, DunitFS v2/fsck/degraded mount | 64-node limit, 1,000-file acceptance, broader recovery/hardware and user provisioning |
 | Desktop | Userspace compositor/DWM, TOML/DSS/Lua, shared themes, SDK GUI apps, clipboard/DnD, pointer modes | Session geometry across reboot, declarative whole-window effects, frame budget, IME/a11y/shaping |
 | C | Static Dunit musl, native pthread subset, TinyCC on-device compile/link/run, thin generated C UI v1 | Secure entropy, broad POSIX/release gates, dynamic tier, in-memory TCC `-run` policy |
-| Hardware | PS/2, PCI, framebuffer, AHCI/VirtIO, reboot/poweroff, AP boot/park and HPET/IPIs | NIC packet I/O, complete USB/audio, modern VirtIO, ACPI battery/thermal/suspend |
+| Hardware | PS/2, PCI, framebuffer, AHCI/VirtIO, reference E1000 INTx, reboot/poweroff, AP boot/park and HPET/IPIs | Broader NIC qualification, complete USB/audio, modern VirtIO, ACPI battery/thermal/suspend |
 
 AP boot/probes work up to eight vCPUs in the recorded TCG matrix; application
 execution remains `dispatch_cpus=1`. HPET clock progress and PIT fallback are
@@ -513,27 +513,18 @@ independent design can proceed, but releases cannot bypass these dependencies.
 
 ## M8 — networking and platform services
 
-Production networking remains unimplemented; `net0` is discovery, not an
-application packet API. A private boot diagnostic now exercises real E1000
-DMA RX/TX rings and PHY loopback, with reset/reclaim and fail-closed quarantine.
-An additional opt-in private INTx path exchanges 103 transformed frames with an
-isolated host socket peer and reclaims its DMA allocation; see
-[bring-up scope](docs/network/e1000-bringup.md). These diagnostics do not provide
-production packet capabilities, netd or Internet connectivity. First reference
-device is QEMU E1000. Modern VirtIO-net
-follows a proven packet path; RTL8139 is later compatibility.
+The reference QEMU E1000 has a kernel-owned DMA and INTx path with copied
+packet queues for an authorized userspace service. The initial supervisor
+grants the device only from an immutable boot catalog. The default netd service
+opens the queue, with optional static IPv4 and ARP/ICMP support. See
+[native packet queue](docs/network/native-packet-queue.md) and
+[private bring-up diagnostics](docs/network/e1000-bringup.md).
 
-Kernel: PCI/MMIO, DMA-safe memory, NIC reset/IRQ/moderation, bounded RX/TX rings
-and capability transfer. `netd`: Ethernet/ARP/NDP/IP/ICMP/UDP/TCP/DHCP/DNS,
-interface configuration and policy. Native/socket/resolver protocols and musl
-adapters converge on that service. Propose NET_DEVICE/PACKET_QUEUE and RX/TX/
-CONTROL/RAW/TRANSFER authority only with human approval. Own buffer transitions
-`DRIVER_RX → NETD → FREE` and `NETD_TX → DRIVER → COMPLETE`; bounded shared rings/
-events avoid per-byte syscalls. On netd crash stop/revoke/reset/restart safely.
-Ordinary apps never obtain raw NIC/MMIO/DMA authority.
-
-The [packet authority proposal](docs/network/packet-authority-proposal.md)
-defines the decisions still needed for production driver-to-service delivery.
+The kernel owns PCI/MMIO, DMA-safe memory, reset, IRQ and bounded RX/TX. Netd
+owns protocol and interface policy. Ordinary applications need native service
+sockets/resolver APIs and musl adapters. Shared CPU rings are a later optimization
+after measuring the copied path. VirtIO-net follows reference transport
+qualification. RTL8139 is later compatibility.
 
 ### N0 — E1000 packet I/O
 
@@ -544,6 +535,10 @@ defines the decisions still needed for production driver-to-service delivery.
   transformed-payload exchange through the shared harness. Require both guest
   success and 103 checked host responses; test ring wrap, reset and DMA reclaim.
   Native TCG checks cover 2/4/8 vCPUs; full N0 gates below stay open.
+- [x] Add the approved copied packet ABI, boot-catalog grant, and process-owned
+  non-inheritable E1000 queue with read/write/poll/wait-set and fail-closed stop.
+  Route the reference service through that queue. Broader hardware qualification
+  and application sockets remain open.
 
 - [ ] Implement reset/register/MAC/link setup and a common DMA API.
 - [ ] Own RX/TX descriptors, heads/tails, barriers and recycling.
@@ -584,6 +579,8 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
   readiness through the host and native diagnostic.
 - [x] Add bounded DNS A/AAAA/CNAME parsing, compression, TTL caching and query
   validation/retry/timeouts over the logical UDP core.
+- [x] Exercise native ARP, ICMP and UDP/DNS over the copied E1000 queue in QEMU.
+  Verify wire bytes with the isolated peer before and after a supervised restart.
 - [ ] Expose UDP through production sockets and integrate blocking, timeout and
   readiness with live device transport.
 - [ ] Implement DHCP INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING and link reset.

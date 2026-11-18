@@ -1,0 +1,201 @@
+{
+  "date": "2026-11-18",
+  "base_commit": "cc2b06caaa69f6b20af3c6328b549e8185ac2fb8",
+  "scope": "Approved E1000 copied packet ABI, sealed service grant, native Ethernet peer and supervised queue lifecycle.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "878daeaca5255f49fe9936072595c4f51beb9e22d3e24f3f87fda984df2c7b93",
+    "Makefile": "5eba079dcf0ef0de0eacd82e6894c76982dec4737985e8b56e7dc9d09440ff68",
+    "abi/README.md": "a5a588a6eb8e567dc43365c0ccf835aa3d65621ec047c53d4e0d12597030df88",
+    "abi/include/dunit.h": "5befcb4c3e79e801c0359d342e4577a64efa539223dff5c2e6536a25cdf144ee",
+    "abi/include/dunit/packet.h": "24f42a825217be4c4f1322fb06ddab34658900ded2d10240026b36334ad47c36",
+    "abi/include/dunit/rights.h": "1f52e48f5f5d4afb38c7b31942ffdd7345af5efd3611562a4fb83ea2eeb99cd4",
+    "abi/include/dunit/syscall.h": "846d2ecb387bd88f66405b721b081db32c8e5d9dde245723e601f4d0d550f237",
+    "abi/packet/Cargo.toml": "48f85ed5e3575aa4d4d9abdde718c9221b42f6e230610d43405741cd597f26e9",
+    "abi/packet/src/lib.rs": "0f7127f3246172e85315c859a5969954355ced290e5729745c94855202978ac2",
+    "abi/packet/src/tests.rs": "da50325f5bc251d6e7736755bbd67cdba3ebea066802dc57a3bfb39cf8110954",
+    "abi/rights.abi": "271383c173aa0b4d4c1f9ae2c3363b8234e7f2c6ac95a59de57af613440db16d",
+    "abi/syscalls.abi": "ae7fc29642462f52577061305ecb71871e9f2a9dfa047187f7560f0e2cf811fb",
+    "docs/architecture/current-state.md": "618a6b918724aa202d5019e0bb14f406bfcc9a856cab0802c3114016e3d8d29f",
+    "docs/network/e1000-bringup.md": "00fd7565d2ca8a8ddf02038ef53942753a0351dc8f378203f3ea5d8c8ad1c612",
+    "docs/network/native-packet-queue.md": "9a0ef94d30f1dc7e68a830de757a8ae2909e36011b3045e72a42e46630f6bf1b",
+    "docs/network/packet-authority-proposal.md": "3c9bfde44d901bedfe203ca3f8115a2fb1122ebbfca6351e6268c8ee53fe71d1",
+    "images/dwm/profile.json": "a5822873560017144fe72d0ea71c3e3926a0302d0b17db86c15485ae0c13f6aa",
+    "kernel/Cargo.lock": "c7e1beb0a32dbeee2e17976fbf6ed610b70b2d9918621fda25c6f490bd179b4d",
+    "kernel/Cargo.toml": "b6614962c3c8e42f88ab9bdc03268fa1c685528c10ce21019f86582a2e479551",
+    "kernel/src/command.rs": "b5c75e3ae6c13c318f72eef84b319f0dfcba66e2063849b885ba3b4d20f16aad",
+    "kernel/src/drivers/net.rs": "b0356f3a565adbc5359ee3e89044c700409d95be471f01b026b843ad107276d0",
+    "kernel/src/drivers/net/e1000.rs": "341f968d9e0ce15cd160ba1b974a5aa7b7000e9915ad7ca1cd53a5c6b45af372",
+    "kernel/src/drivers/net/packet.rs": "f3595a027f6ab864dc1809ad5e90ba85dfa34c78e274a9e2fa34f9a6d2f7b28e",
+    "kernel/src/drivers/net/rings.rs": "94bd5d7b39eb6583831b7e436ce3f0efab2f7600d11c2e215f13d41702deaa73",
+    "kernel/src/fs/memfs.rs": "9842af6ce64850e88bf004901884bb67a62161d50063bc7e07746f231c7eebdb",
+    "kernel/src/fs/vfs.rs": "6da958f74fc01557e5c19e0e34adb173c15192879da31f5d8128ae0b8775ee47",
+    "kernel/src/handle.rs": "1aa313b14648b5155e65e2f8fe22bcfaf1f0a7c82ad41e7650d31dcb9d73b26c",
+    "kernel/src/lib.rs": "ef54f19cdb88635146bc082e04a68fe8aa27a5e3c604cb2704a05cdd92024547",
+    "kernel/src/process/fd.rs": "61bbed565968d197e99b3a91b6994ff6ad6a94c3ff82ef2ca6cab94f038e2b64",
+    "kernel/src/process/mod.rs": "ba5dabc499f6b863a22c3d8d3e6c13c491466b5325df2ae3a05ecf07937db91e",
+    "kernel/src/process/packet.rs": "2d7ecb0ea4989e66089f3a13425f1c8370abc739f6e283fca9f8ccf8ad11223a",
+    "kernel/src/process/resources.rs": "73ccddc7f032bc149b2c1902ecad7f742283ab321bab5f246fe0fb6edff16216",
+    "kernel/src/syscall/mod.rs": "a2c5b77f29addfe61891b10feab95d9c3a89a81ee075fa8dad1a9d7e7561a408",
+    "kernel/src/syscall/native_fd.rs": "8d3f901800f4f13a5c5ee40a9920d9de124d107851b72fb5a71e3cdb7232c656",
+    "kernel/src/syscall/packet.rs": "9da267a7114a0f94dbd06c1ced7f31235bf8498d50357e1cedccea141ebf238c",
+    "kernel/src/syscall/spawn_actions.rs": "02601d76a594edf25a9daad1743d485cfe511f2461e0d40c3e41ffcf0df1f535",
+    "runtime/dunit/src/process.rs": "a5f2d0860d48aaa950dc4881771e23d4dbdb8a18139e7e5c83ab50778bef4c07",
+    "services/boot/netd.toml": "30a683368afd8ede3c45c0958119e4c2d47d9cbbfbb8eec03cbe8253e67c6e8e",
+    "tests/fixtures/net-live/system/boot-services/netd.toml": "c9959b9d55826af0ac34da9884c273386fbd4b62a7199fac0e84d7191d3a2dbc",
+    "tools/check_image_profile.py": "03ace9cb8e94d77c42af62febd1512f575d8d8aefe1d4522c9898e1352b4f016",
+    "tools/gen_abi.py": "ce1bffd6c77e16d604eac4e29e30538d427262de503ef72886b09f78894f622e",
+    "tools/image_profile.py": "a035522049b466d60a32e337609c95eb2b1bf49074e89584b018bd98f70492fa",
+    "tools/net_live_markers.json": "5d9e5ba6cc6404cc926f010699a2e0b763fbbae8eb0ef6664f8dcb75e4cfb62e",
+    "tools/net_live_transport.py": "b24a92914c9817a9eecb63b845dd5a9e11942f6fbe4ff7437ad6db3b13d2250c",
+    "tools/net_test_transport.py": "eda49b86bc7f3abe05ffe238c55a70b21b948b20f4a72176a84122bf43e10e1e",
+    "tools/pack_initrd.py": "f57a9a1e03449338edd2fd2f1aea50cca1fe618cd3170417c589a7a8e55d2858",
+    "tools/packet_authority_markers.json": "f6318b07354d670e398cffa774d4c797ceae34bf3d2c6820170c171fa53037a9",
+    "tools/qemu_test.py": "f4bf74392caac125d419dfee4c731fd82c108ce27c3782a174ae2a70219244e0",
+    "tools/test_c_sdk_headers.py": "38a24e6a6a41142459b47df1c9162aac7f8d4448baf1807979fe12664690c897",
+    "tools/test_image_profiles.py": "8efc9f55890b98cd5928eeeee95dfc1c0b6d50c53a16f0cd7b1a362fa3980adb",
+    "tools/test_net.py": "3469c848eec57afd9818de2a47d5d7978a1497ced61a36cb4ab26884b7408658",
+    "tools/test_net_discovery_host.rs": "290654c70f60d9caa6f6d2d9cec0fa76fba37f7cf7ad63ed444da4d08e0c204c",
+    "tools/test_net_host.rs.in": "a7dff20964ed7aa873452559d3f9baad72232e564f85fefc9a34e16f9eed921f",
+    "tools/test_sdk_init.py": "1f5952a5f87413248f6e18c4f606ffb59807c9af3896880f5fc53b3c3433aede",
+    "tools/test_sdk_init_host.rs.in": "e3cb918e15820a909af3e1b8b3ea7340cc801412321d2beafd7b6f0ad9f7b508",
+    "userspace/libdunit/src/lib.rs": "a53f2fbfb590d6d9a549f59bfbb1fbef59a7dd81a0529766c87a2ef9631a7806",
+    "userspace/libdunit/src/rights_numbers.rs": "05549c2b01b6d399f055e7498b9dcae04a089353e56e7740ce7bf54d2d2d0b78",
+    "userspace/libdunit/src/syscall_numbers.rs": "e9ad82fcddcc53edcbe3c6bd9c2ad5c3211529810257dd986e0c712845a97eb6",
+    "userspace/net-core/README.md": "0a23b973b129bbfae2a095c84668bd01e98bf6b5999d4de15f9e731e7906f938",
+    "userspace/system_apps/abi_test/Cargo.lock": "e750c0a624d4ae575829a69242eec2925a470b33353ff5c8756c7b394630d2df",
+    "userspace/system_apps/abi_test/Cargo.toml": "af7888e706e79c6e0f44ee723ad1e6454611876a20eb0a0219a932f67346041c",
+    "userspace/system_apps/abi_test/src/main.rs": "14161bf8ba6a0a333c92bc3c88dadbb28ef10020fb18795911b4d3a51f8b548d",
+    "userspace/system_apps/abi_test/src/packet_denial.rs": "a9e022e09849101f5ad2e2b75d350980d30de23654ced43019975a0236427d98",
+    "userspace/system_apps/init/Cargo.lock": "8ec1443ba5d1f0cf8e7dd70a144ed72dee7694ed763621016ff09726eb0a9d69",
+    "userspace/system_apps/init/Cargo.toml": "85eddce2d1353edba42b4927e373d109e4d2206bee593db8215d18bb5e00b5e3",
+    "userspace/system_apps/init/src/main.rs": "ce42e17311bae0880e3f5bde57f2a475b627ece5a2dc5885a31ab35e46952b4b",
+    "userspace/system_apps/netd/Cargo.lock": "919a435feff4f0a4ebb651d889410f1399567e5fcc327a31bdc8a115bafc10c9",
+    "userspace/system_apps/netd/Cargo.toml": "134ef0fd5ecc02ea6873aa1e172c0630fb1b80d6ea07860e07c6383c5075742b",
+    "userspace/system_apps/netd/src/lib.rs": "e617d15c453f1e8df7c259d676e821c83658dce4d15c53d046324f47c8398d10",
+    "userspace/system_apps/netd/src/main.rs": "e338ca527f02450c26aabddc722dd0de20c87cc4bf7fe4ffc32d25b296d6d2da",
+    "userspace/system_apps/netd_fixture/Cargo.lock": "0624c9464d587eb5b1935e241afac58a7ed8b479e83faf3322a5d7e16f31d860",
+    "userspace/system_apps/netd_fixture/Cargo.toml": "b54f487ef6d8db4a684dd9fc6d9721083b7b23d0674d0a1de94057c3b3a48d62",
+    "userspace/system_apps/netd_fixture/src/main.rs": "00e5e82e9182044fa06a6cbee0c7f35b0d4bb7c7566aabd0e6f35eae2752112c"
+  },
+  "native_cases": [
+    {
+      "name": "packet-terminal",
+      "scope": "Full terminal/core budget, old PHY and INTx 103-frame diagnostics, ungranted and forged-root denials, sealed catalog protection, poll and wait-set. Ran before stale queue HANGUP follow-up, which the GUI live test covers.",
+      "metadata_sha256": "010c03604abce68b438da2fddfb4351bede4ee549377ebad36ff671ad5dcfa80",
+      "serial_sha256": "cec7c8b598b64f787b7398102622214048332fbd4b1491dead08c759faae3ba4",
+      "image_sha256": "dbfd3bfcf14cdda684d01ef3604ab94aca794481c876c27fde06574aadee64da",
+      "marker_fixture_sha256": "fe1e5ec680bf071e0509e6c4561a3c2ef1f4dd5a0863a1934189b57f558c5db4",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "packet-live-final",
+      "scope": "Live packet fixture with existing GUI and init smoke checks. Two ARP, ICMP and UDP DNS sessions with an isolated host. Validates attenuation, attachment denial, dup, inheritance with CLOEXEC clear, malformed TX, source fault, read-only mapped RX fault, undersized RX and final-handle revocation.",
+      "metadata_sha256": "27a2d8c79ad01082e7f85eb2e35c3d00658acc2fd3105e034433a08efc2c3797",
+      "serial_sha256": "99b569564adb5bcaa83047068a11dcc3a95d024379df08b5366dc1e5e04ac84c",
+      "image_sha256": "b16b6b31407c0696a2af1a4d107d034d6109183fcd91e3d22291d698604f4d85",
+      "marker_fixture_sha256": "c29ec171cd6ea2ae4c15783143f0120deed747c4dea6fe7ef65db65d08063f75",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 6,
+        "bytes": 382,
+        "responses": 6,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "UDP",
+          "DNS"
+        ],
+        "guest_identifiers": [
+          62,
+          77
+        ]
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "packet-dwm",
+      "scope": "Unmodified DWM profile: default netd grant, queue startup without IPv4 configuration and normal desktop ready. Restricted QEMU network.",
+      "metadata_sha256": "80e38c5fc21a83c06480b479caf41f3d4c712f041fece9650b9d4499cf541b9b",
+      "serial_sha256": "b329e24bfef709efe37246d3cc1feb38ca4192bda81889d8a38cf8c1859b05f9",
+      "image_sha256": "fca3c05c7a13260a1789f16a523e9fbaedeb88155069959c80471a65400160e8",
+      "marker_fixture_sha256": "5352df4b2072a6c1e666a4d63f4455933d857cc0014c9946bd44eb6da3386cbc",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": null,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "dwm_live_and_installed_initrd_sha256": "08ceee5df6ec9fd4481b7f5655291b415e9df26f4204dc1c38d9c7c887f8da61",
+  "host_cases": {
+    "gen_abi.py --check": "96 syscalls, 25 errno, 9 rights, generated files in sync",
+    "gen_transfer_values.py --check": "PASS",
+    "abi/packet rustc --test -Dwarnings": "6 passed",
+    "test_c_sdk_headers.py": "6 passed, including C packet layout assertions",
+    "test_net.py": "10 passed, actual controller and discovery with MMIO/DMA shims",
+    "test_net_transport.py": "6 passed after preserving framing errors during stop",
+    "test_net_harness.py": "3 passed",
+    "test_sdk_init.py": "6 passed",
+    "test_image_profiles.py": "10 passed",
+    "test_syscall_wait_scopes.py": "PASS",
+    "DWM initrd verify_entries": "543 files, verified profile and trusted boot components"
+  },
+  "corrections": [
+    "Use the existing syscall5 stub with a zero unused register for the four-argument grant.",
+    "The first live exchange satisfied both peer rounds and all required markers. Its USER-FAULT ban matched three intentional boot-smoke page faults. The final run rejects user faults after supervisor startup.",
+    "Framing errors now survive a concurrent stop, preserving the existing truncated header assertion."
+  ],
+  "limits": [
+    "TCG and QEMU 82540EM INTx only. Userspace dispatch remains UP.",
+    "Live ARP/ICMP/UDP DNS exchanges used the developer boot service fixture. Production netd accepts static IPv4 for ARP/ICMP. The default image leaves it unconfigured.",
+    "DHCP, app sockets, production DNS service, TCP, broader NIC recovery and hardware qualification remain open."
+  ]
+}

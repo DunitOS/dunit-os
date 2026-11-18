@@ -1,10 +1,10 @@
 # E1000 packet bring-up (N0 diagnostic slice)
 
-The production network path still performs PCI/status/MAC discovery. No socket,
-`netd`, raw-NIC capability or application packet queue is provided by this change.
-The private boot diagnostic is compiled only with `boot-smoke-tests` and runs
-after clock initialization. It uses the QEMU 82540EM reference (8086:100e), not
-all devices classified as E1000 by discovery.
+This document records the private PHY loopback and external INTx diagnostics.
+The [native packet queue](native-packet-queue.md) describes the production
+path built on the same reference controller. The private boot diagnostic is
+compiled only with `boot-smoke-tests` and runs after clock initialization. It
+uses the QEMU 82540EM reference (8086:100e).
 
 Production discovery now enables only PCI MEMORY_SPACE while reading registers.
 Its scoped mapping restores the original command bits with BUS_MASTER cleared,
@@ -113,9 +113,8 @@ reference uses legacy INTx and does not prove MSI/MSI-X. Link transition/stall
 recovery, RX starvation, interrupt storms, moderation and the ten-minute flood
 matrix remain open. Multiple NICs, hardware DMA recovery and stats publication
 also remain open.
-The approved `NET_DEVICE`/`PACKET_QUEUE` authority, bounded shared-ring ownership,
-revocation/netd restart and service protocols must precede application exposure.
-Ethernet/ARP/IP/ICMP (N1), UDP/DHCP/DNS, TCP, sockets/musl and TLS are not provided.
+The native packet queue uses copied batches and kernel-owned DMA. Application
+socket protocols, DHCP, TCP and TLS remain open.
 
 Fresh TCG native checks and their source/image hashes are recorded in the
 [17 November integration receipts](../verification/multitrack-2026-11-17.json).
@@ -126,8 +125,8 @@ Fresh TCG native checks and their source/image hashes are recorded in the
 `boot-smoke-tests` plus the exact Limine token `net_irq_test=1` opts into an
 external 82540EM probe after the existing PHY test. An ordinary boot runs no
 external exchange. The reference is PCI 8086:100e on legacy line 10 or 11; this
-controller does not provide MSI/MSI-X. No packet capability, syscall or service
-protocol is added. Production remains discovery only.
+controller does not provide MSI/MSI-X. This diagnostic runs privately before
+any service takes packet-queue ownership.
 
 One static `IrqSafeSpinLock` owns the controller and an inline eight-frame,
 128-byte RX queue. Lock acquisition disables interrupts before waiting, and no

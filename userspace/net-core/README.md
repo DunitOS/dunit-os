@@ -77,9 +77,10 @@ route capacity/reuse, overlapping/default prefixes, invalid masks/gateways,
 reverse gateway ARP and configured MTU boundaries.
 Native verification uses `tools/net_core_markers.json` with the shared QEMU
 harness. Native success proves the SDK app and logical peer executed, not NIC
-I/O. Production packet authority, transport ownership/revocation, netd,
-production interface/routing policy, ICMP error generation, configuration and
-the full N1 NIC acceptance gate remain open.
+I/O. The [native packet service](../../docs/network/native-packet-queue.md)
+owns transport separately. Application sockets, production interface and routing
+policy, ICMP error generation, configuration and the full N1 acceptance gate
+remain open.
 
 
 ## UDP and DNS logical endpoints

@@ -104,10 +104,13 @@ declared programs, preserving asset and overlay file bytes.
   must not support cryptography or a claim of production hash hardening.
 - Signals/interruption, cancellation, process-image exec/fork, dynamic loader/DTV,
   full termios, POSIX ownership/accounts and disk-backed system root remain open.
-- Networking needs packet RX/TX, native socket objects/rights/readiness and DNS.
-  HTTPS additionally requires entropy and TLS. Network-controller discovery is
-  not a working network stack. Audio, full USB enumeration and power services
-  remain incomplete; xHCI compatibility heuristics need real-device validation.
+- The boot supervisor can grant the reference E1000 device to a service through
+  a sealed catalog. Native packet descriptors provide bounded RX/TX and readiness.
+  Application sockets, address configuration, an app-facing resolver and TCP
+  remain open. HTTPS additionally requires entropy and TLS.
+  See [packet queue scope](../network/native-packet-queue.md).
+- Audio, full USB enumeration and power services remain incomplete.
+  xHCI compatibility heuristics need real-device validation.
 - Eager file MAP_PRIVATE is a snapshot with EOF/W^X limits; no demand paging,
   COW, MAP_SHARED or SIGBUS semantics are claimed. Directory iteration is a
   bounded snapshot, not a persistent fd-backed directory object.

@@ -1,8 +1,8 @@
-# Packet authority v1 proposal — human decision required
+# Packet authority v1 design decision
 
-Status: proposed, not implemented or authorized by this document. No syscall,
-rights manifest, bootstrap privilege or public packet contract changes accompany
-this proposal. The current userspace UDP/DNS core still has no NIC transport.
+The maintainer approved the copied-batch design on 18 November 2026.
+The [implementation notes](native-packet-queue.md) track the delivered
+scope and the remaining acceptance gates.
 
 ## Recommended first implementation
 
@@ -34,14 +34,14 @@ Grant policy must come from the trusted boot service catalog. Writable user
 desktop profiles and ordinary application manifests cannot request this grant.
 
 Add NET_CONTROL and NET_RAW rights to the authoritative rights manifest, with
-numbers assigned only after approval and a fresh ABI fetch. Existing READ/WRITE
+assigned bits 7 and 8 after approval and a fresh ABI fetch. Existing READ/WRITE
 attenuate device queries and RX/TX access. NET_CONTROL permits link/reset control;
 NET_RAW permits opening the raw Ethernet queue. Kernel-private object kinds are
 NET_ROOT and NET_DEVICE; a queue is an owner-bound native file description.
 
 ## Native operations
 
-Two new syscall contracts, numbers assigned only after approval:
+Two new syscall contracts use numbers 95 and 96 respectively.
 
 - `NetDeviceGrant(root_handle, interface_index, recipient_pid, rights)` returns
   the device-handle number inserted into that recipient. Validate recipient
