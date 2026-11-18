@@ -33,37 +33,43 @@ pub(crate) fn copy_string_from_user_len(
         return Err(ENAMETOOLONG);
     }
 
-    validate_user_range(ptr as u64, len)?;
-    with_mapping(ptr as u64, len, false, |mapping| {
-        let mut bytes = Vec::new();
-        for offset in 0..len {
-            let byte = mapping.read_byte(offset);
-            if byte == 0 {
-                return Err(EINVAL);
-            }
-            bytes.push(byte);
-        }
-
-        String::from_utf8(bytes).map_err(|_| EINVAL)
-    })
+    // Parsing occurs after every byte has been copied and all mapping guards
+    // have ended. No heap allocation, UTF-8 work or owned-output retirement
+    // nests inside an address-space guard.
+    let bytes = copy_buffer_from_user(ptr, len)?;
+    if bytes.contains(&0) {
+        return Err(EINVAL);
+    }
+    String::from_utf8(bytes).map_err(|_| EINVAL)
 }
 
+/// Each mapping scope validates and reads at most one page. Reacquire the
+/// active address-space owner for every chunk: an unmap or permission change
+/// between chunks must fail validation before another user byte is accessed.
+/// Only a complete owned copy is returned; this is not an atomic snapshot of
+/// userspace contents across chunks.
 pub(crate) fn copy_buffer_from_user(ptr: *const u8, len: usize) -> Result<Vec<u8>, i64> {
     if len == 0 {
         return Ok(Vec::new());
     }
 
     validate_user_range(ptr as u64, len)?;
-    with_mapping(ptr as u64, len, false, |mapping| {
-        let mut out = Vec::new();
-        out.reserve(len);
-        for offset in 0..len {
-            let byte = mapping.read_byte(offset);
-            out.push(byte);
-        }
-
-        Ok(out)
-    })
+    // Allocate and initialize before pinning a mapping. The callback only
+    // overwrites initialized kernel bytes and cannot grow or drop this Vec.
+    let mut out = alloc::vec![0u8; len];
+    let mut offset = 0;
+    while offset < len {
+        let address = ptr as u64 + offset as u64;
+        let count = (4096 - (address as usize & 4095)).min(len - offset);
+        with_mapping(address, count, false, |mapping| {
+            for index in 0..count {
+                out[offset + index] = mapping.read_byte(index);
+            }
+            Ok(())
+        })?;
+        offset += count;
+    }
+    Ok(out)
 }
 
 pub(crate) fn copy_buffer_to_user(ptr: *mut u8, data: &[u8]) -> Result<(), i64> {

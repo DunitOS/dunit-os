@@ -1,7 +1,28 @@
 #![allow(dead_code)]
 extern crate alloc;
 #[path=@SYNC@]mod actual_sync;
-mod sync {pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;}
+// The production mapping implementation runs unchanged. The privileged IRQ
+// lock is replaced by the real host-safe SpinLock plus allocation tracking.
+mod sync {
+    std::thread_local! {pub static HELD:std::cell::Cell<usize>=const {std::cell::Cell::new(0)};}
+    pub struct IrqSafeSpinLock<T>(crate::actual_sync::SpinLock<T>);
+    impl<T> IrqSafeSpinLock<T> {
+        pub fn new(value:T)->Self {Self(crate::actual_sync::SpinLock::new(value))}
+        pub fn lock(&self)->Guard<'_,T> {let inner=self.0.lock();HELD.with(|n|n.set(n.get()+1));Guard{inner}}
+    }
+    pub struct Guard<'a,T> {inner:crate::actual_sync::SpinLockGuard<'a,T>}
+    impl<T> core::ops::Deref for Guard<'_,T> {type Target=T;fn deref(&self)->&T {&self.inner}}
+    impl<T> core::ops::DerefMut for Guard<'_,T> {fn deref_mut(&mut self)->&mut T {&mut self.inner}}
+    impl<T> Drop for Guard<'_,T> {fn drop(&mut self) {HELD.with(|n|n.set(n.get()-1));}}
+}
+struct CheckedAllocator;
+unsafe impl std::alloc::GlobalAlloc for CheckedAllocator {
+    unsafe fn alloc(&self,layout:std::alloc::Layout)->*mut u8 {check_heap();std::alloc::System.alloc(layout)}
+    unsafe fn realloc(&self,ptr:*mut u8,layout:std::alloc::Layout,size:usize)->*mut u8 {check_heap();std::alloc::System.realloc(ptr,layout,size)}
+    unsafe fn dealloc(&self,ptr:*mut u8,layout:std::alloc::Layout) {check_heap();std::alloc::System.dealloc(ptr,layout)}
+}
+fn check_heap() {if sync::HELD.try_with(|n|n.get()!=0).unwrap_or(false) {std::process::abort();}}
+#[global_allocator]static ALLOCATOR:CheckedAllocator=CheckedAllocator;
 mod memory {pub mod vmm {
     #[derive(Clone,Copy)]pub struct VirtualAddress(pub usize);
     impl VirtualAddress {pub fn from_usize(value:usize)->Self {Self(value)}}
@@ -13,8 +34,8 @@ mod memory {pub mod vmm {
     impl core::ops::BitOr for PageFlags {type Output=Self;fn bitor(self,other:Self)->Self {Self(self.0|other.0)}}
     pub struct Buffer {pub address:usize,pub length:usize}
     impl Buffer {
-        pub fn new()->Self {let layout=std::alloc::Layout::from_size_align(8192,4096).unwrap();let address=unsafe{std::alloc::alloc_zeroed(layout)} as usize;
-            assert_ne!(address,0);for i in 0..8192 {unsafe {*(address as *mut u8).add(i)=(i%253) as u8;}}Self{address,length:8192}}
+        pub fn new()->Self {let layout=std::alloc::Layout::from_size_align(65536,4096).unwrap();let address=unsafe{std::alloc::alloc_zeroed(layout)} as usize;
+            assert_ne!(address,0);for i in 0..65536 {unsafe {*(address as *mut u8).add(i)=(i%253) as u8;}}Self{address,length:65536}}
     }
     impl Drop for Buffer {fn drop(&mut self) {unsafe {std::alloc::dealloc(self.address as *mut u8,std::alloc::Layout::from_size_align(self.length,4096).unwrap());}}}
     pub struct AddressSpace {pub buffer:Option<Buffer>,pub flags:PageFlags}
@@ -26,8 +47,20 @@ mod memory {pub mod vmm {
 mod process {
     use std::sync::Arc;use crate::sync::IrqSafeSpinLock;use crate::memory::vmm::AddressSpace;
     pub static SPACE:std::sync::OnceLock<Arc<IrqSafeSpinLock<AddressSpace>>>=std::sync::OnceLock::new();
+    pub static PINS:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(0);
+    pub static FAULT:std::sync::atomic::AtomicUsize=std::sync::atomic::AtomicUsize::new(0);
     pub static SELECTED:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(true);
     pub fn active_address_space_pin()->Option<Arc<IrqSafeSpinLock<AddressSpace>>> {
+        use std::sync::atomic::Ordering;
+        assert_eq!(crate::sync::HELD.with(|n|n.get()),0);
+        let pin=PINS.fetch_add(1,Ordering::SeqCst)+1;
+        if pin==2 {
+            match FAULT.load(Ordering::SeqCst) {
+                1=>SPACE.get().unwrap().lock().flags=crate::memory::vmm::PageFlags(1),
+                2=>{let buffer={SPACE.get().unwrap().lock().buffer.take()};drop(buffer);},
+                _=>{}
+            }
+        }
         SELECTED.load(std::sync::atomic::Ordering::Acquire).then(||SPACE.get().unwrap().clone())
     }
 }
@@ -47,7 +80,7 @@ mod syscall {
         copy_buffer_to_user(ptr,b"hello").unwrap();assert_eq!(copy_string_from_user_len(ptr,5,32),Ok(String::from("hello")));
         assert_eq!(copy_string_from_user_len(ptr,33,32),Err(ENAMETOOLONG));
         copy_buffer_to_user(unsafe{ptr.add(5)},&[0]).unwrap();assert_eq!(copy_string_from_user_len(ptr,6,32),Err(EINVAL));
-        assert_eq!(validate_user_pages(ptr as u64+8192,1,false),Err(EFAULT));
+        assert_eq!(validate_user_pages(ptr as u64+65536,1,false),Err(EFAULT));
         space.lock().flags=PageFlags(3);assert_eq!(copy_buffer_to_user(ptr,b"x"),Err(EFAULT));assert!(copy_buffer_from_user(ptr,1).is_ok());
         space.lock().flags=PageFlags(7|8);assert!(!with_mapping(ptr as u64,1,false,|mapping|Ok(mapping.executable())).unwrap());
         space.lock().flags=PageFlags(7);assert!(with_mapping(ptr as u64,1,false,|mapping|Ok(mapping.executable())).unwrap());
@@ -56,22 +89,58 @@ mod syscall {
         let mut unaligned=0u32;with_mapping(ptr as u64+7,4,false,|mapping| {unsafe {mapping.copy_words_volatile(0,&mut unaligned,1);}Ok(())}).unwrap();assert_eq!(unaligned,u32::from_le_bytes([7,8,9,10]));
         let mut aligned=[0u32;32];with_mapping(ptr as u64+256,aligned.len()*4,false,|mapping| {unsafe {mapping.copy_words_volatile(0,aligned.as_mut_ptr(),aligned.len());}Ok(())}).unwrap();
         for (i,word) in aligned.iter().enumerate() {assert_eq!(*word,u32::from_le_bytes(core::array::from_fn(|b|((256+i*4+b)%253) as u8)));}
+
+        // A MAX_USER_COPY transfer uses one separately pinned page per scope,
+        // including unaligned endpoints. Heap operations fail the process if
+        // performed inside any mapping guard, including error cleanup.
+        let reset=|fault| {crate::process::PINS.store(0,Ordering::SeqCst);crate::process::FAULT.store(fault,Ordering::SeqCst);};
+        reset(0);
+        let full=copy_buffer_from_user(ptr,MAX_USER_COPY).unwrap();
+        assert_eq!(full.len(),MAX_USER_COPY);assert_eq!(crate::process::PINS.load(Ordering::SeqCst),16);
+        for (i,byte) in full.iter().enumerate().skip(256) {assert_eq!(*byte,(i%253) as u8);}
+        reset(0);assert_eq!(copy_buffer_from_user(unsafe{ptr.add(4095)},4098).unwrap().len(),4098);
+        assert_eq!(crate::process::PINS.load(Ordering::SeqCst),3);
+        reset(0);assert_eq!(copy_buffer_from_user(ptr,MAX_USER_COPY+1),Err(EINVAL));
+        assert_eq!(crate::process::PINS.load(Ordering::SeqCst),0);
+        assert_eq!(copy_buffer_from_user(1 as *const u8,1),Err(EFAULT));
+        assert_eq!(copy_buffer_from_user((u64::MAX-2) as *const u8,8),Err(EFAULT));
+        assert_eq!(copy_string_from_user_len(core::ptr::null(),0,32),Ok(String::new()));
+        for max in [0,MAX_USER_COPY+1] {assert_eq!(copy_string_from_user_len(ptr,0,max),Err(EINVAL));}
+        copy_buffer_to_user(ptr,&[0xff]).unwrap();assert_eq!(copy_string_from_user_len(ptr,1,32),Err(EINVAL));
+        // Valid multibyte UTF-8 may cross a mapping boundary.
+        copy_buffer_to_user(ptr,&[b'a';4095]).unwrap();copy_buffer_to_user(unsafe{ptr.add(4095)},&[0xc3,0xa9]).unwrap();
+        reset(0);let text=copy_string_from_user_len(ptr,4097,MAX_USER_COPY).unwrap();assert!(text.ends_with('é'));
+        assert_eq!(crate::process::PINS.load(Ordering::SeqCst),2);
+        copy_buffer_to_user(ptr,&vec![b'z';MAX_USER_COPY]).unwrap();
+        reset(0);let full_text=copy_string_from_user_len(ptr,MAX_USER_COPY,MAX_USER_COPY).unwrap();
+        assert_eq!(full_text.len(),MAX_USER_COPY);assert!(full_text.bytes().all(|byte|byte==b'z'));
+        assert_eq!(crate::process::PINS.load(Ordering::SeqCst),16);
+        reset(1);assert_eq!(copy_buffer_from_user(ptr,4097),Err(EFAULT));assert_eq!(crate::process::PINS.load(Ordering::SeqCst),2);
+        space.lock().flags=PageFlags(7);
+        // An early NUL must not mask a later mapping fault (old precedence).
+        copy_buffer_to_user(ptr,&[0]).unwrap();reset(1);
+        assert_eq!(copy_string_from_user_len(ptr,4097,MAX_USER_COPY),Err(EFAULT));
+        space.lock().flags=PageFlags(7);reset(0);
+        copy_buffer_to_user(unsafe{ptr.add(4090)},&core::array::from_fn::<_,32,_>(|i|((4090+i)%253) as u8)).unwrap();
         // A concurrent unmap must wait until the last validated byte is read.
         let entered=Arc::new(AtomicBool::new(false));let attempted=Arc::new(AtomicBool::new(false));let unmapped=Arc::new(AtomicBool::new(false));
         let writer={let space=space.clone();let entered=entered.clone();let attempted=attempted.clone();let unmapped=unmapped.clone();std::thread::spawn(move|| {
             while !entered.load(Ordering::Acquire) {std::thread::yield_now();}
-            attempted.store(true,Ordering::Release);space.lock().buffer.take();unmapped.store(true,Ordering::Release);
+            attempted.store(true,Ordering::Release);let buffer={space.lock().buffer.take()};drop(buffer);unmapped.store(true,Ordering::Release);
         })};
         let snapshot=with_mapping(ptr as u64+4090,32,false,|mapping| {
             entered.store(true,Ordering::Release);while !attempted.load(Ordering::Acquire) {std::thread::yield_now();}
             assert!(!unmapped.load(Ordering::Acquire));
-            Ok((0..32).map(|i|mapping.read_byte(i)).collect::<Vec<_>>())
+            Ok(core::array::from_fn::<_,32,_>(|i|mapping.read_byte(i)))
         }).unwrap();writer.join().unwrap();assert!(unmapped.load(Ordering::Acquire));
-        assert_eq!(snapshot,(4090..4122).map(|i|(i%253) as u8).collect::<Vec<_>>());
+        assert_eq!(snapshot,core::array::from_fn::<_,32,_>(|i|((4090+i)%253) as u8));
         assert_eq!(copy_buffer_from_user(ptr,1),Err(EFAULT));
+        let buffer=Buffer::new();let next=buffer.address as *const u8;space.lock().buffer=Some(buffer);
+        reset(2);assert_eq!(copy_buffer_from_user(next,4097),Err(EFAULT));assert_eq!(crate::process::PINS.load(Ordering::SeqCst),2);
+        reset(0);
         crate::process::SELECTED.store(false,Ordering::Release);assert_eq!(copy_buffer_from_user(ptr,1),Err(EFAULT));
         assert_eq!(copy_buffer_from_user(core::ptr::null(),0),Ok(Vec::new()));assert_eq!(copy_buffer_to_user(core::ptr::null_mut(),b""),Ok(()));
-        println!("user memory: mapping held across copy/unmap, permissions, owned snapshots, unaligned pixels and production no-context refusal OK");
+        println!("user memory: page-bounded owned copies, MAX_USER_COPY, no heap under mapping guards, inter-chunk unmap/permission faults, UTF-8, mapping pin and no-context refusal OK");
     }
 }
 fn main() {syscall::run();}
