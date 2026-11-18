@@ -9,6 +9,7 @@
   "required": [
     "[TERM-007] Starting main loop",
     "[NET-CORE] logical-peer echo=3 ARP=5 rejected=5 checked",
+    "[NET-CORE] routed-peer echo=2 gateway-ARP=1 rejected=3 checked",
     "[NET-CORE] codec logical-peer OK; NIC service gate open",
     "[EXEC] /app/net_packet_test returned code=0"
   ],

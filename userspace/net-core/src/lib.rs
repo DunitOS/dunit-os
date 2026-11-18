@@ -21,6 +21,7 @@ pub enum Error {
     Timeout,
     Unsolicited,
     RateLimit,
+    NoRoute,
 }
 fn word(b: &[u8], n: usize) -> u16 {
     u16::from_be_bytes([b[n], b[n + 1]])
@@ -414,27 +415,149 @@ impl ArpCache {
     }
 }
 
+pub const ROUTE_CAPACITY: usize = 8;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Route {
+    network: u32,
+    mask: u32,
+    gateway: Option<Ip>,
+}
+impl Route {
+    fn new(network: Ip, mask: Ip, gateway: Option<Ip>) -> Result<Self, Error> {
+        let network = u32::from_be_bytes(network);
+        let mask = u32::from_be_bytes(mask);
+        // Every set bit must belong to the leading contiguous run.
+        if mask.leading_ones() != mask.count_ones() || network & !mask != 0 {
+            return Err(Error::Header);
+        }
+        Ok(Self {
+            network,
+            mask,
+            gateway,
+        })
+    }
+    fn contains(self, ip: Ip) -> bool {
+        u32::from_be_bytes(ip) & self.mask == self.network
+    }
+    fn host(self, ip: Ip) -> bool {
+        self.contains(ip)
+            && (self.mask.count_ones() >= 31
+                || (u32::from_be_bytes(ip) != self.network
+                    && u32::from_be_bytes(ip) != (self.network | !self.mask)))
+    }
+}
+
+/// One interface owns its immutable connected route and seven removable routes.
+/// Gateways must be unicast hosts reachable on that connected interface.
+pub struct Routes {
+    local: Ip,
+    connected: Route,
+    entries: [Option<Route>; ROUTE_CAPACITY - 1],
+    mtu: usize,
+}
+impl Routes {
+    pub fn new(local: Ip, netmask: Ip, mtu: usize) -> Result<Self, Error> {
+        if !valid_ip(local) {
+            return Err(Error::Address);
+        }
+        if !(68..=MTU).contains(&mtu) {
+            return Err(Error::Length);
+        }
+        let network = (u32::from_be_bytes(local) & u32::from_be_bytes(netmask)).to_be_bytes();
+        let connected = Route::new(network, netmask, None)?;
+        if !connected.host(local) {
+            return Err(Error::Address);
+        }
+        Ok(Self {
+            local,
+            connected,
+            entries: [None; ROUTE_CAPACITY - 1],
+            mtu,
+        })
+    }
+    /// Duplicate prefixes are rejected; remove before replacing. Validation is
+    /// atomic, and the connected route cannot be replaced or removed.
+    pub fn add(&mut self, network: Ip, mask: Ip, gateway: Ip) -> Result<(), Error> {
+        let route = Route::new(network, mask, Some(gateway))?;
+        if !valid_ip(gateway) || gateway == self.local || !self.connected.host(gateway) {
+            return Err(Error::Address);
+        }
+        if (route.network == self.connected.network && route.mask == self.connected.mask)
+            || self
+                .entries
+                .iter()
+                .flatten()
+                .any(|r| r.network == route.network && r.mask == route.mask)
+        {
+            return Err(Error::Header);
+        }
+        let slot = self
+            .entries
+            .iter_mut()
+            .find(|r| r.is_none())
+            .ok_or(Error::Capacity)?;
+        *slot = Some(route);
+        Ok(())
+    }
+    pub fn remove(&mut self, network: Ip, mask: Ip) -> Result<(), Error> {
+        let route = Route::new(network, mask, None)?;
+        let slot = self
+            .entries
+            .iter_mut()
+            .find(|r| {
+                r.map(|r| r.network == route.network && r.mask == route.mask)
+                    .unwrap_or(false)
+            })
+            .ok_or(Error::NoRoute)?;
+        *slot = None;
+        Ok(())
+    }
+    pub fn next_hop(&self, destination: Ip) -> Result<Ip, Error> {
+        if !valid_ip(destination)
+            || destination == self.local
+            || (self.connected.contains(destination) && !self.connected.host(destination))
+        {
+            return Err(Error::Address);
+        }
+        let route = core::iter::once(&self.connected)
+            .chain(self.entries.iter().flatten())
+            .filter(|r| r.contains(destination))
+            .max_by_key(|r| r.mask.count_ones())
+            .ok_or(Error::NoRoute)?;
+        Ok(route.gateway.unwrap_or(destination))
+    }
+}
+
 /// A logical peer: owned address, bounded ARP cache and eight echo replies per
-/// one-second window. No routing, forwarding, NIC or service authority is implied.
+/// one-second window. Routes select outbound next hops; this endpoint does not
+/// forward packets and has no NIC or service authority.
 pub struct Peer {
-    pub mac: Mac,
-    pub ip: Ip,
+    mac: Mac,
+    ip: Ip,
+    routes: Routes,
     pub neighbors: ArpCache,
     window: u64,
     replies: u8,
 }
 impl Peer {
-    pub fn new(mac: Mac, ip: Ip) -> Result<Self, Error> {
+    pub fn new(mac: Mac, ip: Ip, netmask: Ip, mtu: usize) -> Result<Self, Error> {
         if !valid_mac(mac) || !valid_ip(ip) {
             return Err(Error::Address);
         }
         Ok(Self {
             mac,
             ip,
+            routes: Routes::new(ip, netmask, mtu)?,
             neighbors: ArpCache::new(),
             window: 0,
             replies: 0,
         })
+    }
+    pub fn add_route(&mut self, network: Ip, mask: Ip, gateway: Ip) -> Result<(), Error> {
+        self.routes.add(network, mask, gateway)
+    }
+    pub fn remove_route(&mut self, network: Ip, mask: Ip) -> Result<(), Error> {
+        self.routes.remove(network, mask)
     }
     /// Returns an ARP request, an echo request, or None while ARP is pending.
     pub fn echo(
@@ -446,24 +569,13 @@ impl Peer {
         now: u64,
     ) -> Result<Option<Vec<u8>>, Error> {
         // Validate size before mutating neighbor state.
-        if data.len() > MTU - 28 {
+        if data.len() > self.routes.mtu - 28 {
             return Err(Error::Length);
         }
-        match self.neighbors.resolve(destination, now)? {
+        let next_hop = self.routes.next_hop(destination)?;
+        match self.neighbors.resolve(next_hop, now)? {
             Resolution::Wait => Ok(None),
-            Resolution::Request => Ok(Some(Ethernet::encode(
-                BROADCAST,
-                self.mac,
-                0x0806,
-                &Arp {
-                    operation: 1,
-                    sender_mac: self.mac,
-                    sender_ip: self.ip,
-                    target_mac: [0; 6],
-                    target_ip: destination,
-                }
-                .encode()?,
-            )?)),
+            Resolution::Request => Ok(Some(self.arp_request(next_hop)?)),
             Resolution::Ready(mac) => Ok(Some(Ethernet::encode(
                 mac,
                 self.mac,
@@ -476,6 +588,23 @@ impl Peer {
             )?)),
         }
     }
+    fn arp_request(&self, target_ip: Ip) -> Result<Vec<u8>, Error> {
+        Ethernet::encode(
+            BROADCAST,
+            self.mac,
+            0x0806,
+            &Arp {
+                operation: 1,
+                sender_mac: self.mac,
+                sender_ip: self.ip,
+                target_mac: [0; 6],
+                target_ip,
+            }
+            .encode()?,
+        )
+    }
+    /// An unresolved reverse gateway produces ARP instead of an echo reply;
+    /// there is no queue, so the sender must retry its original echo request.
     pub fn receive(&mut self, bytes: &[u8], now: u64) -> Result<Option<Vec<u8>>, Error> {
         self.neighbors.advance(now)?;
         let frame = Ethernet::parse(bytes)?;
@@ -515,6 +644,9 @@ impl Peer {
         if ip.destination != self.ip {
             return Err(Error::Address);
         }
+        if ip.payload.len() + 20 > self.routes.mtu {
+            return Err(Error::Length);
+        }
         let echo = Echo::parse(ip.payload)?;
         if echo.reply {
             return Ok(None);
@@ -526,9 +658,19 @@ impl Peer {
         if self.replies >= 8 {
             return Err(Error::RateLimit);
         }
+        let next_hop = self.routes.next_hop(ip.source)?;
+        let reply_mac = if next_hop == ip.source {
+            frame.source
+        } else {
+            match self.neighbors.resolve(next_hop, now)? {
+                Resolution::Ready(mac) => mac,
+                Resolution::Wait => return Ok(None),
+                Resolution::Request => return Ok(Some(self.arp_request(next_hop)?)),
+            }
+        };
         self.replies += 1;
         Ok(Some(Ethernet::encode(
-            frame.source,
+            reply_mac,
             self.mac,
             0x0800,
             &Ipv4::encode(

@@ -194,14 +194,14 @@ fn arp_capacity_unsolicited_late_and_poisoning_policy() {
 }
 #[test]
 fn logical_peer_rate_limit_address_and_no_reply_amplification() {
-    let mut b = Peer::new(B, IB).unwrap();
+    let mut b = Peer::new(B, IB, [255, 255, 255, 0], MTU).unwrap();
     let request = Ethernet::encode(B, A, 0x0800, &ip_packet()).unwrap();
     for _ in 0..8 {
         assert!(b.receive(&request, 0).unwrap().is_some());
     }
     assert_eq!(b.receive(&request, 999), Err(Error::RateLimit));
     let reply = b.receive(&request, 1000).unwrap().unwrap();
-    let mut a = Peer::new(A, IA).unwrap();
+    let mut a = Peer::new(A, IA, [255, 255, 255, 0], MTU).unwrap();
     assert_eq!(a.receive(&reply, 1000), Ok(None));
     let mut wrong = request.clone();
     wrong[..6].copy_from_slice(&BROADCAST);
@@ -210,7 +210,7 @@ fn logical_peer_rate_limit_address_and_no_reply_amplification() {
 }
 #[test]
 fn malformed_corpus_never_panics_or_allocates_unbounded_output() {
-    let mut peer = Peer::new(B, IB).unwrap();
+    let mut peer = Peer::new(B, IB, [255, 255, 255, 0], MTU).unwrap();
     let mut seed = 0x7193u32;
     for n in 0..10_000usize {
         let size = n % 1600;
@@ -242,7 +242,7 @@ fn malformed_corpus_never_panics_or_allocates_unbounded_output() {
 
 #[test]
 fn arp_peer_rejects_broadcast_reply_and_mismatched_sender() {
-    let mut a = Peer::new(A, IA).unwrap();
+    let mut a = Peer::new(A, IA, [255, 255, 255, 0], MTU).unwrap();
     assert!(a.echo(IB, 1, 1, &[], 0).unwrap().is_some());
     let reply = arp_reply().encode().unwrap();
     let broadcast = Ethernet::encode(BROADCAST, B, 0x0806, &reply).unwrap();
@@ -263,4 +263,145 @@ fn checksum_long_input_cannot_overflow() {
     // Public checksum also accepts slices larger than an Ethernet frame.
     assert_eq!(checksum(&alloc::vec![0xff; 200_000]), 0);
     assert_eq!(checksum(&alloc::vec![0xff; 200_001]), 0x00ff);
+}
+
+#[test]
+fn routes_validate_ownership_longest_prefix_and_capacity() {
+    let mask = [255, 255, 255, 0];
+    let gateway = [192, 0, 2, 254];
+    let mut routes = Routes::new(IA, mask, 576).unwrap();
+    assert_eq!(routes.next_hop(IB), Ok(IB));
+    assert_eq!(routes.next_hop([198, 51, 100, 9]), Err(Error::NoRoute));
+    routes.add([0; 4], [0; 4], gateway).unwrap();
+    routes.add([198, 51, 0, 0], [255, 255, 0, 0], IB).unwrap();
+    routes.add([198, 51, 100, 0], mask, gateway).unwrap();
+    assert_eq!(routes.next_hop([198, 51, 100, 9]), Ok(gateway));
+    assert_eq!(routes.next_hop([198, 51, 99, 9]), Ok(IB));
+    assert_eq!(routes.next_hop([203, 0, 113, 1]), Ok(gateway));
+    assert_eq!(routes.next_hop(IB), Ok(IB));
+    routes.remove([198, 51, 100, 0], mask).unwrap();
+    assert_eq!(routes.next_hop([198, 51, 100, 9]), Ok(IB));
+    assert_eq!(routes.remove([192, 0, 2, 0], mask), Err(Error::NoRoute));
+    assert_eq!(
+        routes.add([192, 0, 2, 0], mask, gateway),
+        Err(Error::Header)
+    );
+    assert_eq!(routes.add([0; 4], [0; 4], gateway), Err(Error::Header));
+    assert_eq!(
+        routes.add([10, 1, 0, 0], [255, 0, 0, 0], gateway),
+        Err(Error::Header)
+    );
+    for bad_mask in [[255, 0, 255, 0], [254, 255, 0, 0], [255, 255, 255, 1]] {
+        assert!(matches!(Routes::new(IA, bad_mask, MTU), Err(Error::Header)));
+        assert_eq!(routes.add([0; 4], bad_mask, gateway), Err(Error::Header));
+    }
+    for bad_gateway in [
+        IA,
+        [0; 4],
+        [224, 0, 0, 1],
+        [198, 51, 100, 1],
+        [192, 0, 2, 0],
+        [192, 0, 2, 255],
+    ] {
+        assert_eq!(
+            routes.add([10, 0, 0, 0], [255, 0, 0, 0], bad_gateway),
+            Err(Error::Address)
+        );
+    }
+    for n in 0..5 {
+        routes
+            .add([10, n, 0, 0], [255, 255, 0, 0], gateway)
+            .unwrap();
+    }
+    assert_eq!(
+        routes.add([11, 0, 0, 0], mask, gateway),
+        Err(Error::Capacity)
+    );
+    routes.remove([10, 0, 0, 0], [255, 255, 0, 0]).unwrap();
+    routes.add([11, 0, 0, 0], mask, gateway).unwrap();
+    for invalid in [IA, [192, 0, 2, 0], [192, 0, 2, 255], [255; 4]] {
+        assert_eq!(routes.next_hop(invalid), Err(Error::Address));
+    }
+    for mtu in [0, 67, 1501, usize::MAX] {
+        assert!(matches!(Routes::new(IA, mask, mtu), Err(Error::Length)));
+    }
+    assert!(Routes::new(IA, [255; 4], 68).is_ok());
+    assert!(Routes::new([192, 0, 2, 0], [255, 255, 255, 254], 68).is_ok());
+}
+
+#[test]
+fn routed_native_scenario_and_mtu_before_neighbor_mutation() {
+    assert_eq!(
+        diagnostic::run_routed(),
+        Ok(diagnostic::Report {
+            echo_replies: 2,
+            arp_requests: 1,
+            rejected: 3,
+        })
+    );
+    let mut peer = Peer::new(A, IA, [255, 255, 255, 0], 68).unwrap();
+    assert_eq!(peer.echo(IB, 1, 1, &[0; 41], 0), Err(Error::Length));
+    assert_eq!(peer.neighbors.state(IB, 0), Ok(None));
+    let arp = peer.echo(IB, 1, 1, &[0; 40], 0).unwrap().unwrap();
+    assert_eq!(Ethernet::parse(&arp).unwrap().kind, 0x0806);
+    peer.neighbors.accept(arp_reply(), B, A, IA, 0).unwrap();
+    assert_eq!(peer.echo(IB, 1, 1, &[0; 40], 0).unwrap().unwrap().len(), 82);
+}
+
+#[test]
+fn reverse_gateway_resolution_is_bounded_and_never_reflects_to_ingress() {
+    let gateway = [192, 0, 2, 254];
+    let remote = [198, 51, 100, 9];
+    let mut peer = Peer::new(A, IA, [255, 255, 255, 0], MTU).unwrap();
+    let request = Ethernet::encode(
+        A,
+        B,
+        0x0800,
+        &Ipv4::encode(remote, IA, &Echo::encode(false, 2, 3, b"reverse").unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(peer.receive(&request, 0), Err(Error::NoRoute));
+    peer.add_route([0; 4], [0; 4], gateway).unwrap();
+    let arp = peer.receive(&request, 0).unwrap().unwrap();
+    assert_eq!(
+        Arp::parse(Ethernet::parse(&arp).unwrap().payload)
+            .unwrap()
+            .target_ip,
+        gateway
+    );
+    assert_eq!(peer.receive(&request, 0), Ok(None));
+    let gateway_mac = [2, 0, 0, 0, 0, 99];
+    let reply = Arp {
+        sender_mac: gateway_mac,
+        sender_ip: gateway,
+        ..arp_reply()
+    };
+    peer.neighbors.accept(reply, gateway_mac, A, IA, 0).unwrap();
+    let frame = peer.receive(&request, 0).unwrap().unwrap();
+    let ethernet = Ethernet::parse(&frame).unwrap();
+    assert_eq!(ethernet.destination, gateway_mac);
+    let ip = Ipv4::parse(ethernet.payload).unwrap();
+    assert_eq!(ip.destination, remote);
+    assert!(Echo::parse(ip.payload).unwrap().reply);
+}
+
+#[test]
+fn configured_endpoint_rejects_invalid_hosts_and_rx_over_mtu() {
+    let mask = [255, 255, 255, 0];
+    for local in [[192, 0, 2, 0], [192, 0, 2, 255], [0; 4], [224, 0, 0, 1]] {
+        assert!(matches!(
+            Peer::new(A, local, mask, MTU),
+            Err(Error::Address)
+        ));
+    }
+    let mut peer = Peer::new(A, IA, mask, 68).unwrap();
+    let remote = [198, 51, 100, 9];
+    assert_eq!(peer.echo(remote, 1, 1, &[], 0), Err(Error::NoRoute));
+    assert_eq!(peer.neighbors.state(remote, 0), Ok(None));
+    let packet = Ipv4::encode(IB, IA, &Echo::encode(false, 1, 1, &[0; 41]).unwrap()).unwrap();
+    let frame = Ethernet::encode(A, B, 0x0800, &packet).unwrap();
+    assert_eq!(peer.receive(&frame, 0), Err(Error::Length));
+    let packet = Ipv4::encode(IB, IA, &Echo::encode(false, 1, 1, &[0; 40]).unwrap()).unwrap();
+    let frame = Ethernet::encode(A, B, 0x0800, &packet).unwrap();
+    assert_eq!(peer.receive(&frame, 0).unwrap().unwrap().len(), 82);
 }
