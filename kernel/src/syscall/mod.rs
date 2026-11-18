@@ -2443,6 +2443,8 @@ fn sys_futex_wake(addr: u64, count: u64) -> i64 {
 fn sys_debug_log(code: u64) -> i64 {
     match code {
         #[cfg(feature = "boot-smoke-tests")]
+        5 => crate::cpu::reschedule::debug_log(),
+        #[cfg(feature = "boot-smoke-tests")]
         1 => {
             syscall_log!("[SYSCALL-TEST] userspace syscall OK\r\n");
             SYSCALL_SMOKE_OK.store(true, Ordering::SeqCst);

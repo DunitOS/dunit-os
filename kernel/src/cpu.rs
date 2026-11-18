@@ -125,3 +125,6 @@ pub extern "C" fn kernel_cpu_alloc(size: u64, alignment: u64) -> u64 {
     };
     unsafe { alloc::alloc::alloc_zeroed(layout) as u64 }
 }
+
+#[path = "reschedule.rs"]
+pub mod reschedule;

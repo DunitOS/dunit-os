@@ -154,6 +154,7 @@ pub fn enter_user_process(pid: ProcessId) -> Result<ProcessExit, ProcessError> {
         match hinted
             .or(preferred_root)
             .or_else(|| crate::process::scheduler::pick_next_candidate_excluding(next_pid))
+            .or_else(|| is_pid_runnable(next_pid).then_some(next_pid))
         {
             Some(candidate) => {
                 next_pid = candidate;

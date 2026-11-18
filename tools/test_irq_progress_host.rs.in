@@ -1,0 +1,100 @@
+#![allow(dead_code)]
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[path = @MAILBOX@] mod mailbox;
+mod cpu {
+    use super::*;
+    pub struct Runtime {pub exit_requested:AtomicBool,pub yield_requested:AtomicBool}
+    static RUNTIME:Runtime=Runtime{exit_requested:AtomicBool::new(false),yield_requested:AtomicBool::new(false)};
+    pub fn runtime()->&'static Runtime {&RUNTIME}
+    pub mod reschedule {
+        pub static BOX:crate::mailbox::Mailbox=crate::mailbox::Mailbox::new();
+        pub fn pending()->Option<u64>{BOX.pending()}
+        pub fn capture(g:u64){BOX.capture(g)}
+    }
+}
+mod process {
+    use super::*;
+    #[derive(Clone,Copy,PartialEq,Debug)] pub enum ProcessState{Running,Ready}
+    #[derive(Clone,Copy,Default)] pub struct CpuContext {
+        pub rax:u64,pub rbx:u64,pub rcx:u64,pub rdx:u64,pub rsi:u64,pub rdi:u64,
+        pub rbp:u64,pub rsp:u64,pub r8:u64,pub r9:u64,pub r10:u64,pub r11:u64,
+        pub r12:u64,pub r13:u64,pub r14:u64,pub r15:u64,pub rip:u64,pub rflags:u64,
+    }
+    pub struct Process{pub state:ProcessState,pub is_kernel:bool,pub context:CpuContext}
+    pub struct Record{pub state:ProcessState}
+    #[derive(Debug)] pub enum ProcessError{NotRunnable}
+    pub static TASK:std::sync::Mutex<(Process,Record)>=std::sync::Mutex::new((
+        Process{state:ProcessState::Running,is_kernel:false,context:CpuContext{rax:0,rbx:0,rcx:0,rdx:0,rsi:0,rdi:0,rbp:0,rsp:0,r8:0,r9:0,r10:0,r11:0,r12:0,r13:0,r14:0,r15:0,rip:0,rflags:0}},Record{state:ProcessState::Running}));
+    pub fn current_entity_id()->Option<u64>{Some(1)}
+    pub fn with_task_record<T>(_:u64,f:impl FnOnce(&mut Process,&mut Record)->Result<T,ProcessError>)->Result<T,ProcessError>{
+        let mut task=TASK.lock().unwrap();let (p,r)=&mut *task;f(p,r)
+    }
+    #[path = @BOUNDARY@] pub mod boundary;
+}
+mod interrupts {
+    #[derive(Default)] pub struct InterruptFrame{
+        pub cs:u64,pub rax:u64,pub rbx:u64,pub rcx:u64,pub rdx:u64,pub rsi:u64,pub rdi:u64,
+        pub rbp:u64,pub rsp:u64,pub r8:u64,pub r9:u64,pub r10:u64,pub r11:u64,
+        pub r12:u64,pub r13:u64,pub r14:u64,pub r15:u64,pub rip:u64,pub rflags:u64,
+    }
+}
+mod hal {
+    pub unsafe fn syscall_get_escape_active()->u64{1}
+    pub unsafe fn syscall_capture_user_context(context:*mut crate::process::CpuContext,result:u64){
+        (*context).rax=result;(*context).rip=0x1234;
+    }
+}
+fn reset() {
+    cpu::runtime().exit_requested.store(false,Ordering::SeqCst);
+    cpu::runtime().yield_requested.store(false,Ordering::SeqCst);
+    let mut task=process::TASK.lock().unwrap();task.0.state=process::ProcessState::Running;
+    task.1.state=process::ProcessState::Running;task.0.context=process::CpuContext::default();
+}
+fn main(){
+    let mailbox=std::sync::Arc::new(mailbox::Mailbox::new());
+    let total=std::sync::Arc::new(AtomicU64::new(0));
+    let stop=std::sync::Arc::new(AtomicBool::new(false));
+    let receiver={let mailbox=mailbox.clone();let stop=stop.clone();std::thread::spawn(move||{
+        while !stop.load(Ordering::Acquire){
+            mailbox.deliver();if let Some(g)=mailbox.pending(){
+                assert!(!mailbox.acknowledged(g));mailbox.capture(g);
+                assert!(!mailbox.acknowledged(g));std::thread::yield_now();mailbox.returned();
+            }
+        }
+    })};
+    let workers:Vec<_>=(0..8).map(|_|{let m=mailbox.clone();let total=total.clone();std::thread::spawn(move||{
+        for _ in 0..1000 {
+            let g=loop{if let Some(g)=m.reserve(){break g;}std::thread::yield_now();};
+            while !m.acknowledged(g){std::thread::yield_now();}
+            total.fetch_add(1,Ordering::Relaxed);
+        }
+    })}).collect();
+    for worker in workers {worker.join().unwrap();}stop.store(true,Ordering::Release);receiver.join().unwrap();
+    assert_eq!(total.load(Ordering::Relaxed),8000);
+    let m=&cpu::reschedule::BOX;
+    assert_eq!(process::boundary::syscall_return_boundary(-14),-14);
+    // A returned unrelated dispatch cannot ACK an undelivered or uncaptured IPI.
+    let g=m.reserve().unwrap();m.returned();assert!(!m.acknowledged(g));
+    m.deliver();m.returned();assert!(!m.acknowledged(g));
+    assert_eq!(process::boundary::syscall_return_boundary(-14),0x0051595343414c4c);
+    {let task=process::TASK.lock().unwrap();assert_eq!(task.0.context.rax,(-14i64) as u64);
+        assert_eq!(task.0.context.rip,0x1234);assert_eq!(task.1.state,process::ProcessState::Ready);}
+    assert!(!m.acknowledged(g));m.returned();assert!(m.acknowledged(g));
+    // Exit, block/restart and voluntary yield win over reschedule capture.
+    for priority in 0..3 {
+        reset();let g=m.reserve().unwrap();m.deliver();
+        if priority==0 {cpu::runtime().exit_requested.store(true,Ordering::Release);}
+        if priority==1 {cpu::runtime().yield_requested.store(true,Ordering::Release);}
+        let result=if priority==2 {0x0051595343414c4c}else{77};
+        assert_eq!(process::boundary::syscall_return_boundary(result),0x0051595343414c4c);
+        assert_eq!(process::TASK.lock().unwrap().0.context.rip,0);
+        assert!(!m.acknowledged(g));m.returned();assert!(m.acknowledged(g));
+    }
+    reset();let g=m.reserve().unwrap();m.deliver();
+    let mut irq=interrupts::InterruptFrame{cs:8,rax:42,rip:0x8765,..Default::default()};
+    assert!(!process::boundary::reschedule_user_interrupt(&irq));assert!(!m.acknowledged(g));
+    irq.cs=0x1b;assert!(process::boundary::reschedule_user_interrupt(&irq));
+    {let task=process::TASK.lock().unwrap();assert_eq!(task.0.context.rax,42);assert_eq!(task.0.context.rip,0x8765);}
+    assert!(!m.acknowledged(g));m.returned();assert!(m.acknowledged(g));
+    println!("actual IRQ mailbox: 8000 contended tickets; syscall result, priority, CPL0/CPL3 and delayed ACK OK");
+}

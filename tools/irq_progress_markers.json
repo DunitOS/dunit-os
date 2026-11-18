@@ -1,0 +1,34 @@
+{
+  "description": "Feature-only native TinyCC proof of PIT/AP ordinary IPI progress inside DebugLog, deferred HAL return ACK, register/SIMD/result/TLS preservation; requires at least two CPUs and boot-smoke-tests",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /system/bin/tcc /assets/tcc/irq_progress.c -o /tmp/irq-progress",
+      "exec /tmp/irq-progress"
+    ],
+    "command_actions": {
+      "exec /tmp/irq-progress": [
+        {
+          "wait_marker": "[EXEC] /tmp/irq-progress returned code=0",
+          "timeout": 60
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[IRQ-PROGRESS] PIT and AP IPI inside syscall; lock masks IRQ; HAL return ACK OK",
+    "[IRQ-PROGRESS-USER] syscall result GPR SIMD TLS preserved OK",
+    "[EXEC] /tmp/irq-progress returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop"
+    },
+    "error:",
+    "returned code=1",
+    "returned code=2"
+  ]
+}

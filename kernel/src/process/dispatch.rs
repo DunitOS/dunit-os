@@ -132,6 +132,7 @@ impl DispatchFrame {
         crate::hal::set_user_fpu_state(core::ptr::null_mut());
         Process::reset_syscall_stack_policy();
         self.lease.as_mut().expect("dispatch lease").returned();
+        crate::cpu::reschedule::returned();
         // Scope retains the active root after this frame is released. It
         // switches away before dropping the last root owner, including errors.
         Ok(())

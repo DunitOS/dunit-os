@@ -3,6 +3,7 @@ bits 64
 %include "hal/src/cpu_local.inc"
 
 extern syscall_handler
+extern syscall_return_boundary
 
 %define USER_CODE_SELECTOR 0x1B
 %define USER_DATA_SELECTOR 0x23
@@ -71,7 +72,14 @@ syscall_entry:
     sub rsp, 8
     push r10
 
+    ; All entry scratch, user FPU state and the private kernel stack are ready.
+    ; IRQ handlers may observe progress but never escape a CPL0 frame.
+    sti
     call syscall_handler
+    cli
+    ; Every Rust handler guard has ended before this separate boundary.
+    mov rdi, rax
+    call syscall_return_boundary
 
     add rsp, 16
 

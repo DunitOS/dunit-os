@@ -8,6 +8,8 @@ pub use lifecycle::{allocate_pid, current_tid, current_thread_pointer, set_curre
 use lifecycle::{process_address_space, process_record_index, log_process_transition, current_entity_id, owner_of, current_pid, release_finished_thread, cleanup_owned_threads, remove_waiter};
 pub mod scheduler;
 mod transitions;
+mod syscall_boundary;
+pub(crate) use syscall_boundary::reschedule_user_interrupt;
 mod parking;
 #[cfg(feature = "boot-smoke-tests")]
 mod parking_smoke;

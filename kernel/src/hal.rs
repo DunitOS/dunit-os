@@ -53,13 +53,21 @@ pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
         USER_DF_IRQ.store(true, core::sync::atomic::Ordering::Relaxed);
     }
 
-    if frame.int_no==2 && crate::memory::tlb::handle_nmi() {return 0;}
+    // NMI must always unwind its own IST frame, including unsolicited NMIs.
+    if frame.int_no == 2 {
+        crate::memory::tlb::handle_nmi();
+        return 0;
+    }
 
     use crate::interrupts::*;
 
     if frame.int_no>=240 {
         extern "C"{fn hal_mp_interrupt(vector:u64)->i32;}
-        if unsafe{hal_mp_interrupt(frame.int_no)}!=0{return 0;}
+        if unsafe{hal_mp_interrupt(frame.int_no)}!=0 {
+            if frame.int_no == 246 && frame.cs & 3 == 3
+                && crate::process::reschedule_user_interrupt(frame) { return 2; }
+            return 0;
+        }
     }
     match frame.int_no {
         0 => handle_divide_by_zero(frame),

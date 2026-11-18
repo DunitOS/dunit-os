@@ -9,4 +9,6 @@ uint64_t hal_mp_count(void);
 void hal_mp_snapshot(uint64_t index, uint64_t *out);
 int hal_mp_interrupt(uint64_t vector);
 int hal_mp_run_pmm_probe(void);
+int hal_mp_send_reschedule(uint64_t cpu);
+int hal_mp_irq_probe(void);
 #endif

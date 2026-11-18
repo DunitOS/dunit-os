@@ -15,10 +15,12 @@ uint64_t hal_mp_stack_tops[HAL_CPU_CAPACITY];
 extern uint64_t kernel_cpu_alloc(uint64_t size, uint64_t alignment);
 extern int hal_cpu_local_prepare(uint64_t index);
 extern int hal_gdt_prepare(uint64_t index);
-enum { PROBE = 241, TIMER = 242, REPLY = 243, PMM_PROBE = 244, VM_PROBE = 245, SPURIOUS = 255 };
+enum { PROBE = 241, TIMER = 242, REPLY = 243, PMM_PROBE = 244, VM_PROBE = 245, RESCHEDULE = 246, IRQ_PROBE = 247, SPURIOUS = 255 };
 /* Present only in boot-smoke kernels. No process/VFS/heap entry is permitted. */
 extern void kernel_pmm_probe_worker(uint64_t index) __attribute__((weak));
 extern void kernel_vm_probe_worker(uint64_t index) __attribute__((weak));
+extern void kernel_irq_progress_worker(uint64_t index) __attribute__((weak));
+extern void kernel_reschedule_ipi(void);
 typedef struct { uint64_t ready, done; uint8_t padding[48]; }
   __attribute__((aligned(64))) pmm_probe_slot;
 static pmm_probe_slot pmm_slots[HAL_CPU_CAPACITY];
@@ -173,11 +175,19 @@ int hal_mp_interrupt(uint64_t vector) {
   if (!__atomic_load_n(&prepared, __ATOMIC_ACQUIRE))
     return 0;
   if (vector != PROBE && vector != TIMER && vector != REPLY &&
-      vector != PMM_PROBE && vector != VM_PROBE && vector != SPURIOUS)
+      vector != PMM_PROBE && vector != VM_PROBE && vector != RESCHEDULE &&
+      vector != IRQ_PROBE && vector != SPURIOUS)
     return 0;
   uint64_t i = hal_cpu_index();
   if (i >= count)
     return 0;
+  if (vector == RESCHEDULE || vector == IRQ_PROBE) {
+    /* EOI before an isolated worker sends the ordinary reschedule vector. */
+    store(0xb0, 0);
+    if (vector == RESCHEDULE) kernel_reschedule_ipi();
+    else if (i && kernel_irq_progress_worker) kernel_irq_progress_worker(i);
+    return 1;
+  }
   if (vector == PMM_PROBE || vector == VM_PROBE) {
     pmm_probe_slot *probe_slots = vector == VM_PROBE ? vm_slots : pmm_slots;
     uint32_t *requested = vector == VM_PROBE ? &vm_requested : &pmm_requested;
@@ -361,4 +371,17 @@ int hal_mp_send_nmi(uint64_t cpu) {
       !__atomic_load_n(&slots[cpu].ready, __ATOMIC_ACQUIRE))
     return 0;
   return send((uint32_t)slots[cpu].apic, 4u << 8);
+}
+
+/* Ordinary scheduling notification. The Rust mailbox owns request/return
+ * generations; APIC receipt is deliberately not a return acknowledgement. */
+int hal_mp_send_reschedule(uint64_t cpu) {
+  if (!__atomic_load_n(&prepared, __ATOMIC_ACQUIRE) || cpu >= count ||
+      !__atomic_load_n(&slots[cpu].ready, __ATOMIC_ACQUIRE)) return 0;
+  return send((uint32_t)slots[cpu].apic, RESCHEDULE);
+}
+int hal_mp_irq_probe(void) {
+  if (!kernel_irq_progress_worker || count < 2 || hal_cpu_index() != 0 ||
+      !__atomic_load_n(&slots[1].ready, __ATOMIC_ACQUIRE)) return 0;
+  return send((uint32_t)slots[1].apic, IRQ_PROBE);
 }

@@ -44,6 +44,12 @@ pub fn on_tick() {
 }
 
 #[inline]
+/// Actual PIT interrupt deliveries, independent of the HPET clock source.
+#[cfg(feature = "boot-smoke-tests")]
+pub(crate) fn pit_interrupts() -> u64 {
+    MONOTONIC_TICKS.load(Ordering::Relaxed)
+}
+
 pub fn monotonic_ticks() -> u64 {
     monotonic_ns() / (1_000_000_000 / TICKS_PER_SECOND)
 }
