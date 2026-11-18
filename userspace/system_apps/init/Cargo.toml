@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 dunit = { path = "../../../runtime/dunit" }
+libdunit = { path = "../../libdunit" }
 
 [[bin]]
 name = "init"

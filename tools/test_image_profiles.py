@@ -26,11 +26,12 @@ class ImageProfiles(unittest.TestCase):
             "assets/dwm/test.toml": b"test desktop", "assets/fonts/font.ttf": b"font",
             "assets/images/demo.gif": b"large demo",
             "services/gui-server.toml": b'exec = "/app/gui_server"\n',
+            "services/boot/netd.toml": b'exec = "/system/libexec/netd"\nnet_device = 0\n',
             "services/test/probe.toml": b"probe", "sysroot/include/header.h": b"header", "sysroot/lib/libdunit_ui.a": b"Rust SDK archive",
         }.items():
             self.write(path, data)
         profile = load_profile("dwm")
-        for app in profile["apps"] + profile["c_apps"] + ["test_only"]:
+        for app in profile["apps"] + profile["c_apps"] + load_profile("full")["libexec"] + ["test_only"]:
             self.write("apps/" + app, app.encode())
 
     def write(self, path, data):
@@ -59,6 +60,9 @@ class ImageProfiles(unittest.TestCase):
         for path in ("/app/gui_server", "/app/dwm_lua", "/system/share/dwm/default.toml", "/system/include/header.h", "/system/lib/libdunit_ui.a"):
             self.assertIn(path, entries)
         self.assertNotIn("/system/tcc/libdunit_ui.a", entries)
+        self.assertIn("/system/libexec/netd", entries)
+        self.assertIn("/system/boot-services/netd.toml", entries)
+        self.assertNotIn("/app/netd", entries)
         for path in ("/app/test_only", "/assets/images/demo.gif", "/system/services/probe.toml"):
             self.assertNotIn(path, entries)
 

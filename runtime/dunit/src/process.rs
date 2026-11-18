@@ -40,6 +40,10 @@ impl Child {
     pub fn spawn(path: &str) -> Result<Self> {
         Self::from_spawned(libdunit::spawn(path))
     }
+    /// Start an unprivileged child with explicit arguments and environment additions.
+    pub fn spawn_with_env(path: &str, args: &[&str], env: &[&str]) -> Result<Self> {
+        Self::from_spawned(libdunit::process::spawn_args_env(path, args, env))
+    }
     pub(crate) fn from_spawned(result: isize) -> Result<Self> {
         let pid = checked(result)?;
         if pid == 0 {

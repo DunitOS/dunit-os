@@ -36,6 +36,7 @@ name = "init"
 version = "0.1.0"
 dependencies = [
  "dunit",
+ "libdunit",
 ]
 
 [[package]]

@@ -21,8 +21,8 @@ def main():
     # Copy whole actual items; filesystem, entry and panic are native-test scope.
     sections = {
         'INIT_TYPES': init[init.index('#[derive(Clone, Copy, PartialEq, Eq)]'):init.index('// ---- small helpers')],
-        'INIT_PARSER': init[init.index('fn push_u32'):init.index('/// Discover and register')],
-        'INIT_POLICY': init[init.index('fn start_service'):init.index('// PID 1 retains')],
+        'INIT_PARSER': init[init.index('fn push_u32'):init.index('/// Files are processed')],
+        'INIT_POLICY': init[init.index('fn spawn_service'):init.index('// PID 1 retains')],
         'EXIT_STATUS': process[process.index('#[derive(Debug, Clone, Copy, PartialEq, Eq)]'):process.index('#[derive(Debug)]\npub struct Child')],
     }
     native = (ROOT / 'userspace/libdunit/src/lib.rs').read_text()

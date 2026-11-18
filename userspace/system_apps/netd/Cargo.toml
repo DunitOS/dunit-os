@@ -1,0 +1,10 @@
+[package]
+name = "netd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+libdunit = { path = "../../libdunit" }
+dunit-net-core = { path = "../../net-core" }
+dunit_packet_abi = { path = "../../../abi/packet" }

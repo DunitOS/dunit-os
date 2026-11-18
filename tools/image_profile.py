@@ -18,12 +18,14 @@ def load_profile(name: str = "full") -> dict:
         raise ValueError(f"unknown image profile: {name}")
     if name == "full":
         return {"name": name, "boot_config": "limine.conf", "apps": None, "assets": ["**/*"],
-                "desktop": True, "toolchain": True, "services": None}
+                "desktop": True, "toolchain": True, "services": None,
+                "boot_services": ["netd.toml"], "libexec": ["netd", "netd_fixture"]}
     data = json.loads((ROOT / "images" / name / "profile.json").read_text())
     if data.get("name") != name:
         raise ValueError(f"profile name mismatch: {name}")
-    for key in ("apps", "assets", "services", "c_apps"):
-        if key == "c_apps" and key not in data:
+    basenames = ("apps", "services", "c_apps", "libexec", "boot_services")
+    for key in (*basenames, "assets"):
+        if key in ("c_apps", "libexec", "boot_services") and key not in data:
             continue
         values = data[key]
         if not isinstance(values, list) or len(set(values)) != len(values):
@@ -31,8 +33,10 @@ def load_profile(name: str = "full") -> dict:
         for value in values:
             if not isinstance(value, str) or not value or value.startswith("/") or ".." in value.split("/"):
                 raise ValueError(f"invalid profile path: {name}.{key}")
-            if key in ("apps", "services", "c_apps") and not all(c.isascii() and (c.isalnum() or c in "_-.") for c in value):
+            if key in basenames and not all(c.isascii() and (c.isalnum() or c in "_-.") for c in value):
                 raise ValueError(f"profile entry must be a safe basename: {value}")
+    if set(data["apps"] + data.get("c_apps", [])) & set(data.get("libexec", [])):
+        raise ValueError(f"boot executable is also declared as a public app: {name}")
     for key in ("desktop", "toolchain"):
         if type(data[key]) is not bool:
             raise ValueError(f"invalid profile flag: {name}.{key}")
@@ -48,10 +52,13 @@ def load_profile(name: str = "full") -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("profile", choices=PROFILES)
-    parser.add_argument("--field", choices=("apps", "toolchain", "desktop", "boot_config"))
+    parser.add_argument("--field", choices=("apps", "programs", "toolchain", "desktop", "boot_config"))
     args = parser.parse_args()
     profile = load_profile(args.profile)
-    value = profile.get(args.field) if args.field else profile
+    if args.field == "programs":
+        value = profile["apps"] + profile.get("libexec", []) if profile["apps"] is not None else None
+    else:
+        value = profile.get(args.field) if args.field else profile
     if isinstance(value, list):
         print(" ".join(value))
     elif isinstance(value, bool):

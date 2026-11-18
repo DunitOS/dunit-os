@@ -65,10 +65,17 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
     sources = (sorted(userspace.iterdir()) if profile["apps"] is None else
                [userspace / name for name in profile["apps"] + profile.get("c_apps", [])])
     for source in sources:
+        if source.name in profile.get("libexec", []):
+            continue
         if source.is_file():
             add(f"/app/{source.name}", source, executable=True)
         elif profile["apps"] is not None:
             raise RuntimeError(f"missing required {profile['name']} application: {source}")
+    for name in profile.get("libexec", []):
+        source = userspace / name
+        if not source.is_file():
+            raise RuntimeError(f"missing boot service executable: {source}")
+        add(f"/system/libexec/{name}", source, executable=True)
     entries["/system/share/dunit-image.json"] = (json.dumps(profile, sort_keys=True) + "\n").encode()
 
     assets = Path(args.assets_dir)
@@ -108,6 +115,8 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                      [services / name for name in profile["services"]])
         for host_path in manifests:
             add(f"/system/services/{host_path.name}", host_path)
+        for name in profile.get("boot_services", []):
+            add(f"/system/boot-services/{name}", services / "boot" / name)
         smoke = args.config is not None and os.path.basename(args.config) in SMOKE_CONFIGS
         if smoke and profile["name"] == "full":
             test_dir = services / "test"

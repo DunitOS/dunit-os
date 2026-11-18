@@ -1,0 +1,7 @@
+# Boot-catalog service. Device index zero is the first supported interface.
+name = "netd"
+exec = "/system/libexec/netd"
+net_device = 0
+restart = "on-failure"
+critical = false
+max_restarts = 3

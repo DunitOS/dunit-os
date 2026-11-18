@@ -37,6 +37,8 @@ use dunit::{
 };
 
 const SERVICES_DIR: &str = "/system/services";
+const BOOT_SERVICES_DIR: &str = "/system/boot-services";
+const BOOT_EXEC_PREFIX: &str = "/system/libexec/";
 const PROVISION_MARKER: &str = "/persist/.provisioned";
 const PERSIST_CONFIG_DIR: &str = "/persist/config";
 const PROVISION_CONTENT: &str = "schema=1\n";
@@ -72,6 +74,7 @@ struct Service {
     critical: bool,
     max_restarts: u32,
     fallback: Option<String>,
+    net_device: Option<u32>,
     state: RunState,
     restarts: u32,
     fallback_spawned: bool,
@@ -154,13 +157,14 @@ fn parse_u32(s: &str) -> Option<u32> {
 /// `key = value` lines (no sections); unknown keys are ignored for forward
 /// compatibility. Returns `None` for a manifest with no `exec` — such a file is
 /// malformed and is skipped with a warning rather than crashing init.
-fn parse_service(text: &str) -> Option<Service> {
+fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
     let mut name = String::new();
     let mut exec = String::new();
     let mut policy = RestartPolicy::OnFailure;
     let mut critical = false;
     let mut max_restarts = DEFAULT_MAX_RESTARTS;
     let mut fallback: Option<String> = None;
+    let mut net_device: Option<u32> = None;
 
     for raw in text.lines() {
         let line = raw.trim();
@@ -194,12 +198,32 @@ fn parse_service(text: &str) -> Option<Service> {
                     fallback = Some(String::from(val));
                 }
             }
+            "net_device" => {
+                if !boot_catalog || net_device.is_some() {
+                    return None;
+                }
+                net_device = Some(parse_u32(val)?);
+            }
             _ => {}
         }
     }
 
     if exec.is_empty() {
         return None;
+    }
+    if boot_catalog {
+        let executable = exec.strip_prefix(BOOT_EXEC_PREFIX)?;
+        if executable.is_empty()
+            || executable == "."
+            || executable == ".."
+            || !executable
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+            || net_device.is_none()
+            || fallback.is_some()
+        {
+            return None;
+        }
     }
     if name.is_empty() {
         name = exec.clone();
@@ -211,6 +235,7 @@ fn parse_service(text: &str) -> Option<Service> {
         critical,
         max_restarts,
         fallback,
+        net_device,
         state: RunState::Idle,
         restarts: 0,
         fallback_spawned: false,
@@ -218,20 +243,21 @@ fn parse_service(text: &str) -> Option<Service> {
     })
 }
 
-/// Discover and register every service manifest under `/system/services`.
 /// Files are processed in sorted order so the serial log is deterministic.
-fn load_services() -> Vec<Service> {
+fn load_services(directory: &str, boot_catalog: bool, limit: usize) -> Vec<Service> {
     let mut services: Vec<Service> = Vec::new();
-    let entries = match fs::read_dir(SERVICES_DIR) {
+    let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(_) => {
-            log("no /system/services directory; running as an idle supervisor");
+            if !boot_catalog {
+                log("no /system/services directory");
+            }
             return services;
         }
     };
 
     let mut names: Vec<String> = Vec::new();
-    for entry in entries.iter().take(MAX_SERVICES) {
+    for entry in entries.iter().take(limit) {
         if entry.file_type != FileType::File {
             continue;
         }
@@ -243,11 +269,11 @@ fn load_services() -> Vec<Service> {
     names.sort_unstable();
 
     for nm in &names {
-        let mut path = String::from(SERVICES_DIR);
+        let mut path = String::from(directory);
         path.push('/');
         path.push_str(nm);
         match fs::read_to_string(&path) {
-            Ok(text) => match parse_service(&text) {
+            Ok(text) => match parse_service(&text, boot_catalog) {
                 Some(svc) => {
                     log_svc(&svc.name, "registered");
                     services.push(svc);
@@ -288,8 +314,59 @@ fn provision() {
 
 // ---- supervision -----------------------------------------------------------
 
+fn spawn_service(svc: &Service) -> dunit::Result<Child> {
+    let Some(interface) = svc.net_device else {
+        return Child::spawn(&svc.exec);
+    };
+    let root = dunit::env::var("DUNIT_NET_ROOT")?
+        .as_deref()
+        .and_then(parse_u32)
+        .filter(|&handle| handle != 0)
+        .ok_or(dunit::Error(dunit::errno::EACCES))?;
+    let mut sender = String::from("DUNIT_NET_SUPERVISOR=");
+    push_u32(&mut sender, dunit::process::id());
+    let mut child = Child::spawn_with_env(&svc.exec, &[&svc.exec], &[&sender, "DUNIT_NET_ROOT="])?;
+    let grant = (|| {
+        let handle = libdunit::net_device_grant(
+            root,
+            interface,
+            child.id(),
+            libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_NET_RAW,
+        );
+        if handle < 0 {
+            return Err(dunit::Error(handle));
+        }
+        let handle = u32::try_from(handle)
+            .ok()
+            .filter(|&handle| handle != 0)
+            .ok_or(dunit::Error(dunit::errno::EIO))?;
+        let message = handle.to_le_bytes();
+        let sent = libdunit::ipc_send(child.id(), &message);
+        if sent == message.len() as isize {
+            Ok(())
+        } else {
+            Err(dunit::Error(if sent < 0 {
+                sent
+            } else {
+                dunit::errno::EIO
+            }))
+        }
+    })();
+    if let Err(error) = grant {
+        // A failed delivery must also retire any installed handle. Keep
+        // ownership on an unexpected cleanup error so supervision can reap it.
+        if child.terminate_and_wait().is_err() {
+            log_svc(&svc.name, "network grant failed; tracking child until exit");
+            return Ok(child);
+        }
+        return Err(error);
+    }
+    log_svc(&svc.name, "network grant delivered");
+    Ok(child)
+}
+
 fn start_service(svc: &mut Service) {
-    let child = match Child::spawn(&svc.exec) {
+    let child = match spawn_service(svc) {
         Ok(child) => child,
         Err(_) => {
             // Count spawn failures against the budget so a bad exec path cannot spin.
@@ -417,22 +494,32 @@ fn step(svc: &mut Service) {
 // exits on return/error/panic, while init must never terminate. All service I/O,
 // filesystem access, child ownership and polling time use the SDK lower layers.
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::RawEnvp) -> ! {
+    libdunit::init_runtime(argc, argv, envp);
     log("start: PID 1 userspace service manager");
     provision();
 
-    let mut services = load_services();
-    if services.is_empty() {
+    let mut boot_services = load_services(BOOT_SERVICES_DIR, true, MAX_SERVICES);
+    let services = load_services(SERVICES_DIR, false, MAX_SERVICES - boot_services.len());
+    if services.is_empty() && boot_services.is_empty() {
         log("no services registered; idling");
-    } else {
+    }
+    if !services.is_empty() {
         let mut m = String::from("supervising ");
         push_u32(&mut m, services.len() as u32);
         m.push_str(" service(s)");
         log(&m);
     }
+    if !boot_services.is_empty() {
+        let mut m = String::from("supervising ");
+        push_u32(&mut m, boot_services.len() as u32);
+        m.push_str(" boot service(s)");
+        log(&m);
+    }
+    boot_services.extend(services);
 
     loop {
-        for svc in services.iter_mut() {
+        for svc in &mut boot_services {
             step(svc);
         }
         let _ = time::sleep(Duration::from_millis(POLL_INTERVAL_MS));

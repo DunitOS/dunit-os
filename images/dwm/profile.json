@@ -34,6 +34,12 @@
   "services": [
     "gui-server.toml"
   ],
+  "boot_services": [
+    "netd.toml"
+  ],
+  "libexec": [
+    "netd"
+  ],
   "c_apps": [
     "dwm_lua"
   ],

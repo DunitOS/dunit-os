@@ -1,8 +1,29 @@
 //! Policy/parser/status items come intact from production; only child I/O/logs are scripted.
 #![allow(dead_code)]
 extern crate self as libdunit;
+extern crate self as dunit;
 use std::{cell::RefCell, collections::{BTreeMap, BTreeSet, VecDeque}};
 const DEFAULT_MAX_RESTARTS: u32 = 5;
+const BOOT_EXEC_PREFIX: &str = "/system/libexec/";
+const RIGHT_READ: u32 = 1;
+const RIGHT_WRITE: u32 = 2;
+const RIGHT_NET_RAW: u32 = 1 << 8;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Error(pub isize);
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+pub mod errno {
+    pub const EACCES: isize = -13;
+    pub const EIO: isize = -5;
+}
+pub mod env {
+    pub fn var(key: &str) -> crate::Result<Option<String>> {
+        assert_eq!(key, "DUNIT_NET_ROOT");
+        Ok(crate::NATIVE.with(|n| n.borrow().net_root.map(|handle| handle.to_string())))
+    }
+}
+pub mod process {
+    pub fn id() -> u32 { 21 }
+}
 WAIT_KINDS
 EXIT_STATUS
 INIT_TYPES
@@ -17,15 +38,20 @@ struct Native {
     live: BTreeSet<u32>,
     completions: BTreeMap<u32, Result<Option<ExitStatus>, ()>>,
     logs: Vec<String>,
+    net_root: Option<u32>,
+    grant: Option<isize>,
+    delivery: Option<isize>,
+    grant_attempts: Vec<(u32, u32, u32, u32)>,
+    deliveries: Vec<(u32, [u8; 4])>,
 }
 thread_local! { static NATIVE: RefCell<Native> = RefCell::new(Native::default()); }
 struct Child { pid: u32 }
 impl Child {
-    fn spawn(path: &str) -> Result<Self, ()> {
+    fn spawn(path: &str) -> Result<Self> {
         NATIVE.with(|n| {
             let mut n = n.borrow_mut();
             n.spawns.push(path.into());
-            if n.failures.pop_front().unwrap_or(false) { return Err(()); }
+            if n.failures.pop_front().unwrap_or(false) { return Err(Error(errno::EIO)); }
             n.next += 1;
             let pid = n.next;
             n.live.insert(pid);
@@ -33,6 +59,15 @@ impl Child {
         })
     }
     fn id(&self) -> u32 { self.pid }
+    fn spawn_with_env(path: &str, args: &[&str], env: &[&str]) -> Result<Self> {
+        assert_eq!(args, [path]);
+        assert_eq!(env, ["DUNIT_NET_SUPERVISOR=21", "DUNIT_NET_ROOT="]);
+        Self::spawn(path)
+    }
+    fn terminate_and_wait(&mut self) -> Result<ExitStatus> {
+        NATIVE.with(|n| assert!(n.borrow_mut().live.remove(&self.pid)));
+        Ok(exit(0, -1))
+    }
     fn try_wait(&mut self) -> Result<Option<ExitStatus>, ()> {
         NATIVE.with(|n| {
             let mut n = n.borrow_mut();
@@ -42,11 +77,27 @@ impl Child {
         })
     }
 }
+fn net_device_grant(root: u32, interface: u32, child: u32, rights: u32) -> isize {
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        assert!(n.live.contains(&child));
+        n.grant_attempts.push((root, interface, child, rights));
+        n.grant.unwrap_or(32)
+    })
+}
+fn ipc_send(child: u32, message: &[u8]) -> isize {
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        assert!(n.live.contains(&child));
+        n.deliveries.push((child, message.try_into().unwrap()));
+        n.delivery.unwrap_or(4)
+    })
+}
 fn log_svc(name: &str, msg: &str) {
     NATIVE.with(|n| n.borrow_mut().logs.push(format!("{name}: {msg}")));
 }
 fn service(policy: &str, budget: u32, extra: &str) -> Service {
-    parse_service(&format!("name=test\nexec=/app/service\nrestart={policy}\nmax_restarts={budget}\n{extra}")).unwrap()
+    parse_service(&format!("name=test\nexec=/app/service\nrestart={policy}\nmax_restarts={budget}\n{extra}"), false).unwrap()
 }
 fn exit(kind: i32, code: i32) -> ExitStatus { ExitStatus { kind, code } }
 fn finish(svc: &mut Service, status: ExitStatus) {
@@ -128,4 +179,51 @@ fn never_stops_after_fault_while_always_restarts_success_and_honors_budget() {
     assert_eq!(always.restarts, 1);
     assert_eq!(logged("exited cleanly"), 2);
     assert_no_children();
+}
+
+#[test]
+fn privileged_field_is_boot_catalog_only_and_executable_cannot_escape_libexec() {
+    let trusted = "name=netd\nexec=/system/libexec/netd\nnet_device=0";
+    assert!(parse_service(trusted, false).is_none());
+    assert_eq!(parse_service(trusted, true).unwrap().net_device, Some(0));
+    for path in ["/app/netd", "/system/libexec/../netd", "/system/libexec/net/netd", "/system/libexec/.."] {
+        assert!(parse_service(&format!("exec={path}\nnet_device=0"), true).is_none());
+    }
+    assert!(parse_service(&format!("{trusted}\nnet_device=1"), true).is_none());
+    assert!(parse_service(&format!("{trusted}\nfallback=/app/fallback"), true).is_none());
+    assert!(parse_service("exec=/system/libexec/netd\nnet_device=-1", true).is_none());
+}
+
+#[test]
+fn grant_and_delivery_failures_retire_child_before_retrying() {
+    let mut svc = parse_service(
+        "name=netd\nexec=/system/libexec/netd\nnet_device=0\nmax_restarts=4",
+        true,
+    ).unwrap();
+    step(&mut svc); // no boot handle
+    NATIVE.with(|n| assert!(n.borrow().spawns.is_empty()));
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        n.net_root = Some(16);
+        n.grant = Some(-13);
+    });
+    step(&mut svc);
+    assert_no_children();
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        n.grant = None;
+        n.delivery = Some(-105);
+    });
+    step(&mut svc);
+    assert_no_children();
+    NATIVE.with(|n| n.borrow_mut().delivery = None);
+    step(&mut svc);
+    assert!(matches!(svc.state, RunState::Running(_)));
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        let rights = RIGHT_NET_RAW | RIGHT_READ | RIGHT_WRITE;
+        assert_eq!(n.grant_attempts, [(16, 0, 1, rights), (16, 0, 2, rights), (16, 0, 3, rights)]);
+        assert_eq!(n.deliveries, [(2, 32u32.to_le_bytes()), (3, 32u32.to_le_bytes())]);
+        assert_eq!(n.live.iter().copied().collect::<Vec<_>>(), [3]);
+    });
 }

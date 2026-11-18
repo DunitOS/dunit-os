@@ -46,6 +46,12 @@ def verify_entries(entries: dict[str, bytes], name: str) -> None:
     services = {path for path in entries if path.startswith("/system/services/")}
     if services != {f"/system/services/{service}" for service in profile["services"]}:
         raise ValueError("service manifests do not match the profile")
+    boot_services = {path for path in entries if path.startswith("/system/boot-services/")}
+    if boot_services != {f"/system/boot-services/{service}" for service in profile.get("boot_services", [])}:
+        raise ValueError("boot service manifests do not match the profile")
+    libexec = {path for path in entries if path.startswith("/system/libexec/")}
+    if libexec != {f"/system/libexec/{name}" for name in profile.get("libexec", [])}:
+        raise ValueError("boot service executables do not match the profile")
     if not profile["desktop"]:
         allowed = expected | {"/assets/exec-path", "/system/share/dunit-image.json"}
         if set(entries) != allowed:
@@ -60,7 +66,7 @@ def verify_entries(entries: dict[str, bytes], name: str) -> None:
             executable = app.get("exec", f"/app/{app_id}")
             if executable not in entries:
                 raise ValueError(f"configured desktop application missing: {executable}")
-    for path in services:
+    for path in services | boot_services:
         for line in entries[path].decode().splitlines():
             if line.strip().startswith("exec ="):
                 executable = line.split("=", 1)[1].strip().strip('"')
