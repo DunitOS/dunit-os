@@ -1,10 +1,17 @@
 extern crate alloc;
-use alloc::vec;
-use dunit::time::Duration;
-use dunit::ui::{Component, ComponentWindow, View};
-use dunit::window::{Window, WindowEvent};
+#[cfg(not(test))]
+use {
+    alloc::vec,
+    dunit::{
+        time::Duration,
+        ui::{Component, ComponentWindow, View},
+        window::WindowEvent,
+    },
+};
 
+#[cfg(not(test))]
 struct Welcome;
+#[cfg(not(test))]
 impl Component for Welcome {
     type Message = ();
     fn update(&mut self, _: ()) {}
@@ -33,6 +40,7 @@ fn main() -> dunit::Result<()> {
 
 #[dunit::test]
 fn native_window_frames() -> dunit::Result<()> {
+    use dunit::window::Window;
     let (theme, _) = dunit::ui::load_theme("")?;
     let color = theme.background;
     let background =

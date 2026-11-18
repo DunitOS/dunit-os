@@ -1,7 +1,8 @@
 # Application tooling
 
-The SDK is tied to a Dunit source checkout and uses its existing image builder,
-initrd packer and `tools/qemu_test.py`.
+The SDK supports source-checkout and [standalone distribution](standalone.md)
+layouts. Native execution uses a complete OS checkout and its existing image
+builder, initrd packer and `tools/qemu_test.py`.
 
 ## Application manifests
 
@@ -63,9 +64,11 @@ entry point, `unsafe`, a panic handler or hand-written QEMU markers.
 
 Use the repository's `tools` directory in PATH (or symlink `tools/cargo-dunit`
 into a directory already in PATH). The command requires Python 3.11+, rustup
-nightly with rust-src, and the normal Dunit image/QEMU dependencies. This first
-SDK is tied to its source checkout: generated Cargo dependencies point to that
-checkout. A standalone distributable SDK is future work.
+nightly with rust-src, for application builds. Native run/test additionally requires the normal Dunit
+image/QEMU dependencies. In source-checkout mode generated dependencies point to
+that checkout. The standalone layout generates relative path dependencies to its
+installed source crates and uses its bundled registry snapshot entirely offline.
+See [distribution and installation](standalone.md).
 
 ```sh
 export PATH="/path/to/dunit-os/tools:$HOME/.cargo/bin:$PATH"

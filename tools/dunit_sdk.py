@@ -44,17 +44,22 @@ def generate(sysroot, output):
     metadata["abi_sha256"] = hashlib.sha256(b"".join(
         path.name.encode() + b"\0" + path.read_bytes() for path in abi_files)).hexdigest()
     metadata["sources"] = {}
-    for name in ("dunit-musl", "dunit-tcc"):
-        source = repository / "toolchains" / name
-        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
-        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=source)
-        names = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=source).split(b"\0")
-        digest = hashlib.sha256()
-        for item in sorted(set(names)):
-            if item:
-                path = source / item.decode()
-                if path.is_file(): digest.update(item + b"\0" + path.read_bytes())
-        metadata["sources"][name] = {"commit": revision, "dirty": bool(status), "tree_sha256": digest.hexdigest()}
+    standalone = (repository / "sdk-layout.json").is_file()
+    if standalone:
+        metadata["sources"] = {"sdk_layout_sha256": hashlib.sha256(
+            (repository / "sdk-layout.json").read_bytes()).hexdigest()}
+    else:
+        for name in ("dunit-musl", "dunit-tcc"):
+            source = repository / "toolchains" / name
+            revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=source)
+            names = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=source).split(b"\0")
+            digest = hashlib.sha256()
+            for item in sorted(set(names)):
+                if item:
+                    path = source / item.decode()
+                    if path.is_file(): digest.update(item + b"\0" + path.read_bytes())
+            metadata["sources"][name] = {"commit": revision, "dirty": bool(status), "tree_sha256": digest.hexdigest()}
     metadata["unsupported"] = {
         "M8": ["socket objects", "TCP/IP", "DNS"],
         "separate_contracts": ["signals/interruption", "dynamic loader/TLS", "canonical termios", "secure entropy source"],
@@ -68,7 +73,8 @@ def generate(sysroot, output):
     ]
     portable = {key: value for key, value in metadata.items() if key != "sysroot" and key != "generated"}
     (output / "profile.json").write_text(json.dumps(portable, indent=2) + "\n")
-    (output / "musl-COPYRIGHT").write_bytes((repository / "toolchains/dunit-musl/COPYRIGHT").read_bytes())
+    (output / "musl-COPYRIGHT").write_bytes(((repository / "licenses/musl-COPYRIGHT") if standalone else
+        (repository / "toolchains/dunit-musl/COPYRIGHT")).read_bytes())
     (output / "sdk.json").write_text(json.dumps(metadata, indent=2) + "\n")
     return metadata
 

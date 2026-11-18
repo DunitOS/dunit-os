@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
 """Cargo subcommand entry; all guest execution belongs to qemu_test.py."""
+import sys
+
+# Installed SDKs are immutable; imports must not create unmanifested bytecode.
+sys.dont_write_bytecode = True
+
 from dunit_cli import main
 raise SystemExit(main())

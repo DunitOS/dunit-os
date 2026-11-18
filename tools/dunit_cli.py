@@ -9,10 +9,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 from dunit_manifest import load_manifest, parse_manifest, installed_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
+STANDALONE = (ROOT / "sdk-layout.json").is_file()
 FLAGS = ["--release", "--target", str(ROOT / "userspace/x86_64-unknown-none.json"),
          "-Z", "build-std=core,alloc", "-Z", "build-std-features=compiler-builtins-mem",
          "-Z", "json-target-spec"]
@@ -30,6 +32,66 @@ def cargo():
     return configured or (str(rustup) if rustup.is_file() else "cargo")
 
 
+def sdk_cargo_options(manifest):
+    """Patch requested SDK entry crates; their transitive paths remain relative."""
+    if not STANDALONE:
+        return []
+    layout = json.loads((ROOT / "sdk-layout.json").read_text())
+    document = tomllib.loads(manifest.read_text())
+    tables = [document, *document.get("target", {}).values()]
+    requested = set()
+    for table in tables:
+        for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+            for alias, dependency in table.get(kind, {}).items():
+                if isinstance(dependency, dict):
+                    if "path" in dependency or "git" in dependency or dependency.get("registry", "crates-io") != "crates-io":
+                        continue
+                    name = dependency.get("package", alias)
+                else:
+                    name = alias
+                if name in layout["local_crates"]:
+                    requested.add(name)
+    options = ["--offline"]
+    for name in sorted(requested):
+        crate = layout["local_crates"][name]
+        options += ["--config", f'patch.crates-io.{json.dumps(name)}.path=' + json.dumps(str(ROOT / crate["path"]))]
+    return options
+
+
+def configure_sdk_cargo_home(manifest):
+    """Keep SDK files immutable and registry extraction inside the external project."""
+    if not STANDALONE:
+        return
+    manifest = manifest.expanduser().resolve()
+    project_directory = manifest if manifest.is_dir() else manifest.parent
+    cargo_home = project_directory / "target/.dunit-cargo-home"
+    registry = cargo_home / "registry"
+    registry.mkdir(parents=True, exist_ok=True)
+    # copytree merges without changing the producer snapshot. Cargo may unpack
+    # actual archives here; registry metadata for unused std crates remains real.
+    shutil.copytree(ROOT / "cargo-registry", registry, dirs_exist_ok=True)
+    os.environ["CARGO_HOME"] = str(cargo_home)
+
+
+def execution_checkout():
+    if not STANDALONE:
+        return ROOT
+    configured = os.environ.get("DUNIT_OS_CHECKOUT")
+    if not configured:
+        raise ValueError("standalone run/test requires DUNIT_OS_CHECKOUT: native execution uses the existing OS checkout and tools/qemu_test.py")
+    checkout = Path(configured).expanduser().resolve()
+    for name in ("tools/qemu_test.py", "kernel/Cargo.toml", "Makefile"):
+        if not (checkout / name).is_file():
+            raise ValueError(f"DUNIT_OS_CHECKOUT is incomplete: {checkout / name}")
+    # Require the same public ABI, rather than silently running against another contract.
+    for source in (ROOT / "abi").glob("*.abi"):
+        target = checkout / "abi" / source.name
+        if not target.is_file() or source.read_bytes() != target.read_bytes():
+            raise ValueError(f"DUNIT_OS_CHECKOUT ABI differs: {source.name}")
+    print(f"[dunit] native execution delegated to {checkout / 'tools/qemu_test.py'}", flush=True)
+    return checkout
+
+
 def checked(command, **kwargs):
     return subprocess.run(command, check=True, **kwargs)
 
@@ -38,7 +100,7 @@ def project(path):
     manifest = path.expanduser().resolve()
     if manifest.is_dir():
         manifest /= "Cargo.toml"
-    result = checked([cargo(), "metadata", "--format-version=1", "--no-deps", "--manifest-path", str(manifest)],
+    result = checked([cargo(), *sdk_cargo_options(manifest), "metadata", "--format-version=1", "--no-deps", "--manifest-path", str(manifest)],
                      capture_output=True, text=True)
     packages = json.loads(result.stdout)["packages"]
     package = next((p for p in packages if Path(p["manifest_path"]).resolve() == manifest), None)
@@ -50,7 +112,7 @@ def project(path):
 
 
 def build(manifest, package, app, tests=False):
-    command = [cargo(), "test" if tests else "build", "--manifest-path", str(manifest),
+    command = [cargo(), *sdk_cargo_options(manifest), "test" if tests else "build", "--manifest-path", str(manifest),
                "--bin", app.binary, *FLAGS, "--message-format=json"]
     if tests:
         command += ["--no-run"]
@@ -90,9 +152,11 @@ def create(args):
     # mkdir is intentionally exclusive: never overwrite an existing project.
     destination.mkdir(parents=True)
     (destination / "src").mkdir()
+    sdk_path = (os.path.relpath(ROOT / "runtime/dunit", destination) if STANDALONE
+                else str(ROOT / "runtime/dunit"))
     (destination / "Cargo.toml").write_text(
         f'[package]\nname = {json.dumps(identifier)}\nversion = "0.1.0"\nedition = "2021"\n\n'
-        f'[dependencies]\ndunit = {{ path = {json.dumps(str(ROOT / "runtime/dunit"))}'
+        f'[dependencies]\ndunit = {{ path = {json.dumps(sdk_path)}'
         + (', features = ["gui"]' if args.kind == "gui" else '') + ' }\n')
     (destination / "dunit.toml").write_text(manifest_text, encoding="utf-8")
     source = TEST_ATTRIBUTES + '''
@@ -120,7 +184,12 @@ fn native_file_roundtrip() -> dunit::Result<()> {
     print(f"[dunit] created {destination}")
 
 
-def boot(args, app, artifact, tests):
+def boot(args, app, artifact, tests, native_environment):
+    # The checkout Makefile owns all native output paths. Keep its original
+    # Cargo cache/toolchain, independent of the application SDK cache and target.
+    native_environment = native_environment.copy()
+    native_environment.pop("CARGO_TARGET_DIR", None)
+    checkout = execution_checkout()
     if app.kind == "gui" and (args.args or getattr(args, "input", []) or getattr(args, "input_ready", None)):
         raise ValueError("GUI launch currently accepts no guest arguments or terminal input")
     if not math.isfinite(args.timeout) or args.timeout <= 0:
@@ -128,7 +197,7 @@ def boot(args, app, artifact, tests):
     for argument in args.args:
         if not argument or any(c.isspace() or ord(c) < 32 or ord(c) > 126 for c in argument):
             raise ValueError("guest arguments must be nonempty ASCII words: the recovery console has no quoting syntax")
-    build_dir = ROOT / "build"
+    build_dir = checkout / "build"
     build_dir.mkdir(exist_ok=True)
     # The repository has one shared image directory. Prevent overlapping SDK builds.
     with (build_dir / "cargo-dunit.lock").open('w') as lock:
@@ -182,10 +251,10 @@ def boot(args, app, artifact, tests):
             marker_path = staging / "markers.json"
             marker_path.write_text(json.dumps(markers))
             kernel_features=[] if app.kind=="gui" else ["--features","boot-smoke-tests"]
-            checked([cargo(), "build", "--release", *kernel_features,
+            checked([cargo(), "check", "--release", *kernel_features,
                      "-Z", "build-std=core,alloc,compiler_builtins",
-                     "-Z", "build-std-features=compiler-builtins-mem", "-Z", "json-target-spec"], cwd=ROOT / "kernel")
-            command = [sys.executable, str(ROOT / "tools/qemu_test.py"), "--build",
+                     "-Z", "build-std-features=compiler-builtins-mem", "-Z", "json-target-spec"], cwd=checkout / "kernel", env=native_environment)
+            command = [sys.executable, str(checkout / "tools/qemu_test.py"), "--build",
                        "--initrd-overlay", str(overlay), "--markers-file", str(marker_path),
                        "--accel", args.accel, "--timeout", str(args.timeout),
                        "--boot-timeout", str(args.timeout), "--cmd-timeout", str(args.timeout),
@@ -194,7 +263,7 @@ def boot(args, app, artifact, tests):
             if app.kind == "gui":
                 command[-2:] = ["--cmd", "exec /app/setup import-desktop /sdk-desktop.toml", "--cmd", "exec /app/gui_server"]
                 command += ["--image-profile","dwm","--config","limine_sdk_terminal.conf"]
-            checked(command, cwd=ROOT)
+            checked(command, cwd=checkout, env=native_environment)
 
 
 def main(argv=None):
@@ -226,10 +295,14 @@ def main(argv=None):
         if args.command == "new":
             create(args)
         else:
+            if args.command != "build":
+                execution_checkout()
+            native_environment = os.environ.copy()
+            configure_sdk_cargo_home(args.manifest_path)
             manifest, package, app = project(args.manifest_path)
             artifact = build(manifest, package, app, args.command == "test")
             if args.command != "build":
-                boot(args, app, artifact, args.command == "test")
+                boot(args, app, artifact, args.command == "test", native_environment)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"[dunit] {error}", file=sys.stderr)
