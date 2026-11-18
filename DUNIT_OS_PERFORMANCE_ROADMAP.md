@@ -219,6 +219,11 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   Native probes preserve syscall results, GPR/SIMD/TLS and lock exclusion.
   This does not authorize remote stop/cancel or reclamation.
 
+- [x] Bound framebuffer source validation to one-page scopes and source copies
+  to 4 KiB per mapping pin, release the VM guard before scanout writes, and
+  retain display owner/geometry through a separate access scope. Other syscall,
+  driver and heap IRQ-off work remains open; see [present ownership](docs/performance/framebuffer-progress.md).
+
 Remaining gates, in order:
 
 - [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining

@@ -1,0 +1,414 @@
+{
+  "date": "2026-11-18",
+  "base_commit": "2b4dca9",
+  "scope": "Parallel agent implementation, serialized OS builds/VMs: bounded framebuffer mapping scopes, complete dsh/fsck SDK migration, userspace N1 reference packet core.",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "1f3a14f445a95f69f0eecb3386beb956943ef96974c7fbcb1a4fe4c5cf51d6fc",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "4ecff11ff44bb286eb3802954c4873fd3e6bda658098ea9cbd4e881b718e1e2a",
+    "Makefile": "12f78eef4cb15a846a8fd05f3fdbe7cb07f99d62ff4f8799ce93592f89cbab5e",
+    "docs/performance/framebuffer-progress.md": "ce0bcf45a2d7c7a3e1dc37e87148a71cd5d6d6c6b7031f7af293aeec7a897548",
+    "docs/sdk/native-api.md": "bb12f453ffd32f07e5dbccbe0f07a4de51ed23cb0b2fb67cab5dc30ad9375982",
+    "kernel/src/drivers/display/mod.rs": "b6521b78080ab7642345938761c81d3c27f4875f8b20b4d68beff2a2b5050500",
+    "kernel/src/syscall/display.rs": "c366937dc408a44226c5c005a0a2013424554241d6280fdd94dfbf7f38d8c233",
+    "kernel/tests/terminal_display.rs": "aac2c23ef1597637a6f9d8b0f415f46d815a8bec623d07d50cd2a2fed1cb8609",
+    "runtime/dunit/src/fsck.rs": "ddbbd13604cb361ed60e317827081541132520002fcca5cdb1d862f81033c889",
+    "runtime/dunit/src/io.rs": "212a95d29e0981a141fa4457b52b36cf64dc1443719d09fd96cf0d75fd63cf0a",
+    "runtime/dunit/src/lib.rs": "9a5675f6766cc236a82e01467573f0551e741bb81dee851512977e4d186c0d7a",
+    "runtime/dunit/src/system.rs": "f8644feed8cf6b6a09881cd75aaed143fd9911091a68acb9f1e6a5e1a11e1d37",
+    "tools/dsh_backpressure_markers.json": "80669e7fe3cecf87058c3cb4f32f729c541fcdaf801a6a471ead5345a3327833",
+    "tools/net_core_markers.json": "862667cf05137d0cb1e46bcd026768b2f4508edbc3fa990eef71ca8fe607c12d",
+    "tools/test_dsh_bridge.py": "8d6245af777911b01c5baa66d4266d8d26c2fce464cde3265a9d4c0b27a242be",
+    "tools/test_dsh_bridge_host.rs.in": "342e7c514a2c9a595f89ee197873bf402fd521bc27526ae33c790c2e303b5b93",
+    "tools/test_net_core.py": "373cf674866904d8857fa4010fa8babc844fa33220d4c9ba799be0f63012e629",
+    "tools/test_sdk_stdin.py": "414e28e0bbc5978e604c367699437248eb0fc56c7ca8eb8b85ecc3e6e9fe2f70",
+    "tools/test_sdk_stdin_host.rs.in": "9a3eca63af3e9ff17479c880d893e9ac18dc18a517cb332e3c913ac1bd4be282",
+    "userspace/net-core/Cargo.toml": "28ae4b8415c95f46b6261f8a4203587b488cf5c0beabf6c8be031413cb2f65ef",
+    "userspace/net-core/README.md": "9c7748ab4cc93b9702c9d4c07383a3a048876ac6ffcc715c16d95c41973e6688",
+    "userspace/net-core/src/diagnostic.rs": "d4f18ddea937bc63f58821da5e90d3151cabadcb61b1ecedcbddebbe6192eedd",
+    "userspace/net-core/src/lib.rs": "8d0c90b799fed348352d9419c913929299cbcafabefeb0f928cc29e10fa5423b",
+    "userspace/net-core/src/tests.rs": "58c325a0be7b249d52cdb485488c0ac779d1c6f2def05e5bf0952b06b18524b8",
+    "userspace/system_apps/dsh/Cargo.lock": "41b885940a24c1665aaf52937b8868a1f1183b0c5c180748d10fe6960443cc40",
+    "userspace/system_apps/dsh/Cargo.toml": "b516fd31fae0457a070daca11bc2a504ed19ca0d3baa35680ab69fa4b6a915ec",
+    "userspace/system_apps/dsh/src/main.rs": "0c8052f30d4f3e92e365a9a40237ac22b3f9e02c23155e6736cf5bd89b979efe",
+    "userspace/system_apps/dsh_backpressure_test/Cargo.lock": "09e7c71308371287424100ac42c8032b18168c84006e4d5600a7aee95ec5a5e7",
+    "userspace/system_apps/dsh_backpressure_test/Cargo.toml": "575cd6a1bcb02d49e1d412207b856f328f532a1c79be73b89b650b318143507a",
+    "userspace/system_apps/dsh_backpressure_test/src/main.rs": "8d4fe6c1f06c942da4f0baef53b26028e728a252f8bf0b58a621658ded8ea88b",
+    "userspace/system_apps/fsck_dunit/Cargo.lock": "69dd172361a3b001387c0a28f8370ade07f0e681eab65d6e62671ac7139104fd",
+    "userspace/system_apps/fsck_dunit/Cargo.toml": "ce86cd55f3a812a2006682d3533873a8fa5da16c2b1b22a11ef1bdc84aa21530",
+    "userspace/system_apps/fsck_dunit/src/main.rs": "cc76cf598c63ff8595ddfdd4792165f1a488006cc230dd14d7d1c694619ecffb",
+    "userspace/system_apps/net_packet_test/Cargo.lock": "6b213b2ed8c0a99cfdffc816e87dd55497d64b005970a7bed70c98896734e92f",
+    "userspace/system_apps/net_packet_test/Cargo.toml": "03401ff63b18b7d1a148d4d724b7427c2479b84924c87bbd2803f5bdccb32fe6",
+    "userspace/system_apps/net_packet_test/src/main.rs": "b2b221f158e4c51b785e411abcccbf141d064a0547a88c7527a30601dc5d44b5"
+  },
+  "native_cases": [
+    {
+      "name": "nov18-gui-before",
+      "scope": "Prebuilt2b4dca9 GUI baseline; no comparable FPS samples; image verified against previous receipt",
+      "metadata_sha256": "b52d6d8d3685373fa9d8aa4342511ab8e3c6d0488ffea06417e1e684623a955f",
+      "serial_sha256": "ee433cd9fddd89ba6470423975b3cc2f2c0738da03cf0ba30a3c2cf42d57e4a6",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "f1de19f5c4759965caada0314c0f87b02e1371bf3f429c3357c9b221235c5df2",
+        "bytes": 266702848,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-gui-before/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-gui-before/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "2"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 2,
+        "emulator_vcpus": 2,
+        "kernel_online_cpus": 2,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": null
+    },
+    {
+      "name": "nov18-core-fixed",
+      "scope": "Final source full boot/external INTx plus SDK API, cooked dsh calc, N1logicalpeer, fsck absent partition, full-ring Ctrl-C recovery",
+      "metadata_sha256": "402fa6c57141cd3ea311cfe1092ec137ed19a62431436fa619ea03585e33572e",
+      "serial_sha256": "2eef396ea8dc32ebd7fdc22b44f3d6f1b3b99beeb6f54e8fa9b2164abe16235a",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "dec9c08c339cc8e9b6970bd4c182db300be1add65736dfc3f12c163ed5078c67",
+        "bytes": 266790912,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-core-fixed/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-core-fixed/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4",
+          "-nic",
+          "none",
+          "-netdev",
+          "socket,id=dunit-test,connect=127.0.0.1:58491",
+          "-device",
+          "e1000,netdev=dunit-test,mac=52:54:00:12:34:56"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      }
+    },
+    {
+      "name": "nov18-gui-fixed",
+      "scope": "Final source original GUI required/forbidden/actions plus quotedPTYargs and actual framebuffer IRQ telemetry",
+      "metadata_sha256": "9269c69989399c63fdd2ba3b5f6709b7d8831be0517f5a2939fc5df2dbf61770",
+      "serial_sha256": "e7447dc6180654faa0183d4948c8eb0c5e3031caec8911e0c1d832320324b993",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "dec9c08c339cc8e9b6970bd4c182db300be1add65736dfc3f12c163ed5078c67",
+        "bytes": 266790912,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-gui-fixed/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-gui-fixed/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "2",
+          "-nic",
+          "none",
+          "-netdev",
+          "socket,id=dunit-test,connect=127.0.0.1:40131",
+          "-device",
+          "e1000,netdev=dunit-test,mac=52:54:00:12:34:56"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 2,
+        "emulator_vcpus": 2,
+        "kernel_online_cpus": 2,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      }
+    },
+    {
+      "name": "nov18-regression",
+      "scope": "8CPU IRQ GPR/SIMD/TLS, pointerqueue and PTYquotes. Predates final dsh control fix; kernel/network unchanged; dsh superseded by final2/4CPU runs",
+      "metadata_sha256": "cd209e86e27d1aa17838d1275932a24574f893d12959812ba51093d6b212e550",
+      "serial_sha256": "d2089ac98a9cbc5af3f043ad7d4c4b62a119b815cac4b992d17fb838ef4c73a3",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "36ccc8a148ad064bddecc34e250a3816e5253addaa5dcd6b9077424ab75d4aa1",
+        "bytes": 266758144,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-regression/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-regression/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "8",
+          "-nic",
+          "none",
+          "-netdev",
+          "socket,id=dunit-test,connect=127.0.0.1:34079",
+          "-device",
+          "e1000,netdev=dunit-test,mac=52:54:00:12:34:56"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      }
+    },
+    {
+      "name": "nov18-fsck-disk",
+      "scope": "Original installed AHCI fsck corruption/degraded/read-only/survivor and clean CLI budget. fsck/source/runtime unchanged after this run; predates final dsh control fix",
+      "metadata_sha256": "39ab5c7ad9517a8f6f7deaacb7cd237d366d7eb9ced49ca7bd0fa6a24dc76a3b",
+      "serial_sha256": "27b5a0ff5c2d614c275e84f2e09ec3924e0088dec03f0cd6611b252ec0a3e336",
+      "image": {
+        "path": "build/nov18-fsck-disk/dunit-test-disk.img",
+        "sha256": "b1b7610401c2556fc5163e261decfc532ef1ea22fbe1c733581a8bbe7712eebe",
+        "bytes": 268435456,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-fsck-disk/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-fsck-disk/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-drive",
+          "file=build/nov18-fsck-disk/dunit-test-disk.img,format=raw,if=ide",
+          "-boot",
+          "c",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": null
+    }
+  ],
+  "framebuffer": {
+    "mapping_max_bytes": 4096,
+    "chunks": 1440,
+    "irq_enabled_chunks": 1440,
+    "actual_delivered_pit_interrupts": 1,
+    "source": "kernel/src/clock.rs::pit_interrupts, not HPET-derived elapsed ticks",
+    "interval": "Inside presentation after ACCESS acquisition until source copy and backend publication finish",
+    "before": "Whole source validation, pixel reads, VRAM writes and flush under one address-space IRQ-safe guard;1920x1080 transfer8294400bytes",
+    "after": "One-page preflight scopes; up to4096bytes/two unaligned source pages per copy; kernel stack staging retained after mapping guard releases; device writes observe IF1",
+    "limits": "No comparable before/after FPS samples. No hard elapsed-time IRQ-off guarantee under contention. Concurrent unmap can EFAULT after partial scanout; source must remain mapped until return."
+  },
+  "sdk": {
+    "migrated": [
+      "dsh",
+      "fsck_dunit"
+    ],
+    "native_fsck": [
+      "Absent partition returns original ENOENT diagnostic and exit3",
+      "Installed cleanreport exit0; kernel deliberate corrupt-node/degraded-readonly recovery budget passed unchanged"
+    ],
+    "dsh_pressure": "Real child kill_target reads nothing; two4096-byte cooked lines plus LF exceed8192-byte ring. IncompleteESC[ thenCtrl-C terminates/reaps child, returns prompt and executes echo recovery command. Testapp and shell cleanup finish with VFS handles clean.",
+    "bounded_input": "8192-byte PendingInput preserves suffixes; complete lines exceeding queue are explicitly rejected. Ctrl-C/EOF remain serviced. After interrupt, child output drains and subsequent shell input stays queued.",
+    "public_helpers": [
+      "Stdin::try_read",
+      "system::terminal_diagnostic",
+      "fsck::check"
+    ]
+  },
+  "network": {
+    "host_tests": 11,
+    "native": "Actual SDKnet_packet_test executes samecore diagnostic: echo3,ARP5,rejected5; validates complete logical frame exchanges",
+    "implemented": "Bounded EthernetII/ARP/fixed-headerIPv4/ICMPecho codecs, solicitedARP retry/expiry/cache, logicalpeer rate limit, zeroedpadding/checksums/MTU and malformed rejection",
+    "not_implemented": [
+      "NIC transport authority/netd",
+      "Routing/default gateways",
+      "IPv4options/reassembly/ICMPerrors",
+      "Socket backend or Internet connectivity"
+    ],
+    "external_driver": "Existing independent E1000INTx probe still checks103 transformed host requests/responses and DMA reset/reclaim on each ISO run"
+  },
+  "host_checks": {
+    "display": "7 actual driver/syscall adapter checks incl unaligned multichunk/clipping/revocation and owner/mode/final-reader exclusion",
+    "user_memory": "3 mapping permission/final-byte/non-Send ownership checks",
+    "pty": "5 actual locked stream concurrency/endpoint retirement checks",
+    "sdk_stdin": "4 actual SDK I/O/readiness/partial write/error checks",
+    "dsh_bridge": "6 actual bridge/SDK/cookedline checks incl native zero and EAGAIN, queue rejection, Ctrl-C/CSI, EOF, next shell input retention",
+    "fsck": "4 actual SDK app host tests passed by sdk_fsck agent: exact report incl u64max, partial writes, verdicts/unknown and native/output failures",
+    "net_core": "11 tests plus production no_std metadata with -Dwarnings;10k malformed corpus and byte mutations",
+    "production_kernel": "Exact Makefile release build-std flags cargo check without boot-smoke-tests passed",
+    "contracts": "gen_abi.py --check, gen_cpu_local.py --check, check_kernel_elf.py and git diff --check passed"
+  },
+  "limits": [
+    "TCG only; no KVM or physical input-to-photon measurement.",
+    "Applications remain UP; dispatch_cpus1; AP workers/probes do not enable application SMP.",
+    "Other OP3 IRQ-off/lock-order/remote-stop/final-reader/concurrent-VM gates remain open.",
+    "N1 reference core is userspace and logical-peer only; no production networking authority or service exposed.",
+    "Existing upstream libc sscanf extreme float literal compiler warnings remain visible; no new production warnings suppressed."
+  ],
+  "repaired_attempts": [
+    "Final read-only audit found dsh Ctrl-C/EOF hidden behind full-ring pending-write gate. Fixed with bounded SDKPendingInput and always-serviced controls, added six host checks and real native ring-exhaustion/recovery test; rebuilt and reran complete core/GUI budgets.",
+    "New regression initially named errnoETIMEDOUT, absent from current native ABI. Corrected test timeout failure to existing EIO; no new errno introduced.",
+    "Host runner initially used wrong rustup home, attempted toolchain download and hit disk limit. Runner now respects supplied RUSTC/PATH; tests use installed host toolchain. Removed only task-created failed downloads and generated cache duplicates.",
+    "rustfmt traversed an imported console font table. Verified exact formatter-only output against HEAD and restored incidental formatting; glyph data and production instructions unchanged."
+  ],
+  "implementation_commits": {
+    "performance": "f2eedd6",
+    "sdk_migration_and_pressure": "983a1fb",
+    "userspace_network_core": "3e0c6fb"
+  }
+}

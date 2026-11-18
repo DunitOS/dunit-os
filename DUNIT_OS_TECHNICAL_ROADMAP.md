@@ -484,7 +484,9 @@ Rust toolkit.
 - [x] Migrate dtop to SDK entry/stream helpers and measured memory/process counters;
   report CPU usage unavailable and support a terminating --once snapshot.
 - [ ] Define a versioned identity/uname source.
-- [ ] Finish dsh/fsck_dunit and remaining CLI/TUI/service lower-layer migration.
+- [x] Migrate dsh and fsck_dunit to native SDK entry/streams/files/environment/
+  diagnostics/process/PTY/time APIs; preserve cooked input and report exit codes.
+- [ ] Finish remaining CLI/TUI/service lower-layer migration.
 - [ ] Replace raw image viewers only after parity.
 - [x] Deliver owning SDK thread/synchronization APIs with guarded stacks, typed
   results and native join acknowledgement before reclamation.
@@ -546,6 +548,11 @@ ring wrap/starvation/completion/link-toggle/interrupt-storm/reset tests and
 10-minute flood without DMA corruption/leaks; guards and ownership assertions.
 
 ### N1 — Ethernet, ARP, IPv4 and ICMP
+
+- [x] Add a bounded userspace reference core for Ethernet II, ARP resolution,
+  fixed-header IPv4 and ICMP echo, consumed by host tests and a native logical
+  peer diagnostic. See [scope and limits](userspace/net-core/README.md);
+  this does not close NIC transport, routing or production N1 acceptance.
 
 - [ ] Validate Ethernet II sizes/padding/types; reject bad/unknown frames early.
 - [ ] Bound ARP INCOMPLETE/REACHABLE/STALE retry/expiry/poisoning policy.
