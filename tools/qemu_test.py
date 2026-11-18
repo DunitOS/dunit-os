@@ -608,8 +608,15 @@ def run(args: argparse.Namespace) -> RunResult:
     if run_defaults.get("uefi") and not args.uefi:
         args.uefi = bool(run_defaults["uefi"])
     net_test = bool(getattr(args, "net_test", False) or run_defaults.get("net_test"))
-    if net_test and (args.interactive or args.variant or args.disk or args.build_disk):
-        raise ValueError("--net-test requires an automated developer ISO run")
+    net_live = bool(getattr(args, "net_live", False) or run_defaults.get("net_live"))
+    if net_live and net_test:
+        raise ValueError("choose one network test peer")
+    if (net_test or net_live) and (args.interactive or args.variant or args.disk or args.build_disk):
+        raise ValueError("network peers require an automated developer ISO run")
+    if args.ready_marker == DEFAULT_READY_MARKER and run_defaults.get("ready_marker"):
+        args.ready_marker = str(run_defaults["ready_marker"])
+    if args.initrd_overlay is None and run_defaults.get("initrd_overlay"):
+        args.initrd_overlay = REPO_ROOT / str(run_defaults["initrd_overlay"])
 
     is_disk = False
     if args.build:
@@ -681,14 +688,17 @@ def run(args: argparse.Namespace) -> RunResult:
               f"({args.scratch_disk} MiB, bus={args.scratch_bus})", file=sys.stderr)
     qmp_transport = getattr(args, "qmp_transport", "unix")
     peer = None
-    if net_test:
+    if net_test or net_live:
         if any(arg in ("-nic", "-netdev", "-net") or
                arg.startswith(("-nic=", "-netdev=", "-net=")) or
                arg.startswith("e1000,") for arg in extra_args):
-            raise ValueError("--net-test owns its reference NIC and backend")
-        from net_test_transport import NetPeer
-
-        peer = NetPeer(workdir)
+            raise ValueError("network peer owns its reference NIC and backend")
+        if net_live:
+            from net_live_transport import NetLivePeer
+            peer = NetLivePeer(workdir)
+        else:
+            from net_test_transport import NetPeer
+            peer = NetPeer(workdir)
         peer.start()
         extra_args += ["-nic", "none", "-netdev",
                        f"socket,id=dunit-test,connect={peer.endpoint}",
@@ -985,6 +995,8 @@ def main() -> int:
     parser.add_argument("--cpus", type=int, help="explicit guest vCPU count (1..256)")
     parser.add_argument("--net-test", action="store_true",
                         help="attach the local bounded Ethernet test peer and reference E1000")
+    parser.add_argument("--net-live", action="store_true",
+                        help="attach the isolated userspace ARP/ICMP/UDP/DNS peer and reference E1000")
     parser.add_argument("--qmp-transport", choices=("unix", "stdio"), default="unix",
                         help="QMP control channel; stdio uses local pipes without sockets")
     parser.add_argument(

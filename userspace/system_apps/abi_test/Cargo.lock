@@ -6,11 +6,16 @@ version = 4
 name = "abi_test"
 version = "0.1.0"
 dependencies = [
+ "dunit_packet_abi",
  "libdunit",
 ]
 
 [[package]]
 name = "dunit_file_cap_abi"
+version = "0.1.0"
+
+[[package]]
+name = "dunit_packet_abi"
 version = "0.1.0"
 
 [[package]]

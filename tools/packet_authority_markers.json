@@ -1,0 +1,30 @@
+{
+  "description": "Native raw Ethernet denials and boot catalog immutability in a disposable full Terminal Mode image.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": ["exec /app/abi_test --packet-denied"]
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[PACKET-AUTH] forged root environment and unrelated object types denied",
+      "source": "userspace/system_apps/abi_test/src/packet_denial.rs"
+    },
+    {
+      "marker": "[PACKET-AUTH] trusted manifest and service executable mutations denied",
+      "source": "userspace/system_apps/abi_test/src/packet_denial.rs"
+    },
+    {
+      "marker": "[EXEC] /app/abi_test returned code=0",
+      "source": "kernel/src/command.rs"
+    }
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[PACKET-AUTH] FAIL",
+    "[ABI-QUERY-TEST] FAIL"
+  ]
+}

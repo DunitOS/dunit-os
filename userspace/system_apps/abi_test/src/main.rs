@@ -8,6 +8,8 @@
 
 extern crate alloc;
 
+mod packet_denial;
+
 use alloc::format;
 use core::panic::PanicInfo;
 
@@ -24,7 +26,14 @@ fn fail(why: &str) -> ! {
 }
 
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(argc: usize, argv: libdunit::RawArgv, envp: libdunit::RawEnvp) -> ! {
+    libdunit::init_runtime(argc, argv, envp);
+    match libdunit::arg(1) {
+        Some("--packet-denied") => packet_denial::run(),
+        Some("--packet-spoof") => packet_denial::spoofed_environment(),
+        Some("--packet-target") => libdunit::exit(0),
+        _ => {}
+    }
     let version = libdunit::abi_version();
     let count = libdunit::abi_query(libdunit::ABI_QUERY_SYSCALL_COUNT, 0);
     let has_self = libdunit::abi_query(libdunit::ABI_QUERY_HAS_SYSCALL, libdunit::SYSCALL_ABI_QUERY);

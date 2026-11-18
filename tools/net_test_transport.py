@@ -93,30 +93,42 @@ class NetPeer:
             self._connection = connection
             with connection:
                 connection.settimeout(0.2)
-                while not self._stop.is_set():
-                    header = self._read(connection, 4)
-                    if header is None:
-                        return
-                    length = struct.unpack("!I", header)[0]
-                    if length != FRAME_SIZE:
-                        raise ValueError(f"invalid frame length {length}; expected {FRAME_SIZE}")
-                    frame = self._read(connection, length)
-                    if frame is None:
-                        if not self._stop.is_set():
-                            raise ValueError("missing frame body")
-                        return
-                    if self._packets >= PACKETS:
-                        raise ValueError("unexpected extra frame")
-                    if frame != request_frame(self._packets):
-                        raise ValueError(f"invalid MAC/EtherType/sequence/payload at frame {self._packets}")
-                    self._packets += 1
-                    self._bytes += length
-                    response = response_frame(frame)
-                    connection.sendall(struct.pack("!I", len(response)) + response)
-                    self._responses += 1
-        except (OSError, ValueError) as error:
+                self._exchange(connection)
+        except ValueError as error:
+            # Socket close can reach the client before this handler. Preserve
+            # framing errors even if that client immediately calls stop().
+            self.errors.append(str(error))
+        except OSError as error:
             if not self._stop.is_set():
                 self.errors.append(str(error))
+
+    def _exchange(self, connection: socket.socket) -> None:
+        while not self._stop.is_set():
+            header = self._read(connection, 4)
+            if header is None:
+                return
+            length = struct.unpack("!I", header)[0]
+            if length != FRAME_SIZE:
+                raise ValueError(f"invalid frame length {length}; expected {FRAME_SIZE}")
+            frame = self._read(connection, length)
+            if frame is None:
+                if not self._stop.is_set():
+                    raise ValueError("missing frame body")
+                return
+            if self._packets >= PACKETS:
+                raise ValueError("unexpected extra frame")
+            if frame != request_frame(self._packets):
+                raise ValueError(f"invalid MAC/EtherType/sequence/payload at frame {self._packets}")
+            self._packets += 1
+            self._bytes += length
+            response = response_frame(frame)
+            connection.sendall(struct.pack("!I", len(response)) + response)
+            self._responses += 1
+
+    def _finish_exchange(self) -> dict:
+        if self._packets != PACKETS or self._responses != PACKETS:
+            self.errors.append(f"incomplete exchange: received={self._packets} replied={self._responses} expected={PACKETS}")
+        return {"ethertype": "0x88b5", "payload_transform": "xor-0xa5"}
 
     def stop(self) -> dict:
         if self._result is not None:
@@ -135,12 +147,11 @@ class NetPeer:
                 self.errors.append("peer thread did not stop")
         if self._listener is not None:
             self._listener.close()
-        if self._packets != PACKETS or self._responses != PACKETS:
-            self.errors.append(f"incomplete exchange: received={self._packets} replied={self._responses} expected={PACKETS}")
+        details = self._finish_exchange()
         self._result = {"ok": not self.errors, "packets": self._packets,
                         "bytes": self._bytes, "responses": self._responses,
                         "errors": list(self.errors), "transport": "localhost-tcp-qemu-socket",
-                        "ethertype": "0x88b5", "payload_transform": "xor-0xa5"}
+                        **details}
         self.workdir.mkdir(parents=True, exist_ok=True)
         (self.workdir / "net-peer.json").write_text(json.dumps(self._result, indent=2) + "\n")
         return self._result

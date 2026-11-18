@@ -1,0 +1,31 @@
+{
+  "description": "GUI supervisor launches the sealed boot service test. The isolated E1000 peer validates actual Ethernet ARP/ICMP/UDP/DNS wire bytes twice across a native service exit and restart.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-live",
+    "net_live": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "[NETD-FIXTURE] fresh session after supervised restart", "timeout": 120},
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[INIT] supervising 1 boot service(s)", "claim": "only the trusted boot catalog declared the packet service", "source": "userspace/system_apps/init/src/main.rs"},
+    {"marker": "[INIT] netd: network grant delivered", "claim": "init granted narrowed authority and delivered its handle to the child", "source": "userspace/system_apps/init/src/main.rs"},
+    {"marker": "[NETD-FIXTURE] child cannot inherit packet authority", "claim": "nested child could not use its parent's queue fd, device handle or root grant", "source": "userspace/system_apps/netd_fixture/src/main.rs"},
+    {"marker": "[NETD-FIXTURE] native authority, faults, ARP, ICMP and UDP DNS passed", "claim": "descriptor duplication, rights attenuation, malformed TX and RX faults, followed by decoded wire replies", "source": "userspace/system_apps/netd_fixture/src/main.rs"},
+    {"marker": "[INIT] netd: exited code=7 (failure)", "claim": "the first instance exited while owning the queue", "source": "userspace/system_apps/init/src/main.rs"},
+    {"marker": "[INIT] netd: restart (1/1)", "claim": "init supervised the failure within its manifest restart budget", "source": "userspace/system_apps/init/src/main.rs"},
+    {"marker": "[NETD-FIXTURE] fresh session after supervised restart", "claim": "the fresh process repeated verified Ethernet exchanges with fresh authority", "source": "userspace/system_apps/netd_fixture/src/main.rs"},
+    {"marker": "[NETD-FIXTURE] stale queue revoked with EPIPE and HANGUP", "claim": "closing the last device capability revoked its still-open packet descriptor", "source": "userspace/system_apps/netd_fixture/src/main.rs"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[NETD-FIXTURE] FAIL",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager", "why": "boot smoke deliberately tests user page faults before supervisor launch"},
+    "[INIT] netd: restart budget exhausted"
+  ]
+}

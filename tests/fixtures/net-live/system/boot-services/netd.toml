@@ -1,0 +1,7 @@
+# QEMU isolated-peer bootstrap. This overlay is used only by net_live_markers.
+name = "netd"
+exec = "/system/libexec/netd_fixture"
+net_device = 0
+restart = "on-failure"
+critical = false
+max_restarts = 1
