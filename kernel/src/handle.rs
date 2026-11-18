@@ -26,6 +26,8 @@ pub const RIGHT_SIGNAL: u32 = 1 << 3;
 pub const RIGHT_TRANSFER: u32 = 1 << 4;
 pub const RIGHT_DISPLAY_MASTER: u32 = 1 << 5;
 pub const RIGHT_INPUT_MASTER: u32 = 1 << 6;
+pub const RIGHT_NET_CONTROL: u32 = 1 << 7;
+pub const RIGHT_NET_RAW: u32 = 1 << 8;
 
 pub const RIGHTS_ALL: u32 = RIGHT_READ
     | RIGHT_WRITE
@@ -33,7 +35,9 @@ pub const RIGHTS_ALL: u32 = RIGHT_READ
     | RIGHT_SIGNAL
     | RIGHT_TRANSFER
     | RIGHT_DISPLAY_MASTER
-    | RIGHT_INPUT_MASTER;
+    | RIGHT_INPUT_MASTER
+    | RIGHT_NET_CONTROL
+    | RIGHT_NET_RAW;
 
 /// Верхняя граница размера объекта памяти за одним хэндлом (защита от исчерпания
 /// кучи по запросу из userspace).
@@ -59,8 +63,30 @@ pub enum HandleError {
     NoSuchTarget,
 }
 
+/// One process-owned grant. A device reference records the generation of the
+/// queue opened through it so revoking an old grant cannot stop a new session.
+pub struct NetDevice {
+    pub index: u32,
+    pub queue_generation: core::sync::atomic::AtomicU64,
+}
+impl NetDevice {
+    pub fn new(index: u32) -> Self {
+        Self { index, queue_generation: core::sync::atomic::AtomicU64::new(0) }
+    }
+}
+impl Drop for NetDevice {
+    fn drop(&mut self) {
+        let generation = *self.queue_generation.get_mut();
+        if generation != 0 {
+            crate::drivers::net::packet::close(generation);
+        }
+    }
+}
+
 /// Объект ядра, на который ссылается хэндл.
 pub enum HandleObject {
+    NetRoot,
+    NetDevice(Arc<NetDevice>),
     /// Actual filesystem open-description authority; transferable with attenuation.
     File(Arc<crate::fs::file_cap::FileCapability>),
     /// Буфер байтов в куче ядра. Права READ/WRITE/MAP.
@@ -175,6 +201,8 @@ impl HandleTable {
             return Err(HandleError::AccessDenied);
         }
         let object = match &current.object {
+            HandleObject::NetRoot => return Err(HandleError::AccessDenied),
+            HandleObject::NetDevice(device) => HandleObject::NetDevice(device.clone()),
             HandleObject::File(file) => HandleObject::File(Arc::clone(file)),
             HandleObject::Memory(data) => HandleObject::Memory(data.clone()),
             HandleObject::Endpoint(pid) => HandleObject::Endpoint(*pid),

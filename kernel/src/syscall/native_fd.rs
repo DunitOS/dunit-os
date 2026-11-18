@@ -40,6 +40,9 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
             if arg & !((READ | WRITE | APPEND | NONBLOCK) as u64) != 0 {
                 return EOPNOTSUPP;
             }
+            if matches!(entry.target, crate::process::FdTarget::Packet { .. }) && arg & NONBLOCK as u64 == 0 {
+                return EOPNOTSUPP;
+            }
             let status = (entry.status() & (READ | WRITE)) | (arg as u32 & (APPEND | NONBLOCK));
             if let crate::process::FdTarget::Vfs(vfs_fd) = entry.target {
                 if let Err(error) = crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut vfs| {
@@ -117,6 +120,10 @@ pub(super) fn readiness(fd: i32, events: u16) -> u16 {
                     let _ = crate::process::request_terminal_stdin_for_current();
                 }
             }
+        }
+        FdTarget::Packet { generation, access } => {
+            let ready = crate::drivers::net::packet::ready(generation) as u16;
+            result |= ready & ((events & access as u16) | POLL_HUP | POLL_ERROR);
         }
         FdTarget::Pipe { id, write } => {
             let (ready, closed) = crate::pipe::readiness(id, write);

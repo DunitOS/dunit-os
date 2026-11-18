@@ -4,6 +4,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct RetiredResources {
     pub(super) endpoints: Vec<Arc<crate::pty::Endpoint>>,
+    pub(super) net_devices: Vec<Arc<crate::handle::NetDevice>>,
     pub(super) files: Vec<Arc<crate::fs::file_cap::FileCapability>>,
 }
 
@@ -34,10 +35,15 @@ impl FdResources {
 
     fn clear(&mut self) {
         for (_, entry) in core::mem::take(&mut self.entries) {
-            if let FdTarget::Pipe { id, write } = entry.target {
-                if crate::pipe::release(id, write) {
-                    wake_pipe_waiters(id);
+            match entry.target {
+                FdTarget::Pipe { id, write } => {
+                    if crate::pipe::release(id, write) {
+                        wake_pipe_waiters(id);
+                    }
                 }
+                // Driver close checks generation and is idempotent across dup slots.
+                FdTarget::Packet { generation, .. } => crate::drivers::net::packet::close(generation),
+                FdTarget::Vfs(_) | FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr => {}
             }
         }
         // One VFS reference per distinct description, irrespective of dup count.
@@ -51,7 +57,9 @@ impl FdResources {
     fn inherited(entries: &[(u32, FdEntry)]) -> Result<Self, ProcessError> {
         let mut result = Self::default();
         for (fd, entry) in entries {
-            if *fd >= MAX_PROCESS_FD || result.entries.contains_key(fd) {
+            if *fd >= MAX_PROCESS_FD || result.entries.contains_key(fd)
+                || matches!(entry.target, FdTarget::Packet { .. })
+            {
                 return Err(ProcessError::InvalidFd);
             }
             if let FdTarget::Vfs(vfs_fd) = entry.target {
@@ -115,7 +123,9 @@ impl Drop for VmResources {
                 HandleObject::Display => crate::handle::release_display(self.pid),
                 HandleObject::Input => crate::handle::release_input(self.pid),
                 HandleObject::SharedFrames { id } => shared_vm_release(id, 1),
-                _ => {} // Owned file/endpoint Arcs close here, outside Process access.
+                HandleObject::NetDevice(device) => drop(device),
+                HandleObject::NetRoot | HandleObject::File(_) | HandleObject::Memory(_)
+                | HandleObject::Endpoint(_) => {}
             }
         }
     }

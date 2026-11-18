@@ -1,6 +1,9 @@
-//! Private E1000 legacy-ring diagnostics: PHY polling and external INTx.
-//! No production packet or userspace ownership contract is exposed.
-use super::rings::{Error as RingError, Rings, BUFFER, COUNT};
+//! E1000 legacy rings shared by the production INTx and private boot paths.
+use super::dma::DmaRegion;
+use super::rings::{Error as RingError, Rings, COUNT};
+#[cfg(any(feature = "boot-smoke-tests", test))]
+use super::rings::BUFFER;
+use dunit_packet_abi::{MIN_FRAME_LEN, MAX_FRAME_LEN};
 
 const CTRL: usize = 0x0000;
 const STATUS: usize = 0x0008;
@@ -10,12 +13,70 @@ const IMC: usize = 0x00d8;
 const IMS: usize = 0x00d0;
 const ICS: usize = 0x00c8;
 const INTERRUPTS: u32 = 1 | (1 << 2) | (1 << 4) | (1 << 6) | (1 << 7); // TXDW, LSC, RXDMT0, RXO, RXT0
-const RX_QUEUE: usize = 8;
+#[cfg(any(feature = "boot-smoke-tests", test))]
 pub(super) const FRAME_SIZE: usize = 128;
+#[cfg(any(feature = "boot-smoke-tests", test))]
 pub(super) const HOST_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
-#[derive(Clone, Copy)]
-struct Frame { bytes: [u8; FRAME_SIZE], length: usize }
-impl Frame { const EMPTY: Self = Self { bytes: [0; FRAME_SIZE], length: 0 }; }
+struct Frame {
+    bytes: [u8; MAX_FRAME_LEN],
+    length: usize,
+}
+// PMM reclaim remains exact for the boot diagnostic. This region is
+// CPU-owned for its entire lifetime and never published to device registers.
+struct RxQueue {
+    backing: DmaRegion,
+    capacity: usize,
+    head: usize,
+    len: usize,
+}
+impl RxQueue {
+    fn allocate(capacity: usize) -> Option<Self> {
+        Some(Self {
+            backing: DmaRegion::allocate(core::mem::size_of::<Frame>() * capacity)?,
+            capacity,
+            head: 0,
+            len: 0,
+        })
+    }
+
+    fn frame(&self, slot: usize) -> &Frame {
+        debug_assert!(slot < self.capacity);
+        // Aligned, zero-initialized backing. Frame contains only integers.
+        unsafe { &*(self.backing.virtual_address() as *const Frame).add(slot) }
+    }
+
+    fn frame_mut(&mut self, slot: usize) -> &mut Frame {
+        debug_assert!(slot < self.capacity);
+        // The queue is never published to DMA, so the mutable borrow owns
+        // the slot until the caller returns.
+        unsafe { &mut *(self.backing.virtual_address() as *mut Frame).add(slot) }
+    }
+
+    fn consume(&mut self, count: usize) {
+        debug_assert!(count <= self.len);
+        self.head = (self.head + count) % self.capacity;
+        self.len -= count;
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Packet,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
+    ExternalDiagnostic,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
+    Loopback,
+}
+
+impl Mode {
+    fn uses_irq(self) -> bool {
+        #[cfg(any(feature = "boot-smoke-tests", test))]
+        if self == Self::Loopback {
+            return false;
+        }
+        true
+    }
+}
 const RCTL: usize = 0x0100;
 const TCTL: usize = 0x0400;
 const TIPG: usize = 0x0410;
@@ -36,9 +97,11 @@ const PHY_LOOPBACK: u16 = 1 << 14;
 // QEMU's 82540EM receive-control handler suppresses receive for 1000 ms
 // after every RCTL write. This private reference-device diagnostic settles
 // before sending its first frame; per-frame deadlines stay at 100 ms.
+#[cfg(any(feature = "boot-smoke-tests", test))]
 const RX_STARTUP_NS: u64 = 1_010_000_000;
 const BUDGET_NS: u64 = 100_000_000;
 const POLL_LIMIT: usize = 1_000_000;
+#[cfg(any(feature = "boot-smoke-tests", test))]
 pub(super) const TEST_PACKETS: usize = COUNT * 3 + 7;
 
 pub(super) trait Registers {
@@ -53,9 +116,12 @@ pub(super) enum Error {
     NoMemory,
     Registers,
     BusMaster,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     Transmit,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     Receive,
     Timeout,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     Payload,
     Stop,
 }
@@ -111,6 +177,7 @@ fn write_phy(io: &mut impl Registers, value: u16) -> Result<(), Error> {
     }
     Ok(())
 }
+#[cfg(any(feature = "boot-smoke-tests", test))]
 pub(super) struct Snapshot {
     pub registers: [(usize, u32); 13],
     pub sequence: usize,
@@ -126,18 +193,33 @@ pub(super) struct Controller<R: Registers> {
     mac: [u8; 6],
     original_phy: u16,
     phy_changed: bool,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     sequence: usize,
-    external: bool,
+    mode: Mode,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     ready_at: u64,
-    pending: [Frame; RX_QUEUE],
-    pending_head: usize,
-    pending_len: usize,
+    pending: Option<RxQueue>,
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     irq_count: u64,
+    rx_overruns: u64,
+    tx_errors: u64,
 }
 impl<R: Registers> Controller<R> {
-    pub fn start(io: R) -> Result<Self, Error> { Self::start_mode(io, false) }
-    pub fn start_external(io: R) -> Result<Self, Error> { Self::start_mode(io, true) }
-    fn start_mode(mut io: R, external: bool) -> Result<Self, Error> {
+    #[cfg(any(feature = "boot-smoke-tests", test))]
+    pub fn start(io: R) -> Result<Self, Error> {
+        Self::start_mode(io, Mode::Loopback)
+    }
+
+    #[cfg(any(feature = "boot-smoke-tests", test))]
+    pub fn start_external(io: R) -> Result<Self, Error> {
+        Self::start_mode(io, Mode::ExternalDiagnostic)
+    }
+
+    pub fn start_packet(io: R) -> Result<Self, Error> {
+        Self::start_mode(io, Mode::Packet)
+    }
+
+    fn start_mode(mut io: R, mode: Mode) -> Result<Self, Error> {
         if !reset(&mut io) {
             return Err(Error::Reset);
         }
@@ -155,6 +237,12 @@ impl<R: Registers> Controller<R> {
             return Err(Error::Registers);
         }
         let original_phy = read_phy(&mut io)?;
+        let pending = if mode.uses_irq() {
+            let capacity = if mode == Mode::Packet { COUNT } else { 8 };
+            Some(RxQueue::allocate(capacity).ok_or(Error::NoMemory)?)
+        } else {
+            None
+        };
         let rings = Rings::allocate().ok_or(Error::NoMemory)?;
         let mut device = Self {
             io,
@@ -164,13 +252,16 @@ impl<R: Registers> Controller<R> {
             mac,
             original_phy,
             phy_changed: false,
+            #[cfg(any(feature = "boot-smoke-tests", test))]
             sequence: 0,
-            external,
+            mode,
+            #[cfg(any(feature = "boot-smoke-tests", test))]
             ready_at: 0,
-            pending: [Frame::EMPTY; RX_QUEUE],
-            pending_head: 0,
-            pending_len: 0,
+            pending,
+            #[cfg(any(feature = "boot-smoke-tests", test))]
             irq_count: 0,
+            rx_overruns: 0,
+            tx_errors: 0,
         };
         let rx = device.rings.rx_physical();
         let tx = device.rings.tx_physical();
@@ -191,13 +282,21 @@ impl<R: Registers> Controller<R> {
         device.rings.publish();
         device.armed = true;
         if !device.io.bus_master(true) {
+            device.stop()?;
             return Err(Error::BusMaster);
         }
         // The reference QEMU device implements PHY BMCR loopback, not RCTL's
         // MAC loopback selector. Disable autonegotiation during the local test.
         device.phy_changed = true;
-        write_phy(&mut device.io, if external { original_phy & !PHY_LOOPBACK }
-            else { (original_phy & !(1 << 12)) | PHY_LOOPBACK })?;
+        let phy = if mode.uses_irq() {
+            original_phy & !PHY_LOOPBACK
+        } else {
+            (original_phy & !(1 << 12)) | PHY_LOOPBACK
+        };
+        if let Err(error) = write_phy(&mut device.io, phy) {
+            device.stop()?;
+            return Err(error);
+        }
         // PHY-local loopback never emits diagnostic frames onto the wire.
         // Legacy 2 KiB RX buffers, accept broadcast, strip FCS; no jumbo frames.
         let control = device.io.read(CTRL) | (1 << 6); // SLU
@@ -208,64 +307,162 @@ impl<R: Registers> Controller<R> {
             .write(TCTL, 2 | (1 << 3) | (0x10 << 4) | (0x40 << 12));
         device.io.write(RCTL, 2 | (1 << 15) | (1 << 26));
         let _ = device.io.read(STATUS); // flush posted setup writes
-        let ready_at = device.io.now_ns().saturating_add(RX_STARTUP_NS);
-        device.ready_at = ready_at;
-        if external { return Ok(device); }
-        let mut ready = false;
-        for _ in 0..100_000_000usize {
-            if device.io.now_ns() >= ready_at {
-                ready = true;
-                break;
+        #[cfg(any(feature = "boot-smoke-tests", test))]
+        {
+            device.ready_at = device.io.now_ns().saturating_add(RX_STARTUP_NS);
+            if !mode.uses_irq() {
+                for _ in 0..100_000_000usize {
+                    if device.io.now_ns() >= device.ready_at {
+                        return Ok(device);
+                    }
+                    core::hint::spin_loop();
+                }
+                return Err(Error::Timeout);
             }
-            core::hint::spin_loop();
-        }
-        if !ready {
-            return Err(Error::Timeout);
         }
         Ok(device)
     }
-    pub fn ready_at(&self) -> u64 { self.ready_at }
+
+    #[cfg(any(feature = "boot-smoke-tests", test))]
+    pub fn ready_at(&self) -> u64 {
+        self.ready_at
+    }
+
     pub fn enable_irq(&mut self) {
         let _ = self.io.read(ICR);
-        self.io.write(IMS, INTERRUPTS);
+        self.resume_irq();
+    }
+
+    pub fn mask_irq(&mut self) {
+        self.io.write(IMC, u32::MAX);
         let _ = self.io.read(STATUS);
     }
-    /// Shared INTx: an empty ICR belongs to another device. Bounded work only;
-    /// no allocation, sleeping, serial output or queue-owner callbacks here.
+
+    fn resume_irq(&mut self) {
+        self.io.write(IMS, INTERRUPTS);
+        // Descriptor completion can arrive while causes are masked. Keep the
+        // drain bounded without requiring a new wire edge for pending data.
+        if self.rings.rx_ready() {
+            self.io.write(ICS, 1 << 7);
+        }
+        let _ = self.io.read(STATUS);
+    }
+
+    /// Drain at most one ring after acknowledging a shared INTx interrupt.
     pub fn handle_irq(&mut self) -> bool {
-        if !self.external || !self.armed { return false; }
+        let Some(pending) = self.pending.as_mut() else { return false; };
+        if !self.armed {
+            return false;
+        }
         let cause = self.io.read(ICR);
-        if cause == 0 || cause == u32::MAX { return false; }
+        if cause == u32::MAX {
+            self.failed = true;
+            return false;
+        }
+        if cause == 0 {
+            return false;
+        }
         self.io.write(IMC, u32::MAX);
-        self.irq_count += 1;
-        if self.failed { return true; }
-        if cause & (1 << 6) != 0 { self.failed = true; } // RX overrun
-        if self.rings.complete().is_err() { self.failed = true; } // <=32 TX
-        let mut received = [0; BUFFER];
+        #[cfg(any(feature = "boot-smoke-tests", test))]
+        {
+            self.irq_count += 1;
+        }
+        if self.failed {
+            return true;
+        }
+        if cause & (1 << 6) != 0 {
+            self.rx_overruns += 1;
+            self.failed = self.mode != Mode::Packet;
+        }
+        if self.rings.complete().is_err() {
+            self.tx_errors += 1;
+            self.failed = true;
+        }
+        let (minimum, maximum) = if self.mode == Mode::Packet {
+            (MIN_FRAME_LEN, MAX_FRAME_LEN)
+        } else {
+            (0, 128)
+        };
         for _ in 0..COUNT {
-            let Some((tail, result)) = self.rings.receive(&mut received) else { break; };
+            let slot = (pending.head + pending.len) % pending.capacity;
+            let tail = if pending.len < pending.capacity {
+                self.rings.receive(&mut pending.frame_mut(slot).bytes[..maximum])
+            } else {
+                self.rings.receive(&mut [])
+            };
+            let Some((tail, result)) = tail else { break; };
             self.io.write(RDT, tail);
             match result {
-                Ok(length) if length <= FRAME_SIZE && self.pending_len < RX_QUEUE => {
-                    let slot = (self.pending_head + self.pending_len) % RX_QUEUE;
-                    self.pending[slot].bytes[..length].copy_from_slice(&received[..length]);
-                    self.pending[slot].length = length;
-                    self.pending_len += 1;
+                Ok(length) if length >= minimum => {
+                    pending.frame_mut(slot).length = length;
+                    pending.len += 1;
                 }
-                _ => { self.failed = true; }
+                Ok(_) => {
+                    self.rings.counters.rx_dropped += 1;
+                    self.failed |= self.mode != Mode::Packet;
+                }
+                Err(_) => self.failed |= self.mode != Mode::Packet,
             }
         }
         if !self.failed {
-            self.io.write(IMS, INTERRUPTS);
-            // Descriptor completion may arrive while masked. Preserve a bounded
-            // handler without relying on another wire edge for existing work.
-            if self.rings.rx_ready() { self.io.write(ICS, 1 << 7); }
-            let _ = self.io.read(STATUS);
+            self.resume_irq();
         }
         true
     }
+
+    pub fn mac(&self) -> [u8; 6] {
+        self.mac
+    }
+
+    pub fn link_up(&mut self) -> bool {
+        let status = self.io.read(STATUS);
+        status != u32::MAX && status & (1 << 1) != 0
+    }
+
+    pub fn failed(&self) -> bool {
+        self.failed
+    }
+
+    pub fn counters(&self) -> &super::rings::Counters {
+        &self.rings.counters
+    }
+
+    pub fn rx_drops(&self) -> u64 {
+        self.rings.counters.rx_dropped + self.rx_overruns
+    }
+
+    pub fn tx_errors(&self) -> u64 {
+        self.tx_errors + self.rings.counters.tx_full
+    }
+
+    pub fn tx_ready(&self) -> bool {
+        self.rings.tx_ready()
+    }
+
+    pub fn rx_frame(&self, index: usize) -> Option<&[u8]> {
+        let pending = self.pending.as_ref()?;
+        if index >= pending.len {
+            return None;
+        }
+        let slot = pending.frame((pending.head + index) % pending.capacity);
+        Some(&slot.bytes[..slot.length])
+    }
+
+    pub fn consume_rx(&mut self, count: usize) {
+        if let Some(pending) = self.pending.as_mut() {
+            pending.consume(count);
+        }
+    }
+
+    pub fn submit_packet(&mut self, frame: &[u8]) -> Result<(), RingError> {
+        let tail = self.rings.submit(frame)?;
+        self.io.write(TDT, tail);
+        Ok(())
+    }
+
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn submit_external(&mut self, sequence: usize) -> Result<(), Error> {
-        if !self.external || !self.armed || self.failed { return Err(Error::Stop); }
+        if self.mode != Mode::ExternalDiagnostic || !self.armed || self.failed { return Err(Error::Stop); }
         let mut packet = [0; FRAME_SIZE];
         packet[..6].copy_from_slice(&HOST_MAC);
         packet[6..12].copy_from_slice(&self.mac);
@@ -280,31 +477,33 @@ impl<R: Registers> Controller<R> {
     }
     /// Reads CPU-owned queue/counters only. A descriptor can advance this probe
     /// exclusively through handle_irq, so polling cannot conceal missing IRQs.
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn external_progress(&mut self, sequence: usize) -> Result<bool, Error> {
         if self.failed { return Err(Error::Receive); }
-        if self.pending_len == 0 { return Ok(false); }
-        let frame = self.pending[self.pending_head];
-        self.pending_head = (self.pending_head + 1) % RX_QUEUE;
-        self.pending_len -= 1;
-        if frame.length != FRAME_SIZE || frame.bytes[..6] != self.mac
-            || frame.bytes[6..12] != HOST_MAC || frame.bytes[12..14] != [0x88, 0xb5]
+        let Some(frame) = self.rx_frame(0) else { return Ok(false); };
+        if frame.len() != FRAME_SIZE || frame[..6] != self.mac
+            || frame[6..12] != HOST_MAC || frame[12..14] != [0x88, 0xb5]
         { self.failed = true; return Err(Error::Payload); }
-        for (index, byte) in frame.bytes[14..].iter().enumerate() {
+        for (index, byte) in frame[14..].iter().enumerate() {
             let sent = (sequence as u8).wrapping_mul(37).wrapping_add(index as u8);
             if *byte != (sent ^ 0xa5) { self.failed = true; return Err(Error::Payload); }
         }
+        self.consume_rx(1);
         Ok(true)
     }
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn external_complete(&self) -> Result<bool, Error> {
         if self.failed { return Err(Error::Receive); }
         let c = &self.rings.counters;
-        Ok(self.irq_count > 0 && self.pending_len == 0
+        Ok(self.irq_count > 0 && self.rx_frame(0).is_none()
             && c.tx_packets == TEST_PACKETS as u64 && c.tx_completed == TEST_PACKETS as u64
             && c.rx_packets == TEST_PACKETS as u64 && c.rx_dropped == 0
             && c.tx_bytes == (TEST_PACKETS * FRAME_SIZE) as u64
             && c.rx_bytes == (TEST_PACKETS * FRAME_SIZE) as u64)
     }
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn irq_count(&self) -> u64 { self.irq_count }
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn diagnostic(&mut self) -> Result<(), Error> {
         if self.failed || !self.armed {
             return Err(Error::Stop);
@@ -315,6 +514,7 @@ impl<R: Registers> Controller<R> {
         }
         result
     }
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     fn run_packets(&mut self) -> Result<(), Error> {
         let mut packet = [0u8; 128];
         let mut received = [0u8; BUFFER];
@@ -371,6 +571,7 @@ impl<R: Registers> Controller<R> {
         }
         Err(Error::Timeout)
     }
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn snapshot(&mut self) -> Snapshot {
         let offsets = [
             CTRL, STATUS, MDIC, RCTL, TCTL, RDH, RDT, TDH, TDT, RDBAL, RDBAH, TDBAL, TDBAH,

@@ -102,3 +102,5 @@
 92	FileCapOp
 93	IpcSendHandle
 94	IpcReceiveHandle
+95	NetDeviceGrant
+96	NetQueueOpen

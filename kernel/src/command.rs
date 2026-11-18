@@ -106,19 +106,64 @@ pub fn run_foreground_exec(
     sink: ProcessOutputSink,
     input: &mut impl ExecInput,
 ) -> Result<(String, ProcessExit), ExecRunError> {
-    let (normalized, argv) = parse_exec_argv(command_line, cwd)?;
+    run_foreground(cwd, command_line, sink, input, false)
+}
+
+/// Only the kernel's initial supervisor launch uses archive bytes and
+/// receives the bootstrap device-control handle.
+pub(crate) fn run_boot_supervisor(
+    path: &str,
+    input: &mut impl ExecInput,
+) -> Result<(String, ProcessExit), ExecRunError> {
+    run_foreground("/", path, ProcessOutputSink::SerialOnly, input, true)
+}
+
+fn run_foreground(
+    cwd: &str,
+    command_line: &str,
+    sink: ProcessOutputSink,
+    input: &mut impl ExecInput,
+    boot_supervisor: bool,
+) -> Result<(String, ProcessExit), ExecRunError> {
+    let (normalized, argv) = if boot_supervisor {
+        let name = command_line.rsplit('/').next().filter(|name| !name.is_empty())
+            .ok_or(ExecRunError::MissingPath)?;
+        (String::from(command_line), alloc::vec![String::from(name)])
+    } else {
+        parse_exec_argv(command_line, cwd)?
+    };
 
     crate::serial_write("[EXEC] loading ");
     crate::serial_write(&normalized);
     crate::serial_write("\r\n");
 
-    let data = read_vfs_file(cwd, &normalized)
-        .map_err(|error| ExecRunError::Vfs(normalized.clone(), error))?;
+    let owned;
+    let data = if boot_supervisor {
+        crate::initrd::get_initrd()
+            .and_then(|initrd| initrd.entries().iter().find(|entry| entry.name == normalized))
+            .ok_or_else(|| ExecRunError::Vfs(normalized.clone(), VfsError::NotFound))?
+            .data
+    } else {
+        owned = read_vfs_file(cwd, &normalized)
+            .map_err(|error| ExecRunError::Vfs(normalized.clone(), error))?;
+        &owned
+    };
     // Launched from the kernel console / init: privileged (system-control).
     let pid = process::create_user_process_record(normalized.clone(), true, true)
         .map_err(|_| ExecRunError::ProcessCreate)?;
 
-    if crate::elf::prepare_process_elf(pid, &data, &argv).is_err() {
+    let prepared = if boot_supervisor {
+        match process::bootstrap_net_root(pid) {
+            Ok(handle) => {
+                let env = alloc::format!("DUNIT_NET_ROOT={handle}");
+                crate::elf::prepare_process_elf_env(pid, data, &argv, &[env.as_str()]).is_ok()
+            }
+            Err(_) => false,
+        }
+    } else {
+        crate::elf::prepare_process_elf(pid, data, &argv).is_ok()
+    };
+    if !prepared {
         let _ = process::autoreap_process(pid, "exec-prepare-failed");
         return Err(ExecRunError::ElfLaunch);
     }

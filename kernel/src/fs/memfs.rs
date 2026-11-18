@@ -80,6 +80,7 @@ struct OpenMemHandle {
 
 pub struct MemFs {
     nodes: Vec<MemNode>,
+    boot_services_sealed: bool,
     next_handle: AtomicUsize,
     open_handles: Vec<(FileHandle, OpenMemHandle)>,
 }
@@ -97,6 +98,7 @@ impl MemFs {
     pub const fn empty() -> Self {
         Self {
             nodes: Vec::new(),
+            boot_services_sealed: false,
             next_handle: AtomicUsize::new(1),
             open_handles: Vec::new(),
         }
@@ -108,6 +110,35 @@ impl MemFs {
 
     pub fn with_base_tree() -> Self {
         Self::new()
+    }
+
+    /// Boot authority is resolved from these archive-backed namespaces.
+    pub(super) fn boot_service_path(path: &str) -> bool {
+        ["system/boot-services", "system/libexec"].iter().any(|prefix| {
+            let path = Self::clean(path);
+            path == *prefix || path.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('/'))
+        })
+    }
+
+    pub(super) fn seal_boot_services(&mut self) {
+        self.boot_services_sealed = true;
+    }
+
+    fn check_boot_mutation(&self, path: &str) -> Result<()> {
+        if self.boot_services_sealed && Self::boot_service_path(path) {
+            Err(VfsError::PermissionDenied)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_boot_directory_move(&self, path: &str) -> Result<()> {
+        self.check_boot_mutation(path)?;
+        // Moving the ancestor would allow replacement at the trusted path.
+        if self.boot_services_sealed && Self::clean(path) == "system" {
+            return Err(VfsError::PermissionDenied);
+        }
+        Ok(())
     }
 
     pub fn add_file(&mut self, name: &str, data: Vec<u8>) {
@@ -248,6 +279,9 @@ impl FileSystem for MemFs {
         Ok(dunit_file_cap_abi::Relation::paths(&source,&destination))
     }
     fn cap_open(&mut self, path: &str, flags: OpenFlags) -> Result<FileHandle> {
+        if flags.can_write() || flags.create() || flags.trunc() {
+            self.check_boot_mutation(path)?;
+        }
         let clean = Self::clean(path);
         // The virtual root spans mount points, not one backend inode.
         if clean.is_empty() { return Err(VfsError::Unsupported); }
@@ -310,6 +344,9 @@ impl FileSystem for MemFs {
             return Err(VfsError::InvalidPath);
         }
 
+        if flags.can_write() || flags.create() || flags.trunc() {
+            self.check_boot_mutation(path)?;
+        }
         let exists = self.node_type(path).is_some();
         // O_EXCL: exclusive create must fail if the path already exists.
         if flags.create() && flags.is_exclusive() && exists {
@@ -580,6 +617,7 @@ impl FileSystem for MemFs {
     }
 
     fn create(&mut self, path: &str) -> Result<()> {
+        self.check_boot_mutation(path)?;
         let clean = Self::clean(path);
         if clean.is_empty() {
             return Err(VfsError::InvalidPath);
@@ -602,6 +640,7 @@ impl FileSystem for MemFs {
     }
 
     fn mkdir(&mut self, path: &str) -> Result<()> {
+        self.check_boot_mutation(path)?;
         let clean = Self::clean(path);
         if clean.is_empty() {
             return Err(VfsError::InvalidPath);
@@ -624,6 +663,7 @@ impl FileSystem for MemFs {
     }
 
     fn remove(&mut self, path: &str) -> Result<()> {
+        self.check_boot_mutation(path)?;
         let clean = Self::clean(path);
         if clean.is_empty() {
             return Err(VfsError::InvalidPath);
@@ -650,6 +690,7 @@ impl FileSystem for MemFs {
     }
 
     fn remove_dir(&mut self, path: &str) -> Result<()> {
+        self.check_boot_directory_move(path)?;
         let clean = Self::clean(path);
         if clean.is_empty() {
             return Err(VfsError::InvalidPath);
@@ -681,6 +722,8 @@ impl FileSystem for MemFs {
     }
 
     fn rename(&mut self, old: &str, new: &str) -> Result<()> {
+        self.check_boot_directory_move(old)?;
+        self.check_boot_directory_move(new)?;
         let old_clean = Self::clean(old);
         let new_clean = Self::clean(new);
         if old_clean.is_empty() || new_clean.is_empty() {
@@ -727,6 +770,7 @@ impl FileSystem for MemFs {
     }
 
     fn truncate(&mut self, path: &str) -> Result<()> {
+        self.check_boot_mutation(path)?;
         let clean = Self::clean(path);
         if clean.is_empty() {
             return Err(VfsError::InvalidPath);

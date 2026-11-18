@@ -2,6 +2,7 @@
 """Check actual generated/public headers on fresh and cached sysroots."""
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,11 +26,32 @@ class Headers(unittest.TestCase):
     def test_generated_umbrella_has_no_copied_definitions(self):
         source=(ROOT/'abi/include/dunit.h').read_text()
         self.assertEqual(source,render_c_api())
-        for name in ('syscall','errno','rights','transfer'):
+        for name in ('syscall','errno','rights','transfer','packet'):
             self.assertIn(f'#include <dunit/{name}.h>',source)
         self.assertNotRegex(source,r'#define\s+(?:SYS_|DUNIT_(?:E[A-Z]|RIGHT_|TRANSFER_))')
     def test_fresh_install(self):
         sysroot_tool.install_headers(self.root,self.sysroot);self.assert_installed()
+    def test_packet_layout_in_installed_umbrella(self):
+        sysroot_tool.install_headers(self.root, self.sysroot)
+        subprocess.run(
+            ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+             '-I', str(self.sysroot / 'include'), '-xc', '-fsyntax-only', '-'],
+            input='''
+#include <dunit.h>
+_Static_assert(SYS_NET_DEVICE_GRANT == 95, "grant syscall");
+_Static_assert(SYS_NET_QUEUE_OPEN == 96, "open syscall");
+_Static_assert(DUNIT_RIGHT_NET_CONTROL == (1u << 7), "control right");
+_Static_assert(DUNIT_RIGHT_NET_RAW == (1u << 8), "raw right");
+_Static_assert(sizeof(struct dunit_packet_options) == 16, "options length");
+_Static_assert(sizeof(struct dunit_packet_info) == 64, "info length");
+_Static_assert(sizeof(struct dunit_packet_control) == 16, "control length");
+_Static_assert(sizeof(struct dunit_packet_frame) == 8, "frame header length");
+_Static_assert(offsetof(struct dunit_packet_info, mac) == 8, "MAC");
+_Static_assert(offsetof(struct dunit_packet_info, rx_frames) == 16, "RX frames");
+_Static_assert(offsetof(struct dunit_packet_info, tx_errors) == 56, "TX errors");
+''',
+            text=True, check=True,
+        )
     def test_changed_header_updates_without_touching_other_headers(self):
         sysroot_tool.install_headers(self.root,self.sysroot)
         stable=self.sysroot/'include/dunit/errno.h';os.utime(stable,ns=(1,1))

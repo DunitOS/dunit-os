@@ -656,15 +656,14 @@ pub fn init() -> Result<()> {
 
         // Populate /app and /assets entirely from the Limine-loaded initrd
         // archive (kernel/src/initrd.rs). The kernel embeds no application
-        // binaries or desktop assets; every path comes from the archive. Asset
-        // files are mounted zero-copy read-only (they reference module memory,
-        // which Limine never reclaims); everything else is copied into a
-        // writable MemFS node.
+        // binaries or desktop assets; every path comes from the archive. Assets
+        // and trusted boot services reference the read-only module memory.
+        // Other files are copied into writable MemFS nodes.
         match crate::initrd::get_initrd() {
             Some(initrd) => {
                 for entry in initrd.entries() {
                     ensure_parent_dirs(&mut memfs, &entry.name);
-                    if entry.name.starts_with("/assets/") {
+                    if entry.name.starts_with("/assets/") || MemFs::boot_service_path(&entry.name) {
                         memfs.add_static_file(&entry.name, entry.data);
                     } else {
                         memfs.add_file(&entry.name, entry.data.to_vec());
@@ -673,6 +672,8 @@ pub fn init() -> Result<()> {
             }
             None => serial_log("[VFS] WARN: no initrd archive; /app and /assets are empty\r\n"),
         }
+
+        memfs.seal_boot_services();
 
         // Kernel-seeded writable nodes that are not shipped in the archive.
         let _ = memfs.mkdir("/persist");

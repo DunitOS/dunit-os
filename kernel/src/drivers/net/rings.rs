@@ -129,6 +129,7 @@ impl Rings {
         self.dma.retire_after_reset();
     }
     /// The returned tail must be published to TDT only after this function.
+    #[cfg(any(feature = "boot-smoke-tests", test))]
     pub fn transmit(&mut self, frame: &[u8]) -> Result<u32, Error> {
         if !(14..=MAX_FRAME).contains(&frame.len()) {
             return Err(Error::InvalidLength);
@@ -195,6 +196,9 @@ impl Rings {
             self.reclaim(i)?;
         }
         Ok(!self.busy.iter().any(|busy| *busy))
+    }
+    pub fn tx_ready(&self) -> bool {
+        self.queued < COUNT - 1 && !self.busy[self.tx_next]
     }
     pub fn rx_ready(&self) -> bool {
         unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*self.rx(self.rx_next)).status)) & DD != 0 }

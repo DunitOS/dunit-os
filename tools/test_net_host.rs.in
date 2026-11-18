@@ -275,3 +275,53 @@ fn external_rejects_untransformed_loopback_and_corruption() {
         assert_eq!(PAGES.load(Ordering::SeqCst), 0);
     }
 }
+
+#[test]
+fn production_packet_frames_and_backpressure_recover_through_irq() {
+    use dunit_packet_abi::{MAX_FRAME_LEN, MIN_FRAME_LEN};
+
+    let mut model = Device::new();
+    model.external = true;
+    model.no_transform = true;
+    let time = model.now.clone();
+    let mut controller = e1000::Controller::start_packet(model).unwrap();
+    time.set(controller.ready_at());
+    controller.enable_irq();
+    assert!(controller.link_up());
+    assert_eq!(controller.mac(), [0x52, 0x54, 0, 0x12, 0x34, 0x56]);
+
+    let maximum = [0xa5; MAX_FRAME_LEN];
+    let minimum = [0x56; MIN_FRAME_LEN];
+    for _ in 0..rings::COUNT - 1 {
+        controller.submit_packet(&maximum).unwrap();
+    }
+    assert!(controller.rx_frame(0).is_none());
+    assert!(!controller.tx_ready());
+    assert_eq!(controller.submit_packet(&minimum), Err(rings::Error::Full));
+    assert!(controller.handle_irq());
+    assert!(controller.tx_ready());
+
+    // Fill the last CPU slot and then overflow by a full TX drain. Retain
+    // the original FIFO records and recycle oversubscribed descriptors.
+    for _ in 0..rings::COUNT - 1 {
+        controller.submit_packet(&minimum).unwrap();
+    }
+    assert!(controller.handle_irq());
+    assert!(!controller.failed());
+    assert_eq!(controller.rx_drops(), (rings::COUNT - 2) as u64);
+    assert_eq!(controller.tx_errors(), 1);
+    for index in 0..rings::COUNT - 1 {
+        assert_eq!(controller.rx_frame(index), Some(maximum.as_slice()));
+    }
+    assert_eq!(controller.rx_frame(rings::COUNT - 1), Some(minimum.as_slice()));
+    assert!(controller.rx_frame(rings::COUNT).is_none());
+
+    // Consume and verify that the first post-overflow frame reuses space.
+    controller.consume_rx(rings::COUNT);
+    controller.submit_packet(&minimum).unwrap();
+    assert!(controller.handle_irq());
+    assert_eq!(controller.rx_frame(0), Some(minimum.as_slice()));
+    controller.stop().unwrap();
+    drop(controller);
+    assert_eq!(PAGES.load(Ordering::SeqCst), 0);
+}

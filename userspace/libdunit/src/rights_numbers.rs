@@ -9,3 +9,5 @@ pub const RIGHT_SIGNAL: u32 = 1 << 3;
 pub const RIGHT_TRANSFER: u32 = 1 << 4;
 pub const RIGHT_DISPLAY_MASTER: u32 = 1 << 5;
 pub const RIGHT_INPUT_MASTER: u32 = 1 << 6;
+pub const RIGHT_NET_CONTROL: u32 = 1 << 7;
+pub const RIGHT_NET_RAW: u32 = 1 << 8;

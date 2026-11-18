@@ -1275,12 +1275,7 @@ pub extern "C" fn kernel_main(
             // spawns get CPU via PIT preemption.
             serial_write("[GUI] launching /app/init (userspace service manager)\r\n");
             let mut input = command::NoExecInput;
-            match command::run_foreground_exec(
-                "/",
-                "/app/init",
-                process::ProcessOutputSink::SerialOnly,
-                &mut input,
-            ) {
+            match command::run_boot_supervisor("/app/init", &mut input) {
                 Ok((_path, _exit)) => {
                     serial_write("[GUI] init exited\r\n");
                 }

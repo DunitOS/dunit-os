@@ -3,6 +3,7 @@ pub use display::FbInfo;
 use display::{sys_get_framebuffer, sys_get_terminal_cursor, sys_draw_pixel,
     sys_draw_rect, sys_fb_present, sys_set_video_mode};
 mod native_fd;
+mod packet;
 mod pointer_input;
 mod file_cap;
 mod attached_ipc;
@@ -117,6 +118,8 @@ pub enum Syscall {
     FileCapOp = 92,
     IpcSendHandle = 93,
     IpcReceiveHandle = 94,
+    NetDeviceGrant = 95,
+    NetQueueOpen = 96,
 }
 
 impl Syscall {
@@ -217,6 +220,8 @@ impl Syscall {
             92 => Some(Syscall::FileCapOp),
             93 => Some(Syscall::IpcSendHandle),
             94 => Some(Syscall::IpcReceiveHandle),
+            95 => Some(Syscall::NetDeviceGrant),
+            96 => Some(Syscall::NetQueueOpen),
             _ => None,
         }
     }
@@ -546,6 +551,8 @@ pub extern "C" fn syscall_handler(
         Syscall::FutexWake => sys_futex_wake(arg0, arg1),
         Syscall::HandleCreateMemory => sys_handle_create_memory(arg0 as usize),
         Syscall::HandleCreateEndpoint => sys_handle_create_endpoint(arg0),
+        Syscall::NetDeviceGrant => packet::grant(arg0, arg1, arg2, arg3),
+        Syscall::NetQueueOpen => packet::open(arg0, arg1 as *const u8, arg2 as usize),
         Syscall::HandleRead => sys_handle_read(arg0 as u32, arg1 as *mut u8, arg2 as usize),
         Syscall::HandleWrite => sys_handle_write(arg0 as u32, arg1 as *const u8, arg2 as usize),
         Syscall::HandleMap => sys_handle_map(arg0 as u32, arg1 as usize, arg2 as usize),
@@ -656,6 +663,11 @@ fn sys_handle_read(handle: u32, user_buf: *mut u8, len: usize) -> i64 {
     if len == 0 || !is_valid_user_pointer(user_buf as u64, len) {
         return EINVAL;
     }
+    if let Some(Ok(Some((device, rights)))) =
+        crate::process::with_current_process(|process| process.net_device(handle))
+    {
+        return packet::read_info(&device, rights, user_buf, len);
+    }
     // Объект памяти хэндла не превышает MAX_MEMORY_OBJECT (handle.rs), поэтому
     // читать — и выделять под это ядерный буфер — больше смысла нет. Ограничение
     // ОБЯЗАТЕЛЬНО: без него процесс передаёт произвольно большой userspace-len и
@@ -679,6 +691,11 @@ fn sys_handle_read(handle: u32, user_buf: *mut u8, len: usize) -> i64 {
 fn sys_handle_write(handle: u32, user_buf: *const u8, len: usize) -> i64 {
     if len == 0 || !is_valid_user_pointer(user_buf as u64, len) {
         return EINVAL;
+    }
+    if let Some(Ok(Some((device, rights)))) =
+        crate::process::with_current_process(|process| process.net_device(handle))
+    {
+        return packet::control(&device, rights, user_buf, len);
     }
     let data = match copy_buffer_from_user(user_buf, len) {
         Ok(data) => data,
@@ -717,6 +734,12 @@ fn sys_handle_rights(handle: u32) -> i64 {
 }
 
 fn sys_handle_close(handle: u32) -> i64 {
+    if let Some(Some(device)) = crate::process::with_current_process_mut(|process| {
+        process.take_net_device(handle)
+    }) {
+        drop(device);
+        return 0;
+    }
     crate::process::with_current_process_mut(|process| process
             .handle_close(handle)
             .map(|_| 0)
@@ -863,6 +886,9 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
             return sys_pipe_read(id, buf, count, entry.status() & 64 != 0);
         }
         crate::process::FdTarget::Pipe { .. } => return EBADF, // read on write end
+        crate::process::FdTarget::Packet { generation, access } => {
+            return packet::read(generation, access, buf, count);
+        }
         crate::process::FdTarget::Vfs(_) => {}
     }
 
@@ -1088,12 +1114,19 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
         return 0;
     }
 
+    let entry = crate::process::get_fd(fd);
+    if let Some(crate::process::FdTarget::Packet { generation, access }) =
+        entry.as_ref().map(|entry| entry.target)
+    {
+        return packet::write(generation, access, buf, count);
+    }
+
     let data = match copy_buffer_from_user(buf, count) {
         Ok(data) => data,
         Err(error) => return error,
     };
 
-    let entry = match crate::process::get_fd(fd) {
+    let entry = match entry {
         Some(entry) => entry,
         None => return EBADF,
     };
@@ -1113,6 +1146,7 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
             return sys_pipe_write(id, &data, entry.status() & 64 != 0);
         }
         crate::process::FdTarget::Pipe { .. } => return EBADF, // write on read end
+        crate::process::FdTarget::Packet { .. } => unreachable!("packet write handled before copy"),
         crate::process::FdTarget::Vfs(_) => {}
     }
 
@@ -1387,6 +1421,9 @@ fn apply_fd_cleanup(cleanup: crate::process::FdCleanup) {
                 let _ = vfs.close(vfs_fd);
             }
         }
+        crate::process::FdCleanup::ClosePacket(generation) => {
+            crate::drivers::net::packet::close(generation);
+        }
         crate::process::FdCleanup::WakePipe(id) => {
             crate::process::wake_pipe_waiters(id);
         }
@@ -1417,7 +1454,7 @@ fn sys_fsync(fd: u32) -> i64 {
                 Err(error) => error,
             }
         }
-        crate::process::FdTarget::Pipe { .. } => EINVAL, // fsync on a pipe (POSIX)
+        crate::process::FdTarget::Pipe { .. } | crate::process::FdTarget::Packet { .. } => EINVAL,
     }
 }
 
@@ -1709,7 +1746,7 @@ fn process_vfs_fd(fd: u32) -> Result<crate::fs::vfs::FileDescriptor, i64> {
             | crate::process::FdTarget::Stdout
             | crate::process::FdTarget::Stderr,
         ) => Err(EBADF),
-        Some(crate::process::FdTarget::Pipe { .. }) => Err(EBADF),
+        Some(crate::process::FdTarget::Pipe { .. } | crate::process::FdTarget::Packet { .. }) => Err(EBADF),
         None => Err(EBADF),
     }
 }

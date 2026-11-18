@@ -952,6 +952,30 @@ pub fn handle_rights(handle: u32) -> isize {
     syscall1(SYSCALL_HANDLE_RIGHTS, handle as usize)
 }
 
+/// Insert a nontransferable NIC device handle into an authorized recipient.
+/// The returned handle number belongs to the recipient's handle table.
+pub fn net_device_grant(root: u32, interface_index: u32, recipient_pid: u32, rights: u32) -> isize {
+    syscall5(
+        SYSCALL_NET_DEVICE_GRANT,
+        root as usize,
+        interface_index as usize,
+        recipient_pid as usize,
+        rights as usize,
+        0,
+    )
+}
+
+/// Open an owner-bound, nonblocking packet descriptor using v1 queue options.
+/// The versioned records are defined in the shared dunit_packet_abi crate.
+pub fn net_queue_open(device: u32, options: &[u8]) -> isize {
+    syscall3(
+        SYSCALL_NET_QUEUE_OPEN,
+        device as usize,
+        options.as_ptr() as usize,
+        options.len(),
+    )
+}
+
 /// Закрывает хэндл. Возвращает 0 или отрицательный errno.
 pub fn handle_close(handle: u32) -> isize {
     syscall1(SYSCALL_HANDLE_CLOSE, handle as usize)

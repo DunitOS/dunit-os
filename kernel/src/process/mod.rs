@@ -1,4 +1,6 @@
 mod fd;
+mod packet;
+pub(crate) use packet::{bootstrap_net_root, grant_net_device};
 mod runner;
 pub use runner::{exit_current_process, request_current_user_exit, request_current_user_fault, user_fault_escape_requested, preempt_switch_requested, clear_preempt_switch, set_preemption_enabled, preemption_enabled, preemption_count, reset_preemption_count, enter_user_process};
 mod lifecycle;
@@ -935,6 +937,8 @@ impl Process {
             shared_vm_release(id, 1);
         } else if let HandleObject::File(file) = entry.object {
             self.retired_resources.files.push(file);
+        } else if let HandleObject::NetDevice(device) = entry.object {
+            self.retired_resources.net_devices.push(device);
         }
         Ok(())
     }
@@ -1085,7 +1089,7 @@ impl Process {
         handle: Handle,
     ) -> Result<(HandleObject, u32), HandleError> {
         let entry = self.handle_table.require(handle, RIGHT_TRANSFER)?;
-        if matches!(entry.object, HandleObject::Display | HandleObject::Input) {
+        if matches!(entry.object, HandleObject::Display | HandleObject::Input | HandleObject::NetRoot | HandleObject::NetDevice(_)) {
             return Err(HandleError::WrongType);
         }
         self.handle_table.take_for_transfer(handle)
@@ -1191,6 +1195,8 @@ pub enum FdTarget {
     Vfs(crate::fs::vfs::FileDescriptor),
     /// One end of an anonymous pipe (see crate::pipe). `write` selects which end.
     Pipe { id: u64, write: bool },
+    /// Process-local native Ethernet queue, never inherited or exported.
+    Packet { generation: u64, access: u32 },
 }
 
 /// What the fd layer asks the syscall layer to finish after a close/dup2 that
@@ -1201,6 +1207,7 @@ pub enum FdCleanup {
     None,
     CloseVfs(crate::fs::vfs::FileDescriptor),
     WakePipe(u64),
+    ClosePacket(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1261,9 +1268,6 @@ pub fn get_fd(fd: ProcessFd) -> Option<FdEntry> {
     with_current_process(|process| process.get_fd(fd).cloned()).flatten()
 }
 
-pub fn close_fd(fd: ProcessFd) -> Result<FdEntry, ProcessError> {
-    with_current_process_mut(|process| process.close_fd(fd)).ok_or(ProcessError::NoCurrentProcess)?
-}
 
 #[cfg(feature = "boot-smoke-tests")]
 pub fn run_process_address_space_smoke() -> bool {

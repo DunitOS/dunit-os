@@ -48,7 +48,14 @@ impl Process {
                     FdCleanup::None
                 }
             }
-            _ => FdCleanup::None,
+            FdTarget::Packet { generation, .. } => {
+                if self.fd_table.values().any(|entry| entry.target == target) {
+                    FdCleanup::None
+                } else {
+                    FdCleanup::ClosePacket(generation)
+                }
+            }
+            FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr => FdCleanup::None,
         }
     }
 
@@ -58,7 +65,7 @@ impl Process {
                 *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
             }
             FdTarget::Pipe { id, write } => crate::pipe::retain(id, write),
-            _ => {}
+            FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr | FdTarget::Packet { .. } => {}
         }
     }
 
@@ -77,7 +84,8 @@ impl Process {
                 if nf >= MAX_PROCESS_FD { return Err(ProcessError::InvalidFd); }
                 entry.cloexec = false;
                 self.retain_target(entry.target);
-                let cleanup = match self.fd_table.remove(&nf) {
+                entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
+                let cleanup = match self.fd_table.insert(nf, entry) {
                     Some(old) => {
                         let cleanup = self.release_target(old.target);
                         self.retire_fd(old);
@@ -85,8 +93,6 @@ impl Process {
                     }
                     None => FdCleanup::None,
                 };
-                entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
-                self.fd_table.insert(nf, entry);
                 self.fd_wakeup_pending = true;
                 Ok((nf, cleanup))
             }
@@ -141,6 +147,15 @@ impl Process {
     pub fn snapshot_fds(&self) -> Vec<(u32, FdEntry)> {
         self.fd_table.iter().map(|(&fd, entry)| (fd, entry.clone())).collect()
     }
+    pub fn inheritable_fds(&self) -> Vec<(u32, FdEntry)> {
+        self.fd_table.iter().filter_map(|(&fd, entry)| {
+            if matches!(entry.target, FdTarget::Packet { .. }) {
+                None
+            } else {
+                Some((fd, entry.clone()))
+            }
+        }).collect()
+    }
     pub fn set_cloexec(&mut self, fd: u32, value: bool) -> Result<(), ProcessError> {
         self.fd_table.get_mut(&fd).ok_or(ProcessError::InvalidFd)?.cloexec = value;
         Ok(())
@@ -151,7 +166,8 @@ impl Process {
             return Err(ProcessError::InvalidFd);
         }
         self.retain_target(entry.target);
-        let cleanup = match self.fd_table.remove(&fd) {
+        entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
+        let cleanup = match self.fd_table.insert(fd, entry) {
             Some(old) => {
                 let cleanup = self.release_target(old.target);
                 self.retire_fd(old);
@@ -159,8 +175,6 @@ impl Process {
             }
             None => FdCleanup::None,
         };
-        entry.identity = NEXT_FD_IDENTITY.fetch_add(1, Ordering::Relaxed);
-        self.fd_table.insert(fd, entry);
         self.fd_wakeup_pending = true;
         Ok(cleanup)
     }
@@ -171,12 +185,6 @@ impl Process {
     }
     pub fn get_fd(&self, fd: ProcessFd) -> Option<&FdEntry> {
         self.fd_table.get(&fd)
-    }
-
-    pub fn close_fd(&mut self, fd: ProcessFd) -> Result<FdEntry, ProcessError> {
-        let entry = self.fd_table.remove(&fd).ok_or(ProcessError::InvalidFd)?;
-        self.fd_wakeup_pending = true;
-        Ok(entry)
     }
 
 }

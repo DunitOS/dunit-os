@@ -7,6 +7,7 @@ edition = "2021"
 crate-type = ["staticlib"]
 
 [dependencies]
+dunit_packet_abi = { path = "../abi/packet" }
 dunit_file_cap_abi = { path = "../abi/file-cap" }
 dunit_pointer_abi = { path = "../abi/pointer-input" }
 dunit_wait_abi = { path = "../abi/wait-set" }

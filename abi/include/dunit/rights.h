@@ -10,5 +10,7 @@
 #define DUNIT_RIGHT_TRANSFER (1u << 4)
 #define DUNIT_RIGHT_DISPLAY_MASTER (1u << 5)
 #define DUNIT_RIGHT_INPUT_MASTER (1u << 6)
+#define DUNIT_RIGHT_NET_CONTROL (1u << 7)
+#define DUNIT_RIGHT_NET_RAW (1u << 8)
 
 #endif /* DUNIT_RIGHTS_H */

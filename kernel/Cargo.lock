@@ -13,6 +13,10 @@ name = "dunit_file_cap_abi"
 version = "0.1.0"
 
 [[package]]
+name = "dunit_packet_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_pointer_abi"
 version = "0.1.0"
 
@@ -26,6 +30,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "dunit_file_cap_abi",
+ "dunit_packet_abi",
  "dunit_pointer_abi",
  "dunit_wait_abi",
  "term_theme",

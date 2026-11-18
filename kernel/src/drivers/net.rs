@@ -77,6 +77,9 @@ pub fn init() {
 
         match probe_nic(dev, kind) {
             Ok(probe) => {
+                if index == 0 && dev.device_id == 0x100e && probe.mac_valid {
+                    packet::discover(dev, probe.mac, probe.link_up);
+                }
                 if probe.mmio_ready {
                     mmio_ready += 1;
                 }
@@ -114,7 +117,7 @@ pub fn init() {
         write_dec(mmio_ready as u64);
         serial_write(" mac-ready=");
         write_dec(mac_ready as u64);
-        serial_write(" stack=not-implemented\r\n");
+        serial_write("\r\n");
     }
 }
 
@@ -134,6 +137,8 @@ fn classify_nic(dev: PciDevice) -> NicKind {
 struct ProbeResult {
     mmio_ready: bool,
     mac_valid: bool,
+    mac: [u8; 6],
+    link_up: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,11 +187,16 @@ fn probe_e1000(dev: PciDevice) -> Result<ProbeResult, ProbeError> {
     write_hex(status as u64, 8);
     serial_write(" mac=");
     write_mac(ral, rah);
-    serial_write(" packet-io=not-implemented\r\n");
+    serial_write("\r\n");
 
     Ok(ProbeResult {
         mmio_ready: true,
         mac_valid,
+        mac: [
+            ral as u8, (ral >> 8) as u8, (ral >> 16) as u8, (ral >> 24) as u8,
+            rah as u8, (rah >> 8) as u8,
+        ],
+        link_up: status & 2 != 0,
     })
 }
 
@@ -237,17 +247,14 @@ fn read32(base: usize, offset: usize) -> u32 {
     unsafe { core::ptr::read_volatile((base + offset) as *const u32) }
 }
 
-// Packet bring-up remains private to boot diagnostics until N0 IRQ delivery and
-// the userspace packet-capability contract are implemented and verified.
-#[cfg(feature = "boot-smoke-tests")]
 #[path = "net/dma.rs"]
 mod dma;
-#[cfg(feature = "boot-smoke-tests")]
 #[path = "net/e1000.rs"]
 mod e1000;
-#[cfg(feature = "boot-smoke-tests")]
 #[path = "net/rings.rs"]
 mod rings;
+#[path = "net/packet.rs"]
+pub(crate) mod packet;
 
 struct MappedRegisters {
     base: usize,
@@ -276,7 +283,6 @@ impl MappedRegisters {
         }
     }
 }
-#[cfg(feature = "boot-smoke-tests")]
 impl e1000::Registers for MappedRegisters {
     fn read(&mut self, offset: usize) -> u32 {
         read32(self.base, offset)
@@ -385,8 +391,8 @@ static EXTERNAL: crate::sync::IrqSafeSpinLock<Option<(u8, e1000::Controller<Mapp
 #[cfg(feature = "boot-smoke-tests")]
 static EXTERNAL_USED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// Called by HAL before its PIC EOI. Device cause is acknowledged here; a
-/// shared line with no active diagnostic owner remains unclaimed.
+/// Called by HAL before its PIC EOI. An empty cause leaves a shared line
+/// unclaimed.
 pub fn handle_irq(line: u8) -> bool {
     #[cfg(feature = "boot-smoke-tests")]
     {
@@ -395,15 +401,11 @@ pub fn handle_irq(line: u8) -> bool {
             if *irq == line { return controller.handle_irq(); }
         }
     }
-    let _ = line;
-    false
+    packet::handle_irq(line)
 }
 
-/// Private PIC routing lifetime. Only reference PCI lines 10/11 are accepted.
-/// Restore the saved line/cascade mask and ELCR bit even on diagnostic failure.
-#[cfg(feature = "boot-smoke-tests")]
+/// PIC routing lifetime for reference PCI lines 10/11.
 struct LegacyRoute { line: u8, master: u8, slave: u8, elcr: u8 }
-#[cfg(feature = "boot-smoke-tests")]
 impl LegacyRoute {
     fn open(line: u8) -> Self {
         let _irq = crate::sync::InterruptGuard::new();
@@ -417,7 +419,6 @@ impl LegacyRoute {
         }
     }
 }
-#[cfg(feature = "boot-smoke-tests")]
 impl Drop for LegacyRoute {
     fn drop(&mut self) {
         let _irq = crate::sync::InterruptGuard::new();

@@ -20,6 +20,7 @@
 #include <dunit/errno.h>
 #include <dunit/rights.h>
 #include <dunit/transfer.h>
+#include <dunit/packet.h>
 #include <dunit/ui.h>
 
 #endif /* DUNIT_H */

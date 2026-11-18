@@ -96,3 +96,5 @@ pub const SYSCALL_FILE_CAP_OPEN: usize = 91;
 pub const SYSCALL_FILE_CAP_OP: usize = 92;
 pub const SYSCALL_IPC_SEND_HANDLE: usize = 93;
 pub const SYSCALL_IPC_RECEIVE_HANDLE: usize = 94;
+pub const SYSCALL_NET_DEVICE_GRANT: usize = 95;
+pub const SYSCALL_NET_QUEUE_OPEN: usize = 96;

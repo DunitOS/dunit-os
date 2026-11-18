@@ -256,6 +256,41 @@ it; invalid output buffers and insufficient capacity also preserve the message.
 The kernel has no clipboard owner, MIME negotiation or desktop application list.
 See [M7.7 lifetime and scope](../docs/sdk/desktop-transfers.md#clipboard-and-dragdrop).
 
+## Native Ethernet packet queue
+
+`NetDeviceGrant` (95) inserts a nontransferable device handle into a selected
+live direct child's handle table. The caller supplies its bootstrap root handle,
+interface ordinal, recipient PID and device rights. The return value is a
+handle number in the recipient's table. `NET_CONTROL` is bit 7 and `NET_RAW` is
+bit 8. `READ` and `WRITE` constrain the operations on the resulting device and
+its raw queue.
+
+`NetQueueOpen` (96) takes a device handle and an exact 16-byte options record
+containing version 1 and zero flags/reserved bytes. It returns an owner-bound
+descriptor for standard read, write, poll, wait-set and close operations.
+Read and write are nonblocking. Descriptors may be duplicated within the owner
+and are excluded from descriptor inheritance, even with CLOEXEC clear.
+An explicit spawn duplication action using a packet descriptor fails with
+EBADF. File capability export is unavailable for packet queues.
+
+Device `HandleRead` copies a 64-byte info record into a buffer of at least that
+size. It reports a link bit (bit 0), MTU, the byte length of the next complete RX record (0 for none), the
+MAC address and six u64 counters. `HandleWrite` requires both `WRITE` and
+`NET_CONTROL` and an exact 16-byte control record with version 1. Operation 1
+stops and resets an active queue. It returns EPIPE if there is no active queue.
+Reserved bytes must be zero.
+
+A packet batch consists of up to 32 whole records in at most 48 KiB. Each
+record starts with a u16 Ethernet frame length, u16 zero flags and u32 reserved
+zero, followed by 60–1514 frame bytes without FCS and zero padding to an
+eight-byte boundary. Writes validate the entire batch before accepting a
+complete prefix. A write returning EAGAIN accepted no frames. Reads return
+EAGAIN for an empty queue and EFBIG for an undersized first-record buffer.
+Queue revocation yields EPIPE and device failure yields EIO.
+
+The shared codec lives in [`abi/packet`](packet). C layouts are in
+[`include/dunit/packet.h`](include/dunit/packet.h).
+
 ## Conformance and limits
 
 The freestanding `/app/c_hello` uses generated headers and its own crt0 to read
