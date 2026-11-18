@@ -133,10 +133,17 @@ impl Rings {
         if !(14..=MAX_FRAME).contains(&frame.len()) {
             return Err(Error::InvalidLength);
         }
-        let index = self.tx_next;
         for i in 0..COUNT {
             self.reclaim(i)?;
         }
+        self.submit(frame)
+    }
+    /// IRQ mode submits from CPU ownership only; only the handler reads DD.
+    pub fn submit(&mut self, frame: &[u8]) -> Result<u32, Error> {
+        if !(14..=MAX_FRAME).contains(&frame.len()) {
+            return Err(Error::InvalidLength);
+        }
+        let index = self.tx_next;
         if self.queued == COUNT - 1 || self.busy[index] {
             self.counters.tx_full += 1;
             return Err(Error::Full);
@@ -188,6 +195,9 @@ impl Rings {
             self.reclaim(i)?;
         }
         Ok(!self.busy.iter().any(|busy| *busy))
+    }
+    pub fn rx_ready(&self) -> bool {
+        unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*self.rx(self.rx_next)).status)) & DD != 0 }
     }
     /// A completed descriptor is recycled on every result. Caller publishes
     /// the returned index to RDT after consumption, even for a dropped frame.

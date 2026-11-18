@@ -1,0 +1,415 @@
+{
+  "description": "Existing complete boot regression and PHY diagnostic plus private 82540EM INTx external exchange. Requires --net-test and net_irq_test=1; not full N0 or MSI acceptance.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/runtime_stress",
+      "exec /app/ipc_parent",
+      "exec /app/calc",
+      "exec /app/./calc",
+      "exec /app/ipc_parent",
+      "exec /app/handle_test"
+    ],
+    "command_actions": {
+      "exec /app/calc": [
+        {
+          "wait_marker": "calc> "
+        },
+        {
+          "type_text": "410+3"
+        },
+        {
+          "wait_marker": "[STDOUT] 413"
+        },
+        {
+          "type_text": "700+1"
+        },
+        {
+          "wait_marker": "[STDOUT] 701"
+        },
+        {
+          "type_text": "exit"
+        },
+        {
+          "wait_marker": "[EXEC] /app/calc returned code=0"
+        }
+      ],
+      "exec /app/./calc": [
+        {
+          "wait_marker": "calc> "
+        },
+        {
+          "execute": "send-key",
+          "arguments": {
+            "keys": [
+              {
+                "type": "qcode",
+                "data": "ctrl"
+              },
+              {
+                "type": "qcode",
+                "data": "c"
+              }
+            ],
+            "hold-time": 80
+          }
+        },
+        {
+          "wait_marker": "exec: interrupted"
+        }
+      ],
+      "exec /app/ipc_parent": [
+        {
+          "wait_marker": "ipc_parent: OK"
+        },
+        {
+          "wait_marker": "[EXEC] /app/ipc_parent returned code=0"
+        }
+      ]
+    }
+  },
+  "required": [
+    {
+      "marker": "[DISPLAY-LEASE] repeated acquire survives first close and revokes on last close OK",
+      "claim": "display ownership survives multiple handles until final release",
+      "source": "userspace/system_apps/handle_test/src/main.rs; kernel/src/drivers/display/mod.rs"
+    },
+    {
+      "marker": "[DISPLAY-ACCESS] padded record, copy errors, clipped rect and revoked write OK",
+      "claim": "display record and user-copy boundaries preserve ABI and ownership",
+      "source": "userspace/system_apps/handle_test/src/main.rs; kernel/src/syscall/display.rs"
+    },
+    {
+      "marker": "handle_test: OK",
+      "claim": "capability and file contracts survive display ownership changes",
+      "source": "userspace/system_apps/handle_test/src/main.rs"
+    },
+    {
+      "marker": "[STDOUT] 413",
+      "claim": "foreground terminal stdin supplies a complete expression",
+      "source": "kernel/src/process/terminal_stdin.rs; userspace/system_apps/calc/src/main.rs"
+    },
+    {
+      "marker": "[STDOUT] 701",
+      "claim": "a second terminal line reaches the same foreground reader",
+      "source": "kernel/src/process/lifecycle.rs"
+    },
+    {
+      "marker": "calc: bye",
+      "claim": "interactive foreground application exits and returns console ownership",
+      "source": "kernel/src/lib.rs; kernel/src/command.rs"
+    },
+    {
+      "marker": "exec: interrupted",
+      "claim": "Ctrl+C clears pending input before a subsequent foreground exec",
+      "source": "kernel/src/lib.rs; kernel/src/process/lifecycle.rs"
+    },
+    {
+      "marker": "[DF-TEST] syscall+irq flags preserved",
+      "claim": "DF cleared at kernel entry and preserved in userspace across timer interrupts and syscall return",
+      "source": "userspace/system_apps/preempt_child/src/main.rs; kernel/src/hal.rs; kernel/src/command.rs"
+    },
+    {
+      "marker": "[KERNEL] START",
+      "claim": "boot/kernel handoff",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "GDT loaded",
+      "claim": "GDT",
+      "source": "hal/src/gdt.c"
+    },
+    {
+      "marker": "IDT loaded with 256 entries",
+      "claim": "IDT + exception handlers",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "Exception handlers registered",
+      "claim": "exception handlers",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[PMM] OK",
+      "claim": "Physical Memory Manager",
+      "source": "kernel/src/memory/pmm.rs"
+    },
+    {
+      "marker": "[VMM] OK",
+      "claim": "Virtual Memory Manager",
+      "source": "kernel/src/memory/vmm.rs"
+    },
+    {
+      "marker": "[HEAP] OK (PMM-backed, growable)",
+      "claim": "kernel heap",
+      "source": "kernel/src/allocator.rs"
+    },
+    {
+      "marker": "[ADDRSPACE-TEST] OK",
+      "claim": "address-space switching",
+      "source": "kernel/src/memory"
+    },
+    {
+      "marker": "[MMIO-ALLOC-TEST] OK",
+      "claim": "MMIO allocator",
+      "source": "kernel/src/memory"
+    },
+    {
+      "marker": "[PROCESS-ADDRSPACE-TEST] OK",
+      "claim": "per-process address space",
+      "source": "kernel/src/process/mod.rs"
+    },
+    {
+      "marker": "Scheduler: cooperative context switch ready",
+      "claim": "context switch (save/restore + yield)",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[SCHED] UP round-robin init: timer-preemption=on fpu=fxsave",
+      "claim": "default-on UP round-robin with x87/SSE state",
+      "source": "kernel/src/process/scheduler.rs"
+    },
+    {
+      "marker": "[IPC] manager ready: bounded byte message queues (lazy per-PID)",
+      "claim": "byte message queues",
+      "source": "kernel/src/ipc/mod.rs"
+    },
+    {
+      "marker": "[MEMFS] mounted as /",
+      "claim": "VFS + MemFS as /",
+      "source": "kernel/src/fs"
+    },
+    {
+      "marker": "[VFS] init OK",
+      "claim": "VFS ready",
+      "source": "kernel/src/fs/vfs.rs"
+    },
+    {
+      "marker": "[ OK ] Initrd:",
+      "claim": "initrd archive loaded from the Limine module (apps/assets no longer embedded in the kernel)",
+      "source": "kernel/src/initrd.rs"
+    },
+    {
+      "marker": "Keyboard driver ready",
+      "claim": "PS/2 keyboard",
+      "source": "kernel/src/drivers"
+    },
+    {
+      "marker": "Mouse input driver ready",
+      "claim": "PS/2 mouse",
+      "source": "kernel/src/drivers"
+    },
+    {
+      "marker": "IRQ 0: PIT timer enabled (~100 Hz)",
+      "claim": "PIT timer",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[CLOCK] source=hpet resolution_ns=10 event=pit-100hz",
+      "claim": "q35 HPET monotonic clock with PIT scheduling events",
+      "source": "kernel/src/clock.rs"
+    },
+    {
+      "marker": "[PTY-LOCK] owning I/O, read/write wake, hangup and drain OK",
+      "claim": "locked PTY transactions notify real blocked tasks after unlock",
+      "source": "kernel/src/process/fd_retirement_smoke.rs"
+    },
+    {
+      "marker": "[FD-RETIREMENT] final PTY/cap drops, fd errors and wake reentry after unlock OK",
+      "claim": "last endpoint and file owners release after task scope on success and error",
+      "source": "kernel/src/process/fd_retirement_smoke.rs"
+    },
+    {
+      "marker": "[SYSCALL-TEST] userspace syscall OK",
+      "claim": "userspace syscall path",
+      "source": "kernel/src/process"
+    },
+    {
+      "marker": "[SYSCALL-FS-TEST] OK",
+      "claim": "FS syscalls",
+      "source": "kernel/src/syscall/mod.rs"
+    },
+    {
+      "marker": "[SYSCALL-FS-SEMANTICS-TEST] OK",
+      "claim": "FS syscall semantics",
+      "source": "kernel/src/syscall/mod.rs"
+    },
+    {
+      "marker": "[PROCESS-KSTACK-TEST] OK",
+      "claim": "process kernel stack smoke",
+      "source": "kernel/src/process/mod.rs"
+    },
+    {
+      "marker": "Dunit OS (Green Tea) ready",
+      "claim": "system init complete",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "terminal / tty",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[ELF-TEST] userspace app started",
+      "claim": "ELF load and run",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[SPAWN] ready pid=",
+      "claim": "spawn child process",
+      "source": "kernel/src/syscall/mod.rs"
+    },
+    {
+      "marker": "runtime_stress: resumable OK",
+      "claim": "resumable child",
+      "source": "userspace/system_apps/runtime_stress"
+    },
+    {
+      "marker": "runtime_stress: ipc OK",
+      "claim": "send/receive between processes",
+      "source": "userspace/system_apps/runtime_stress"
+    },
+    {
+      "marker": "runtime_stress: repeated spawn OK",
+      "claim": "repeated spawn",
+      "source": "userspace/system_apps/runtime_stress"
+    },
+    {
+      "marker": "runtime_stress: kill OK",
+      "claim": "kill process",
+      "source": "userspace/system_apps/runtime_stress"
+    },
+    {
+      "marker": "reason=page-fault",
+      "claim": "user-fault handling (page fault)",
+      "source": "kernel/src/interrupts.rs"
+    },
+    {
+      "marker": "runtime_stress: fault OK",
+      "claim": "fault delivered to waiter",
+      "source": "userspace/system_apps/runtime_stress"
+    },
+    {
+      "marker": "runtime_stress: OK",
+      "claim": "runtime_stress full pass (the do-not-break bar)",
+      "source": "userspace/system_apps/runtime_stress"
+    },
+    {
+      "marker": "[PROCESS-RUN] VFS handles clean",
+      "claim": "no VFS handle leak after exec",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "/app/runtime_stress returned code=0",
+      "claim": "runtime_stress clean exit",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "ipc_parent: OK",
+      "claim": "ipc_parent full pass",
+      "source": "userspace/system_apps/ipc_parent"
+    },
+    {
+      "marker": "/app/ipc_parent returned code=0",
+      "claim": "ipc_parent clean exit",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[PREEMPT-TEST] OK",
+      "claim": "default-on timer preemption and XMM isolation for CPU-bound parent/child (M1)",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[THREAD-TEST] OK",
+      "claim": "schedulable TIDs, shared process address space, per-thread XMM and lifecycle",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[WAIT-TEST] OK",
+      "claim": "timer and IPC wait queues with blocked thread wakeup",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[VM-TEST] OK",
+      "claim": "munmap/mprotect, shared VM frames, guard pages and frame reclamation",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[TLS-TEST] OK",
+      "claim": "FS.base thread pointer, PT_TLS initialization and per-thread TLS isolation",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[DSH-CALC-TEST] OK",
+      "claim": "GUI-terminal program path: dsh's cooked line discipline runs a classic terminal-mode program (calc) under spawn_external exactly like kernel Terminal Mode \u2014 echoes keystrokes, delivers whole lines, child evaluates and exits cleanly",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[NET-N0] e1000 PHY-loopback packets=103 bytes=13184 ring-wrap, payload, reset and DMA reclaim OK",
+      "claim": "actual legacy RX/TX DMA descriptor wrap, payload and quiescent reclaim",
+      "source": "kernel/src/drivers/net/e1000.rs; kernel/src/drivers/net/rings.rs; kernel/src/drivers/net.rs"
+    },
+    {
+      "marker": "[NET-IRQ] e1000 INTx external packets=103 bytes=13184 transformed payload, ring-wrap, reset and DMA reclaim OK irq=",
+      "claim": "private 82540EM INTx handler drives external host-transformed RX/TX across three ring wraps with reset and PMM reclaim; host peer receipt separately required",
+      "source": "kernel/src/drivers/net.rs; kernel/src/drivers/net/e1000.rs; tools/net_test_transport.py"
+    }
+  ],
+  "forbidden": [
+    {
+      "marker": "[PANIC]",
+      "why": "kernel panic (covers double-fault/invalid-TSS, which panic!)",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[PROCESS-RUN] VFS handles leaked",
+      "why": "VFS handle leak after a process exits",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "preempt_test: FAIL",
+      "why": "CPU-bound child was not preempted without yield",
+      "source": "userspace/system_apps/preempt_test"
+    },
+    {
+      "marker": "[PREEMPT-TEST] FAIL",
+      "why": "timer preemption smoke did not observe a committed switch",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[THREAD-TEST] FAIL",
+      "why": "thread lifecycle or state isolation failed",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[WAIT-TEST] FAIL",
+      "why": "blocked sleep or IPC/event wakeup failed",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[VM-TEST] FAIL",
+      "why": "VM mapping lifecycle failed",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[TLS-TEST] FAIL",
+      "why": "TLS initialization or thread isolation failed",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[DSH-CALC-TEST] FAIL",
+      "why": "a terminal-mode program (calc) failed to run under dsh's cooked bridge \u2014 the GUI terminal would not behave like Terminal Mode",
+      "source": "kernel/src/command.rs"
+    },
+    {
+      "marker": "[NET-N0] FAIL",
+      "why": "NIC packet or stop/reclaim failure",
+      "source": "kernel/src/drivers/net.rs"
+    },
+    {
+      "marker": "[NET-IRQ] FAIL",
+      "why": "external INTx exchange, payload, IRQ progress or quiescence/reclaim failure",
+      "source": "kernel/src/drivers/net.rs"
+    }
+  ]
+}

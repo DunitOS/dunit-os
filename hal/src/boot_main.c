@@ -154,6 +154,23 @@ static int strstr_contains(const char *haystack, const char *needle) {
     return 0;
 }
 
+static int network_irq_test;
+int hal_network_irq_test_enabled(void) { return network_irq_test; }
+
+/* Private smoke configuration, never a substring inside another option. */
+static int cmdline_has_token(const char *line, const char *token) {
+    if (!line || !token || !*token) return 0;
+    for (unsigned i = 0; i < 4096 && line[i];) {
+        if (line[i] == ' ' || line[i] == '\t') { ++i; continue; }
+        unsigned j = 0;
+        while (i + j < 4096 && token[j] && line[i + j] == token[j]) ++j;
+        if (!token[j] && i + j < 4096 &&
+            (!line[i + j] || line[i + j] == ' ' || line[i + j] == '\t')) return 1;
+        while (i < 4096 && line[i] && line[i] != ' ' && line[i] != '\t') ++i;
+    }
+    return 0;
+}
+
 extern void kernel_main(
     struct limine_framebuffer *fb,
     struct limine_terminal_response *term,
@@ -222,6 +239,8 @@ void boot_main(void) {
 
     int terminal_mode = 0;
     if (kf_resp && kf_resp->kernel_file && kf_resp->kernel_file->cmdline) {
+        network_irq_test = cmdline_has_token(kf_resp->kernel_file->cmdline,
+                                            "net_irq_test=1");
         if (strstr_contains(kf_resp->kernel_file->cmdline, "mode=terminal")) {
             terminal_mode = 1;
             serial_write("[BOOT] terminal mode OK\r\n");

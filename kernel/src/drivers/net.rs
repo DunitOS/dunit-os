@@ -378,3 +378,137 @@ pub fn run_packet_smoke() -> bool {
         }
     }
 }
+
+#[cfg(feature = "boot-smoke-tests")]
+static EXTERNAL: crate::sync::IrqSafeSpinLock<Option<(u8, e1000::Controller<MappedRegisters>)>> =
+    crate::sync::IrqSafeSpinLock::new(None);
+#[cfg(feature = "boot-smoke-tests")]
+static EXTERNAL_USED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Called by HAL before its PIC EOI. Device cause is acknowledged here; a
+/// shared line with no active diagnostic owner remains unclaimed.
+pub fn handle_irq(line: u8) -> bool {
+    #[cfg(feature = "boot-smoke-tests")]
+    {
+        let mut owner = EXTERNAL.lock();
+        if let Some((irq, controller)) = owner.as_mut() {
+            if *irq == line { return controller.handle_irq(); }
+        }
+    }
+    let _ = line;
+    false
+}
+
+/// Private PIC routing lifetime. Only reference PCI lines 10/11 are accepted.
+/// Restore the saved line/cascade mask and ELCR bit even on diagnostic failure.
+#[cfg(feature = "boot-smoke-tests")]
+struct LegacyRoute { line: u8, master: u8, slave: u8, elcr: u8 }
+#[cfg(feature = "boot-smoke-tests")]
+impl LegacyRoute {
+    fn open(line: u8) -> Self {
+        let _irq = crate::sync::InterruptGuard::new();
+        unsafe {
+            let route = Self { line, master: crate::hal::hal_inb(0x21),
+                slave: crate::hal::hal_inb(0xa1), elcr: crate::hal::hal_inb(0x4d1) };
+            crate::hal::hal_outb(0x4d1, route.elcr | (1 << (line - 8)));
+            crate::hal::hal_outb(0xa1, route.slave & !(1 << (line - 8)));
+            crate::hal::hal_outb(0x21, route.master & !(1 << 2));
+            route
+        }
+    }
+}
+#[cfg(feature = "boot-smoke-tests")]
+impl Drop for LegacyRoute {
+    fn drop(&mut self) {
+        let _irq = crate::sync::InterruptGuard::new();
+        unsafe {
+            let bit = 1 << (self.line - 8);
+            let slave = crate::hal::hal_inb(0xa1);
+            let master = crate::hal::hal_inb(0x21);
+            let elcr = crate::hal::hal_inb(0x4d1);
+            crate::hal::hal_outb(0xa1, (slave & !bit) | (self.slave & bit));
+            crate::hal::hal_outb(0x21, (master & !4) | (self.master & 4));
+            crate::hal::hal_outb(0x4d1, (elcr & !bit) | (self.elcr & bit));
+        }
+    }
+}
+
+#[cfg(feature = "boot-smoke-tests")]
+pub fn run_external_smoke() -> bool {
+    use core::sync::atomic::Ordering;
+    if !crate::sync::interrupts_enabled() || EXTERNAL_USED.swap(true, Ordering::AcqRel) {
+        serial_write("[NET-IRQ] FAIL invalid-entry\r\n");
+        return false;
+    }
+    let mut reference = None;
+    pci::for_each_device(|dev| {
+        if reference.is_none() && (dev.vendor_id, dev.device_id) == (VENDOR_INTEL, 0x100e) {
+            reference = Some(dev);
+        }
+    });
+    let Some(device) = reference else {
+        serial_write("[NET-IRQ] FAIL no-82540EM\r\n");
+        return false;
+    };
+    if !matches!(device.interrupt_line, 10 | 11) {
+        serial_write("[NET-IRQ] FAIL unsupported-INTx-line\r\n");
+        return false;
+    }
+    let (_, before) = crate::memory::pmm::stats_bytes();
+    let started = (|| {
+        let registers = MappedRegisters::open(device).map_err(|_| e1000::Error::Registers)?;
+        // 82540EM uses PCI INTx, not MSI. The scoped mapping restores this bit.
+        pci::set_command(device, pci::command(device) & !(1 << 10));
+        e1000::Controller::start_external(registers)
+    })();
+    let controller = match started {
+        Ok(controller) => controller,
+        Err(_) => { serial_write("[NET-IRQ] FAIL start\r\n"); return false; }
+    };
+    let ready_at = controller.ready_at();
+    // No owner guard crosses HLT. PIT supplies deadline wakeups even if the
+    // device never asserts its line. No DD/ICR polling occurs in the runner.
+    while crate::clock::monotonic_ns() < ready_at {
+        unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)); }
+    }
+    *EXTERNAL.lock() = Some((device.interrupt_line, controller));
+    EXTERNAL.lock().as_mut().unwrap().1.enable_irq();
+    let route = LegacyRoute::open(device.interrupt_line);
+    let result = (|| {
+        for sequence in 0..e1000::TEST_PACKETS {
+            EXTERNAL.lock().as_mut().ok_or(e1000::Error::Stop)?.1.submit_external(sequence)?;
+            let deadline = crate::clock::monotonic_ns().saturating_add(500_000_000);
+            loop {
+                let matched = EXTERNAL.lock().as_mut().ok_or(e1000::Error::Stop)?.1.external_progress(sequence)?;
+                if matched { break; }
+                if crate::clock::monotonic_ns() >= deadline { return Err(e1000::Error::Timeout); }
+                unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)); }
+            }
+        }
+        let deadline = crate::clock::monotonic_ns().saturating_add(500_000_000);
+        loop {
+            if EXTERNAL.lock().as_ref().ok_or(e1000::Error::Stop)?.1.external_complete()? { return Ok(()); }
+            if crate::clock::monotonic_ns() >= deadline { return Err(e1000::Error::Timeout); }
+            unsafe { core::arch::asm!("sti; hlt", options(nomem, nostack)); }
+        }
+    })();
+    // Stop masks NIC causes before resetting and retiring DMA. Taking the
+    // owning controller under the IRQ-safe lock excludes in-flight handlers.
+    let mut controller = EXTERNAL.lock().take().unwrap().1;
+    let deliveries = controller.irq_count();
+    let stopped = controller.stop();
+    drop(controller);
+    drop(route);
+    let (_, after) = crate::memory::pmm::stats_bytes();
+    if result.is_ok() && stopped.is_ok() && before == after {
+        serial_write("[NET-IRQ] e1000 INTx external packets=103 bytes=13184 transformed payload, ring-wrap, reset and DMA reclaim OK irq=");
+        write_dec(deliveries);
+        serial_write("\r\n");
+        true
+    } else {
+        serial_write("[NET-IRQ] FAIL exchange-or-stop irq=");
+        write_dec(deliveries);
+        serial_write("\r\n");
+        false
+    }
+}

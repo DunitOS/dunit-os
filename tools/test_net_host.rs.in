@@ -54,7 +54,7 @@ struct Device {
     registers: std::collections::BTreeMap<usize,u32>,
     tx_head: usize,
     rx_head: usize,
-    now: std::cell::Cell<u64>,
+    now: std::rc::Rc<std::cell::Cell<u64>>,
     resets: usize,
     stuck_reset: bool,
     stuck_after_start: bool,
@@ -63,6 +63,9 @@ struct Device {
     fail_disable: bool,
     phy: u16,
     rx_ready_at: u64,
+    external: bool,
+    no_transform: bool,
+    irq_mask: u32,
 }
 impl Device {
     fn new() -> Self {
@@ -78,7 +81,7 @@ impl Device {
     }
     fn transmit(&mut self, tail: usize) {
         if self.hang_tx || !self.registers.contains_key(&0x3800) {return;}
-        let can_receive = self.phy & (1<<14) != 0 && self.now.get() >= self.rx_ready_at;
+        let can_receive = (self.external || self.phy & (1<<14) != 0) && self.now.get() >= self.rx_ready_at;
         let tx_ring = self.address(0x3800);
         let rx_ring = self.address(0x2800);
         while self.tx_head != tail {
@@ -95,6 +98,10 @@ impl Device {
                 }
                 assert_eq!(std::ptr::read(rx.add(12)), 0, "device overwrite before RX recycle");
                 std::ptr::copy_nonoverlapping(src,dst,len);
+                if self.external && !self.no_transform {
+                    for i in 0..6 {let byte=*dst.add(i);*dst.add(i)=*dst.add(i+6);*dst.add(i+6)=byte;}
+                    for i in 14..len {*dst.add(i) ^= 0xa5;}
+                }
                 if self.corrupt {*dst.add(40) ^= 1;}
                 std::ptr::write(rx.add(8) as *mut u16,len as u16);
                 std::ptr::write_volatile(rx.add(12),3);
@@ -102,12 +109,19 @@ impl Device {
             }
             self.tx_head=(self.tx_head+1)%rings::COUNT;
             self.rx_head=(self.rx_head+1)%rings::COUNT;
+            if self.external { *self.registers.entry(0xc0).or_insert(0) |= 1 | (1<<7); }
         }
     }
 }
 impl e1000::Registers for Device {
-    fn read(&mut self, offset: usize) -> u32 {*self.registers.get(&offset).unwrap_or(&0)}
+    fn read(&mut self, offset: usize) -> u32 {
+        if offset == 0xc0 { return self.registers.remove(&offset).unwrap_or(0); }
+        *self.registers.get(&offset).unwrap_or(&0)
+    }
     fn write(&mut self, offset: usize, value: u32) {
+        if offset==0xd0 { self.irq_mask |= value; }
+        if offset==0xd8 { self.irq_mask &= !value; }
+        if offset==0xc8 { *self.registers.entry(0xc0).or_insert(0) |= value; }
         if offset==0x20 {
             assert_eq!((value>>21)&0x1f,1);
             assert_eq!((value>>16)&0x1f,0);
@@ -210,5 +224,54 @@ fn stalled_corrupt_and_uncertain_dma_fail_closed() {
         controller.diagnostic().unwrap();assert_eq!(controller.stop(),Err(e1000::Error::Stop));
         drop(controller);assert!(PAGES.load(Ordering::SeqCst)>0,"uncertain DMA backing must remain allocated");
         memory::pmm::release_quarantine();
+    }
+}
+
+#[test]
+fn external_progress_is_exclusively_irq_driven_and_wraps() {
+    let mut model = Device::new(); model.external = true;
+    let time = model.now.clone();
+    let mut controller = e1000::Controller::start_external(model).unwrap();
+    time.set(controller.ready_at());
+    controller.enable_irq();
+    assert!(!controller.handle_irq(), "shared line without ICR cause must not claim");
+    for sequence in 0..e1000::TEST_PACKETS {
+        controller.submit_external(sequence).unwrap();
+        assert!(!controller.external_progress(sequence).unwrap(), "DD alone must not progress the probe");
+        assert!(controller.handle_irq());
+        assert!(controller.external_progress(sequence).unwrap());
+        assert!(!controller.handle_irq(), "ICR read must acknowledge cause");
+    }
+    assert!(controller.external_complete().unwrap());
+    assert_eq!(controller.irq_count(), e1000::TEST_PACKETS as u64);
+    controller.stop().unwrap(); drop(controller);
+    assert_eq!(PAGES.load(Ordering::SeqCst), 0);
+}
+#[test]
+fn external_tx_full_without_irq_and_queue_exhaustion_fail_closed() {
+    let mut model = Device::new(); model.external = true;
+    let time = model.now.clone();
+    let mut controller = e1000::Controller::start_external(model).unwrap();
+    time.set(controller.ready_at()); controller.enable_irq();
+    for sequence in 0..rings::COUNT-1 { controller.submit_external(sequence).unwrap(); }
+    assert_eq!(controller.submit_external(31), Err(e1000::Error::Transmit), "submit must not reclaim DD outside handler");
+    assert!(controller.handle_irq()); // >8 RX fills bounded CPU queue: terminal failure
+    assert_eq!(controller.external_progress(0), Err(e1000::Error::Receive));
+    controller.stop().unwrap(); drop(controller);
+    assert_eq!(PAGES.load(Ordering::SeqCst), 0);
+}
+#[test]
+fn external_rejects_untransformed_loopback_and_corruption() {
+    for loopback in [true, false] {
+        let mut model = Device::new(); model.external = true;
+        model.no_transform = loopback; model.corrupt = !loopback;
+        let time = model.now.clone();
+        let mut controller = e1000::Controller::start_external(model).unwrap();
+        time.set(controller.ready_at()); controller.enable_irq();
+        controller.submit_external(0).unwrap();
+        assert!(controller.handle_irq());
+        assert_eq!(controller.external_progress(0), Err(e1000::Error::Payload));
+        controller.stop().unwrap(); drop(controller);
+        assert_eq!(PAGES.load(Ordering::SeqCst), 0);
     }
 }

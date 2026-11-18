@@ -875,6 +875,13 @@ pub extern "C" fn kernel_main(
     assert!(memory::run_tlb_smoke(), "cross-CPU mapping invalidation and reclaim");
     #[cfg(feature = "boot-smoke-tests")]
     assert!(drivers::net::run_packet_smoke(), "E1000 packet DMA diagnostic");
+    #[cfg(feature = "boot-smoke-tests")]
+    unsafe {
+        extern "C" { fn hal_network_irq_test_enabled() -> i32; }
+        if hal_network_irq_test_enabled() != 0 {
+            assert!(drivers::net::run_external_smoke(), "E1000 external IRQ diagnostic");
+        }
+    }
 
     #[cfg(feature = "boot-smoke-tests")]
     {

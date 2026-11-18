@@ -107,13 +107,86 @@ host model checks; this document alone does not claim a fresh VM run.
 
 ## Remaining N0 and M8 work
 
-This is diagnostic polling, explicitly not accepted IRQ-driven N0. MSI/MSI-X and
-legacy IRQ delivery/moderation, link transition/stall recovery, RX starvation,
-interrupt storms and the ten-minute flood matrix remain open. External RX/TX,
-multiple NICs, hardware DMA recovery and stats publication also remain open.
+The PHY-local diagnostic remains polling. A separate opt-in private external
+INTx probe is described below; neither diagnostic closes full N0. The 82540EM
+reference uses legacy INTx and does not prove MSI/MSI-X. Link transition/stall
+recovery, RX starvation, interrupt storms, moderation and the ten-minute flood
+matrix remain open. Multiple NICs, hardware DMA recovery and stats publication
+also remain open.
 The approved `NET_DEVICE`/`PACKET_QUEUE` authority, bounded shared-ring ownership,
 revocation/netd restart and service protocols must precede application exposure.
 Ethernet/ARP/IP/ICMP (N1), UDP/DHCP/DNS, TCP, sockets/musl and TLS are not provided.
 
 Fresh TCG native checks and their source/image hashes are recorded in the
 [17 November integration receipts](../verification/multitrack-2026-11-17.json).
+
+
+## Private external INTx slice
+
+`boot-smoke-tests` plus the exact Limine token `net_irq_test=1` opts into an
+external 82540EM probe after the existing PHY test. An ordinary boot runs no
+external exchange. The reference is PCI 8086:100e on legacy line 10 or 11; this
+controller does not provide MSI/MSI-X. No packet capability, syscall or service
+protocol is added. Production remains discovery only.
+
+One static `IrqSafeSpinLock` owns the controller and an inline eight-frame,
+128-byte RX queue. Lock acquisition disables interrupts before waiting, and no
+guard crosses HLT. The handler reads/clears ICR, masks device causes, reclaims
+at most 32 TX descriptors and drains at most 32 RX descriptors. It rearms IMS
+and uses ICS if RX work remains, so a bounded drain does not depend on a new
+wire edge. Only this handler reads DD and advances RX/TX completion counters.
+Submission reads CPU-owned free-slot state; the runner reads the CPU RX queue
+and counters. An empty shared-line ICR is not claimed. PIC EOI belongs to HAL
+and follows device acknowledgment. Overrun, malformed RX, completion errors or
+a full CPU queue fail the private probe and leave its device causes masked.
+
+The scoped route sets the assigned PIC/ELCR line to level triggered and saves
+and restores its mask, cascade mask and ELCR bit. PCI interrupt disable is
+cleared only during the mapped owner lifetime. The existing reset, observed
+bus-master disable, readback and DMA quarantine rules also cover external
+start, stop and failure. A probe cannot be retried during the same boot.
+
+The runner waits with HLT and monotonic deadlines, including QEMU's receive
+activation interval. It exchanges 103 frames of 128 bytes, spanning three ring
+wraps plus seven descriptors. The Ethernet destination is 02:00:00:00:00:01,
+source is 52:54:00:12:34:56 and EtherType is 0x88b5. Request payload byte `i`
+is `(sequence * 37 + i) & 255`, with `i=0` at Ethernet offset 14. The host swaps
+MAC addresses and XORs every payload byte with 0xa5. The guest rejects an
+untransformed local loopback frame, a wrong sequence or any corrupt byte.
+
+`tools/net_test_transport.py` listens only on 127.0.0.1, using QEMU's four-byte
+big-endian length framing, and checks every byte before replying. Its shutdown
+is bounded even when QEMU never connects or sends an incomplete frame. The
+harness also requires its `net-peer.json` receipt to show exactly 103 checked
+requests and 103 responses; guest serial success alone is insufficient.
+
+Host checks:
+
+```sh
+RUSTUP_HOME=/workspace/.rustup CARGO_HOME=/workspace/.cargo \
+  RUSTUP_TOOLCHAIN=stable RUSTC=/workspace/.cargo/bin/rustc python3 tools/test_net.py
+python3 tools/test_net_transport.py
+```
+
+The actual controller host checks include IRQ-exclusive progress, shared-line
+acknowledgment, three wraps, full TX without handler reclamation, bounded CPU
+queue exhaustion, untransformed loopback rejection and payload corruption.
+They use simulated hardware and do not prove native IRQ routing.
+
+Native validation (the harness supplies the isolated socket peer and exact
+boot token when building):
+
+```sh
+python3 tools/qemu_test.py --build --net-test \
+  --markers-file tools/net_irq_markers.json --cpus 4 --accel tcg \
+  --timeout 600 --cmd-timeout 240 --boot-timeout 120
+```
+
+Reusing this ISO also requires `--net-test`; the embedded token still requests
+the peer exchange. The marker contract retains the complete existing boot
+regression and PHY marker, adds the external IRQ success marker and forbids
+`[NET-IRQ] FAIL`. A fresh native run and image/source receipt must be recorded
+separately. [Follow-up receipts](../verification/multitrack-progress-2026-11-17.json)
+record passing 2/4/8-vCPU TCG runs with exactly 103 checked host requests and
+responses each, transformed-payload validation and guest IRQ/reset/reclaim
+markers. This accepts the private diagnostic, not the full N0 production gate.

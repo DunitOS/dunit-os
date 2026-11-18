@@ -1,5 +1,5 @@
-//! Private E1000 legacy-ring bring-up. Polling is only a boot diagnostic;
-//! production packet queues and interrupt delivery need their own contracts.
+//! Private E1000 legacy-ring diagnostics: PHY polling and external INTx.
+//! No production packet or userspace ownership contract is exposed.
 use super::rings::{Error as RingError, Rings, BUFFER, COUNT};
 
 const CTRL: usize = 0x0000;
@@ -7,6 +7,15 @@ const STATUS: usize = 0x0008;
 const MDIC: usize = 0x0020;
 const ICR: usize = 0x00c0;
 const IMC: usize = 0x00d8;
+const IMS: usize = 0x00d0;
+const ICS: usize = 0x00c8;
+const INTERRUPTS: u32 = 1 | (1 << 2) | (1 << 4) | (1 << 6) | (1 << 7); // TXDW, LSC, RXDMT0, RXO, RXT0
+const RX_QUEUE: usize = 8;
+pub(super) const FRAME_SIZE: usize = 128;
+pub(super) const HOST_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
+#[derive(Clone, Copy)]
+struct Frame { bytes: [u8; FRAME_SIZE], length: usize }
+impl Frame { const EMPTY: Self = Self { bytes: [0; FRAME_SIZE], length: 0 }; }
 const RCTL: usize = 0x0100;
 const TCTL: usize = 0x0400;
 const TIPG: usize = 0x0410;
@@ -118,9 +127,17 @@ pub(super) struct Controller<R: Registers> {
     original_phy: u16,
     phy_changed: bool,
     sequence: usize,
+    external: bool,
+    ready_at: u64,
+    pending: [Frame; RX_QUEUE],
+    pending_head: usize,
+    pending_len: usize,
+    irq_count: u64,
 }
 impl<R: Registers> Controller<R> {
-    pub fn start(mut io: R) -> Result<Self, Error> {
+    pub fn start(io: R) -> Result<Self, Error> { Self::start_mode(io, false) }
+    pub fn start_external(io: R) -> Result<Self, Error> { Self::start_mode(io, true) }
+    fn start_mode(mut io: R, external: bool) -> Result<Self, Error> {
         if !reset(&mut io) {
             return Err(Error::Reset);
         }
@@ -148,6 +165,12 @@ impl<R: Registers> Controller<R> {
             original_phy,
             phy_changed: false,
             sequence: 0,
+            external,
+            ready_at: 0,
+            pending: [Frame::EMPTY; RX_QUEUE],
+            pending_head: 0,
+            pending_len: 0,
+            irq_count: 0,
         };
         let rx = device.rings.rx_physical();
         let tx = device.rings.tx_physical();
@@ -173,7 +196,8 @@ impl<R: Registers> Controller<R> {
         // The reference QEMU device implements PHY BMCR loopback, not RCTL's
         // MAC loopback selector. Disable autonegotiation during the local test.
         device.phy_changed = true;
-        write_phy(&mut device.io, (original_phy & !(1 << 12)) | PHY_LOOPBACK)?;
+        write_phy(&mut device.io, if external { original_phy & !PHY_LOOPBACK }
+            else { (original_phy & !(1 << 12)) | PHY_LOOPBACK })?;
         // PHY-local loopback never emits diagnostic frames onto the wire.
         // Legacy 2 KiB RX buffers, accept broadcast, strip FCS; no jumbo frames.
         let control = device.io.read(CTRL) | (1 << 6); // SLU
@@ -185,6 +209,8 @@ impl<R: Registers> Controller<R> {
         device.io.write(RCTL, 2 | (1 << 15) | (1 << 26));
         let _ = device.io.read(STATUS); // flush posted setup writes
         let ready_at = device.io.now_ns().saturating_add(RX_STARTUP_NS);
+        device.ready_at = ready_at;
+        if external { return Ok(device); }
         let mut ready = false;
         for _ in 0..100_000_000usize {
             if device.io.now_ns() >= ready_at {
@@ -198,6 +224,87 @@ impl<R: Registers> Controller<R> {
         }
         Ok(device)
     }
+    pub fn ready_at(&self) -> u64 { self.ready_at }
+    pub fn enable_irq(&mut self) {
+        let _ = self.io.read(ICR);
+        self.io.write(IMS, INTERRUPTS);
+        let _ = self.io.read(STATUS);
+    }
+    /// Shared INTx: an empty ICR belongs to another device. Bounded work only;
+    /// no allocation, sleeping, serial output or queue-owner callbacks here.
+    pub fn handle_irq(&mut self) -> bool {
+        if !self.external || !self.armed { return false; }
+        let cause = self.io.read(ICR);
+        if cause == 0 || cause == u32::MAX { return false; }
+        self.io.write(IMC, u32::MAX);
+        self.irq_count += 1;
+        if self.failed { return true; }
+        if cause & (1 << 6) != 0 { self.failed = true; } // RX overrun
+        if self.rings.complete().is_err() { self.failed = true; } // <=32 TX
+        let mut received = [0; BUFFER];
+        for _ in 0..COUNT {
+            let Some((tail, result)) = self.rings.receive(&mut received) else { break; };
+            self.io.write(RDT, tail);
+            match result {
+                Ok(length) if length <= FRAME_SIZE && self.pending_len < RX_QUEUE => {
+                    let slot = (self.pending_head + self.pending_len) % RX_QUEUE;
+                    self.pending[slot].bytes[..length].copy_from_slice(&received[..length]);
+                    self.pending[slot].length = length;
+                    self.pending_len += 1;
+                }
+                _ => { self.failed = true; }
+            }
+        }
+        if !self.failed {
+            self.io.write(IMS, INTERRUPTS);
+            // Descriptor completion may arrive while masked. Preserve a bounded
+            // handler without relying on another wire edge for existing work.
+            if self.rings.rx_ready() { self.io.write(ICS, 1 << 7); }
+            let _ = self.io.read(STATUS);
+        }
+        true
+    }
+    pub fn submit_external(&mut self, sequence: usize) -> Result<(), Error> {
+        if !self.external || !self.armed || self.failed { return Err(Error::Stop); }
+        let mut packet = [0; FRAME_SIZE];
+        packet[..6].copy_from_slice(&HOST_MAC);
+        packet[6..12].copy_from_slice(&self.mac);
+        packet[12..14].copy_from_slice(&[0x88, 0xb5]);
+        for (index, byte) in packet[14..].iter_mut().enumerate() {
+            *byte = (sequence as u8).wrapping_mul(37).wrapping_add(index as u8);
+        }
+        self.sequence = sequence;
+        let tail = self.rings.submit(&packet).map_err(|_| Error::Transmit)?;
+        self.io.write(TDT, tail);
+        Ok(())
+    }
+    /// Reads CPU-owned queue/counters only. A descriptor can advance this probe
+    /// exclusively through handle_irq, so polling cannot conceal missing IRQs.
+    pub fn external_progress(&mut self, sequence: usize) -> Result<bool, Error> {
+        if self.failed { return Err(Error::Receive); }
+        if self.pending_len == 0 { return Ok(false); }
+        let frame = self.pending[self.pending_head];
+        self.pending_head = (self.pending_head + 1) % RX_QUEUE;
+        self.pending_len -= 1;
+        if frame.length != FRAME_SIZE || frame.bytes[..6] != self.mac
+            || frame.bytes[6..12] != HOST_MAC || frame.bytes[12..14] != [0x88, 0xb5]
+        { self.failed = true; return Err(Error::Payload); }
+        for (index, byte) in frame.bytes[14..].iter().enumerate() {
+            let sent = (sequence as u8).wrapping_mul(37).wrapping_add(index as u8);
+            if *byte != (sent ^ 0xa5) { self.failed = true; return Err(Error::Payload); }
+        }
+        Ok(true)
+    }
+    pub fn external_complete(&self) -> Result<bool, Error> {
+        if self.failed { return Err(Error::Receive); }
+        let c = &self.rings.counters;
+        Ok(self.irq_count > 0 && self.pending_len == 0
+            && c.tx_packets == TEST_PACKETS as u64 && c.tx_completed == TEST_PACKETS as u64
+            && c.rx_packets == TEST_PACKETS as u64 && c.rx_dropped == 0
+            && c.tx_bytes == (TEST_PACKETS * FRAME_SIZE) as u64
+            && c.rx_bytes == (TEST_PACKETS * FRAME_SIZE) as u64)
+    }
+    pub fn irq_count(&self) -> u64 { self.irq_count }
     pub fn diagnostic(&mut self) -> Result<(), Error> {
         if self.failed || !self.armed {
             return Err(Error::Stop);

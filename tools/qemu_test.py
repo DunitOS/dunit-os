@@ -99,6 +99,7 @@ class RunResult:
     markers_checked: bool = False
     missing_markers: list[str] = field(default_factory=list)
     forbidden_hits: list[str] = field(default_factory=list)
+    network_test: dict | None = None
 
 
 class Qmp:
@@ -358,6 +359,33 @@ def build_iso(config: str, variant: str | None = None, overlay: Path | None = No
     return iso
 
 
+def network_test_config(config: str, workdir: Path) -> str:
+    """Copy a smoke config, preserving the basename that enables its checks."""
+    from pack_initrd import SMOKE_CONFIGS
+
+    source = Path(config)
+    if not source.is_absolute():
+        source = REPO_ROOT / source
+    if source.name not in SMOKE_CONFIGS:
+        raise ValueError("--net-test builds require a boot-smoke configuration")
+    lines = source.read_text().splitlines(keepends=True)
+    matches = [i for i, line in enumerate(lines) if line.lstrip().startswith("cmdline:")]
+    if len(matches) != 1:
+        raise ValueError("--net-test requires exactly one kernel cmdline")
+    i = matches[0]
+    prefix, command = lines[i].split("cmdline:", 1)
+    tokens = command.split()
+    if any(token.startswith("net_irq_test=") and token != "net_irq_test=1" for token in tokens):
+        raise ValueError("conflicting network diagnostic boot option")
+    if "net_irq_test=1" not in tokens:
+        tokens.append("net_irq_test=1")
+    lines[i] = prefix + "cmdline: " + " ".join(tokens) + "\n"
+    output = workdir / "net-config" / source.name
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("".join(lines))
+    return str(output.resolve())
+
+
 def build_disk(config: str, workdir: Path) -> Path:
     """Build a raw BIOS/UEFI bootable disk image via install_disk.py.
 
@@ -579,9 +607,14 @@ def run(args: argparse.Namespace) -> RunResult:
         args.scratch_bus = str(run_defaults["scratch_bus"])
     if run_defaults.get("uefi") and not args.uefi:
         args.uefi = bool(run_defaults["uefi"])
+    net_test = bool(getattr(args, "net_test", False) or run_defaults.get("net_test"))
+    if net_test and (args.interactive or args.variant or args.disk or args.build_disk):
+        raise ValueError("--net-test requires an automated developer ISO run")
 
     is_disk = False
     if args.build:
+        if net_test:
+            args.config = network_test_config(args.config, workdir)
         image = build_iso(args.config, args.variant, args.initrd_overlay, args.image_profile)
     elif args.build_disk:
         image = build_disk(args.config, workdir)
@@ -647,25 +680,43 @@ def run(args: argparse.Namespace) -> RunResult:
         print(f"[qemu_test] blank scratch disk: {scratch} "
               f"({args.scratch_disk} MiB, bus={args.scratch_bus})", file=sys.stderr)
     qmp_transport = getattr(args, "qmp_transport", "unix")
+    peer = None
+    if net_test:
+        if any(arg in ("-nic", "-netdev", "-net") or
+               arg.startswith(("-nic=", "-netdev=", "-net=")) or
+               arg.startswith("e1000,") for arg in extra_args):
+            raise ValueError("--net-test owns its reference NIC and backend")
+        from net_test_transport import NetPeer
+
+        peer = NetPeer(workdir)
+        peer.start()
+        extra_args += ["-nic", "none", "-netdev",
+                       f"socket,id=dunit-test,connect={peer.endpoint}",
+                       "-device", "e1000,netdev=dunit-test,mac=52:54:00:12:34:56"]
     qemu_cmd = build_qemu_command(image, is_disk, args.accel, args.mem, qmp_sock,
                                   serial_log, extra_args, display, qmp_transport)
     print("[qemu_test] launch:", " ".join(qemu_cmd), file=sys.stderr)
 
     metadata = None
     metadata_path = getattr(args, "performance_record", None)
-    if metadata_path:
-        from performance_metadata import collect
-
-        metadata = collect(REPO_ROOT, image, qemu_cmd, args.image_profile)
     result = RunResult(ok=False, reason="", booted=False, iso=str(image))
     launch_started = time.monotonic()
-    with (workdir / "qemu-stderr.log").open("wb") as qemu_stderr:
-        proc = subprocess.Popen(
-            qemu_cmd, cwd=REPO_ROOT, stderr=qemu_stderr,
-            stdout=subprocess.PIPE if qmp_transport == "stdio" else subprocess.DEVNULL,
-            stdin=subprocess.PIPE if qmp_transport == "stdio" else subprocess.DEVNULL,
-            bufsize=0,
-        )
+    try:
+        if metadata_path:
+            from performance_metadata import collect
+
+            metadata = collect(REPO_ROOT, image, qemu_cmd, args.image_profile)
+        with (workdir / "qemu-stderr.log").open("wb") as qemu_stderr:
+            proc = subprocess.Popen(
+                qemu_cmd, cwd=REPO_ROOT, stderr=qemu_stderr,
+                stdout=subprocess.PIPE if qmp_transport == "stdio" else subprocess.DEVNULL,
+                stdin=subprocess.PIPE if qmp_transport == "stdio" else subprocess.DEVNULL,
+                bufsize=0,
+            )
+    except BaseException:
+        if peer is not None:
+            peer.stop()
+        raise
     hard_deadline = time.monotonic() + args.timeout
     qmp = (Qmp(qmp_sock, reader=proc.stdout, writer=proc.stdin)
            if qmp_transport == "stdio" else Qmp(qmp_sock))
@@ -790,6 +841,11 @@ def run(args: argparse.Namespace) -> RunResult:
             force_quit("run stopped")
         serial.pump()
         qmp.close()
+        if peer is not None:
+            result.network_test = peer.stop()
+            if not result.network_test.get("ok", False):
+                result.ok = False
+                result.reason += "; network peer verification failed"
         result.full_serial_len = len(serial.text)
         result.exit_code = proc.returncode
         # Persist the full serial log alongside the run for later inspection.
@@ -820,6 +876,8 @@ def run(args: argparse.Namespace) -> RunResult:
                 result.ok = False
 
         if metadata is not None:
+            if result.network_test is not None:
+                metadata["network_test"] = result.network_test
             import re
 
             cpu_state = re.search(
@@ -925,6 +983,8 @@ def main() -> int:
         help="QEMU acceleration (default auto: kvm if /dev/kvm writable)",
     )
     parser.add_argument("--cpus", type=int, help="explicit guest vCPU count (1..256)")
+    parser.add_argument("--net-test", action="store_true",
+                        help="attach the local bounded Ethernet test peer and reference E1000")
     parser.add_argument("--qmp-transport", choices=("unix", "stdio"), default="unix",
                         help="QMP control channel; stdio uses local pipes without sockets")
     parser.add_argument(

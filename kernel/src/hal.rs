@@ -93,6 +93,11 @@ pub extern "C" fn interrupt_handler(frame: *const InterruptFrame) -> u64 {
         32 => handle_timer(frame),
         33 => handle_keyboard(frame),
         44 => handle_mouse(frame),
+        irq @ 32..=47 if crate::drivers::net::handle_irq((irq - 32) as u8) => {
+            // Device causes were drained before the PIC acknowledgement.
+            // Continue through the common CPL3 return boundary below.
+            handle_unknown_interrupt(frame);
+        }
         _ => handle_unknown_interrupt(frame),
     }
 
