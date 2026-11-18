@@ -224,6 +224,12 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   retain display owner/geometry through a separate access scope. Other syscall,
   driver and heap IRQ-off work remains open; see [present ownership](docs/performance/framebuffer-progress.md).
 
+- [x] Copy bulk input and fixed-length strings through page-aligned mapping
+  scopes of at most 4 KiB; allocate owned output before mapping guards and parse
+  UTF-8 afterward. Host checks reject allocator activity under the mapped guard
+  and cover inter-chunk unmap/permission loss. Copyout, outer IRQ guards and heap
+  latency remain separate open work. See [source-copy scope](docs/performance/user-copy-progress.md).
+
 Remaining gates, in order:
 
 - [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining

@@ -1,0 +1,264 @@
+{
+  "date": "2026-11-18",
+  "base_commit": "d05bc604a05957002365045996906d915e5c1cd9",
+  "scope": "Parallel agent source work and serialized native validation: page-bounded owned user input, SDK service supervision, reference-core routes/gatewayARP/MTU.",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "2acb595fe860b3925276bb3b00700439d8882b39899cbddd10c69f93dbff60d0",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "66156325ad9b596d7ddcd21c88c0f9bf58668ea2f4506249c62f7dd6dfb71baf",
+    "docs/performance/user-copy-progress.md": "4f83eef1507599a3d65f1badd384d9e2980ef6b5b6e035a91186bbc42adb07b6",
+    "docs/sdk/native-api.md": "fdda437845dc4ab80ddd33e4e64db4827f3e38ae3a253e58433e1b3e86ad1b67",
+    "kernel/src/syscall/user_memory.rs": "cc224260cc91ce47415fb7ddcce247fc684c4b408ae54bf6f52ecf1b3c6ac5fd",
+    "runtime/dunit/src/process.rs": "db03b440a8aab16acc9c6b7359fa568762ab62f06c9feee02267a0eed2548cf7",
+    "tools/net_core_markers.json": "44518bf16d31c4b7a9ffba0a1d8eb9cf3bebd1a7d2ca644d5ac3882e2373c7df",
+    "tools/test_sdk_init.py": "5e6c634736c8d5d1dae00c1435e6af934ec80dd78a0478b112031d47eb472590",
+    "tools/test_sdk_init_host.rs.in": "8e1004305a990daebae6d6f9de1911cad4c691faea925370256a198732912bc2",
+    "tools/test_sdk_process.py": "57142fa7fde0e1399cfa99a629e4cfaff80c692731103556e5e9fed2bb2bd64f",
+    "tools/test_sdk_process_host.rs.in": "e4aa67568d62a0aec434abd6c3766103110b1bc0958d38af00d60a032dd2566e",
+    "tools/test_user_memory_host.rs.in": "165d953d6506d36f44852fa978fda61682a7d157a560b1605a1f43f3c6a282ce",
+    "userspace/net-core/README.md": "6f3656d8b9b5273f81ba244383664dac3e4799af747c7b74fd6d51bb06488ff1",
+    "userspace/net-core/src/diagnostic.rs": "c0236fd7178348f6f2518a761ffb46cd25aef5e1dee65dcd32d1e0313485917b",
+    "userspace/net-core/src/lib.rs": "4c8920e04bc57ae5848f426b958045939fb3a3277ef3f148b44b19f5a3f49bc5",
+    "userspace/net-core/src/tests.rs": "8bfa38dfbfa380e19ca906b4eb69f6cf17876144eda49bda909f6a6b38b3b32b",
+    "userspace/system_apps/init/Cargo.lock": "b1b228271042b4c1745f39a310e3cdd02de64113f94ddc4c681c99c94ec3b1c6",
+    "userspace/system_apps/init/Cargo.toml": "0d850931299154e660841dfbf274d6d862837f4207d6dddad259e60c56d24c61",
+    "userspace/system_apps/init/src/main.rs": "3f42bf8b9ae608c6615a1362808dad44c7160af9b651527ee1d3e064483ad194",
+    "userspace/system_apps/net_packet_test/src/main.rs": "6505cadf49a250bdcd99bcd28294ad6dbe94f006cfa7c0e136a7ec620d803a50"
+  },
+  "native_cases": [
+    {
+      "name": "nov18-next-core",
+      "scope": "Fullboot/core original budget plus SDKfiles/bulk/children, dsh pressure, standalone fsck absence and original+routed packet diagnostics; externalINTxpeer",
+      "metadata_sha256": "7df7e3b0adf3f038d4d7289daa99bd63b04eeacf60b28649af2972f670301a74",
+      "serial_sha256": "63df2b6c021ddc23e97a45461c9a2d4e0826ba2f1259a51688ea466fb4aba657",
+      "image": {
+        "path": "/workspace/dunit-os/build/microkernel.iso",
+        "sha256": "8a134adf037ed43bbe64ef034a639f2842eaa71ebf12b04275c3f6c50a853d42",
+        "bytes": 266801152,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-next-core/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-next-core/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4",
+          "-nic",
+          "none",
+          "-netdev",
+          "socket,id=dunit-test,connect=127.0.0.1:57579",
+          "-device",
+          "e1000,netdev=dunit-test,mac=52:54:00:12:34:56"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      }
+    },
+    {
+      "name": "nov18-next-init",
+      "scope": "Explicit GUIconfig installed disk firstboot: original init restart/provisioning budget AND original fullGUI required/forbidden/actions",
+      "metadata_sha256": "5ba03b846bd277af393ba54c100f0a29d432a74cd50c6a8e64d174de0f0663ed",
+      "serial_sha256": "211d71dbe78d27499b2b08645654ed2991384b36c3fc464c2e1dba395d6b5653",
+      "image": {
+        "path": "build/nov18-next-init/dunit-test-disk.img",
+        "sha256": "a8616f00366df2873cc6722a866baa365c356e6b33058e521916c7ae0f2f9429",
+        "bytes": 268435456,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-next-init/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-next-init/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-drive",
+          "file=build/nov18-next-init/dunit-test-disk.img,format=raw,if=ide",
+          "-boot",
+          "c",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": null
+    },
+    {
+      "name": "nov18-next-init-reboot",
+      "scope": "Same installed disk secondboot: sentinel persistence, already provisioned, no firstboot provisioning, original init restarts and desktop readiness",
+      "metadata_sha256": "1fa97809144b81cd2121a107983d8bf5363b27a760c59bc6e5772ce0f3522508",
+      "serial_sha256": "042166cb2259d00dbb31d359608efcf762eca81402a1912c7dc9f44dd703f238",
+      "image": {
+        "path": "build/nov18-next-init/dunit-test-disk.img",
+        "sha256": "78e6c48dce863d9d21d785f48c84cb7b04eee2f324440c9fee09f36cd67e1daa",
+        "bytes": 268435456,
+        "profile": "full"
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/nov18-next-init-reboot/qemu-serial.log",
+          "-qmp",
+          "unix:build/nov18-next-init-reboot/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-drive",
+          "file=build/nov18-next-init/dunit-test-disk.img,format=raw,if=ide",
+          "-boot",
+          "c",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "4"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_test": null
+    }
+  ],
+  "user_copy": {
+    "source": "Actual kernel/src/syscall/user_memory.rs included by host test",
+    "aligned_64KiB_mapping_scopes": 16,
+    "unaligned_4098_byte_scopes": 3,
+    "maximum_mapping_bytes": 4096,
+    "allocator_exclusion": "Checking host global allocator aborts allocation/reallocation/free while mapped guard held; passes bulk/string maximum inputs",
+    "faults": "Inter-chunk permission removal and physical backing retirement return EFAULT before another read; earlyNUL/laterfault priority, invalidUTF8, page-spanning UTF8 and zero/range/cap semantics checked",
+    "copyout": "Unchanged full-range validation before writes",
+    "limits": "This bounds mapped source work only. Heap allocation, caller outerIRQguards and arbitrary with_mapping consumers remain separate gates. No native PIT/elapsedIRQoff or FPS improvement is inferred for these helpers."
+  },
+  "sdk": {
+    "init": "All service filesystem/streams/time/child ownership migrated to SDK lowerlayers; explicit loader entry and never-exit panic policy intentionally preserved",
+    "child": "Nonblocking native wait first, returnedPID/kind validation, EAGAINpending, reapedstatus caching inclprepared. Blocking wait probes before process-event subscription.",
+    "supervision": "Existing startup/provisioning/critical/restart/fallback policy and markers preserved; fallback owner retained until polled completion",
+    "native": "Actual installed GUI session firstboot creates marker/config; secondboot verifies persistent sentinel and already-provisioned path; init-probe executes three times with restart budget2, desktop remains functional",
+    "host_only_paths": [
+      "Prepared-child specialstatus recovery",
+      "Single fallback launch/retained ownership/reap",
+      "Spawn failures/critical/never/always policies"
+    ]
+  },
+  "network": {
+    "reference_only": true,
+    "implemented": [
+      "Immutable interfaceMAC/IP/netmask/MTU",
+      "Protected connected route plus7 removable gateway routes",
+      "Canonical contiguous prefix validation and bounded longest-prefix lookup",
+      "Connected unicast next-hop gateway validation, no-route beforeARP mutation",
+      "GatewayARP retains finalIPv4 destination; bounded reverse-gateway resolution",
+      "MTU68..1500 checked before outbound neighbor mutation and onRX"
+    ],
+    "native_markers": [
+      "[NET-CORE] logical-peer echo=3 ARP=5 rejected=5 checked",
+      "[NET-CORE] routed-peer echo=2 gateway-ARP=1 rejected=3 checked"
+    ],
+    "fixture_limit": "Synthetic gatewayARP and remoteIP peer shareMAC. This validates emitted next-hop/endpoint bytes, not real router forwarding or NIC connectivity.",
+    "open": [
+      "Production packet authority/transport/netd/interface config",
+      "Metrics/multiple-interface forwarding",
+      "IPv4options/reassembly/ICMPerrors",
+      "Sockets/musl backend/Internet"
+    ]
+  },
+  "host_checks": {
+    "user_memory": "3 test groups pass actual production copy helper/lifetime fixture",
+    "net_core": "15 tests plus production no_std metadata; -Dwarnings and overflow/debug assertions",
+    "sdk_process": "4 tests on actual process/time/error modules and native WaitStatus definition",
+    "sdk_init_policy": "4 tests extracting intact actual supervision/parser/status items; Child/native events/logs scripted",
+    "dsh_bridge_regression": "6 actual SDK/bridge checks passed",
+    "production_kernel": "Exact Makefile release build-std cargo check without boot-smoke-tests passed",
+    "contracts": "gen_abi.py --check, gen_cpu_local.py --check, check_kernel_elf.py, git diff --check passed"
+  },
+  "limits": [
+    "TCG only, no /dev/kvm; no scaling or physical input-to-photon measurement.",
+    "Application scheduler remains UP dispatch_cpus1; AP application dispatch and OP3 remaining gates stay open.",
+    "No new syscall/rights/gui-v1/disk format or service authority introduced.",
+    "Disk hashes in metadata identify launch snapshots; guest writes change raw image bytes after launch.",
+    "Existing upstream libc sscanf extreme floating literal warnings remain visible; no new production warning suppression."
+  ],
+  "repaired_attempts": [
+    "First installedGUI invocation relied on manifest config default. Harness applies that default only for ISO --build, so disk booted Terminal and never exercised init. Rebuilt with explicit --config limine_test_gui.conf; unchanged original init+GUI budgets passed, then verified real reboot separately."
+  ],
+  "implementation_commits": {
+    "bounded_user_input": "832fb03",
+    "init_and_owned_processes": "423c6e5",
+    "reference_routes_gateway_mtu": "a8e72cb"
+  }
+}

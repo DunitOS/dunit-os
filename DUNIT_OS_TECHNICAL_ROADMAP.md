@@ -486,6 +486,9 @@ Rust toolkit.
 - [ ] Define a versioned identity/uname source.
 - [x] Migrate dsh and fsck_dunit to native SDK entry/streams/files/environment/
   diagnostics/process/PTY/time APIs; preserve cooked input and report exit codes.
+- [x] Migrate init service I/O, filesystem, owned-child supervision and time to
+  SDK lower layers; preserve its explicit entry and never-exit panic policy.
+  Prepared-child recovery, restart budgets and single fallback reaping are checked.
 - [ ] Finish remaining CLI/TUI/service lower-layer migration.
 - [ ] Replace raw image viewers only after parity.
 - [x] Deliver owning SDK thread/synchronization APIs with guarded stacks, typed
@@ -553,6 +556,10 @@ ring wrap/starvation/completion/link-toggle/interrupt-storm/reset tests and
   fixed-header IPv4 and ICMP echo, consumed by host tests and a native logical
   peer diagnostic. See [scope and limits](userspace/net-core/README.md);
   this does not close NIC transport, routing or production N1 acceptance.
+- [x] Add bounded connected/default routes and longest-prefix next-hop selection
+  to the reference core. Gateway ARP retains the final IP destination, interface
+  MTU is enforced, and route errors precede neighbor mutation. Native logical
+  diagnostics check the bytes; production interface/transport policy remains open.
 
 - [ ] Validate Ethernet II sizes/padding/types; reject bad/unknown frames early.
 - [ ] Bound ARP INCOMPLETE/REACHABLE/STALE retry/expiry/poisoning policy.
