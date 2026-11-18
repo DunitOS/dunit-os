@@ -418,3 +418,144 @@ fn concurrent_modes_and_copies_observe_one_geometry_and_backing() {
     assert_eq!(memory::vmm::MAPS.load(Ordering::SeqCst), 1);
     assert_eq!(memory::vmm::UNMAPS.load(Ordering::SeqCst), 0);
 }
+
+// Exercise the actual framebuffer ABI adapter, including clipping and source
+// pin boundaries. Mapping translation/permissions have their own actual-VMM
+// tests; this shim records each requested owned scope and can revoke a page.
+mod process {
+    pub struct Process {
+        pub pid: Pid,
+    }
+    pub struct Pid(pub u64);
+    pub fn with_current_process<R>(op: impl FnOnce(&Process) -> R) -> Option<R> {
+        Some(op(&Process { pid: Pid(7) }))
+    }
+}
+mod present_syscall {
+    pub const EOPNOTSUPP: i64 = -95;
+    pub const EINVAL: i64 = -22;
+    pub const EIO: i64 = -5;
+    pub const EACCES: i64 = -13;
+    pub const EFAULT: i64 = -14;
+    #[allow(dead_code)]
+    pub struct TerminalCursorInfo {
+        pub x: u32,
+        pub y: u32,
+        pub char_width: u32,
+        pub char_height: u32,
+    }
+    pub fn copy_buffer_to_user(_: *mut u8, _: &[u8]) -> Result<(), i64> {
+        Ok(())
+    }
+    pub fn is_valid_user_pointer(pointer: u64, len: usize) -> bool {
+        pointer != 0 && pointer.checked_add(len as u64).is_some()
+    }
+    pub mod user_memory {
+        use std::sync::Mutex;
+        pub static SCOPES: Mutex<Vec<(usize, bool)>> = Mutex::new(Vec::new());
+        pub static SOURCE: Mutex<(usize, usize, usize)> = Mutex::new((0, 0, usize::MAX));
+        pub struct Mapping {
+            ptr: *const u8,
+            len: usize,
+        }
+        impl Mapping {
+            pub unsafe fn copy_words_volatile(
+                &self,
+                offset: usize,
+                destination: *mut u32,
+                count: usize,
+            ) {
+                assert!(offset + count * 4 <= self.len);
+                for i in 0..count {
+                    destination.add(i).write_volatile(
+                        self.ptr.add(offset + i * 4).cast::<u32>().read_unaligned(),
+                    );
+                }
+            }
+        }
+        pub fn with_mapping<R>(
+            ptr: u64,
+            len: usize,
+            _: bool,
+            op: impl FnOnce(Mapping) -> Result<R, i64>,
+        ) -> Result<R, i64> {
+            let mut source = SOURCE.lock().unwrap();
+            if ptr < source.0 as u64 || ptr as usize + len > source.0 + source.1 || source.2 == 0 {
+                return Err(-14);
+            }
+            source.2 = source.2.saturating_sub(1);
+            drop(source);
+            SCOPES.lock().unwrap().push((len, true));
+            op(Mapping {
+                ptr: ptr as *const u8,
+                len,
+            })
+        }
+        pub fn validate_user_pages(ptr: u64, len: usize, _: bool) -> Result<(), i64> {
+            let source = SOURCE.lock().unwrap();
+            if ptr < source.0 as u64 || ptr as usize + len > source.0 + source.1 {
+                return Err(-14);
+            }
+            assert!((ptr as usize & 4095) + len <= 4096);
+            SCOPES.lock().unwrap().push((len, false));
+            Ok(())
+        }
+    }
+    pub fn present(src: *const u8, width: u32, height: u32, x: u32, y: u32) -> i64 {
+        crate::present_adapter::sys_fb_present(src, width, height, x, y)
+    }
+}
+
+use present_syscall::{
+    copy_buffer_to_user, is_valid_user_pointer, user_memory, TerminalCursorInfo, EACCES, EFAULT,
+    EINVAL, EIO, EOPNOTSUPP,
+};
+#[allow(dead_code)]
+#[path = "../src/syscall/display.rs"]
+mod present_adapter;
+
+#[test]
+fn framebuffer_present_bounds_source_pins_and_preserves_clipping_and_faults() {
+    let _test = TEST_LOCK.lock().unwrap();
+    setup();
+    assert!(display::try_acquire(7));
+    display::set_mode(7, 2048, 80).unwrap();
+    let source: Vec<u32> = (0..2053 * 3).map(|i| i as u32 + 0x12340000).collect();
+    let ptr = unsafe { source.as_ptr().cast::<u8>().add(1) };
+    let bytes = source.len() * 4 - 1;
+    *present_syscall::user_memory::SOURCE.lock().unwrap() = (ptr as usize, bytes, usize::MAX);
+    present_syscall::user_memory::SCOPES.lock().unwrap().clear();
+    assert_eq!(present_syscall::present(ptr, 2052, 3, 3, 2), 0);
+    let frame = pixels();
+    for row in 0..3 {
+        for column in 0..2045 {
+            let expected = unsafe {
+                ptr.add((row * 2052 + column) * 4)
+                    .cast::<u32>()
+                    .read_unaligned()
+            };
+            assert_eq!(frame[(row + 2) * 2048 + column + 3], expected);
+        }
+    }
+    let scopes = present_syscall::user_memory::SCOPES.lock().unwrap();
+    assert!(scopes.iter().all(|(len, _)| *len <= 4096));
+    assert_eq!(scopes.iter().filter(|(_, copy)| *copy).count(), 6);
+    assert_eq!(
+        scopes
+            .iter()
+            .filter(|(_, copy)| !*copy)
+            .map(|(n, _)| n)
+            .sum::<usize>(),
+        2052 * 3 * 4
+    );
+    drop(scopes);
+    // Full supplied range is checked even when all pixels clip away.
+    assert_eq!(present_syscall::present(ptr, 2053, 3, 4096, 4096), -14);
+    // A revoked mapping is checked again per chunk, with no stale user view.
+    present_syscall::user_memory::SOURCE.lock().unwrap().2 = 1;
+    assert_eq!(present_syscall::present(ptr, 2052, 3, 0, 0), -14);
+    present_syscall::user_memory::SOURCE.lock().unwrap().2 = usize::MAX;
+    display::release(7);
+    assert_eq!(present_syscall::present(ptr, 2052, 3, 0, 0), -13);
+    assert_canaries();
+}

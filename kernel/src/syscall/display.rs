@@ -146,29 +146,109 @@ pub(super) fn sys_fb_present(
     if !is_valid_user_pointer(src as u64, bytes) {
         return EFAULT;
     }
-    // VM -> display, never display -> VM. The mapping pin spans validation,
-    // copying and flush; display ownership is revalidated after that pin.
-    user_memory::with_mapping(src as u64, bytes, false, |mapping| {
-        driver::present(pid, None, |framebuffer| {
-            let (x, y) = (dst_x as usize, dst_y as usize);
-            let copy_width = width.min((framebuffer.width as usize).saturating_sub(x));
-            let copy_height = height.min((framebuffer.height as usize).saturating_sub(y));
-            if copy_width == 0 {
-                return;
-            }
-            for row in 0..copy_height {
-                let offset = (y + row) * framebuffer.pitch as usize + x * 4;
+    #[cfg(feature = "boot-smoke-tests")]
+    let mut probe = PresentProbe::new();
+    let result = driver::present(pid, None, |framebuffer| {
+        #[cfg(feature = "boot-smoke-tests")]
+        { probe.start = crate::clock::pit_interrupts(); }
+        // Preserve validation of the entire supplied image, including clipped
+        // pixels. Each pin covers at most one source page, never a whole frame.
+        let mut checked = 0;
+        while checked < bytes {
+            let address = src as u64 + checked as u64;
+            let count = (4096 - (address as usize & 4095)).min(bytes - checked);
+            user_memory::validate_user_pages(address, count, false)?;
+            checked += count;
+        }
+        let (x, y) = (dst_x as usize, dst_y as usize);
+        let copy_width = width.min((framebuffer.width as usize).saturating_sub(x));
+        let copy_height = height.min((framebuffer.height as usize).saturating_sub(y));
+        // Kernel-owned staging outlives each mapping guard. Device writes run
+        // after the guard restores IF; ACCESS keeps the display lease/geometry
+        // stable across every chunk without masking IRQs. A concurrent unmap
+        // can return EFAULT after earlier chunks reached scanout; present does
+        // not promise transactional frame contents.
+        let mut staging = [0u32; 1024];
+        for row in 0..copy_height {
+            let mut column = 0;
+            while column < copy_width {
+                let count = staging.len().min(copy_width - column);
+                let address = src as u64 + ((row * width + column) * 4) as u64;
+                user_memory::with_mapping(address, count * 4, false, |mapping| {
+                    unsafe {
+                        mapping.copy_words_volatile(0, staging.as_mut_ptr(), count);
+                    }
+                    Ok(())
+                })?;
+                #[cfg(feature = "boot-smoke-tests")]
+                probe.chunk(count * 4);
+                let offset = (y + row) * framebuffer.pitch as usize + (x + column) * 4;
                 let destination =
                     unsafe { (framebuffer.address as *mut u8).add(offset) } as *mut u32;
-                unsafe {
-                    mapping.copy_words_volatile(row * width * 4, destination, copy_width);
+                for (index, pixel) in staging[..count].iter().enumerate() {
+                    unsafe {
+                        destination.add(index).write_volatile(*pixel);
+                    }
                 }
+                column += count;
             }
-        })
-        .map_err(display_errno)
+        }
+        Ok::<(), i64>(())
     })
+    .map_err(display_errno)
+    .and_then(|result| result)
     .map(|()| 0)
-    .unwrap_or_else(|error| error)
+    .unwrap_or_else(|error| error);
+    #[cfg(feature = "boot-smoke-tests")]
+    if result == 0 && bytes >= 1024 * 1024 {
+        probe.report();
+    }
+    result
+}
+
+// Private feature-only evidence from real presents; no public ABI or hot-path
+// output in production. Report only after all source/device guards have ended.
+#[cfg(feature = "boot-smoke-tests")]
+struct PresentProbe {
+    start: u64,
+    max_bytes: usize,
+    enabled_chunks: usize,
+    chunks: usize,
+}
+#[cfg(feature = "boot-smoke-tests")]
+impl PresentProbe {
+    fn new() -> Self {
+        Self {
+            start: crate::clock::pit_interrupts(),
+            max_bytes: 0,
+            enabled_chunks: 0,
+            chunks: 0,
+        }
+    }
+    fn chunk(&mut self, bytes: usize) {
+        self.max_bytes = self.max_bytes.max(bytes);
+        self.chunks += 1;
+        if crate::sync::interrupts_enabled() {
+            self.enabled_chunks += 1;
+        }
+    }
+    fn report(self) {
+        use core::sync::atomic::{AtomicBool, Ordering};
+        static REPORTED: AtomicBool = AtomicBool::new(false);
+        let ticks = crate::clock::pit_interrupts().wrapping_sub(self.start);
+        if ticks == 0 || REPORTED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        crate::serial_write("[FB-PRESENT] mapping_max_bytes=");
+        crate::serial::write_dec(self.max_bytes as u64);
+        crate::serial_write(" chunks=");
+        crate::serial::write_dec(self.chunks as u64);
+        crate::serial_write(" irq_enabled_chunks=");
+        crate::serial::write_dec(self.enabled_chunks as u64);
+        crate::serial_write(" pit_ticks=");
+        crate::serial::write_dec(ticks);
+        crate::serial_write("\r\n");
+    }
 }
 
 pub(super) fn sys_set_video_mode(width: u32, height: u32) -> i64 {

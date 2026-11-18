@@ -1,6 +1,7 @@
 //! Display ownership, scanout geometry and backend programming.
-//! Display policy stays in userspace. All pixel access and modesets use STATE;
-//! no callback may take a task/VM lock or retain a framebuffer pointer.
+//! Display policy stays in userspace. ACCESS serializes pixel access, leases and
+//! modesets. STATE protects metadata; never take a task/VM lock under STATE.
+//! No callback may retain a framebuffer pointer.
 
 use crate::sync::{InterruptGuard, SpinLock};
 
@@ -54,6 +55,11 @@ struct DisplayState {
 // IRQ handlers never acquire this lock, and timer preemption only switches
 // CPL3. Kernel console rendering can therefore leave interrupts enabled.
 // Task/AS -> display is permitted; display -> task/AS is prohibited.
+// Lock order: ACCESS -> user mapping (bounded staging only) -> STATE.
+// No IRQ/NMI path renders, changes leases or modesets; CPL0 timer IRQs return
+// without dispatch. Panic/exception diagnostics use serial, never ACCESS.
+static ACCESS: SpinLock<()> = SpinLock::new(());
+
 static STATE: SpinLock<DisplayState> = SpinLock::new(DisplayState {
     owner: 0,
     leases: 0,
@@ -130,6 +136,7 @@ pub fn try_acquire(pid: u64) -> bool {
     if pid == 0 {
         return false;
     }
+    let _access = ACCESS.lock();
     let mut state = STATE.lock();
     if state.owner != 0 && state.owner != pid {
         return false;
@@ -143,6 +150,7 @@ pub fn try_acquire(pid: u64) -> bool {
 }
 
 pub fn release(pid: u64) {
+    let _access = ACCESS.lock();
     let mut state = STATE.lock();
     if pid != 0 && state.owner == pid {
         state.leases -= 1;
@@ -164,6 +172,7 @@ pub(crate) fn with_framebuffer<R>(
     pid: u64,
     op: impl FnOnce(&Framebuffer) -> R,
 ) -> Result<R, DisplayError> {
+    let _access = ACCESS.lock();
     let state = STATE.lock();
     if pid == 0 || state.owner != pid {
         return Err(DisplayError::AccessDenied);
@@ -175,6 +184,7 @@ pub(crate) fn with_framebuffer<R>(
 }
 
 pub(crate) fn with_console_framebuffer(op: impl FnOnce(&Framebuffer)) {
+    let _access = ACCESS.lock();
     let state = STATE.lock();
     if state.owner != 0 {
         return;
@@ -208,6 +218,7 @@ pub fn set_mode(pid: u64, width: u32, height: u32) -> Result<(), DisplayError> {
     // Mask PS/2 only for programming/publication. The callback cannot wait on
     // an IRQ, task or VM owner. No serial output runs inside this scope.
     {
+        let _access = ACCESS.lock();
         let mut state = STATE.lock();
         let _irq = InterruptGuard::new();
         if pid == 0 || state.owner != pid {
@@ -242,25 +253,27 @@ pub fn set_mode(pid: u64, width: u32, height: u32) -> Result<(), DisplayError> {
     Ok(())
 }
 
-/// Copy and backend publication share the same owner/geometry scope. Source
-/// validation and its VM pin must already exist before entering this callback.
-pub(crate) fn present(
+/// ACCESS retains owner/geometry through staging, pixel writes and publication.
+/// The callback may take bounded user mapping scopes while STATE is unlocked.
+/// It must release each mapping before writing scanout, and retain no pointers.
+pub(crate) fn present<R>(
     pid: u64,
     rect: Option<(u32, u32, u32, u32)>,
-    copy: impl FnOnce(&Framebuffer),
-) -> Result<(), DisplayError> {
+    copy: impl FnOnce(&Framebuffer) -> R,
+) -> Result<R, DisplayError> {
+    let _access = ACCESS.lock();
+    let framebuffer = {
+        let state = STATE.lock();
+        if pid == 0 || state.owner != pid {
+            return Err(DisplayError::AccessDenied);
+        }
+        state.framebuffer.ok_or(DisplayError::Unavailable)?
+    };
+    let result = copy(&framebuffer);
     let mut state = STATE.lock();
-    if pid == 0 || state.owner != pid {
-        return Err(DisplayError::AccessDenied);
-    }
-    copy(
-        state
-            .framebuffer
-            .as_ref()
-            .ok_or(DisplayError::Unavailable)?,
-    );
     match &mut state.backend {
-        Backend::Limine => Ok(()),
-        Backend::Bochs(device) => device.present(rect),
+        Backend::Limine => {}
+        Backend::Bochs(device) => device.present(rect)?,
     }
+    Ok(result)
 }
