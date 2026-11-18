@@ -230,6 +230,11 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   and cover inter-chunk unmap/permission loss. Copyout, outer IRQ guards and heap
   latency remain separate open work. See [source-copy scope](docs/performance/user-copy-progress.md).
 
+- [x] Prepare poll and wait-set requests outside the outer IRQ guard and
+  narrow attached IPC send to the capability/publication transaction. Preserve
+  wait generation checks and preflighted reply writes. See
+  [wait and IPC scope verification](docs/performance/wait-ipc-scopes.md).
+
 Remaining gates, in order:
 
 - [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining

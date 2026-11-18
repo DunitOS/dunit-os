@@ -1,0 +1,200 @@
+{
+  "date": "2026-11-18",
+  "base_commit": "559123df046b9cb1a9b44f306dde0e94aed783b9",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "c36dd609891427a39bf443f78c4624340d5c9e1b37231f5c30121b4107bc3046",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "0e5ded7f8e9082ffca2e7e4c3ee49522d098f191d436f6ea899174356b042212",
+    "docs/network/packet-authority-proposal.md": "fdb86bd344e0726ae70c0d794f59ad1f078571e7b5d182e70f99752c47486cf5",
+    "docs/performance/wait-ipc-scopes.md": "0c07467626f2b27141791b9bc906a509071d9fec4279ec5e1ee0a59858cc5a27",
+    "docs/sdk/native-api.md": "e054142b17b8d40a724c4307cfa280496771c4bb1be4044f48590fcb12f28a76",
+    "kernel/src/syscall/attached_ipc.rs": "a4867c0a189f54db191790a2eda2dc0c9daa348e51ef75ec2f6f900f35e7e74c",
+    "kernel/src/syscall/native_fd.rs": "75100c73ee4fe1434f5eaa3b2582d0e2a6bfcd363d1414c7f3b69bec72543500",
+    "kernel/src/syscall/wait_set.rs": "1cf75d64fec3d0637c52a7bdffd7220d3f7881c88e41995fc0d87a7091ee1106",
+    "runtime/dunit/src/display.rs": "aa0ad3d95cb163f70c16bd8177d17d4a25502cab571671d5c648e581b8ab772d",
+    "runtime/dunit/src/lib.rs": "b317a1f67b12e109bc8ab169606d136bf044b6b2b938c1716afcd0bed482c5e8",
+    "runtime/dunit/src/terminal.rs": "1e7cbb4b6178c6b5ddc2a0512f54fe507933f25c89b304d95879e657bc97dc65",
+    "tools/net_core_markers.json": "139a94758aa882604a4144d33894b960d58e909fe7b998a90075a5071a9f423a",
+    "tools/test_sdk_display.py": "cb51bbf11b4769e194f330b59ab99dad9b45eeb814b1ad004b7519b71bdc7c39",
+    "tools/test_sdk_display_host.rs.in": "b9b23258cd80a792eb8e79553c634a35703a690fbe50ede2912a88ca149250a2",
+    "tools/test_setup_sdk.py": "3813d747c6371bba182449b0b505d5db28d5ec101fa000faf2dafb46b5e457a2",
+    "tools/test_setup_sdk_host.rs.in": "616ff77801a3990d4f55464193237cf0c98a2b70a02d2fc26fccc5d9b76c53c4",
+    "tools/test_syscall_wait_scopes.py": "dd896d6ed89df77b668b4b698ef7978c76e77d15635c85b3b70988f0bcede709",
+    "tools/test_syscall_wait_scopes_host.rs.in": "be1a98711bfe9d1cfe247fe6081e9e717ed36f49e2fe1ac474eb709e3472e4fe",
+    "userspace/net-core/README.md": "8c50e61d1381b3e08a120eb736134d19ccf424022d509d11fc10bb22702815e9",
+    "userspace/net-core/src/dns.rs": "ef61795205691efd5f90ffa86204029db10d9bb6e6ee3ba2560f1a6d834b6911",
+    "userspace/net-core/src/lib.rs": "0eb5ce64ffe13c1c110d339da8ac4b4a9848b5ed1eade1ff9e117e90a63fd98f",
+    "userspace/net-core/src/tests.rs": "1046d15f27d26778ff5fb86d85ec9e4e4b623e59b19fe55f37e94831387f0301",
+    "userspace/net-core/src/transport_diagnostic.rs": "d0df7ed4eb50e8af6a9b151ad6ea1ae07670223484dbc54b5d61d4217ec4ede9",
+    "userspace/net-core/src/transport_tests.rs": "c1c4e28115f29524ce469f0767513d49705a81eb2e490c1d68557f2f9b551618",
+    "userspace/net-core/src/udp.rs": "9906e30400cfeb5b2c17acb208bf11a709eee38ee8d7e1b2bf8f9abe2f6e4594",
+    "userspace/system_apps/bmp_viewer/Cargo.lock": "ffcc1feda5dfb9f997141a1e2e053ed0e74a36b1ae90d0b5dbab6a2eb24988b9",
+    "userspace/system_apps/bmp_viewer/Cargo.toml": "8225153081abc3b73e7c408020481fe307f8219d68834ecb35c45d198ac473ff",
+    "userspace/system_apps/bmp_viewer/src/bmp.rs": "0c66d528858ef791dd988e1ade806119c2111dd3c2aa29cc9bc6f01f15b2d09f",
+    "userspace/system_apps/bmp_viewer/src/main.rs": "b62af97d47bbbe5c6fd6f238a958fc8493b55a589ad060f177956ce54521ef17",
+    "userspace/system_apps/image_demo/Cargo.lock": "a02ad63aaaed913be4a2b00e829ee20d29f3ca7abc8679424e07e95fb6e8fa33",
+    "userspace/system_apps/image_demo/Cargo.toml": "6e13f9aab6ed3b7fae9d6405942091aa6f9c732d7c6e705a5187ddeb3e48223d",
+    "userspace/system_apps/image_demo/src/main.rs": "f4a597d4db036f69e6253d93c2e5f8f31625cf18550cc7aac026255e47ce6169",
+    "userspace/system_apps/net_packet_test/src/main.rs": "efc00b309ce3b47540cce8c3a1889dbe5b35c7818e9828d131cea9d51411b6c3",
+    "userspace/system_apps/setup/Cargo.lock": "b3ddd15be14f45c485de89e08e52791a0aabd9eb270c835cc00f8b4ec6c4870f",
+    "userspace/system_apps/setup/Cargo.toml": "e6295e77aa54bbed2f5a09dd8f6aef0382174bf45883ab424d626f061be58c7c",
+    "userspace/system_apps/setup/src/app.rs": "31b44b86aab6f0560fa3c8560dd5d773b1fcf2da74e016239e7b5ce8a052fd2b",
+    "userspace/system_apps/setup/src/main.rs": "aa690e58f732ab5fb29596f5d5d69564c7a3083c69d6a9435d9ecb51b424deea"
+  },
+  "native_cases": [
+    {
+      "name": "nov18-block-core-accepted",
+      "scope": "Full Terminal Mode, legacy core contracts and budgets, SDK APIs, dsh backpressure, Setup menu/overlay/invalid input, both viewers, valid and invalid BMP, native logical UDP/DNS, external INTx frame exchange.",
+      "metadata_sha256": "9028aecfc999ab4b154959c911a8818c9067b7c010169b48774c7117c78c2947",
+      "serial_sha256": "4c211adc2413cef9c6af25e4ce53c53a086d4b27a5a4ea4e09da8b6a2fa56b58",
+      "marker_fixture_sha256": "3c40c0b2173995905dbde0ed721d7674a8d7d8c69feae5a941ae12cef254b994",
+      "image_sha256": "239b8fdefe0752668923a8b978039bc357562668c8438e7f8f1eaa3629145e2c",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "nov18-block-waits-gui",
+      "scope": "Existing native-FD poll and wait-set fixtures, PTY marker fixture, Setup import-user/check/import-desktop, attached GUI shared-buffer round trip, desktop resize and recycling.",
+      "metadata_sha256": "ab57e7597b5c9e3be1c20485de57e7a63d8e5b0a75f9ef34c8ab663f1ee0c718",
+      "serial_sha256": "fc79953f6b19e67a6cfa3c8915d1a08883e47680ebbb713a61e76c0e6cfaac6e",
+      "marker_fixture_sha256": "63a48b2b6bd50a76137272ced5683e4d8617a8024a6fe8edb0d09ef0dce34ef1",
+      "image_sha256": "239b8fdefe0752668923a8b978039bc357562668c8438e7f8f1eaa3629145e2c",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "nov18-block-viewer-before",
+      "scope": "Interactive BMP preview and key-triggered exit on baseline ISO.",
+      "metadata_sha256": "32ebdf984ce2f72155e037fafe7f43399475cef06ddcfe41825691e4b2117e55",
+      "serial_sha256": "3f41482096a6c8cf1fc039f987cc323928c30f00cc497aa65f3d6dfe60846fe8",
+      "marker_fixture_sha256": "6fad41624305ceaa8413f695de9c637d2d90ddbda3540ac1398e0ee4ac17f457",
+      "image_sha256": "8a134adf037ed43bbe64ef034a639f2842eaa71ebf12b04275c3f6c50a853d42",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "nov18-block-viewer-after",
+      "scope": "Same interactive BMP preview and key-triggered exit on updated ISO.",
+      "metadata_sha256": "5e155f4bb58d6eb82944eb6e6d28357ce8896aebe50b1858ac22da26e2c0cfd5",
+      "serial_sha256": "71aa2e1202f65581f8e1384bb2fba4e9fb4219434592211ad2b37b8255651344",
+      "marker_fixture_sha256": "0cda9f0cfe31b33b3cb0f9b9951967e89f80feae4f77ee0f8d73904f1a37bb8f",
+      "image_sha256": "239b8fdefe0752668923a8b978039bc357562668c8438e7f8f1eaa3629145e2c",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "network_test": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "host_cases": {
+    "test_syscall_wait_scopes.py": "PASS: actual syscall source at max counts, remote probe gap, descriptor generation reuse, allocation scope, publication rollback, receive faults",
+    "test_sdk_display.py": "5 passed",
+    "test_setup_sdk.py": "10 passed",
+    "bmp.rs rustc --test": "4 passed",
+    "net-core rustc --test -D warnings": "25 passed; production library metadata also builds with -D warnings",
+    "test_parking.py": "8,000 race iterations passed",
+    "test_ipc_lock.py": "8,000 ordered transactions and compile-negative fixture passed"
+  },
+  "bmp_visual_parity": {
+    "width": 1920,
+    "height": 1080,
+    "different_pixels": 0,
+    "both_ppm_sha256": "9279c2f937ed49e160dabf29bd4366d052233a887358ffe504c3bfb897811eb3",
+    "stock_raster_draw_calls_before": 250001,
+    "stock_raster_draw_calls_after": 1,
+    "count_scope": "500 by 500 stock BMP and its border. Count from the draw loop and bulk present. Exit clear and unrelated syscalls excluded."
+  },
+  "fixture_corrections": [
+    "Wait for the preceding viewer to exit before typing the next Terminal command.",
+    "Use the packaged /assets/exec-path for the readable non-BMP input. The unpackaged PNG path exercised read failure instead of format rejection."
+  ],
+  "limits": [
+    "TCG only. No hardware latency or scaling claim. Scheduler dispatch stays on one CPU.",
+    "UDP/DNS used a native logical peer. The separate hardware IRQ diagnostic used a private EtherType.",
+    "No production packet transport, DHCP, TCP resolver fallback or new kernel ABI."
+  ]
+}

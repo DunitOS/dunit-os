@@ -490,7 +490,10 @@ Rust toolkit.
   SDK lower layers; preserve its explicit entry and never-exit panic policy.
   Prepared-child recovery, restart budgets and single fallback reaping are checked.
 - [ ] Finish remaining CLI/TUI/service lower-layer migration.
-- [ ] Replace raw image viewers only after parity.
+- [x] Migrate Setup to SDK entry and buffered I/O; reuse the desktop settings
+  parser, staging rules and import paths.
+- [x] Migrate BMP Viewer and Image Demo to owned SDK display leases. Submit
+  each image as one bounded raster; compare the native BMP capture pixel for pixel.
 - [x] Deliver owning SDK thread/synchronization APIs with guarded stacks, typed
   results and native join acknowledgement before reclamation.
 - [x] Deliver standalone SDK packaging and verified offline relocated builds.
@@ -528,6 +531,9 @@ CONTROL/RAW/TRANSFER authority only with human approval. Own buffer transitions
 `DRIVER_RX → NETD → FREE` and `NETD_TX → DRIVER → COMPLETE`; bounded shared rings/
 events avoid per-byte syscalls. On netd crash stop/revoke/reset/restart safely.
 Ordinary apps never obtain raw NIC/MMIO/DMA authority.
+
+The [packet authority proposal](docs/network/packet-authority-proposal.md)
+defines the decisions still needed for production driver-to-service delivery.
 
 ### N0 — E1000 packet I/O
 
@@ -573,13 +579,18 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
 
 ### N2 — UDP, DHCPv4 and DNS
 
-- [ ] Implement port demultiplexing/ephemeral allocation/checksums/bounded UDP queues.
-- [ ] Provide datagram bind/connect/send-to/receive-from and nonblocking/timeouts/readiness.
+- [x] Add UDP checksums, port demultiplexing, ephemeral allocation and bounded
+  queues to the logical peer core. Exercise bind, connect, send, receive and
+  readiness through the host and native diagnostic.
+- [x] Add bounded DNS A/AAAA/CNAME parsing, compression, TTL caching and query
+  validation/retry/timeouts over the logical UDP core.
+- [ ] Expose UDP through production sockets and integrate blocking, timeout and
+  readiness with live device transport.
 - [ ] Implement DHCP INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING and link reset.
 - [ ] Validate offers/options, atomically apply address/prefix/gateway/DNS with rollback,
   and revalidate cached leases after reboot.
-- [ ] Implement bounded DNS A/AAAA/CNAME, compression pointers/TTL cache, query
-  validation/retry/timeouts and TCP truncated-response fallback.
+- [ ] Integrate live DNS with DHCP configuration, service entropy and TCP
+  fallback on truncated replies.
 - [ ] Define static→DHCP→admin/user configuration precedence.
 
 Acceptance: DHCP loss/NAK/
