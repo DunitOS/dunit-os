@@ -1,0 +1,24 @@
+{
+  "description": "N1 userspace codec/logical-peer diagnostic only; no NIC or netd claim",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": [
+      "exec /app/net_packet_test"
+    ]
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[NET-CORE] logical-peer echo=3 ARP=5 rejected=5 checked",
+    "[NET-CORE] codec logical-peer OK; NIC service gate open",
+    "[EXEC] /app/net_packet_test returned code=0"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "[NET-CORE] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[TERM-007] Starting main loop"
+    }
+  ]
+}

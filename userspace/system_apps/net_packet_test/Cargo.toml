@@ -1,0 +1,8 @@
+[package]
+name = "net_packet_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+dunit-net-core = { path = "../../net-core" }
