@@ -22,6 +22,11 @@ pub enum Error {
     Unsolicited,
     RateLimit,
     NoRoute,
+    WouldBlock,
+    NotBound,
+    PortInUse,
+    Unsupported,
+    NameNotFound,
 }
 fn word(b: &[u8], n: usize) -> u16 {
     u16::from_be_bytes([b[n], b[n + 1]])
@@ -150,10 +155,11 @@ impl Arp {
 pub struct Ipv4<'a> {
     pub source: Ip,
     pub destination: Ip,
+    pub protocol: u8,
     pub payload: &'a [u8],
 }
 impl<'a> Ipv4<'a> {
-    /// This initial endpoint supports ICMP only, no IP options or reassembly.
+    /// ICMP and UDP only; no IP options or reassembly.
     pub fn parse(b: &'a [u8]) -> Result<Self, Error> {
         if b.len() < 20 {
             return Err(Error::Length);
@@ -174,7 +180,7 @@ impl<'a> Ipv4<'a> {
         if word(b, 6) & 0xbfff != 0 {
             return Err(Error::Fragment);
         }
-        if b[9] != 1 {
+        if ![1, 17].contains(&b[9]) {
             return Err(Error::Protocol);
         }
         let source = b[12..16].try_into().unwrap();
@@ -185,10 +191,19 @@ impl<'a> Ipv4<'a> {
         Ok(Self {
             source,
             destination,
+            protocol: b[9],
             payload: &b[20..size],
         })
     }
     pub fn encode(source: Ip, destination: Ip, payload: &[u8]) -> Result<Vec<u8>, Error> {
+        Self::encode_protocol(source, destination, 1, payload)
+    }
+    pub fn encode_protocol(
+        source: Ip,
+        destination: Ip,
+        protocol: u8,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, Error> {
         if payload.len() > MTU - 20 {
             return Err(Error::Length);
         }
@@ -198,7 +213,7 @@ impl<'a> Ipv4<'a> {
         put(&mut b, 2, len);
         put(&mut b, 6, 0x4000);
         b[8] = 64;
-        b[9] = 1;
+        b[9] = protocol;
         b[12..16].copy_from_slice(&source);
         b[16..20].copy_from_slice(&destination);
         let c = checksum(&b[..20]);
@@ -538,6 +553,7 @@ pub struct Peer {
     pub neighbors: ArpCache,
     window: u64,
     replies: u8,
+    udp: udp::Endpoints,
 }
 impl Peer {
     pub fn new(mac: Mac, ip: Ip, netmask: Ip, mtu: usize) -> Result<Self, Error> {
@@ -551,6 +567,7 @@ impl Peer {
             neighbors: ArpCache::new(),
             window: 0,
             replies: 0,
+            udp: udp::Endpoints::new(),
         })
     }
     pub fn add_route(&mut self, network: Ip, mask: Ip, gateway: Ip) -> Result<(), Error> {
@@ -647,6 +664,11 @@ impl Peer {
         if ip.payload.len() + 20 > self.routes.mtu {
             return Err(Error::Length);
         }
+        if ip.protocol == 17 {
+            let datagram = udp::Udp::parse(ip.source, ip.destination, ip.payload)?;
+            self.udp.deliver(ip.source, datagram)?;
+            return Ok(None);
+        }
         let echo = Echo::parse(ip.payload)?;
         if echo.reply {
             return Ok(None);
@@ -683,5 +705,10 @@ impl Peer {
 }
 
 pub mod diagnostic;
+pub mod dns;
 #[cfg(test)]
 mod tests;
+pub mod transport_diagnostic;
+#[cfg(test)]
+mod transport_tests;
+pub mod udp;

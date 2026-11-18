@@ -1,5 +1,5 @@
 {
-  "description": "N1 userspace codec/logical-peer diagnostic only; no NIC or netd claim",
+  "description": "N1/N2 userspace codec/UDP/DNS logical-peer diagnostic only; no NIC or netd claim",
   "run": {
     "config": "limine_test_terminal.conf",
     "cmd": [
@@ -10,6 +10,8 @@
     "[TERM-007] Starting main loop",
     "[NET-CORE] logical-peer echo=3 ARP=5 rejected=5 checked",
     "[NET-CORE] routed-peer echo=2 gateway-ARP=1 rejected=3 checked",
+    "[NET-UDP] logical-peer datagrams=19 checked",
+    "[NET-DNS] logical-peer answers=4 transport-rejected=8 checked",
     "[NET-CORE] codec logical-peer OK; NIC service gate open",
     "[EXEC] /app/net_packet_test returned code=0"
   ],

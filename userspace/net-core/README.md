@@ -1,4 +1,4 @@
-# Userspace packet core (N1 foundation)
+# Userspace packet core (N1/N2 logical foundation)
 
 `dunit-net-core` is a dependency-free `no_std` + `alloc` library shared by the
 native SDK `net_packet_test` app and host tests. It has no syscall, kernel,
@@ -7,7 +7,7 @@ vectors with a logical peer supplied by its caller. It does not open an
 interface, send packets to a NIC, or provide Internet connectivity.
 
 The wire codecs implement Ethernet II (60–1514 bytes without preamble/FCS),
-Ethernet/IPv4 ARP, IPv4 with a fixed 20-byte header, and ICMP echo request/reply.
+Ethernet/IPv4 ARP, IPv4 with a fixed 20-byte header, ICMP echo request/reply, and IPv4 UDP.
 Encoders zero Ethernet padding. IPv4 total length bounds the ICMP slice, so
 padding never becomes echo data. Parsers check sizes before indexing, validate
 addresses and checksums, reject unsupported EtherTypes/protocols/options, and
@@ -80,3 +80,61 @@ harness. Native success proves the SDK app and logical peer executed, not NIC
 I/O. Production packet authority, transport ownership/revocation, netd,
 production interface/routing policy, ICMP error generation, configuration and
 the full N1 NIC acceptance gate remain open.
+
+
+## UDP and DNS logical endpoints
+
+`Peer` now demultiplexes UDP into eight bound local ports. Port zero allocates
+from 49152–65535; duplicate ports and full endpoint tables fail explicitly.
+Each port queues at most four datagrams, each at most 1472 bytes (and bounded
+by the interface MTU). A full queue drops the incoming datagram and returns
+`Capacity`, preserving FIFO contents. Connected ports filter the remote IP/port;
+reconnecting discards old queued packets. Close frees the port and its queue.
+`udp_ready` observes queued input; empty receive returns `WouldBlock`.
+`udp_recv_into` consumes one datagram and reports both copied and original
+lengths, including zero-buffer truncation. There are no blocking operations or
+implicit receive timers; callers own scheduling and deadlines.
+
+TX returns distinct `Neighbor`, `Waiting` and `Sent` outcomes. ARP frames are
+never counted as transmitted datagrams; the caller exchanges ARP and retries.
+Route/MTU validation precedes neighbor mutation. UDP checks the pseudoheader,
+ports and exact length within IPv4 total length; Ethernet padding is excluded.
+IPv4 zero UDP checksums are accepted; TX always emits a checksum, encoding a
+computed zero as 0xffff. No fragmentation or implicit pending TX queue is added.
+
+`dns::Resolver` owns one connected ephemeral port and one transaction, supplied
+with a caller-configured IPv4 DNS server. It sends A and AAAA questions over the
+same UDP path and validates transaction IDs, exact question/name/type/class,
+response opcode/flags/rcode, all section framing and record lengths. DNS names
+are normalized to lowercase ASCII labels with a 253-byte limit; labels accept
+letters, digits, hyphens and underscores. Root names, IDNA conversion, EDNS,
+DNSSEC and arbitrary binary labels are outside this resolver's supported subset.
+Messages are at most 512 bytes with 32 records; compressed names use backward
+pointers, at most 16 hops and bounded expanded lengths. CNAME resolution follows
+at most eight aliases and rejects cycles. Only answer-section A/AAAA records
+satisfy the question; authority/additional records cannot supply an answer.
+
+Three transmitted queries are allowed, one second apart, followed by `Timeout`
+at the final deadline. ARP attempts do not consume DNS attempts. Polling drives
+all work; clock regressions fail. Malformed or mismatched replies return an
+explicit error while preserving the transaction; NXDOMAIN terminates with
+`NameNotFound`. The TC bit returns `Unsupported`: TCP fallback is deferred,
+never reported as a successful answer. Positive answers use an eight-entry FIFO
+cache; expiry uses the minimum TTL across the CNAME chain. Zero TTL is not
+cached, expired entries are removed, and returned cache TTL is remaining whole
+seconds. Negative caching is deferred. This bounded diagnostic resolver has
+predictable IDs/ports and no DNS authentication; it is not a production resolver.
+
+The shared UDP/DNS diagnostic exchanges nineteen datagrams, checks A/CNAME/AAAA
+answers and TTL cache expiry, wrong-ID/compression-loop rejection, three-send
+timeout, queue overflow, checksum failure, FIFO/truncated receive, NXDOMAIN and
+explicit truncated-response refusal. Separate `[NET-UDP]` and `[NET-DNS]` native
+markers supplement the preserved echo/ARP/routed markers. Host checks also cover
+all short lengths, zero/negative-zero checksums, endpoint capacity/reuse,
+connected filtering, MTU/route refusal, malformed DNS framing, bounded mutation
+corpora and monotonic clocks.
+
+This work adds no NIC transport, kernel path, syscall, rights, public socket ABI,
+netd, DHCP state machine, configuration precedence or TCP implementation. N2 and
+its external-network acceptance remain open; the native diagnostic establishes
+logical owned-frame execution only.

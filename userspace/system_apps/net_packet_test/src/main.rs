@@ -32,6 +32,26 @@ fn main() -> dunit::Result<()> {
                 routed.arp_requests,
                 routed.rejected
             )?;
+            let transport = match dunit_net_core::transport_diagnostic::run() {
+                Ok(report) => report,
+                Err(error) => {
+                    dunit::println!("[NET-CORE] FAIL UDP/DNS {:?}", error)?;
+                    return Err(dunit::Error(dunit::errno::EINVAL));
+                }
+            };
+            if transport.datagrams != 19 || transport.dns_answers != 4 || transport.rejected != 8 {
+                dunit::println!("[NET-CORE] FAIL UDP/DNS counts")?;
+                return Err(dunit::Error(dunit::errno::EINVAL));
+            }
+            dunit::println!(
+                "[NET-UDP] logical-peer datagrams={} checked",
+                transport.datagrams
+            )?;
+            dunit::println!(
+                "[NET-DNS] logical-peer answers={} transport-rejected={} checked",
+                transport.dns_answers,
+                transport.rejected
+            )?;
             dunit::println!("[NET-CORE] codec logical-peer OK; NIC service gate open")?;
             Ok(())
         }
