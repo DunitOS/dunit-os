@@ -72,10 +72,9 @@ pub(super) fn wait(
     timeout: u64,
     flags: u64,
 ) -> i64 {
-    // Checkpoint spans snapshot/probes/registration even with remote producers.
     // Restart retains absolute deadlines and fd identities after a winning wake.
-    let _irq = crate::sync::InterruptGuard::new();
-    let checkpoint = crate::process::wait_checkpoint();
+    // Taking the saved state is task-scoped; copying/parsing a new snapshot and
+    // allocating output storage need no syscall-wide interrupt exclusion.
     let saved = match crate::process::with_current_thread_mut(|thread| thread.wait_set.take()) {
         Some(value) => value,
         None => return EINVAL,
@@ -94,9 +93,13 @@ pub(super) fn wait(
             return error;
         }
     }
+    let mut results = Vec::with_capacity(pending.capacity * 24);
+    // A notification between any probe and registration forces an immediate
+    // restart. capture_block owns the atomic check/register/state transition;
+    // interrupts may run between these independent, owning readiness snapshots.
+    let checkpoint = crate::process::wait_checkpoint();
     let now = crate::clock::monotonic_ns();
     let mut wake_deadline = pending.deadline;
-    let mut results = Vec::with_capacity(pending.capacity * 24);
     for (interest, identity) in &pending.interests {
         let mut data = 0;
         let events = match interest.kind {
@@ -161,7 +164,11 @@ pub(super) fn wait(
     match crate::process::wait_set_block_current(wake_deadline, checkpoint) {
         Ok(()) => USER_CONTEXT_RETURN_MAGIC,
         Err(error) => {
-            crate::process::with_current_thread_mut(|thread| thread.wait_set = None).unwrap();
+            // Retire the heap snapshot after the task scope has ended, including
+            // failed registration. No allocator/destructor runs under that lock.
+            let retired =
+                crate::process::with_current_thread_mut(|thread| thread.wait_set.take()).unwrap();
+            drop(retired);
             process_error_to_errno(error)
         }
     }

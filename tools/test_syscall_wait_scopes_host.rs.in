@@ -1,0 +1,185 @@
+#![allow(dead_code)]
+extern crate alloc;
+extern crate self as dunit_wait_abi;
+#[path=@ABI@] mod wait_abi;
+pub use wait_abi::*;
+use std::sync::atomic::{AtomicBool,AtomicU64,AtomicUsize,Ordering};
+thread_local! { static IRQ:std::cell::Cell<usize>=const{std::cell::Cell::new(0)}; static TASK:std::cell::Cell<usize>=const{std::cell::Cell::new(0)}; }
+fn irq()->usize {IRQ.with(|v|v.get())}
+struct Alloc;
+unsafe impl std::alloc::GlobalAlloc for Alloc {
+    unsafe fn alloc(&self,l:std::alloc::Layout)->*mut u8 {
+        // Capability insertion in this harness does not allocate. Every other
+        // syscall-owned allocation must be outside both IRQ and task scopes.
+        assert_eq!(irq(),0,"heap allocation under outer IRQ guard");
+        TASK.with(|v|assert_eq!(v.get(),0,"heap allocation under task scope"));
+        std::alloc::System.alloc(l)
+    }
+    unsafe fn dealloc(&self,p:*mut u8,l:std::alloc::Layout) {
+        assert_eq!(irq(),0,"heap retirement under outer IRQ guard");
+        TASK.with(|v|assert_eq!(v.get(),0,"heap retirement under task scope"));
+        std::alloc::System.dealloc(p,l)
+    }
+}
+#[global_allocator] static ALLOC:Alloc=Alloc;
+mod sync {
+    pub struct InterruptGuard;
+    impl InterruptGuard {pub fn new()->Self {crate::IRQ.with(|v|v.set(v.get()+1));Self}}
+    impl Drop for InterruptGuard {fn drop(&mut self) {crate::IRQ.with(|v|v.set(v.get()-1));}}
+}
+mod clock {pub fn monotonic_ns()->u64 {100}}
+mod handle {pub const RIGHTS_ALL:u32=255;pub const RIGHT_TRANSFER:u32=8;pub struct HandleObject;}
+static EPOCH:AtomicU64=AtomicU64::new(0);
+static NOTIFY:AtomicBool=AtomicBool::new(false);
+static READY:AtomicBool=AtomicBool::new(false);
+static BLOCK_FAIL:AtomicBool=AtomicBool::new(false);
+static RETRY:AtomicBool=AtomicBool::new(false);
+static COPY_FAULT:AtomicBool=AtomicBool::new(false);
+static OUTPUT_FAULT:AtomicBool=AtomicBool::new(false);
+static OUTPUT_BYTES_UNDER_IRQ:AtomicUsize=AtomicUsize::new(0);
+static FD_ID:AtomicU64=AtomicU64::new(1);
+static BAD_OUTPUT:AtomicU64=AtomicU64::new(0);
+static COPY_WRITES:AtomicUsize=AtomicUsize::new(0);
+static SEND_FAIL:AtomicBool=AtomicBool::new(false);
+static CONSUMED:AtomicUsize=AtomicUsize::new(0);
+static CLOSED:AtomicUsize=AtomicUsize::new(0);
+static WAKES:AtomicUsize=AtomicUsize::new(0);
+mod process {
+    use super::*;
+    #[derive(Clone,Copy)]pub struct ProcessId(pub u64);
+    #[derive(Clone,Copy)]pub enum ProcessState {Running,Dead,Reaped}
+    pub struct Process {pub pid:ProcessId,pub state:ProcessState,pub ipc_handles_enabled:bool,pub wait_set:Option<Box<syscall::wait_set::Pending>>}
+    thread_local! {static PROCESS:std::cell::RefCell<Process>=const{std::cell::RefCell::new(Process{pid:ProcessId(1),state:ProcessState::Running,ipc_handles_enabled:true,wait_set:None})};}
+    pub fn with_current_process<R>(f:impl FnOnce(&Process)->R)->Option<R> {PROCESS.with(|p|Some(f(&p.borrow())))}
+    pub fn with_current_process_mut<R>(f:impl FnOnce(&mut Process)->R)->Option<R> {
+        TASK.with(|v|v.set(v.get()+1));
+        let out=PROCESS.with(|p|Some(f(&mut p.borrow_mut())));
+        TASK.with(|v|v.set(v.get()-1));out
+    }
+    pub fn with_current_thread_mut<R>(f:impl FnOnce(&mut Process)->R)->Option<R> {with_current_process_mut(f)}
+    pub fn with_process_mut<R>(_:ProcessId,f:impl FnOnce(&mut Process)->Result<R,i64>)->Result<R,i64> {with_current_process_mut(f).unwrap()}
+    impl Process {
+        pub fn handle_rights(&self,_:u32)->Result<u32,i64> {assert!(irq()>0);Ok(255)}
+        pub fn handle_dup(&mut self,_:u32,_:u32)->Result<u32,i64> {assert!(irq()>0);Ok(7)}
+        pub fn handle_take_for_transfer(&mut self,_:u32)->Result<(handle::HandleObject,u32),i64> {Ok((handle::HandleObject,255))}
+        pub fn handle_receive(&mut self,_:handle::HandleObject,_:u32)->u32 {assert!(irq()>0);9}
+        pub fn handle_close(&mut self,_:u32)->Result<(),i64> {CLOSED.fetch_add(1,Ordering::SeqCst);Ok(())}
+    }
+    pub struct Fd {pub identity:u64}
+    pub fn get_fd(_:u32)->Option<Fd> {Some(Fd{identity:FD_ID.load(Ordering::SeqCst)})}
+    pub struct Status {pub kind:u32,pub code:i32}
+    pub fn child_exit_snapshot(_:ProcessId)->Result<Option<Status>,i64> {Ok(None)}
+    pub fn wait_checkpoint()->u64 {assert_eq!(irq(),0);EPOCH.load(Ordering::SeqCst)}
+    fn block(checkpoint:u64)->Result<(),i64> {
+        assert_eq!(irq(),0);
+        // Atomic queue registration itself is covered by test_parking.py.
+        let _irq=sync::InterruptGuard::new();
+        RETRY.store(EPOCH.load(Ordering::SeqCst)!=checkpoint,Ordering::SeqCst);
+        if BLOCK_FAIL.load(Ordering::SeqCst) {Err(-5)} else {Ok(())}
+    }
+    pub fn poll_block_current(_:u64,c:u64)->Result<(),i64> {block(c)}
+    pub fn wait_set_block_current(_:u64,c:u64)->Result<(),i64> {block(c)}
+    pub fn wake_ipc_waiters(_:ProcessId) {assert_eq!(irq(),0);WAKES.fetch_add(1,Ordering::SeqCst);}
+}
+mod ipc {
+    use super::*;
+    pub const MAX_MESSAGE_SIZE:usize=256;
+    #[derive(Clone)]pub struct Message {pub data:[u8;256],pub len:usize,pub sender:process::ProcessId,pub attachment:u32}
+    pub fn send_attached(_:process::ProcessId,_:&mut process::Process,b:&[u8],h:u32)->Result<(),i64> {
+        assert!(irq()>0);assert_eq!(u32::from_le_bytes(b[..4].try_into().unwrap()),h);
+        if SEND_FAIL.load(Ordering::SeqCst) {Err(-11)} else {Ok(())}
+    }
+    pub fn peek_attached(_:process::ProcessId)->Result<Message,i64> {assert!(irq()>0);Ok(Message{data:[5;256],len:256,sender:process::ProcessId(3),attachment:9})}
+    pub fn consume_attached(_:process::ProcessId,_:&Message)->Result<(),i64> {assert!(irq()>0);CONSUMED.fetch_add(1,Ordering::SeqCst);Ok(())}
+    pub struct Manager;
+    impl Manager {pub fn has_messages(&self,_:process::ProcessId)->bool {false}}
+    pub fn get_ipc_manager()->Option<Manager> {Some(Manager)}
+}
+mod syscall {
+    use super::*;use alloc::vec::Vec;
+    const EINVAL:i64=-22;const EFAULT:i64=-14;const EMSGSIZE:i64=-90;const EOPNOTSUPP:i64=-95;const ENOENT:i64=-2;const EACCES:i64=-13;const EBADF:i64=-9;
+    const USER_CONTEXT_RETURN_MAGIC:i64=-1000;
+    fn process_error_to_errno(e:i64)->i64 {e}fn handle_error_to_errno(e:i64)->i64 {e}fn ipc_error_to_errno(e:i64)->i64 {e}
+    fn validate_user_mapping(p:u64,_:usize,_:bool)->Result<(),i64> {if p==BAD_OUTPUT.load(Ordering::SeqCst) {Err(EFAULT)} else {Ok(())}}
+    fn copy_buffer_from_user(p:*const u8,n:usize)->Result<Vec<u8>,i64> {
+        assert_eq!(irq(),0,"input copy under outer guard");
+        if COPY_FAULT.load(Ordering::SeqCst) {return Err(EFAULT)}
+        Ok(unsafe{std::slice::from_raw_parts(p,n)}.to_vec())
+    }
+    fn copy_buffer_to_user(p:*mut u8,b:&[u8])->Result<(),i64> {
+        // This shim models the full-range preflight before any write.
+        if OUTPUT_FAULT.load(Ordering::SeqCst) || p as u64==BAD_OUTPUT.load(Ordering::SeqCst) {return Err(EFAULT)}
+        COPY_WRITES.fetch_add(1,Ordering::SeqCst);
+        if irq()>0 {OUTPUT_BYTES_UNDER_IRQ.fetch_add(b.len(),Ordering::SeqCst);}
+        unsafe{std::ptr::copy_nonoverlapping(b.as_ptr(),p,b.len())};Ok(())
+    }
+    pub mod native_fd {
+        use super::*;const POLL_READ:u16=1;const POLL_WRITE:u16=2;
+        pub fn readiness(_:i32,_:u16)->u16 {
+            assert_eq!(irq(),0,"readiness under outer guard");
+            if NOTIFY.swap(false,Ordering::SeqCst) {
+                // A real remote producer wins after this predicate was read.
+                std::thread::spawn(||{EPOCH.fetch_add(1,Ordering::SeqCst);}).join().unwrap();
+            }
+            if READY.load(Ordering::SeqCst) {1} else {0}
+        }
+        @POLL@
+    }
+    #[path=@WAIT@]pub mod wait_set;
+    #[path=@ATTACHED@]mod attached_ipc;
+    pub fn run() {
+        let mut records=vec![0u8;1024*8];for r in records.chunks_exact_mut(8) {r[4]=1;}
+        NOTIFY.store(true,Ordering::SeqCst);
+        assert_eq!(native_fd::poll(records.as_mut_ptr(),1024,u64::MAX),USER_CONTEXT_RETURN_MAGIC);
+        assert!(RETRY.load(Ordering::SeqCst));
+        READY.store(true,Ordering::SeqCst);
+        assert_eq!(native_fd::poll(records.as_mut_ptr(),1024,0),1024);
+        let before=records.clone();COPY_FAULT.store(true,Ordering::SeqCst);
+        assert_eq!(native_fd::poll(records.as_mut_ptr(),1024,0),EFAULT);assert_eq!(records,before);
+        COPY_FAULT.store(false,Ordering::SeqCst);
+        OUTPUT_FAULT.store(true,Ordering::SeqCst);
+        assert_eq!(native_fd::poll(records.as_mut_ptr(),1024,0),EFAULT);assert_eq!(records,before);
+        OUTPUT_FAULT.store(false,Ordering::SeqCst);
+        records[4]=255;assert_eq!(native_fd::poll(records.as_mut_ptr(),1024,0),EINVAL);
+        let mut interests=vec![0u8;64*32];for (i,b) in interests.chunks_exact_mut(32).enumerate() {
+            b[..4].copy_from_slice(&DESCRIPTOR.to_le_bytes());b[4..8].copy_from_slice(&READ.to_le_bytes());b[16..24].copy_from_slice(&(i as u64).to_le_bytes());
+        }
+        let mut output=vec![0u8;64*24];READY.store(false,Ordering::SeqCst);NOTIFY.store(true,Ordering::SeqCst);
+        assert_eq!(wait_set::wait(interests.as_ptr() as u64,64,output.as_mut_ptr() as u64,64,INFINITE,0),USER_CONTEXT_RETURN_MAGIC);
+        assert!(RETRY.load(Ordering::SeqCst));
+        // A restarted wait must retain its snapshot even when the original
+        // userspace request changes to invalid bytes.
+        interests.fill(255);READY.store(true,Ordering::SeqCst);
+        assert_eq!(wait_set::wait(0,0,0,0,0,0),64);
+        for (i,b) in output.chunks_exact(24).enumerate() {assert_eq!(u64::from_le_bytes(b[..8].try_into().unwrap()),i as u64);}
+        interests.fill(0);for b in interests.chunks_exact_mut(32) {b[..4].copy_from_slice(&DESCRIPTOR.to_le_bytes());b[4..8].copy_from_slice(&READ.to_le_bytes());}
+        // The restarted request retains the original descriptor generation.
+        // Replacement before a resumed snapshot must report hangup/error,
+        // regardless of readiness on the new descriptor.
+        READY.store(false,Ordering::SeqCst);
+        assert_eq!(wait_set::wait(interests.as_ptr() as u64,64,output.as_mut_ptr() as u64,64,INFINITE,0),USER_CONTEXT_RETURN_MAGIC);
+        FD_ID.store(2,Ordering::SeqCst);
+        assert_eq!(wait_set::wait(0,0,0,0,0,0),64);
+        for b in output.chunks_exact(24) {assert_eq!(u32::from_le_bytes(b[8..12].try_into().unwrap()),HANGUP|ERROR);}
+        FD_ID.store(1,Ordering::SeqCst);READY.store(true,Ordering::SeqCst);
+        let old_output=output.clone();OUTPUT_FAULT.store(true,Ordering::SeqCst);
+        assert_eq!(wait_set::wait(interests.as_ptr() as u64,64,output.as_mut_ptr() as u64,64,0,0),EFAULT);
+        assert_eq!(output,old_output);OUTPUT_FAULT.store(false,Ordering::SeqCst);
+        READY.store(false,Ordering::SeqCst);BLOCK_FAIL.store(true,Ordering::SeqCst);
+        assert_eq!(wait_set::wait(interests.as_ptr() as u64,64,output.as_mut_ptr() as u64,64,INFINITE,0),-5);
+        assert!(process::with_current_thread_mut(|t|t.wait_set.is_none()).unwrap());BLOCK_FAIL.store(false,Ordering::SeqCst);
+        let input=[0u8;256];
+        assert_eq!(attached_ipc::send(2,1,1,input.as_ptr() as u64,256,0),256);assert_eq!(WAKES.load(Ordering::SeqCst),1);
+        SEND_FAIL.store(true,Ordering::SeqCst);assert_eq!(attached_ipc::send(2,1,1,input.as_ptr() as u64,256,0),-11);
+        assert_eq!(CLOSED.load(Ordering::SeqCst),1);assert_eq!(WAKES.load(Ordering::SeqCst),1);
+        let mut message=[0xaau8;256];let mut sender=0xaaaaaaaau32;let mut handle=0xaaaaaaaau32;
+        BAD_OUTPUT.store(&mut handle as *mut u32 as u64,Ordering::SeqCst);let writes=COPY_WRITES.load(Ordering::SeqCst);
+        assert_eq!(attached_ipc::receive(message.as_mut_ptr() as u64,256,&mut sender as *mut u32 as u64,&mut handle as *mut u32 as u64),EFAULT);
+        assert_eq!(COPY_WRITES.load(Ordering::SeqCst),writes);assert_eq!(CONSUMED.load(Ordering::SeqCst),0);assert_eq!(message,[0xaa;256]);
+        BAD_OUTPUT.store(0,Ordering::SeqCst);
+        assert_eq!(attached_ipc::receive(message.as_mut_ptr() as u64,256,&mut sender as *mut u32 as u64,&mut handle as *mut u32 as u64),256);
+        assert_eq!(sender,3);assert_eq!(handle,9);assert_eq!(CONSUMED.load(Ordering::SeqCst),1);
+        assert_eq!(OUTPUT_BYTES_UNDER_IRQ.load(Ordering::SeqCst),264);
+    }
+}
+fn main() {syscall::run();println!("syscall scopes: max-count poll/wait-set, remote probe gaps, restart token/saved-descriptor generations, allocation/retirement exclusion, copy faults and cap rollback/wake OK");}

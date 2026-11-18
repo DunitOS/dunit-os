@@ -8,7 +8,6 @@ pub(super) fn send(
     len: u64,
     offset: u64,
 ) -> i64 {
-    let _irq = crate::sync::InterruptGuard::new();
     if target == 0
         || target > u32::MAX as u64
         || handle > u32::MAX as u64
@@ -28,61 +27,68 @@ pub(super) fn send(
         Err(e) => return e,
     };
     let target = crate::process::ProcessId(target);
-    match crate::process::with_process_mut(target, |p| Ok(p.ipc_handles_enabled)) {
-        Ok(true) => {}
-        Ok(false) => return EOPNOTSUPP,
-        Err(_) => return ENOENT,
-    }
-    let sender = match crate::process::with_current_process(|p| p.pid) {
-        Some(value) => value,
-        None => return EINVAL,
-    };
-    let object = match crate::process::with_current_process_mut(
-        |process| -> Result<crate::handle::HandleObject, i64> {
-            let held = process
-                .handle_rights(handle as u32)
-                .map_err(handle_error_to_errno)?;
-            if held & crate::handle::RIGHT_TRANSFER == 0 {
-                return Err(EACCES);
+    // Only capability duplication, target validation, insertion and publication
+    // form the IRQ-excluded transaction. Input copying/allocation precedes it;
+    // notification and buffer retirement follow it. The packet is at most 256
+    // bytes; handle-table/queue allocator latency is a separate remaining gate.
+    let result = {
+        let _irq = crate::sync::InterruptGuard::new();
+        match crate::process::with_process_mut(target, |p| Ok(p.ipc_handles_enabled)) {
+            Ok(true) => {}
+            Ok(false) => return EOPNOTSUPP,
+            Err(_) => return ENOENT,
+        }
+        let sender = match crate::process::with_current_process(|p| p.pid) {
+            Some(value) => value,
+            None => return EINVAL,
+        };
+        let object = match crate::process::with_current_process_mut(
+            |process| -> Result<crate::handle::HandleObject, i64> {
+                let held = process
+                    .handle_rights(handle as u32)
+                    .map_err(handle_error_to_errno)?;
+                if held & crate::handle::RIGHT_TRANSFER == 0 {
+                    return Err(EACCES);
+                }
+                let duplicate = process
+                    .handle_dup(handle as u32, rights as u32 | crate::handle::RIGHT_TRANSFER)
+                    .map_err(handle_error_to_errno)?;
+                match process.handle_take_for_transfer(duplicate) {
+                    Ok((object, _)) => Ok(object),
+                    Err(error) => {
+                        let _ = process.handle_close(duplicate);
+                        Err(handle_error_to_errno(error))
+                    }
+                }
+            },
+        ) {
+            Some(Ok(object)) => object,
+            Some(Err(error)) => return error,
+            None => return EINVAL,
+        };
+        // Target handle insertion and queue publication share the target task
+        // scope. The IPC guard ends before rollback or readiness notification.
+        crate::process::with_process_mut(target, |process| {
+            if !process.ipc_handles_enabled {
+                return Ok(Err(EOPNOTSUPP));
             }
-            let duplicate = process
-                .handle_dup(handle as u32, rights as u32 | crate::handle::RIGHT_TRANSFER)
-                .map_err(handle_error_to_errno)?;
-            match process.handle_take_for_transfer(duplicate) {
-                Ok((object, _)) => Ok(object),
+            if matches!(
+                process.state,
+                crate::process::ProcessState::Dead | crate::process::ProcessState::Reaped
+            ) {
+                return Ok(Err(ENOENT));
+            }
+            let received = process.handle_receive(object, rights as u32);
+            bytes[offset as usize..offset as usize + 4].copy_from_slice(&received.to_le_bytes());
+            match crate::ipc::send_attached(sender, process, &bytes, received) {
+                Ok(()) => Ok(Ok(len as i64)),
                 Err(error) => {
-                    let _ = process.handle_close(duplicate);
-                    Err(handle_error_to_errno(error))
+                    let _ = process.handle_close(received);
+                    Ok(Err(ipc_error_to_errno(error)))
                 }
             }
-        },
-    ) {
-        Some(Ok(object)) => object,
-        Some(Err(error)) => return error,
-        None => return EINVAL,
+        })
     };
-    // Target handle insertion and queue publication share the target task
-    // scope. The IPC guard ends before rollback or readiness notification.
-    let result = crate::process::with_process_mut(target, |process| {
-        if !process.ipc_handles_enabled {
-            return Ok(Err(EOPNOTSUPP));
-        }
-        if matches!(
-            process.state,
-            crate::process::ProcessState::Dead | crate::process::ProcessState::Reaped
-        ) {
-            return Ok(Err(ENOENT));
-        }
-        let received = process.handle_receive(object, rights as u32);
-        bytes[offset as usize..offset as usize + 4].copy_from_slice(&received.to_le_bytes());
-        match crate::ipc::send_attached(sender, process, &bytes, received) {
-            Ok(()) => Ok(Ok(len as i64)),
-            Err(error) => {
-                let _ = process.handle_close(received);
-                Ok(Err(ipc_error_to_errno(error)))
-            }
-        }
-    });
     match result {
         Ok(Ok(len)) => {
             crate::process::wake_ipc_waiters(target);
@@ -93,10 +99,14 @@ pub(super) fn send(
     }
 }
 pub(super) fn receive(message: u64, len: u64, sender: u64, handle: u64) -> i64 {
-    let _irq = crate::sync::InterruptGuard::new();
     if len == 0 || len > crate::ipc::MAX_MESSAGE_SIZE as u64 {
         return EMSGSIZE;
     }
+    // Keep all destination preflights, copyouts and FIFO consumption together.
+    // Splitting these would let a sibling invalidate a later output after an
+    // earlier output was written. This bounded transaction copies <=264 bytes;
+    // each copyout still pins and validates its entire mapping before writing.
+    let _irq = crate::sync::InterruptGuard::new();
     for (pointer, size) in [(message, len as usize), (sender, 4), (handle, 4)] {
         if let Err(e) = validate_user_mapping(pointer, size, true) {
             return e;

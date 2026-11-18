@@ -137,7 +137,6 @@ pub(super) fn poll(records: *mut u8, count: usize, deadline_ns: u64) -> i64 {
     if count > 1024 {
         return EINVAL;
     }
-    let _guard = crate::sync::InterruptGuard::new();
     let length = count * 8;
     if let Err(error) = validate_user_mapping(records as u64, length, true) {
         return error;
@@ -146,14 +145,20 @@ pub(super) fn poll(records: *mut u8, count: usize, deadline_ns: u64) -> i64 {
         Ok(data) => data,
         Err(error) => return error,
     };
+    // Reject the complete owned request before probing readiness. Neither input
+    // allocation nor parsing needs to exclude interrupts. A checkpoint before
+    // the first probe closes every producer gap through atomic registration.
+    for record in data.chunks_exact(8) {
+        let events = u16::from_le_bytes(record[4..6].try_into().unwrap());
+        if events & !(POLL_READ | POLL_WRITE) != 0 {
+            return EINVAL;
+        }
+    }
     let checkpoint = crate::process::wait_checkpoint();
     let mut ready = 0;
     for record in data.chunks_exact_mut(8) {
         let fd = i32::from_le_bytes(record[..4].try_into().unwrap());
         let events = u16::from_le_bytes(record[4..6].try_into().unwrap());
-        if events & !(POLL_READ | POLL_WRITE) != 0 {
-            return EINVAL;
-        }
         let returned = readiness(fd, events);
         record[6..8].copy_from_slice(&returned.to_le_bytes());
         if returned != 0 {
