@@ -1,0 +1,131 @@
+//! Policy/parser/status items come intact from production; only child I/O/logs are scripted.
+#![allow(dead_code)]
+extern crate self as libdunit;
+use std::{cell::RefCell, collections::{BTreeMap, BTreeSet, VecDeque}};
+const DEFAULT_MAX_RESTARTS: u32 = 5;
+WAIT_KINDS
+EXIT_STATUS
+INIT_TYPES
+INIT_PARSER
+INIT_POLICY
+
+#[derive(Default)]
+struct Native {
+    next: u32,
+    spawns: Vec<String>,
+    failures: VecDeque<bool>,
+    live: BTreeSet<u32>,
+    completions: BTreeMap<u32, Result<Option<ExitStatus>, ()>>,
+    logs: Vec<String>,
+}
+thread_local! { static NATIVE: RefCell<Native> = RefCell::new(Native::default()); }
+struct Child { pid: u32 }
+impl Child {
+    fn spawn(path: &str) -> Result<Self, ()> {
+        NATIVE.with(|n| {
+            let mut n = n.borrow_mut();
+            n.spawns.push(path.into());
+            if n.failures.pop_front().unwrap_or(false) { return Err(()); }
+            n.next += 1;
+            let pid = n.next;
+            n.live.insert(pid);
+            Ok(Self { pid })
+        })
+    }
+    fn id(&self) -> u32 { self.pid }
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>, ()> {
+        NATIVE.with(|n| {
+            let mut n = n.borrow_mut();
+            let result = n.completions.remove(&self.pid).unwrap_or(Ok(None));
+            if !matches!(result, Ok(None)) { assert!(n.live.remove(&self.pid)); }
+            result
+        })
+    }
+}
+fn log_svc(name: &str, msg: &str) {
+    NATIVE.with(|n| n.borrow_mut().logs.push(format!("{name}: {msg}")));
+}
+fn service(policy: &str, budget: u32, extra: &str) -> Service {
+    parse_service(&format!("name=test\nexec=/app/service\nrestart={policy}\nmax_restarts={budget}\n{extra}")).unwrap()
+}
+fn exit(kind: i32, code: i32) -> ExitStatus { ExitStatus { kind, code } }
+fn finish(svc: &mut Service, status: ExitStatus) {
+    step(svc);
+    let RunState::Running(child) = &svc.state else { panic!("service failed to start") };
+    NATIVE.with(|n| { n.borrow_mut().completions.insert(child.id(), Ok(Some(status))); });
+    step(svc);
+}
+fn logged(marker: &str) -> usize {
+    NATIVE.with(|n| n.borrow().logs.iter().filter(|line| line.contains(marker)).count())
+}
+fn assert_no_children() { NATIVE.with(|n| assert!(n.borrow().live.is_empty())); }
+
+#[test]
+fn three_runs_exhaust_two_restarts_then_launch_and_reap_one_fallback() {
+    let mut svc = service("on-failure", 2, "critical=true\nfallback=/app/fallback");
+    for attempt in 0..3 {
+        finish(&mut svc, exit(0, 7));
+        assert_eq!(svc.restarts, (attempt + 1).min(2));
+    }
+    assert!(matches!(svc.state, RunState::Stopped));
+    assert!(svc.fallback_spawned);
+    assert_eq!(logged("restart ("), 2);
+    assert_eq!(logged("restart budget exhausted"), 1);
+    assert_eq!(logged("CRITICAL service is down"), 1);
+    assert_eq!(logged("launched fallback"), 1);
+    step(&mut svc); // running fallback must retain its owner
+    let pid = svc.fallback_child.as_ref().unwrap().id();
+    NATIVE.with(|n| { n.borrow_mut().completions.insert(pid, Ok(Some(exit(0, 0)))); });
+    step(&mut svc);
+    assert!(svc.fallback_child.is_none());
+    launch_fallback(&mut svc); // one-launch flag survives reaping
+    for _ in 0..3 { step(&mut svc); }
+    NATIVE.with(|n| assert_eq!(n.borrow().spawns, ["/app/service", "/app/service", "/app/service", "/app/fallback"]));
+    assert_no_children();
+}
+
+#[test]
+fn spawn_failures_are_bounded_and_critical_is_reported_once() {
+    NATIVE.with(|n| n.borrow_mut().failures.extend([true, true]));
+    let mut svc = service("always", 2, "critical=true\nfallback=/app/fallback");
+    for _ in 0..5 { step(&mut svc); }
+    assert!(matches!(svc.state, RunState::Stopped));
+    assert_eq!(svc.restarts, 2);
+    assert_eq!(logged("spawn failed; will retry"), 1);
+    assert_eq!(logged("giving up after repeated spawn failures"), 1);
+    assert_eq!(logged("CRITICAL service is down"), 1);
+    NATIVE.with(|n| assert_eq!(n.borrow().spawns.len(), 2));
+    assert_no_children();
+}
+
+#[test]
+fn prepared_recovery_is_unbilled_and_success_stops_on_failure_policy() {
+    let mut svc = service("on-failure", 1, "critical=true");
+    finish(&mut svc, exit(WAIT_KIND_SPAWN_PREPARED, 0));
+    assert!(matches!(svc.state, RunState::Idle));
+    assert_eq!(svc.restarts, 0);
+    assert_eq!(logged("reaped before run; restarting"), 1);
+    finish(&mut svc, exit(0, 0));
+    assert!(matches!(svc.state, RunState::Stopped));
+    assert_eq!(logged("CRITICAL"), 0);
+    assert_no_children();
+}
+
+#[test]
+fn never_stops_after_fault_while_always_restarts_success_and_honors_budget() {
+    let mut never = service("never", 2, "critical=true\nfallback=/app/fallback");
+    finish(&mut never, exit(3, -1));
+    assert!(matches!(never.state, RunState::Stopped));
+    assert_eq!(never.restarts, 0);
+    assert_eq!(logged("faulted"), 1);
+    assert_eq!(logged("CRITICAL"), 1);
+    assert!(!never.fallback_spawned);
+    let mut always = service("always", 1, "");
+    finish(&mut always, exit(0, 0));
+    assert!(matches!(always.state, RunState::Idle));
+    finish(&mut always, exit(0, 0));
+    assert!(matches!(always.state, RunState::Stopped));
+    assert_eq!(always.restarts, 1);
+    assert_eq!(logged("exited cleanly"), 2);
+    assert_no_children();
+}

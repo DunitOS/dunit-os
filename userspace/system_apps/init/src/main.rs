@@ -29,7 +29,12 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use libdunit::{DirEntry, WaitStatus};
+use dunit::{
+    fs::{self, FileType},
+    io::{self, Write},
+    process::{Child, ExitStatus},
+    time::{self, Duration},
+};
 
 const SERVICES_DIR: &str = "/system/services";
 const PROVISION_MARKER: &str = "/persist/.provisioned";
@@ -41,7 +46,7 @@ const MAX_SERVICES: usize = 32;
 
 #[panic_handler]
 fn panic(_: &PanicInfo) -> ! {
-    libdunit::println("[INIT] PANIC in init (PID 1)");
+    let _ = io::stdout().write(b"[INIT] PANIC in init (PID 1)\n");
     loop {
         core::hint::spin_loop();
     }
@@ -54,10 +59,9 @@ enum RestartPolicy {
     Always,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum RunState {
     Idle,
-    Running(u32),
+    Running(Child),
     Stopped,
 }
 
@@ -71,6 +75,7 @@ struct Service {
     state: RunState,
     restarts: u32,
     fallback_spawned: bool,
+    fallback_child: Option<Child>,
 }
 
 // ---- small helpers ---------------------------------------------------------
@@ -84,7 +89,7 @@ fn emit(body: &str) {
     let mut line = String::from("[INIT] ");
     line.push_str(body);
     line.push('\n');
-    libdunit::print(&line);
+    let _ = io::stdout().write_all(line.as_bytes());
 }
 
 fn log(msg: &str) {
@@ -209,6 +214,7 @@ fn parse_service(text: &str) -> Option<Service> {
         state: RunState::Idle,
         restarts: 0,
         fallback_spawned: false,
+        fallback_child: None,
     })
 }
 
@@ -216,20 +222,20 @@ fn parse_service(text: &str) -> Option<Service> {
 /// Files are processed in sorted order so the serial log is deterministic.
 fn load_services() -> Vec<Service> {
     let mut services: Vec<Service> = Vec::new();
-    let mut entries = [DirEntry::empty(); MAX_SERVICES];
-    let n = libdunit::readdir(SERVICES_DIR, &mut entries);
-    if n < 0 {
-        log("no /system/services directory; running as an idle supervisor");
-        return services;
-    }
-    let count = (n as usize).min(MAX_SERVICES);
+    let entries = match fs::read_dir(SERVICES_DIR) {
+        Ok(entries) => entries,
+        Err(_) => {
+            log("no /system/services directory; running as an idle supervisor");
+            return services;
+        }
+    };
 
     let mut names: Vec<String> = Vec::new();
-    for entry in entries.iter().take(count) {
-        if entry.file_type != libdunit::FILE_TYPE_FILE {
+    for entry in entries.iter().take(MAX_SERVICES) {
+        if entry.file_type != FileType::File {
             continue;
         }
-        let nm = entry.name();
+        let nm = entry.name.as_str();
         if nm.ends_with(".toml") {
             names.push(String::from(nm));
         }
@@ -240,7 +246,7 @@ fn load_services() -> Vec<Service> {
         let mut path = String::from(SERVICES_DIR);
         path.push('/');
         path.push_str(nm);
-        match libdunit::read_to_string(&path) {
+        match fs::read_to_string(&path) {
             Ok(text) => match parse_service(&text) {
                 Some(svc) => {
                     log_svc(&svc.name, "registered");
@@ -265,7 +271,7 @@ fn load_services() -> Vec<Service> {
 // ---- first-boot provisioning ----------------------------------------------
 
 fn provision() {
-    if libdunit::file_exists(PROVISION_MARKER) {
+    if fs::File::open(PROVISION_MARKER).is_ok() {
         log("/persist already provisioned");
         return;
     }
@@ -273,8 +279,8 @@ fn provision() {
     // Create the persistent user-config root. mkdir is best-effort here: the
     // authoritative gate is the marker file written below, so an "already
     // exists" style failure must not abort provisioning.
-    let _ = libdunit::mkdir(PERSIST_CONFIG_DIR);
-    match libdunit::write_string(PROVISION_MARKER, PROVISION_CONTENT) {
+    let _ = fs::create_dir(PERSIST_CONFIG_DIR);
+    match fs::write(PROVISION_MARKER, PROVISION_CONTENT.as_bytes()) {
         Ok(()) => log("provisioning complete; wrote /persist/.provisioned"),
         Err(_) => log("WARN provisioning marker write failed (/persist read-only?)"),
     }
@@ -283,26 +289,28 @@ fn provision() {
 // ---- supervision -----------------------------------------------------------
 
 fn start_service(svc: &mut Service) {
-    let pid = libdunit::spawn(&svc.exec);
-    if pid < 0 {
-        // Count spawn failures against the budget so a bad exec path cannot spin.
-        svc.restarts += 1;
-        if svc.restarts >= svc.max_restarts {
-            log_svc(&svc.name, "giving up after repeated spawn failures");
-            svc.state = RunState::Stopped;
-            if svc.critical {
-                log_svc(&svc.name, "CRITICAL service is down");
+    let child = match Child::spawn(&svc.exec) {
+        Ok(child) => child,
+        Err(_) => {
+            // Count spawn failures against the budget so a bad exec path cannot spin.
+            svc.restarts += 1;
+            if svc.restarts >= svc.max_restarts {
+                log_svc(&svc.name, "giving up after repeated spawn failures");
+                svc.state = RunState::Stopped;
+                if svc.critical {
+                    log_svc(&svc.name, "CRITICAL service is down");
+                }
+            } else {
+                log_svc(&svc.name, "spawn failed; will retry");
+                svc.state = RunState::Idle;
             }
-        } else {
-            log_svc(&svc.name, "spawn failed; will retry");
-            svc.state = RunState::Idle;
+            return;
         }
-        return;
-    }
+    };
     let mut m = String::from("spawn pid=");
-    push_u32(&mut m, pid as u32);
+    push_u32(&mut m, child.id());
     log_svc(&svc.name, &m);
-    svc.state = RunState::Running(pid as u32);
+    svc.state = RunState::Running(child);
 }
 
 fn launch_fallback(svc: &mut Service) {
@@ -313,8 +321,9 @@ fn launch_fallback(svc: &mut Service) {
         Some(fb) => fb.clone(),
         None => return,
     };
-    if libdunit::spawn(&fb) >= 0 {
+    if let Ok(child) = Child::spawn(&fb) {
         svc.fallback_spawned = true;
+        svc.fallback_child = Some(child);
         let mut m = String::from("launched fallback ");
         m.push_str(&fb);
         log_svc(&svc.name, &m);
@@ -325,7 +334,7 @@ fn launch_fallback(svc: &mut Service) {
     }
 }
 
-fn on_exit(svc: &mut Service, st: &WaitStatus) {
+fn on_exit(svc: &mut Service, st: ExitStatus) {
     if st.spawn_prepared() {
         // Reaped before it ever ran. spawn() leaves children Ready, so this is
         // not expected in steady state; recover without charging the budget.
@@ -334,14 +343,17 @@ fn on_exit(svc: &mut Service, st: &WaitStatus) {
         return;
     }
 
-    let success = st.exited() && st.code == 0;
+    on_completion(svc, st.success(), st.fault_kind().is_some(), st.raw_code());
+}
+
+fn on_completion(svc: &mut Service, success: bool, faulted: bool, code: i32) {
     if success {
         log_svc(&svc.name, "exited cleanly (code 0)");
-    } else if st.faulted() {
+    } else if faulted {
         log_svc(&svc.name, "faulted");
     } else {
         let mut m = String::from("exited code=");
-        push_i32(&mut m, st.code);
+        push_i32(&mut m, code);
         m.push_str(" (failure)");
         log_svc(&svc.name, &m);
     }
@@ -378,27 +390,32 @@ fn on_exit(svc: &mut Service, st: &WaitStatus) {
 }
 
 fn step(svc: &mut Service) {
-    match svc.state {
-        RunState::Idle => start_service(svc),
-        RunState::Running(pid) => {
-            let mut st = WaitStatus::empty();
-            let r = libdunit::wait(pid, &mut st);
-            if r == libdunit::EAGAIN {
-                return; // still running
-            }
-            if r == pid as isize {
-                on_exit(svc, &st);
-            } else {
-                // ECHILD/ENOENT or other unexpected error: the child is gone.
-                // Treat as a failure exit so the restart policy still applies.
-                log_svc(&svc.name, "wait error; treating as failure");
-                on_exit(svc, &WaitStatus { kind: 1, code: -1 });
-            }
+    // Fallbacks run once and do not inherit the failed service's restart
+    // policy. Retain ownership only to reap their eventual completion.
+    if let Some(child) = &mut svc.fallback_child {
+        if !matches!(child.try_wait(), Ok(None)) {
+            svc.fallback_child = None;
         }
+    }
+    match &mut svc.state {
+        RunState::Idle => start_service(svc),
+        RunState::Running(child) => match child.try_wait() {
+            Ok(None) => {} // still running
+            Ok(Some(status)) => on_exit(svc, status),
+            Err(_) => {
+                // ECHILD/ENOENT or other unexpected error: the child is gone.
+                // Preserve the native supervisor's synthetic failure fault.
+                log_svc(&svc.name, "wait error; treating as failure");
+                on_completion(svc, false, true, -1);
+            }
+        },
         RunState::Stopped => {}
     }
 }
 
+// PID 1 retains an explicit entry and panic handler: the ordinary SDK entry
+// exits on return/error/panic, while init must never terminate. All service I/O,
+// filesystem access, child ownership and polling time use the SDK lower layers.
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
     log("start: PID 1 userspace service manager");
@@ -418,7 +435,6 @@ pub extern "C" fn _start() -> ! {
         for svc in services.iter_mut() {
             step(svc);
         }
-        libdunit::sleep_ms(POLL_INTERVAL_MS);
+        let _ = time::sleep(Duration::from_millis(POLL_INTERVAL_MS));
     }
 }
-

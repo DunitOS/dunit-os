@@ -1,0 +1,37 @@
+//! Only native syscalls/readiness are replaced; SDK process/time/error code is intact.
+#![allow(dead_code)]
+extern crate alloc;
+extern crate self as libdunit;
+#[path = SDK_PROCESS_PATH]
+mod process;
+#[path = SDK_TIME_PATH]
+mod time;
+#[path = SDK_ERROR_PATH]
+mod error;
+#[path = ERRNO_PATH]
+mod errno;
+pub use error::{Error, Result};
+pub use errno::*;
+WAIT_STATUS_SOURCE
+
+pub fn error_name(_: isize) -> &'static str { "scripted errno" }
+pub fn spawn(_: &str) -> isize { panic!("unexpected native spawn") }
+pub fn kill(_: u32) -> isize { panic!("unexpected native kill") }
+pub fn wait(_: u32, _: &mut WaitStatus) -> isize { panic!("unexpected native wait") }
+pub fn get_pid() -> u32 { panic!("unexpected native get_pid") }
+pub fn exit(_: i32) -> ! { panic!("unexpected native exit") }
+pub const SYSCALL_CLOCK_GET_TIME: usize = 0;
+pub fn syscall2(_: usize, _: usize, _: usize) -> isize { panic!("unexpected native clock") }
+pub mod event { pub use crate::wait_set::Interest; }
+pub mod wait_set {
+    pub const INFINITE: u64 = u64::MAX;
+    #[derive(Default)] pub struct Event;
+    pub struct Interest;
+    impl Interest {
+        pub fn process(_: u32, _: u64) -> Self { Self }
+        pub fn timer(_: u64, _: u64) -> Self { Self }
+    }
+    pub fn wait(_: &[Interest], _: &mut [Event], _: u64) -> core::result::Result<usize, isize> {
+        panic!("unexpected native wait-set")
+    }
+}

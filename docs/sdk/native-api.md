@@ -102,6 +102,11 @@ creates a timer interest. Durations that cannot be represented as a finite
 native nanosecond timeout return EINVAL rather than becoming infinite waits.
 
 `Child::spawn` uses existing native program lookup and SpawnProcess semantics.
+`Child::try_wait` probes native nonblocking wait directly. It preserves EAGAIN
+as pending, validates the returned PID/status kind and caches only a reaped
+status. `ExitStatus::spawn_prepared()` distinguishes a child reaped before running;
+that status is neither success nor an ordinary exit code. Blocking waits probe
+before subscribing to exit readiness, which does not represent prepared children.
 `Child::spawn` does not accept custom argv/env or file actions. Waiting observes
 child completion with WaitSetWait, then consumes the actual native wait status
 once. Further waits return the cached status. `try_wait` and `wait_timeout` do
@@ -213,3 +218,14 @@ Host contracts: `runtime/dunit/tests/streams.rs`, `entry_data.rs`,
 The API probe checks a 200,003-byte binary file roundtrip. Empty/error/panic
 suites require real failure exits 1/1/101; successful output cannot override them.
 All guest execution uses `tools/qemu_test.py`.
+
+## Service manager
+
+`init` uses SDK streams, filesystem helpers, owned `Child` values and monotonic
+sleep for provisioning and supervision. Restart/fallback policy and manifest
+parsing stay in userspace. Fallback children are retained until completion and
+reaped without inheriting the failed service's restart policy.
+
+The service manager retains its own explicit loader entry and panic loop: the
+ordinary SDK entry exits on return/error/panic, whereas init must never terminate.
+This is an intentional service policy, not a second GUI or application runtime.
