@@ -1,5 +1,5 @@
 {
-  "description": "Production netd verifies tentative DHCPv4 addresses through E1000, routes ICMP using RFC 3442, and tracks ownership across renewal, rebinding, NAK and replacement.",
+  "description": "Production netd verifies direct and relayed DHCPv4 over E1000, including address probing, RFC 3442 routes, off-link renewal, relayed NAK and lease replacement.",
   "run": {
     "config": "limine_test_gui.conf",
     "net_dhcp": true,

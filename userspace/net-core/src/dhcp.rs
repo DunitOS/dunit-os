@@ -371,9 +371,9 @@ impl Client {
         if reply.xid != self.xid || reply.mac != self.mac {
             return Err(Error::Unsolicited);
         }
-        // This Ethernet client handles directly connected DHCP servers. An
-        // IP/identity mismatch, or any relay indication, is outside that path.
-        if reply.server != ip.source {
+        // The relay may preserve the server's source IP (RFC 1542) or use
+        // giaddr. Option 54 still names the server for selection and renewal.
+        if reply.server != ip.source && reply.relay != Some(ip.source) {
             return Err(Error::Unsolicited);
         }
         let current = self.lease.map_or(UNASSIGNED, |lease| lease.address);

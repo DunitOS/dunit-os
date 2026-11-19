@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "31d634b230d496233b41693a9311c6dc61b4c947",
+  "scope": "DHCPv4 client accepts relayed responses from an off-link server and retains the server identifier for renewal.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "bb2920b2c9ace88cc4226fbd68d670383b1713e17072beff5468affe0616377e",
+    "docs/network/ipv4-services.md": "9c094dcd84bf1bddceffff96f6692336ec3dc734934cf26521de56957952e547",
+    "tools/net_dhcp_markers.json": "e2b7b225fb70a26c3920e2c6e3f7d39c5adc37202c70decf0d3489dc00161a84",
+    "tools/net_dhcp_transport.py": "2ae6d73c8f17ca5c3ae4bbcbbd7c7620a2fbe6f05518782881b7d2d9d6cd2498",
+    "tools/test_net_dhcp_transport.py": "5a9f200d0765817039d1f10b96eb9614adacf172b14da25ef0e469076ac31edb",
+    "userspace/net-core/src/dhcp.rs": "950655fb64883b96d983dfe9ec3249d85add7a5bdf699b79861a3b5c815e044b",
+    "userspace/net-core/src/dhcp/tests.rs": "63b7324da95364a0953d2c47ddb5d637e094a46319ae1a3e1412332fdd024096",
+    "userspace/net-core/src/dhcp/wire.rs": "9f3ec970b19b56d6529e373966da95f125576e27f1a51757f73e561de12aa58f"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 68,
+    "python3 tools/test_net_dhcp_transport.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "command": "python3 tools/qemu_test.py --build --image-profile dwm --config limine_dwm.conf --markers-file tools/net_dhcp_markers.json --cpus 4 --accel tcg --timeout 170 --boot-timeout 120",
+    "started_utc": "2026-11-19T12:57:12.491969+00:00",
+    "iso_sha256": "cc713149caf1c2e124546db14eeec6653840babe287f5f6c5d5215f05ccc54c5",
+    "serial_sha256": "f6d445d06700f3415a77a16ec5a3922c7edce3bda526fe0b164e018cdada9b6a",
+    "network_peer_sha256": "65bc1df37ab6305a731cd2127a2f2e6009e8fdab7f42dd842d75b175997012aa",
+    "result": {
+      "ok": true,
+      "reason": "completed",
+      "missing": [],
+      "forbidden": []
+    },
+    "network_peer": {
+      "ok": true,
+      "packets": 37,
+      "bytes": 6168,
+      "responses": 30,
+      "errors": [],
+      "transport": "localhost-tcp-qemu-socket",
+      "protocols": [
+        "ARP",
+        "ICMPv4",
+        "DHCPv4"
+      ],
+      "lease_stages": [
+        "discover_retried_after_loss",
+        "select_ignored_wrong_transaction",
+        "conflict_probe_declined_and_cooled_down",
+        "relayed_offer_and_ack",
+        "first_lease_acd_and_probe_response",
+        "first_lease_arp_icmp",
+        "classless_route_and_router_option_ignored",
+        "on_link_route_direct_reply",
+        "unicast_renewal_to_remote_server_ack",
+        "renewed_lease_arp_icmp",
+        "renewal_retains_classless_route",
+        "renewal_retains_on_link_route",
+        "unicast_renewal_lost_rebind_relayed_nak",
+        "new_lease_acd",
+        "new_lease_arp_icmp_old_address_silent",
+        "replacement_lease_removes_on_link_route"
+      ],
+      "renewal_retries_before_rebind": 3,
+      "acd_probes": 7,
+      "acd_announcements": 4,
+      "decline_wall_cooldown_seconds": 10.009159223001916
+    }
+  }
+}

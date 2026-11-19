@@ -15,7 +15,7 @@ optional. Blank lines and comment lines starting with `#` are allowed.
 Netd validates the whole file and connected gateway before advertising the
 address. Static mode probes and announces the configured address, withdraws it
 on conflict, and retries on a detected link down/up or reboot. With the file
-absent, netd negotiates an IPv4 lease with a directly connected DHCP server.
+absent, netd negotiates an IPv4 lease directly or through a DHCPv4 relay.
 The configured DNS addresses are retained with the interface state. The
 application resolver service remains separate.
 
@@ -33,6 +33,12 @@ The service waits on packet readiness and monotonic deadlines. It bounds TX
 backlog to one batch of 32 records so a slow transmitter cannot stall RX or
 lease transitions. The DHCP client uses a local noncryptographic transaction
 seed and bounded retries.
+
+For forwarded replies netd accepts the server's IP or the relay's BOOTP
+`giaddr` as the source. The DHCP Server Identifier (option 54) still selects
+the server and supplies the unicast renewal destination. An off-link server
+requires a matching route in the lease for unicast renewal. If renewal
+fails, rebinding uses broadcast as before.
 
 DHCP option 121 carries up to seven classless routes. A nonzero gateway
 must be reachable in the primary connected subnet. A zero gateway marks
@@ -80,16 +86,17 @@ python3 tools/qemu_test.py --build --markers-file tools/net_live_markers.json \
 ```
 
 The DHCP host peer verifies retry after loss, unrelated OFFER rejection,
-unicast renewal, broadcast rebinding, NAK, and ARP/ICMP on the replacement
-address. The retired address is silent. The separate native logical test
+lease acquisition through a relay, routed unicast renewal, broadcast
+rebinding, relayed NAK, and ARP/ICMP on the replacement address. The retired
+address is silent. The separate native logical test
 covers 8,192 bytes of TCP with losses and both half-closes. Its host counterpart
 also covers 2 MiB, sequence wrap and timer bounds.
 
 Stock netd also handles [explicitly granted outbound IPv4 sockets](application-sockets.md).
-Application DNS, TCP listener authority, production congestion control, DHCP
-relays and persisted lease recovery remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
+Application DNS, TCP listener authority, production congestion control and
+persisted lease recovery remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
 [TCP admission verification](../verification/tcp-admission-2026-11-19.json),
 [DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json), and
 [static and gateway route verification](../verification/ipv4-routing-2026-11-19.json).
-The direct-route run is recorded in
-[on-link DHCP verification](../verification/dhcp-on-link-2026-11-19.json).
+See [on-link DHCP verification](../verification/dhcp-on-link-2026-11-19.json)
+and [relayed DHCP verification](../verification/dhcp-relay-2026-11-19.json).

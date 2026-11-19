@@ -601,7 +601,9 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
 - [x] Probe each new DHCPv4 address before activation and announce it after
   the quiet interval. Decline an ARP conflict and verify reacquisition after
   the cooldown through the E1000 fixture.
-- [ ] Add DHCP relay support and reboot validation before using persisted leases.
+- [x] Accept DHCPv4 replies forwarded by a relay. Verify leases from an
+  off-link server, routed unicast renewal and relayed NAK over E1000.
+- [ ] Validate leases after reboot before using persisted configuration.
 - [ ] Integrate the resolver with lease changes, service entropy, and an
   application endpoint. Define admin/user configuration precedence.
 

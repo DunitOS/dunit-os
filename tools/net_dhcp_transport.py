@@ -20,6 +20,7 @@ PROBER_MAC = bytes.fromhex("020000000004")
 ROUTE_GATEWAY = bytes([192, 0, 2, 254])
 ROUTE_MAC = bytes.fromhex("020000000007")
 ROUTED_HOST = bytes([198, 51, 100, 7])
+REMOTE_SERVER = bytes([198, 51, 100, 53])
 ON_LINK_HOST = bytes([198, 51, 101, 7])
 ON_LINK_MAC = bytes.fromhex("020000000008")
 OFF_PREFIX_HOST = bytes([203, 0, 113, 7])
@@ -39,15 +40,16 @@ STAGES = (
     "discover_retried_after_loss",
     "select_ignored_wrong_transaction",
     "conflict_probe_declined_and_cooled_down",
+    "relayed_offer_and_ack",
     "first_lease_acd_and_probe_response",
     "first_lease_arp_icmp",
     "classless_route_and_router_option_ignored",
     "on_link_route_direct_reply",
-    "unicast_renewal_ack",
+    "unicast_renewal_to_remote_server_ack",
     "renewed_lease_arp_icmp",
     "renewal_retains_classless_route",
     "renewal_retains_on_link_route",
-    "unicast_renewal_lost_rebind_nak",
+    "unicast_renewal_lost_rebind_relayed_nak",
     "new_lease_acd",
     "new_lease_arp_icmp_old_address_silent",
     "replacement_lease_removes_on_link_route",
@@ -109,9 +111,15 @@ class Request:
     options: dict[int, bytes]
 
 
+def client_next_hop(destination: bytes) -> bytes:
+    if destination == BROADCAST:
+        return BROADCAST_MAC
+    return ROUTE_MAC if destination == REMOTE_SERVER else HOST_MAC
+
+
 def parse_request(frame: bytes, kind: int, address: bytes, destination: bytes) -> Request:
     source, target, data = parse_ipv4(frame, 17)
-    if target != destination or frame[:6] != (BROADCAST_MAC if target == BROADCAST else HOST_MAC):
+    if target != destination or frame[:6] != client_next_hop(target):
         raise ValueError("invalid DHCP Ethernet or IP destination")
     if source != address or len(data) < 248:
         raise ValueError("invalid DHCP source address or length")
@@ -129,14 +137,15 @@ def parse_request(frame: bytes, kind: int, address: bytes, destination: bytes) -
 
 
 def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False,
-          include_routes: bool = True) -> bytes:
+          include_routes: bool = True, server: bytes = SERVER, relay: bytes = ZERO) -> bytes:
     body = bytearray(240)
-    body[:4] = b"\x02\x01\x06\x00"
+    body[:4] = bytes([2, 1, 6, int(relay != ZERO)])
     struct.pack_into("!I", body, 4, xid)
     body[16:20] = address
+    body[24:28] = relay
     body[28:34] = GUEST_MAC
     body[236:240] = COOKIE
-    body += option(53, bytes([kind])) + option(54, SERVER)
+    body += option(53, bytes([kind])) + option(54, server)
     if kind != NAK:
         body += option(1, MASK) + option(6, DNS)
         if include_routes:
@@ -148,12 +157,14 @@ def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False,
     body += b"\xff"
     body = body.ljust(300, b"\0")
     target = address if unicast else BROADCAST
+    source = relay if relay != ZERO else server
     length = 8 + len(body)
     datagram = struct.pack("!HHHH", 67, 68, length, 0) + body
-    check = checksum(pseudo(SERVER, target, length) + datagram) or 0xffff
+    check = checksum(pseudo(source, target, length) + datagram) or 0xffff
     payload = datagram[:6] + struct.pack("!H", check) + datagram[8:]
     return ethernet(GUEST_MAC if unicast else BROADCAST_MAC,
-                    IPV4, ipv4(17, SERVER, target, payload))
+                    IPV4, ipv4(17, source, target, payload),
+                    source=client_next_hop(server))
 
 
 class NetDhcpPeer(EthernetPeer):
@@ -180,13 +191,14 @@ class NetDhcpPeer(EthernetPeer):
             raise ValueError("DHCP discovery must request classless routes before the router option")
         return request
 
-    def _select(self, connection: socket.socket, discover: Request, address: bytes) -> None:
-        self._send(connection, reply(OFFER, discover.xid, address))
+    def _select(self, connection: socket.socket, discover: Request, address: bytes,
+                *, server: bytes = SERVER, relay: bytes = ZERO) -> None:
+        self._send(connection, reply(OFFER, discover.xid, address, server=server, relay=relay))
         request = parse_request(self._receive(connection), REQUEST, ZERO, BROADCAST)
         if (request.xid != discover.xid or request.options.get(50) != address or
-                request.options.get(54) != SERVER):
+                request.options.get(54) != server):
             raise ValueError("client did not select the matching DHCP offer")
-        self._send(connection, reply(ACK, request.xid, address))
+        self._send(connection, reply(ACK, request.xid, address, server=server, relay=relay))
 
     def _expect_acd(self, connection: socket.socket, address: bytes, sender: bytes) -> None:
         expected = (BROADCAST_MAC + GUEST_MAC + ARP + ARP_HEADER + b"\0\x01" +
@@ -297,18 +309,19 @@ class NetDhcpPeer(EthernetPeer):
 
     def _renewal(self, connection: socket.socket, *, allow_rebind: bool = False) -> Request:
         # The stack may need one gateway/server ARP resolution before sending
-        # the unicast renewal. It must target the server on the leased subnet.
+        # the unicast renewal. The server is off-link, reachable via the relay.
         for _ in range(8):
             frame = self._receive(connection)
             if frame[12:14] == ARP:
                 request = (BROADCAST_MAC + GUEST_MAC + ARP + ARP_HEADER + b"\0\x01" +
-                           GUEST_MAC + FIRST + bytes(6) + SERVER).ljust(60, b"\0")
+                           GUEST_MAC + FIRST + bytes(6) + ROUTE_GATEWAY).ljust(60, b"\0")
                 if frame != request:
                     raise ValueError("unexpected ARP while renewing lease")
                 self._send(connection, ethernet(GUEST_MAC, ARP, ARP_HEADER + b"\0\x02" +
-                                                HOST_MAC + SERVER + GUEST_MAC + FIRST))
+                                                ROUTE_MAC + ROUTE_GATEWAY + GUEST_MAC + FIRST,
+                                                source=ROUTE_MAC))
                 continue
-            destination = BROADCAST if allow_rebind and frame[:6] == BROADCAST_MAC else SERVER
+            destination = BROADCAST if allow_rebind and frame[:6] == BROADCAST_MAC else REMOTE_SERVER
             packet = parse_request(frame, REQUEST, FIRST, destination)
             if 50 in packet.options or 54 in packet.options:
                 raise ValueError("DHCP renewal/rebind used discovery-only selectors")
@@ -329,7 +342,8 @@ class NetDhcpPeer(EthernetPeer):
         discover = self._decline(connection, discover)
         self._stages.append("conflict_probe_declined_and_cooled_down")
 
-        self._select(connection, discover, FIRST)
+        self._select(connection, discover, FIRST, server=REMOTE_SERVER, relay=ROUTE_GATEWAY)
+        self._stages.append("relayed_offer_and_ack")
         self._complete_acd(connection, FIRST)
         self._active_probe_reply(connection, FIRST)
         self._stages.append("first_lease_acd_and_probe_response")
@@ -341,8 +355,9 @@ class NetDhcpPeer(EthernetPeer):
         self._stages.append("on_link_route_direct_reply")
 
         renewal = self._renewal(connection)
-        self._send(connection, reply(ACK, renewal.xid, FIRST, unicast=True, include_routes=False))
-        self._stages.append("unicast_renewal_ack")
+        self._send(connection, reply(ACK, renewal.xid, FIRST, unicast=True, include_routes=False,
+                                     server=REMOTE_SERVER))
+        self._stages.append("unicast_renewal_to_remote_server_ack")
         self._probe_address(connection, FIRST, 2)
         self._stages.append("renewed_lease_arp_icmp")
         self._probe_classless_route(connection, FIRST, 5)
@@ -354,12 +369,13 @@ class NetDhcpPeer(EthernetPeer):
         for _ in range(8):
             request = self._renewal(connection, allow_rebind=True)
             if request.destination == BROADCAST:
-                self._send(connection, reply(NAK, request.xid, ZERO))
+                self._send(connection, reply(NAK, request.xid, ZERO,
+                                             server=REMOTE_SERVER, relay=ROUTE_GATEWAY))
                 break
             self._renew_retries += 1
         else:
             raise ValueError("client did not broadcast DHCP rebind")
-        self._stages.append("unicast_renewal_lost_rebind_nak")
+        self._stages.append("unicast_renewal_lost_rebind_relayed_nak")
 
         discover = self._discover(connection)
         self._select(connection, discover, SECOND)

@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 const OPTIONS: usize = 240;
 const MIN_REQUEST: usize = 300;
 const MAX_OPTIONS: usize = 128;
+const MAX_RELAY_HOPS: u8 = 16;
 const CLASSLESS_ROUTE: u8 = 121;
 const MAX_ROUTE_BYTES: usize = (ROUTE_CAPACITY - 1) * 9;
 const MAGIC: [u8; 4] = [99, 130, 83, 99];
@@ -32,6 +33,7 @@ pub(super) struct Reply {
     pub client: Ip,
     pub address: Ip,
     pub server: Ip,
+    pub relay: Option<Ip>,
     options: Options,
 }
 
@@ -249,12 +251,18 @@ pub(super) fn reply(bytes: &[u8]) -> Result<Reply, Error> {
     if !(OPTIONS + 1..=MAX_PAYLOAD).contains(&bytes.len()) {
         return Err(Error::Length);
     }
-    if bytes[..4] != [2, 1, 6, 0] // BOOTREPLY, Ethernet, MAC length, direct
+    if bytes[..3] != [2, 1, 6] // BOOTREPLY, Ethernet, MAC length
         || word(bytes, 10) & 0x7fff != 0
-        || bytes[24..28] != [0; 4] // giaddr: no relayed replies
         || bytes[236..240] != MAGIC
     {
         return Err(Error::Header);
+    }
+    let relay = fixed(&bytes[24..28])?;
+    if bytes[3] > MAX_RELAY_HOPS || (relay == UNASSIGNED && bytes[3] != 0) {
+        return Err(Error::Header);
+    }
+    if relay != UNASSIGNED && !usable_ip(relay) {
+        return Err(Error::Address);
     }
     let mac = fixed(&bytes[28..34])?;
     let options = parse_options(&bytes[OPTIONS..], mac)?;
@@ -269,6 +277,7 @@ pub(super) fn reply(bytes: &[u8]) -> Result<Reply, Error> {
         client: fixed(&bytes[12..16])?,
         address: fixed(&bytes[16..20])?,
         server,
+        relay: (relay != UNASSIGNED).then_some(relay),
         options,
     })
 }

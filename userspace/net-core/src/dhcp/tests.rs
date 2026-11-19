@@ -405,6 +405,49 @@ fn validates_udp_checksums_xid_and_direct_link_identity() {
 }
 
 #[test]
+fn relayed_reply_keeps_server_identity_for_selection_and_renewal() {
+    let remote_server = [198, 51, 100, 53];
+    let mut client = Client::new(CLIENT, 41).unwrap();
+    let xid = transaction(&send(&mut client, 0));
+    let config = offer_options(LIFETIME);
+    let mut offer = reply(2, xid, HOST, remote_server, &config);
+    offer[3] = 1;
+    offer[24..28].copy_from_slice(&SERVER);
+    let broadcast = |payload: &[u8], source| {
+        server_frame(payload, source, LIMITED_BROADCAST, BROADCAST)
+    };
+    assert_eq!(
+        client.receive(&broadcast(&offer, OTHER), 1),
+        Err(Error::Unsolicited)
+    );
+    let mut invalid = offer.clone();
+    invalid[3] = 17;
+    assert_eq!(client.receive(&broadcast(&invalid, SERVER), 1), Err(Error::Header));
+    invalid[3] = 1;
+    invalid[24..28].copy_from_slice(&UNASSIGNED);
+    assert_eq!(client.receive(&broadcast(&invalid, SERVER), 1), Err(Error::Header));
+    invalid[24..28].copy_from_slice(&LIMITED_BROADCAST);
+    assert_eq!(client.receive(&broadcast(&invalid, SERVER), 1), Err(Error::Address));
+    assert_eq!(client.state(), State::Selecting);
+    assert_eq!(client.receive(&broadcast(&offer, SERVER), 1), Ok(Event::Offered));
+    let request = send(&mut client, 1);
+    assert!(request.payload.windows(6).any(|option| option == [54, 4, 198, 51, 100, 53]));
+
+    let mut ack = reply(5, xid, HOST, OTHER, &config);
+    ack[24..28].copy_from_slice(&SERVER);
+    assert_eq!(client.receive(&broadcast(&ack, SERVER), 2), Err(Error::Unsolicited));
+    let mut ack = reply(5, xid, HOST, remote_server, &config);
+    ack[24..28].copy_from_slice(&SERVER);
+    let direct_source = server_frame(&ack, remote_server, HOST, CLIENT);
+    let Ok(Event::Bound(lease)) = client.receive(&direct_source, 2) else {
+        panic!("expected relayed lease");
+    };
+    assert_eq!(lease.server, remote_server);
+    let renewal = send(&mut client, lease.renew_at);
+    request_header(&renewal, 3, HOST, remote_server);
+}
+
+#[test]
 fn option_bounds_and_mutations_never_panic() {
     let mut payload = reply(2, 9, HOST, SERVER, &offer_options(LIFETIME));
     assert!(wire::reply(&payload).is_ok());
