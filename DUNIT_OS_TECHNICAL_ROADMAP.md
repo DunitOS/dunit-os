@@ -649,7 +649,10 @@ defines the initial outbound IPv4 scope. See
 - [ ] Separate CONNECT/BIND_LOW_PORT/LISTEN/RAW/CONFIGURE_INTERFACE/OBSERVE_ALL rights.
 - [ ] Bound per-process sockets/queued bytes/DNS/backlog, and define deterministic
   transfer/revocation and netd-restart errors.
-- [ ] Adapt POSIX socket/resolver calls and poll/pselect to native semantics.
+- [x] Provide an opt-in static musl C adapter for nonblocking outbound IPv4
+  TCP/UDP, endpoint and error queries, datagram truncation and mixed poll.
+- [ ] Integrate socket translation into the libc fork and add blocking,
+  listener, IPv6 and resolver operations as their native contracts mature.
 
 Translate POSIX socket calls, sockaddr/options/flags/errors and getaddrinfo/
 getnameinfo through native adapters, never Linux structs. Blocking/nonblocking

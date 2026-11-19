@@ -1,0 +1,62 @@
+{
+  "description": "Static musl POSIX UDP/TCP adapter exercises authorized stock netd and E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-socket-posix",
+    "net_socket": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {
+        "wait_marker": "[POSIX-SOCKET] complete",
+        "timeout": 90
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "timeout": 60
+      }
+    ]
+  },
+  "required": [
+    {
+      "marker": "[NETD] IPv4 static bound 192.0.2.12",
+      "source": "userspace/system_apps/netd/src/static_runtime.rs"
+    },
+    {
+      "marker": "[POSIX-SOCKET] grant and descriptor stay with owner",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    {
+      "marker": "[POSIX-SOCKET] UDP sendto/recvfrom truncation and poll passed",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    {
+      "marker": "[POSIX-SOCKET] TCP connect, partial I/O, endpoints and EOF passed",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    {
+      "marker": "[NETD] IPv4 static conflict 192.0.2.12",
+      "source": "userspace/system_apps/netd/src/static_runtime.rs"
+    },
+    {
+      "marker": "[POSIX-SOCKET] revoked socket woke poll and returned EPIPE",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    {
+      "marker": "[POSIX-SOCKET] complete",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[POSIX-SOCKET] FAIL",
+    "[NETD-FIXTURE]",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[INIT] start: PID 1 userspace service manager"
+    }
+  ]
+}

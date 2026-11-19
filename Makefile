@@ -47,6 +47,7 @@ LUA_FULL_UNITS = $(LUA_UNITS) lcorolib liolib loslib loadlib ldblib lutf8lib lin
 LUA_FULL_SOURCES = $(addprefix third_party/lua/src/,$(addsuffix .c,$(LUA_FULL_UNITS)))
 
 MUSL_CTESTS = dwm_lua_test musl_io musl_hello musl_stdio musl_malloc musl_file musl_thread musl_read musl_stat musl_dir musl_cwd musl_time musl_fsmgmt wc_demo musl_child musl_spawn fault_child musl_harden nx_child musl_wx slow_child musl_reap cap_child musl_cap musl_cond musl_lseek musl_fstat musl_dup musl_pipe musl_direxcl musl_fileops musl_profile musl_terminal musl_native_fd musl_persist musl_thread_stress
+MUSL_SOCKET_CTESTS = net_socket_posix
 
 # Dunit TinyCC port (M6 capstone): the x86_64-dunit tcc fork lives in the
 # submodule toolchains/dunit-tcc. tools/dunit/build-tcc.sh builds a host-hosted
@@ -66,6 +67,7 @@ USERSPACE_APPS = pointer_queue_test pointer_queue_denied pty_args_test pty_termi
 ifneq ($(IMAGE_PROFILE),full)
 USERSPACE_APPS := $(shell python3 tools/image_profile.py $(IMAGE_PROFILE) --field programs)
 MUSL_CTESTS :=
+MUSL_SOCKET_CTESTS :=
 TCC_CTESTS :=
 endif
 
@@ -196,11 +198,18 @@ ifneq ($(WITH_TOOLCHAIN),false)
 	@if [ -f $(MUSL_DIR)/tools/dunit/build-libc.sh ]; then set -e; \
 		CC=$(CC) python3 tools/ensure_musl_sysroot.py; \
 		python3 tools/ensure_c_ui.py --sysroot $(abspath $(MUSL_SYSROOT)); \
+		CC=$(CC) python3 tools/ensure_posix_sockets.py --sysroot $(abspath $(MUSL_SYSROOT)); \
 		for prog in $(MUSL_CTESTS); do \
 			echo "  [MUSL] $$prog"; \
 			CC=$(CC) $(abspath $(MUSL_SYSROOT))/bin/dunit-cc -O2 \
 				-o $(USERSPACE_BUILD_DIR)/$$prog \
 				$(USERSPACE_DIR)/ctests/$$prog.c; \
+		done; \
+		for prog in $(MUSL_SOCKET_CTESTS); do \
+			echo "  [MUSL-SOCKETS] $$prog"; \
+			CC=$(CC) $(abspath $(MUSL_SYSROOT))/bin/dunit-cc -O2 -Wall -Wextra -Werror \
+				-o $(USERSPACE_BUILD_DIR)/$$prog $(USERSPACE_DIR)/ctests/$$prog.c \
+				-ldunit_posix_sockets; \
 		done; \
 	else echo "[USERSPACE] WARNING: $(MUSL_DIR) unavailable (not a git checkout or offline); musl ctests skipped. Fetch with: git submodule update --init --recursive"; fi
 	@echo "[USERSPACE] building tcc ctests ($(TCC_CTESTS)) with the Dunit cross-tcc"

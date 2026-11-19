@@ -5,6 +5,7 @@ components and a generated C bridge to the same widget runtime. Ordinary GUI
 applications are independent ELF processes; the compositor owns display/input.
 
 - [Native API](native-api.md): entry, streams, files, time, child processes and wait-set.
+- [POSIX sockets](posix-sockets.md): opt-in C adapter for granted outbound IPv4.
 - [Threads and synchronization](threads.md): owning workers, joining handles, mutex and condition variables.
 - [Tooling](tooling.md): cargo dunit, manifests, native tests and desktop discovery.
 - [Standalone distribution](standalone.md): verified installation, offline builds, relocation and delegated native execution.

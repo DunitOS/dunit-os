@@ -1,0 +1,116 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "740337e8fbac6402421cb27f0076b9ffd59c0b97",
+  "musl_revision": "ab1312290aebb101f98ae4afaa347b9fba3afc70",
+  "scope": "Opt-in static C adapter for granted nonblocking outbound IPv4 sockets over the existing native socket bridge.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "866c22a9c5326f67c843612829e4db0c23b599d0849e0f30a18864d21e257122",
+    "Makefile": "4dcee1c023193bb13999769ec1c317dda5efb7ee22fe3f8b7d0a1bdc208f23a0",
+    "docs/network/application-sockets.md": "b5d4ac1612033529d11b969dee9ba4fdf7414c4c13bf800f948e02e30ce2fe39",
+    "docs/sdk/README.md": "a516cfc83a9f7c0ba53ccebc33e9645332236b4eb068039320520dc2e1a1d045",
+    "docs/sdk/posix-sockets.md": "0db053a98a2bf62aedc6b53160765677efc61530e948a51aa80061eae72fcb2c",
+    "runtime/dunit-posix-sockets/include/dunit/posix-sockets.h": "fdf496c7c061013feb819aa40ed1db472f3c613c8bd629973add4035b05fdbc2",
+    "runtime/dunit-posix-sockets/socket.c": "7914f3b392d7840c0ee12d5ca26890d086569b23f2f9d2dea9d55f15fb07a78e",
+    "tests/fixtures/net-socket-posix/system/boot-services/net-socket-posix.toml": "32cd3ac6816c2ba3b89163ed6389272d282c048567ba63c36473275715b6e55a",
+    "tests/fixtures/net-socket-posix/system/boot-services/netd-ipv4.conf": "23427ce0555e061896e0b563130163be5ad4b6a319ee5fac569c7a74b3a2b4ca",
+    "tools/dunit_sdk.py": "18bc142fd6295f43cef799292498965c0809b22d6633cfece87f116f7f611f6b",
+    "tools/ensure_posix_sockets.py": "4bf24de96da7d3206abcee4e25c84f607f24060a2597c2bc6c547a344d16bc78",
+    "tools/image_profile.py": "8c2713e9d9916ec95f760ca4d6006f268a096abfa7a7c0c46ee2b77a34b2af25",
+    "tools/net_socket_posix_markers.json": "0ebc45fea2b471193690fadd0c94ac6d61ba744c7d82f9acd16a036293611820",
+    "tools/pack_initrd.py": "67a670bdfd4d034061f845077c778fb7f4ec68796f173da883b4347025b05255",
+    "tools/test_image_profiles.py": "d3c4c9bd4a2aa2bacc98f4cd03e39f0e03fd851205d7d5b5c7e55213c1bb3aa6",
+    "userspace/ctests/net_socket_posix.c": "e1b08c7c0b3706f0b5ebf0bfbfd4029b497e17daaca5ffac445d9ef652d870b6"
+  },
+  "host_checks": {
+    "python3 tools/test_image_profiles.py": 10,
+    "python3 tools/test_c_sdk_headers.py": 6,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "python3 tools/gen_abi.py --check": "passed",
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 8 --accel tcg --timeout 245 --boot-timeout 120",
+      "started_utc": "2026-11-19T12:12:33.410762+00:00",
+      "iso_sha256": "d3b1a5e016db2aa63fd8d9b9da9cf71a53c676259e7944cf1662f162a13ade6b",
+      "marker_profile_sha256": "0ebc45fea2b471193690fadd0c94ac6d61ba744c7d82f9acd16a036293611820",
+      "serial_sha256": "34f630b3f20987bd362294f87c3ca8096db10c4f06500d8a8d92692bdbc46026",
+      "network_peer_sha256": "93d43f81b5ddae8813f00aa8d50052a04eef28358ece1386ab7c4b7433916300",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 21,
+        "bytes": 6204,
+        "responses": 17,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    },
+    "native_rust_regression": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 220 --boot-timeout 120",
+      "started_utc": "2026-11-19T12:13:34.405829+00:00",
+      "iso_sha256": "345a0c74e14fa94801008eb60782014a5d3772d4631c527cfa0fe99d19fec228",
+      "marker_profile_sha256": "066555e26bb12737361cefe778cab3b9edee73e282c6734217402cae84d6e4b1",
+      "serial_sha256": "38db1fe6c8003da391b3714b1626d445b4854abaf6cf1a9e1c31a8da84935fe3",
+      "network_peer_sha256": "93d43f81b5ddae8813f00aa8d50052a04eef28358ece1386ab7c4b7433916300",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 21,
+        "bytes": 6204,
+        "responses": 17,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    }
+  },
+  "full_initrd": {
+    "matches_sysroot": [
+      "/system/lib/libdunit_posix_sockets.a",
+      "/system/include/dunit/posix-sockets.h"
+    ],
+    "archive_sha256": "9266818b9dcaa8bd80c22737d23d37a270c47eeee503054e9d6904f0521f10cf",
+    "libexec_matches_stripped_elf": "/system/libexec/net_socket_posix",
+    "absent": [
+      "/app/net_socket_posix",
+      "/system/tcc/libdunit_posix_sockets.a"
+    ]
+  }
+}

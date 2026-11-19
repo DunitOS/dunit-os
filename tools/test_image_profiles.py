@@ -28,6 +28,7 @@ class ImageProfiles(unittest.TestCase):
             "services/gui-server.toml": b'exec = "/app/gui_server"\n',
             "services/boot/netd.toml": b'exec = "/system/libexec/netd"\nnet_device = 0\n',
             "services/test/probe.toml": b"probe", "sysroot/include/header.h": b"header", "sysroot/lib/libdunit_ui.a": b"Rust SDK archive",
+            "sysroot/lib/libdunit_posix_sockets.a": b"POSIX socket archive",
         }.items():
             self.write(path, data)
         profile = load_profile("dwm")
@@ -46,6 +47,7 @@ class ImageProfiles(unittest.TestCase):
         self.assertNotIn("/app/gui_server", entries)
         self.assertNotIn("/system/include/header.h", entries)
         self.assertNotIn("/system/lib/libdunit_ui.a", entries)
+        self.assertNotIn("/system/lib/libdunit_posix_sockets.a", entries)
         self.assertNotIn("/assets/fonts/font.ttf", entries)
 
     def test_missing_required_app_fails_instead_of_shipping_partial_image(self):
@@ -60,6 +62,9 @@ class ImageProfiles(unittest.TestCase):
         for path in ("/app/gui_server", "/app/dwm_lua", "/system/share/dwm/default.toml", "/system/include/header.h", "/system/lib/libdunit_ui.a"):
             self.assertIn(path, entries)
         self.assertNotIn("/system/tcc/libdunit_ui.a", entries)
+        self.assertIn("/system/lib/libdunit_posix_sockets.a", entries)
+        self.assertNotIn("/system/tcc/libdunit_posix_sockets.a", entries)
+        self.assertNotIn("/system/libexec/net_socket_posix", entries)
         self.assertIn("/system/libexec/netd", entries)
         self.assertIn("/system/boot-services/netd.toml", entries)
         self.assertNotIn("/app/netd", entries)

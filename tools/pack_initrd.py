@@ -140,12 +140,12 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
                     rel = host_path.relative_to(inc).as_posix()
                     add(f"/system/include/{rel}", host_path)
             lib = sysroot / "lib"
-            for name in ("libc.a", "libdunit_ui.a", "crt1.o", "crti.o", "crtn.o"):
+            for name in ("libc.a", "libdunit_ui.a", "libdunit_posix_sockets.a", "crt1.o", "crti.o", "crtn.o"):
                 p = lib / name
                 if p.is_file():
                     add(f"/system/lib/{name}", p)
                     # crt also under /system/tcc so tcc finds them via -B/CONFIG_TCCDIR
-                    if name not in ("libc.a", "libdunit_ui.a"):
+                    if name in ("crt1.o", "crti.o", "crtn.o"):
                         add(f"/system/tcc/{name}", p)
 
         # System Lua is a normal executable; its complete source SDK permits a real
