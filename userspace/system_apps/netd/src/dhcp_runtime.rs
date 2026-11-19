@@ -7,7 +7,13 @@ use dunit_net_core::{
 };
 use netd::Queue;
 
-use crate::{address_probe::AddressProbe, interface::{Config, Interface}, network_error, outbound::Outbound};
+use crate::{
+    address_probe::AddressProbe,
+    interface::{Config, Interface},
+    lease_hint::LeaseHint,
+    network_error,
+    outbound::Outbound,
+};
 
 struct Candidate {
     config: Config,
@@ -19,16 +25,19 @@ pub struct Dynamic {
     seed: u32,
     client: Client,
     remembered: Option<Ip>,
+    hint: LeaseHint,
     pending: Option<Transmission>,
     candidate: Option<Candidate>,
 }
 
 impl Dynamic {
     pub fn new(mac: Mac, seed: u32, remembered: Option<Ip>) -> Result<Self> {
+        let hint = LeaseHint::load(mac);
         Ok(Self {
             mac, seed,
             client: Client::new(mac, seed).map_err(network_error)?,
-            remembered,
+            remembered: remembered.or(hint.address()),
+            hint,
             pending: None,
             candidate: None,
         })
@@ -70,7 +79,7 @@ impl Dynamic {
                 self.pending = Some(message);
                 Ok(())
             }
-            Action::Expired => self.remove(interface, tx),
+            Action::Expired => self.withdraw(interface, tx),
         }
     }
 
@@ -83,13 +92,21 @@ impl Dynamic {
     ) -> Result<()> {
         match self.client.receive(frame, now) {
             Ok(Event::Bound(lease)) => self.acknowledged(lease, now, interface, tx),
-            Ok(Event::Lost) => self.remove(interface, tx),
+            Ok(Event::Lost) => self.withdraw(interface, tx),
             Ok(Event::Offered) => {
                 self.pending = None;
                 Ok(())
             }
             Ok(Event::Ignored) | Err(_) => Ok(()),
         }
+    }
+
+    fn withdraw(&mut self, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
+        self.remove(interface, tx)?;
+        if let Err(error) = self.hint.clear() {
+            dunit::println!("[NETD] cannot clear DHCP hint: {:?}", error)?;
+        }
+        Ok(())
     }
 
     fn acknowledged(
@@ -136,6 +153,9 @@ impl Dynamic {
         if changed {
             tx.clear();
         }
+        if let Err(error) = self.hint.save(config.address) {
+            dunit::println!("[NETD] cannot save DHCP hint: {:?}", error)?;
+        }
         let [a, b, c, d] = config.address;
         dunit::println!("[NETD] DHCP {} {}.{}.{}.{}", verb, a, b, c, d)
     }
@@ -155,7 +175,7 @@ impl Dynamic {
         }
         let [a, b, c, d] = candidate.config.address;
         let decline = self.client.decline(now).map_err(network_error)?;
-        self.remove(interface, tx)?;
+        self.withdraw(interface, tx)?;
         self.pending = Some(decline);
         dunit::println!("[NETD] DHCP conflict {}.{}.{}.{}", a, b, c, d)?;
         Ok(true)

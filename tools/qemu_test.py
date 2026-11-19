@@ -704,8 +704,12 @@ def run(args: argparse.Namespace) -> RunResult:
             from net_static_transport import NetStaticPeer
             peer = NetStaticPeer(workdir)
         elif net_dhcp:
-            from net_dhcp_transport import NetDhcpPeer
-            peer = NetDhcpPeer(workdir, reboot=bool(run_defaults.get("dhcp_reboot")))
+            from net_dhcp_transport import NetDhcpPeer, NetDhcpPersistencePeer
+            phase = run_defaults.get("dhcp_persistence")
+            if phase is None:
+                peer = NetDhcpPeer(workdir, reboot=bool(run_defaults.get("dhcp_reboot")))
+            else:
+                peer = NetDhcpPersistencePeer(workdir, phase)
         elif net_live:
             from net_live_transport import NetLivePeer
             peer = NetLivePeer(workdir)

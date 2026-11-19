@@ -46,8 +46,15 @@ once at startup using DHCP INIT-REBOOT. It broadcasts DHCPREQUEST from
 `0.0.0.0` with the Requested IP Address option and without a Server
 Identifier. Only a fresh ACK for that address supplies interface settings.
 The same ARP probing and conflict handling run before activation. A NAK or
-no response after four requests returns the client to discovery. Automatic
-on-disk storage of the address hint remains open.
+no response after four requests returns the client to discovery.
+
+After activation netd saves the address and interface MAC at
+`/persist/netd-dhcp-hint`. On startup the boot archive's explicit hint takes
+precedence over this record. The record supplies no lease timers, routes,
+DNS servers or DHCP server identity. Incomplete records and records with
+a different interface MAC are ignored. Lease expiry, a NAK, or an ARP
+conflict clears the record. An unavailable or read-only volume leaves DHCP
+operational.
 
 DHCP option 121 carries up to seven classless routes. A nonzero gateway
 must be reachable in the primary connected subnet. A zero gateway marks
@@ -103,8 +110,8 @@ covers 8,192 bytes of TCP with losses and both half-closes. Its host counterpart
 also covers 2 MiB, sequence wrap and timer bounds.
 
 Stock netd also handles [explicitly granted outbound IPv4 sockets](application-sockets.md).
-Application DNS, TCP listener authority, production congestion control and
-persisted lease recovery remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
+Application DNS, TCP listener authority and production congestion control
+remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
 [TCP admission verification](../verification/tcp-admission-2026-11-19.json),
 [DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json), and
 [static and gateway route verification](../verification/ipv4-routing-2026-11-19.json).
@@ -112,3 +119,5 @@ See [on-link DHCP verification](../verification/dhcp-on-link-2026-11-19.json)
 and [relayed DHCP verification](../verification/dhcp-relay-2026-11-19.json).
 The startup request and conflict checks are recorded in
 [INIT-REBOOT verification](../verification/dhcp-init-reboot-2026-11-19.json).
+Two QEMU boots using the same DunitFS volume are recorded in
+[DHCP persistence verification](../verification/dhcp-persistence-2026-11-19.json).

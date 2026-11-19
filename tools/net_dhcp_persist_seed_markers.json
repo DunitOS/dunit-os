@@ -1,0 +1,10 @@
+{
+  "description": "Acquire a DHCPv4 address on a guest with a fresh DunitFS volume.",
+  "run": {"net_dhcp": true, "ready_marker": "gui_server: desktop ready", "dhcp_persistence": "seed"},
+  "required": [
+    "[DUNITFS] auto-mounted sda kind=system at /persist",
+    "[INIT] first boot: provisioning /persist",
+    "[NETD] DHCP bound 192.0.2.2"
+  ],
+  "forbidden": ["[PANIC]", "[NETD] cannot save DHCP hint", "[NETD] cannot clear DHCP hint"]
+}

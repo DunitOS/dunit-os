@@ -606,7 +606,9 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
 - [x] Send INIT-REBOOT for a remembered address supplied at boot. Require a
   fresh matching ACK and ARP conflict checks before activating it. Fall
   back to discovery on NAK or retry exhaustion.
-- [ ] Persist and recover a DHCP address hint across installed-system reboots.
+- [x] Store a MAC-scoped DHCP address hint on DunitFS after activation.
+  Revalidate it on the next boot and clear it on conflict, expiry or NAK.
+  Verify both boots against the same persistent volume.
 - [ ] Integrate the resolver with lease changes, service entropy, and an
   application endpoint. Define admin/user configuration precedence.
 

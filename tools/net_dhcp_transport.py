@@ -194,9 +194,9 @@ class NetDhcpPeer(EthernetPeer):
             raise ValueError("DHCP discovery must request classless routes before the router option")
         return request
 
-    def _reboot_request(self, connection: socket.socket) -> Request:
+    def _reboot_request(self, connection: socket.socket, address: bytes = CONFLICT) -> Request:
         request = parse_request(self._receive(connection), REQUEST, ZERO, BROADCAST)
-        if request.options.get(50) != CONFLICT or 54 in request.options:
+        if request.options.get(50) != address or 54 in request.options:
             raise ValueError("INIT-REBOOT must request the remembered address without a server ID")
         return request
 
@@ -430,3 +430,36 @@ class NetDhcpPeer(EthernetPeer):
             "acd_announcements": self._acd_announcements,
             "decline_wall_cooldown_seconds": self._cooldown,
         }
+
+
+class NetDhcpPersistencePeer(NetDhcpPeer):
+    """Seed a clean DunitFS volume or require its hint on the next boot."""
+
+    def __init__(self, workdir: Path, phase: str):
+        super().__init__(workdir)
+        if phase not in ("seed", "recover"):
+            raise ValueError("DHCP persistence phase must be seed or recover")
+        self._phase = phase
+        self._expected_stages = {
+            "seed": ("acquired_address_from_discovery",),
+            "recover": ("revalidated_disk_address_before_activation",),
+        }[phase]
+
+    def _exchange(self, connection: socket.socket) -> None:
+        if self._phase == "seed":
+            self._discover(connection)
+            if not self._settle_initial_link():
+                return
+            self._select(connection, self._discover(connection), FIRST)
+        else:
+            first = self._reboot_request(connection, FIRST)
+            if not self._settle_initial_link():
+                return
+            retry = self._reboot_request(connection, FIRST)
+            if retry.xid != first.xid:
+                raise ValueError("INIT-REBOOT retry used a different transaction ID")
+            self._send(connection, self._arp_request(FIRST))
+            self._send(connection, reply(ACK, retry.xid, FIRST))
+        self._complete_acd(connection, FIRST)
+        self._probe_address(connection, FIRST, 1)
+        self._stages.extend(self._expected_stages)

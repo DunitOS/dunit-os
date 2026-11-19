@@ -1,0 +1,94 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "1fafa03e4d96a97ff4273ba8064c049f9eadbdd9",
+  "scope": "Two DWM ISO boots through E1000 with the same writable DunitFS system partition attached as /persist. The boot image contains no DHCP address hint.",
+  "disk_setup": "Create a fresh sparse 256 MiB raw image and use tools/install_disk.py partition_disk, partition_ranges, set_partition_type_guid(DUNIT_SYSTEM_TYPE_GUID) and format_dunitfs for partition 2.",
+  "disk_sha256_before_recovery": "8e22f9440c66bd4308c711629b6c5b9cba056690c92ac0ce93ac511db7bbc43c",
+  "disk_sha256_after_recovery": "8e22f9440c66bd4308c711629b6c5b9cba056690c92ac0ce93ac511db7bbc43c",
+  "host_checks": {
+    "python3 tools/test_net_core.py": 70,
+    "python3 tools/test_net_dhcp_transport.py": 3,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "seed": {
+      "command": "python3 tools/qemu_test.py --build --image-profile dwm --config limine_dwm.conf --markers-file tools/net_dhcp_persist_seed_markers.json --qemu-arg=-drive --qemu-arg=file=build/net-dhcp-persist-volume.img,format=raw,if=ide --cpus 4 --accel tcg --timeout 110 --boot-timeout 75",
+      "started_utc": "2026-11-19T15:03:31.435098+00:00",
+      "iso_sha256": "6b1b7176836322707c5c40df4316fae314db2f400df2edf0fa1cd744b662f47c",
+      "serial_sha256": "09b974702df7aa1da907d9426ad552f538c43500edc5366ad839ab732bb5c1c7",
+      "network_peer_sha256": "37935a98658f6a69727c3ceeea126f7c0d75ac26cd9a23eca990103fbd18fb8d",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 10,
+        "bytes": 1446,
+        "responses": 5,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "acquired_address_from_discovery"
+        ],
+        "renewal_retries_before_rebind": 0,
+        "acd_probes": 3,
+        "acd_announcements": 2,
+        "decline_wall_cooldown_seconds": null
+      }
+    },
+    "recover": {
+      "command": "python3 tools/qemu_test.py --iso build/microkernel.iso --markers-file tools/net_dhcp_persist_recover_markers.json --qemu-arg=-drive --qemu-arg=file=build/net-dhcp-persist-volume.img,format=raw,if=ide --cpus 4 --accel tcg --timeout 110 --boot-timeout 75",
+      "started_utc": "2026-11-19T15:04:04.154433+00:00",
+      "iso_sha256": "6b1b7176836322707c5c40df4316fae314db2f400df2edf0fa1cd744b662f47c",
+      "serial_sha256": "7ca6f16a60b58cb10a6149bb5a2a625ac15fc4195d85a52df53932e3676cdcb4",
+      "network_peer_sha256": "ee2c504e5fd16921e630a4af4feeab5783b0f506999c8c3c7076aeaa43b495bb",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 9,
+        "bytes": 1104,
+        "responses": 5,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "revalidated_disk_address_before_activation"
+        ],
+        "renewal_retries_before_rebind": 0,
+        "acd_probes": 3,
+        "acd_announcements": 2,
+        "decline_wall_cooldown_seconds": null
+      }
+    }
+  },
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "68c68a922b8f77370bb0708b7b28ce24611bff48b64d8db505db3b9bbb47c14b",
+    "docs/network/ipv4-services.md": "374556a46b91e1fde386d6f80085c02314916062cceb3948226e18d4c1ae6eac",
+    "tools/net_dhcp_persist_recover_markers.json": "299d8be16ece3336b283cf6bdc6e4ded7d1ff45e7e587545e7301f368122fd0f",
+    "tools/net_dhcp_persist_seed_markers.json": "3e65196f1ffbb94ead083f71b6bb8dfc90b4fdeb5fbd851528800b36d17cb5ab",
+    "tools/net_dhcp_transport.py": "7761b5f66ecb683055fe8b6e6830db7450b75bc2e12af0f7a96913be6faea369",
+    "tools/qemu_test.py": "e3c69b45d677a443f20ee508aee006495926fc10f644608fa6fe3fec0711a02f",
+    "userspace/system_apps/netd/src/dhcp_runtime.rs": "0d766c869da9f27b5f782c4d364036db9037f393dd13bdeaf74ffe641f7269b5",
+    "userspace/system_apps/netd/src/interface.rs": "7d5eeced52634767caec1aa24b0056b65343c5fb4e22ba15b4c5a2881df9ca2e",
+    "userspace/system_apps/netd/src/lease_hint.rs": "7659db58d0e56bb507b5ce93b7f5627875cd4d422e0636d0c6fc73e4b3dddbb7",
+    "userspace/system_apps/netd/src/main.rs": "c42e35eea70508cb7eb00a90735e4e93fbc04de1711fb5b935556736fea4568f"
+  }
+}

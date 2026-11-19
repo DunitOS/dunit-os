@@ -64,10 +64,14 @@ pub(crate) fn parse_ip(input: &str) -> Option<Ip> {
     for octet in &mut address {
         *octet = components.next()?.parse().ok()?;
     }
-    if components.next().is_some() || address[0] == 0 || address[0] == 127 || address[0] >= 224 {
+    if components.next().is_some() || !usable_ip(address) {
         return None;
     }
     Some(address)
+}
+
+pub(crate) fn usable_ip(address: Ip) -> bool {
+    address[0] > 0 && address[0] != 127 && address[0] < 224
 }
 
 pub struct Interface {
