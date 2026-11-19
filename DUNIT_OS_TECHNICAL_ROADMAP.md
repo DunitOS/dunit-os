@@ -584,8 +584,9 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
   validation/retry/timeouts over the logical UDP core.
 - [x] Exercise native ARP, ICMP and UDP/DNS over the copied E1000 queue in QEMU.
   Verify wire bytes with the isolated peer before and after a supervised restart.
-- [ ] Expose UDP through production sockets and integrate blocking, timeout and
-  readiness with live device transport.
+- [x] Expose UDP send-to and receive-from through explicitly granted
+  nonblocking sockets. Verify readiness and truncation through E1000.
+- [ ] Integrate POSIX blocking/timeouts and wider application socket policy.
 - [x] Run the single-interface DHCPv4 state machine in netd. Validate offers,
   publish address/prefix/gateway/DNS together, renew, rebind, and remove expired,
   NAKed or link-invalidated configurations.
@@ -619,8 +620,9 @@ renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
   admission, active ephemeral ports, stream readiness, fair polling and
   generation-checked retirement. Exercise two concurrent incoming flows and
   backlog refusal on the E1000 fixture.
-- [ ] Integrate those connection limits with production netd and application
-  socket ownership.
+- [x] Reuse the connection table and route selection in stock netd for
+  explicitly granted outbound native TCP sockets. Verify the active path over
+  E1000 and leave application listener admission open.
 - [ ] Test an initial congestion algorithm such as Reno before Internet release.
 - [ ] Define backlog/accept, ephemeral ports, SO_REUSEADDR/keepalive/TCP_NODELAY,
   quotas and rare-option boundaries.
@@ -630,8 +632,15 @@ zero-window/reset/simultaneous-close/TIME_WAIT/SYN exhaustion without leaks.
 
 ### N4 and N5 — native sockets and musl adaptation
 
-The [application socket proposal](docs/network/application-sockets-proposal.md)
-describes an outbound-first native descriptor and the authority decision needed.
+The [approved application socket boundary](docs/network/application-sockets-proposal.md)
+defines the initial outbound IPv4 scope. See
+[native socket behavior](docs/network/application-sockets.md) for the verified slice.
+
+- [x] Expose nonblocking IPv4 TCP/UDP descriptors to explicitly granted boot
+  clients. Share native I/O, poll and wait-set across sockets, with bounded
+  requests and receive credit.
+- [x] Exercise native TCP partial I/O/EOF, UDP truncation/copyout retry,
+  process isolation and old socket wakeup when netd retires its bridge.
 
 - [ ] Define versioned native open/bind/connect/listen/accept/send/receive/send-to/
   receive-from/shutdown/options/resolver APIs with typed IPv4/IPv6 endpoints.

@@ -83,9 +83,9 @@ address. The retired address is silent. The separate native logical test
 covers 8,192 bytes of TCP with losses and both half-closes. Its host counterpart
 also covers 2 MiB, sequence wrap and timer bounds.
 
-Application sockets, production netd integration for TCP and DNS, congestion
-control, DHCP relays, on-link classless routes and persisted lease recovery
-remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
+Stock netd also handles [explicitly granted outbound IPv4 sockets](application-sockets.md).
+Application DNS, TCP listener authority, production congestion control, DHCP
+relays, on-link classless routes and persisted lease recovery remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
 [TCP admission verification](../verification/tcp-admission-2026-11-19.json),
 [DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json), and
 [static and classless route verification](../verification/ipv4-routing-2026-11-19.json).

@@ -1,6 +1,7 @@
 # Application socket boundary for N4
 
-Status: proposal for maintainer approval.
+The maintainer approved this outbound IPv4 boundary on 19 November 2026.
+See [implementation and verification](application-sockets.md).
 
 The current E1000 packet descriptor belongs to a trusted service and carries
 raw Ethernet frames. Applications need a separate descriptor whose operations
@@ -14,7 +15,7 @@ Use owner-bound native descriptors backed by bounded requests to one registered
 netd generation. Support explicit outbound IPv4 grants before adding listen,
 low-port binding, global observability, or interface configuration.
 
-Proposed calls and rights, with numbering reserved for approval:
+The first implementation assigns syscalls 97–100 and rights bits 9–10:
 
 - `NetServiceRegister(device_handle, options)` publishes a live service
   generation and returns a private service FD. Its reads deliver kernel-tagged

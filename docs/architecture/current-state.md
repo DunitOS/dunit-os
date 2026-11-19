@@ -107,8 +107,9 @@ declared programs, preserving asset and overlay file bytes.
 - The boot supervisor can grant the reference E1000 device to a service through
   a sealed catalog. Native packet descriptors provide bounded RX/TX and readiness.
   The reference netd configures IPv4 using DHCPv4 or an archive-supplied address.
-  A diagnostic exercises the reference TCP and DNS fallback through E1000.
-  Application sockets, resolver service integration and TLS remain open.
+  An explicit boot-catalog grant enables owner-bound outbound TCP/UDP sockets
+  through the stock service. A diagnostic also exercises DNS fallback through
+  E1000. Application resolver integration, POSIX socket adapters and TLS remain open.
   See [packet queue scope](../network/native-packet-queue.md).
 - Audio, full USB enumeration and power services remain incomplete.
   xHCI compatibility heuristics need real-device validation.

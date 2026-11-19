@@ -1,0 +1,209 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "68678fd1916b685490f9ddeba96224278617146c",
+  "scope": "Approved outbound owner-bound IPv4 socket ABI and stock service bridge.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "08d7254b5ec4e10587f8c11989e81bea857d2ab89beab3d8fec974df70edc44a",
+    "Makefile": "30404f4c620ca1c300574f54d74906cd88bf40caee4b4d698bdab84346cc36b5",
+    "abi/README.md": "b0948842a9d5c8d1c92305c05b292225be3cf85126fefb293ac774a2843990d2",
+    "abi/include/dunit.h": "2a17e6f6aa2d9e0580d926487a96f6bacadd12f8c65833b5d1ea4f48c95625b8",
+    "abi/include/dunit/rights.h": "522e60d86baa68e1c383f9dc9fd2f339f9db47ac9101e42762f76b3096eadba9",
+    "abi/include/dunit/socket.h": "5119bffb37c0e7978b1b31dc87002bc9d9b2d3437c74e92d489007042b3b4364",
+    "abi/include/dunit/syscall.h": "fa1f9aca15026e2aa1431d8dc1031f6a12940c645d165f400af93e50db78e400",
+    "abi/rights.abi": "1446e82d596b7f074e92e4f3df4a0b4eb9529dcc363f8784885dbfd12ee047a8",
+    "abi/socket/Cargo.toml": "22f74fc313d94086733e95c536aa9680f552db0f1178c1d955a63ce2feded8c2",
+    "abi/socket/src/lib.rs": "5f573061f543fb74c1128f364e383bf51c9ce1fbd49740e9d5c579f4ca3e0cf8",
+    "abi/socket/src/tests.rs": "61309f918a7bd74c384dd3a7f2143bb93f7f2516419afc792707b39671104590",
+    "abi/syscalls.abi": "848de26a0fbeb8bf10b3997634a37aeec7c6d9992e0bf097c4408e0bea3ac5ad",
+    "docs/architecture/current-state.md": "d312389ee9a2150ac5614d1abdabf765575df2c0cb3a38555be9f4e2df8d6e18",
+    "docs/network/application-sockets-proposal.md": "6bdfec5c835ce4e334f70c69eb055c3e317afc7243860c17842c473e479f135e",
+    "docs/network/application-sockets.md": "757eb416c702c1712cc03512a006e1e011dc61c5d8269ca6ae04b53f7979db7c",
+    "docs/network/ipv4-services.md": "d0d8360cbd26f49198a4e556a47a0b5c9f9e4b55c78dff886faa6272c847e79b",
+    "kernel/Cargo.lock": "fe4c2f2ca29a4f9792b8e812b23a8d7d67ef97c42af8d608b0650cff2b0572e8",
+    "kernel/Cargo.toml": "69c83759147d5ff72e93f126d58c6cade50cd39f12cbcf1499ebf34abada4c60",
+    "kernel/src/handle.rs": "7935acfd2fd353fab82f5ac79d6a109465b2330cb7f7556484655e95bf899e3d",
+    "kernel/src/process/current_access.rs": "3b9e64a27f478512564ee0fd2556be8ad078a8722d6e066774f9281c3fbb75bd",
+    "kernel/src/process/fd.rs": "d15e690b904a6313e41fd7a0d68b2e42c0fc20682ef8cae8dff987b9eec118b3",
+    "kernel/src/process/mod.rs": "9f3fda87e27e195083239ce2ad63258c16a0b877ae9b45d7de7b3c2cb409a702",
+    "kernel/src/process/packet.rs": "ba3997a6864726b4116a3a059aad23a1f557a8b4cc2b324ba141ac56cb2931c1",
+    "kernel/src/process/resources.rs": "90ff2f98bd66bd89915c08a565e54880584a2e28928ba4d5cdafe70c278c280e",
+    "kernel/src/syscall/mod.rs": "53bbc9eddd11b5575608227df3d1fc37fef6d4e1823f618fff29b632c0636c54",
+    "kernel/src/syscall/native_fd.rs": "88b013b131e7ac97125111f68e02a4cc4b7510415331b076784f18fc2ae1af03",
+    "kernel/src/syscall/net_socket.rs": "8473814ff34947ca97b1e6c9eadac046ec7bd27f36a94361ca58f75d90f6d6a8",
+    "kernel/src/syscall/net_socket/state.rs": "a910a10e9fd67d0d63656ad5d8cdc7cc218e2f921c6bc49a29ce55e155d39291",
+    "services/boot/netd.toml": "a1caf9c20fbe6809173a8272f29789ffe558ecd97b0c2d83f8835cd419635a32",
+    "tests/fixtures/net-socket/system/boot-services/net-socket-test.toml": "4a895e1f467b0091f2bb2b43e30ee6ec6d804baa505b4f61ac7659d091e2e517",
+    "tests/fixtures/net-socket/system/boot-services/netd-ipv4.conf": "23427ce0555e061896e0b563130163be5ad4b6a319ee5fac569c7a74b3a2b4ca",
+    "tools/gen_abi.py": "351bbfc429541940cbe6aba98761ee9820894d1a75811cd2a261a364f900857b",
+    "tools/image_profile.py": "bf2989a6727251dea46a8da979208b6b155a4b2130d3f96bf551ab74c51f58fe",
+    "tools/net_socket_markers.json": "066555e26bb12737361cefe778cab3b9edee73e282c6734217402cae84d6e4b1",
+    "tools/net_socket_transport.py": "c5bb5c4f695d62b38989b67b4888e2a94ee7292c3a683d1a7fe2e4d84216b803",
+    "tools/qemu_test.py": "a993e5664473fcbbab770c1a447ab6431979a9cf0ca5ca1a33560ce35df2d5af",
+    "tools/test_c_sdk_headers.py": "6df7a5f7628e0116076f03992960acff49b9680877c046c74d6319d4bb47ee7a",
+    "tools/test_net_socket_bridge.py": "4c471621511d7a73ee34044d05f48fdb0991a0c1da085aa0cd88c42dda155539",
+    "tools/test_net_socket_transport.py": "d40fe6d4f4ba4b9bc74a85f88cdca4c6ef958796110041f1cdf9f7c928f82afe",
+    "tools/test_sdk_init_host.rs.in": "f44b5271fff4e669cc8388cd86301ef10b0304e33a82a41c04450fe46ae32f0e",
+    "userspace/libdunit/src/lib.rs": "698ff0eabb7b47365832aa01d3b1df6e267f951ab6a59792cad95df2a472ae50",
+    "userspace/libdunit/src/rights_numbers.rs": "cfd2068316a6b315029e48e53cfb4facddfc0359b00e4362b595eab76b2ca0ae",
+    "userspace/libdunit/src/syscall_numbers.rs": "2395075f4e36e96d64b317d4d3cebcf1f5b3a0fffb5b2409fd2b9aa2337cbae2",
+    "userspace/system_apps/init/src/main.rs": "4649475539e902b700f7fd38047fc37bbf6710ec95a2486ddd7f81da3defbb02",
+    "userspace/system_apps/net_socket_test/Cargo.lock": "43717fea8876144d765d238c6d23b8d20100c45dbf4bd781523c246159219e81",
+    "userspace/system_apps/net_socket_test/Cargo.toml": "604225039add52a95f04d43c0dddf1b26a7aea9a2c113f82e0b6b8fc0205c3ba",
+    "userspace/system_apps/net_socket_test/src/main.rs": "ff8308d76a62fac96f56c022d90f42739926a9fd21e0d76e5cc0b4a661868bbd",
+    "userspace/system_apps/netd/Cargo.lock": "f6f36c5204fed8858c106916233fa76b81598fff4ad03663d7427f259243a28e",
+    "userspace/system_apps/netd/Cargo.toml": "0c7acd737c3b11787934a2d235e22e88b9026fd4cea05637d7a101ea53a1fea2",
+    "userspace/system_apps/netd/src/interface.rs": "5c7ae3fb0c01c80b611e128867980db27f756b8220017942f260574e117f5838",
+    "userspace/system_apps/netd/src/main.rs": "4560c63e90cd48482dc18eef3502f56b84d0581144b67f7518deae75ed657bbe",
+    "userspace/system_apps/netd/src/outbound.rs": "27c15dcc15f86055733586bc39fcce98815ca7cd8f461e7c00ca7d14e6179502",
+    "userspace/system_apps/netd/src/socket_service.rs": "39409ab93981e51518d0a951f4ec224ed363266592b429bf89e67307baf1d059",
+    "userspace/system_apps/netd_fixture/Cargo.lock": "f3ef6b0df419ebd4ff163a0482c47e8999a11e22e024987ffd19fd8e814c3c89"
+  },
+  "native_cases": [
+    {
+      "name": "net-app-sockets-final",
+      "scope": "Explicit grant through sealed catalog, isolated E1000 peer and stock netd. UDP truncation and copyout retry, 5000 bytes of TCP with partial I/O and EOF, process isolation. An injected address conflict withdraws the active bridge and wakes an idle duplicated socket; old operations return EPIPE.",
+      "marker_fixture": "tools/net_socket_markers.json",
+      "metadata_sha256": "48934b21f527a6a25f792121f39d129c075faa54f0f937abdddccaa58fd0beaf",
+      "serial_sha256": "77f2f00b80d8e588782f709f251c63eb69742b6202461932f170ed07dfe2b802",
+      "image_sha256": "ef6fe8beeeca5dfc380c17173a3cce3c9662b5483ec81700678e6ae10958f66b",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 21,
+        "bytes": 6204,
+        "responses": 17,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-app-sockets-dhcp",
+      "scope": "DWM stock netd with socket registration. DHCP conflict, classless route and renewal, rebind, NAK and address replacement.",
+      "marker_fixture": "tools/net_dhcp_markers.json",
+      "metadata_sha256": "b8232b7506e9526fa3adcade1f450916d169768b1b58e23aa0c14fa3f0266410",
+      "serial_sha256": "dff1959a7187315071caf18afe8c11115271a8af490e835cbe27581c2b0f450c",
+      "image_sha256": "da56f6f0826a822bdd249ded323537353a52d2bfc1c218b3d8bb7feced344bb9",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 36,
+        "bytes": 6108,
+        "responses": 28,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "discover_retried_after_loss",
+          "select_ignored_wrong_transaction",
+          "conflict_probe_declined_and_cooled_down",
+          "first_lease_acd_and_probe_response",
+          "first_lease_arp_icmp",
+          "classless_route_and_router_option_ignored",
+          "unicast_renewal_ack",
+          "renewed_lease_arp_icmp",
+          "renewal_retains_classless_route",
+          "unicast_renewal_lost_rebind_nak",
+          "new_lease_acd",
+          "new_lease_arp_icmp_old_address_silent"
+        ],
+        "renewal_retries_before_rebind": 3,
+        "acd_probes": 7,
+        "acd_announcements": 4,
+        "decline_wall_cooldown_seconds": 10.011279195001407
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-app-sockets-terminal",
+      "scope": "Terminal logical protocol suite, prior E1000 IRQ 103-frame round trip, packet authorization, poll, FD and wait-set regressions.",
+      "marker_fixture": "Combined tracked core, packet-authority, wait-set and musl native-FD marker files",
+      "metadata_sha256": "3bdbea5d30b6f3f680ebbf0259f3976ca80a06d95b1439fc3f53959e5ba9303c",
+      "serial_sha256": "5befefdde5f7f9987a56926ca457fc56d294b5132c91505004917f4440a52619",
+      "image_sha256": "4e24baf8f53fe5541af281336661ea761cd8c95db2cd6fdecb5e22a536674a3d",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "host_cases": {
+    "abi/socket rustc --test -Dwarnings": "4 passed",
+    "test_net_socket_bridge.py": "4 passed including replacement generations, quotas, copyout retry, owner mismatch and partial TCP",
+    "test_net_socket_transport.py": "2 passed",
+    "test_net_harness.py": "3 passed",
+    "test_c_sdk_headers.py": "6 passed",
+    "test_image_profiles.py": "10 passed",
+    "test_net_core.py": "63 core and 3 interface tests passed",
+    "test_sdk_init.py": "7 passed",
+    "test_syscall_wait_scopes.py": "1 passed",
+    "gen_abi.py --check": "100 syscalls, 25 errno, 11 rights",
+    "gen_transfer_values.py --check": "PASS"
+  },
+  "limits": [
+    "Native service withdrawal uses static IP conflict, not a process crash. Replacement-generation ownership is covered by the kernel host test.",
+    "Reference E1000 in QEMU TCG. No hardware or general Internet qualification.",
+    "Explicit outbound IPv4 boot grants only. App resolver, general launch policy, IPv6, listener authority and POSIX socket adapters remain open."
+  ]
+}
