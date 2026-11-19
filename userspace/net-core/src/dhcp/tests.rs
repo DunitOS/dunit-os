@@ -1,0 +1,440 @@
+use super::*;
+use crate::word;
+
+const CLIENT: Mac = [2, 0, 0, 0, 0, 3];
+const SERVER_MAC: Mac = [2, 0, 0, 0, 0, 2];
+const SERVER: Ip = [192, 0, 2, 1];
+const OTHER: Ip = [192, 0, 2, 4];
+const HOST: Ip = [192, 0, 2, 7];
+const MASK: Ip = [255, 255, 255, 0];
+const DNS: Ip = [198, 51, 100, 53];
+const LIFETIME: u32 = 16;
+
+fn offer_options(lifetime: u32) -> Vec<u8> {
+    let mut options = alloc::vec![
+        1, 4, MASK[0], MASK[1], MASK[2], MASK[3], 3, 4, SERVER[0], SERVER[1], SERVER[2], SERVER[3],
+        6, 8, DNS[0], DNS[1], DNS[2], DNS[3], OTHER[0], OTHER[1], OTHER[2], OTHER[3], 51, 4,
+    ];
+    options.extend_from_slice(&lifetime.to_be_bytes());
+    options
+}
+
+fn reply(kind: u8, xid: u32, address: Ip, server: Ip, options: &[u8]) -> Vec<u8> {
+    let mut payload = alloc::vec![0; 240];
+    payload[..4].copy_from_slice(&[2, 1, 6, 0]);
+    payload[4..8].copy_from_slice(&xid.to_be_bytes());
+    payload[16..20].copy_from_slice(&address);
+    payload[28..34].copy_from_slice(&CLIENT);
+    payload[236..240].copy_from_slice(&[99, 130, 83, 99]);
+    payload.extend_from_slice(&[53, 1, kind, 54, 4]);
+    payload.extend_from_slice(&server);
+    payload.extend_from_slice(options);
+    payload.push(255);
+    payload
+}
+
+fn server_frame(payload: &[u8], server: Ip, ip: Ip, mac: Mac) -> Vec<u8> {
+    frame(
+        SERVER_MAC,
+        mac,
+        Address {
+            ip: server,
+            port: SERVER_PORT,
+        },
+        Address {
+            ip,
+            port: CLIENT_PORT,
+        },
+        payload,
+    )
+    .unwrap()
+}
+
+fn send(client: &mut Client, now: u64) -> Transmission {
+    let Action::Send(output) = client.poll(now).unwrap() else {
+        panic!("expected send in {:?} at {now}", client.state());
+    };
+    output
+}
+
+fn transaction(transmission: &Transmission) -> u32 {
+    u32::from_be_bytes(transmission.payload[4..8].try_into().unwrap())
+}
+
+fn request_header(transmission: &Transmission, kind: u8, ip: Ip, server: Ip) {
+    assert_eq!(transmission.source, ip);
+    assert_eq!(transmission.destination, server);
+    assert_eq!(&transmission.payload[..4], &[1, 1, 6, 0]);
+    assert_eq!(transmission.payload[12..16], ip);
+    assert_eq!(transmission.payload[28..34], CLIENT);
+    assert_eq!(transmission.payload[240..243], [53, 1, kind]);
+    assert_ne!(transaction(transmission), 0);
+}
+
+fn receive(
+    client: &mut Client,
+    now: u64,
+    kind: u8,
+    xid: u32,
+    address: Ip,
+    server: Ip,
+) -> Result<Event, Error> {
+    let payload = reply(kind, xid, address, server, &offer_options(LIFETIME));
+    client.receive(
+        &server_frame(&payload, server, LIMITED_BROADCAST, BROADCAST),
+        now,
+    )
+}
+
+fn select(client: &mut Client) -> u32 {
+    let xid = transaction(&send(client, 0));
+    assert_eq!(receive(client, 1, 2, xid, HOST, SERVER), Ok(Event::Offered));
+    xid
+}
+
+fn bound(client: &mut Client) -> Lease {
+    let xid = select(client);
+    send(client, 1);
+    let Event::Bound(lease) = receive(client, 2, 5, xid, HOST, SERVER).unwrap() else {
+        panic!("expected initial lease");
+    };
+    lease
+}
+
+#[test]
+fn direct_dora_uses_broadcast_exceptions_and_selects_exact_server() {
+    let mut client = Client::new(CLIENT, 95).unwrap();
+    let discover = send(&mut client, 0);
+    request_header(&discover, 1, UNASSIGNED, LIMITED_BROADCAST);
+    assert_eq!(word(&discover.payload, 10), 0x8000);
+    let wire = discover.broadcast_frame(CLIENT).unwrap();
+    let ethernet = Ethernet::parse(&wire).unwrap();
+    assert_eq!(ethernet.destination, BROADCAST);
+    assert!(matches!(Ipv4::parse(ethernet.payload), Err(Error::Address)));
+    let ip = Ipv4::parse_framing(ethernet.payload).unwrap();
+    let udp = Udp::parse_framing(ip.source, ip.destination, ip.payload).unwrap();
+    assert_eq!((udp.source, udp.destination), (CLIENT_PORT, SERVER_PORT));
+    assert_eq!(udp.data, discover.payload);
+    assert!(!is_candidate(&wire));
+
+    let xid = transaction(&discover);
+    assert_eq!(
+        receive(&mut client, 1, 2, xid, HOST, SERVER),
+        Ok(Event::Offered)
+    );
+    assert_eq!(client.state(), State::Requesting);
+    assert_eq!(client.deadline(), 1);
+    assert_eq!(
+        receive(&mut client, 1, 5, xid, HOST, SERVER),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(client.lease(), None);
+    let request = send(&mut client, 1);
+    request_header(&request, 3, UNASSIGNED, LIMITED_BROADCAST);
+    assert_eq!(transaction(&request), xid);
+    assert_eq!(
+        &request.payload[243..255],
+        &[50, 4, 192, 0, 2, 7, 54, 4, 192, 0, 2, 1]
+    );
+    assert_eq!(
+        receive(&mut client, 2, 2, xid, HOST, SERVER),
+        Ok(Event::Ignored)
+    );
+    assert_eq!(
+        receive(&mut client, 2, 5, xid, HOST, OTHER),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(
+        receive(&mut client, 2, 5, xid, OTHER, SERVER),
+        Err(Error::Unsolicited)
+    );
+
+    let payload = reply(5, xid, HOST, SERVER, &offer_options(LIFETIME));
+    let unicast_ack = server_frame(&payload, SERVER, HOST, CLIENT);
+    assert!(is_candidate(&unicast_ack));
+    let Event::Bound(lease) = client.receive(&unicast_ack, 3).unwrap() else {
+        panic!("expected accepted ACK");
+    };
+    assert_eq!(lease.address, HOST);
+    assert_eq!(lease.mask, MASK);
+    assert_eq!(lease.router, Some(SERVER));
+    assert_eq!(lease.dns, [Some(DNS), Some(OTHER)]);
+    assert_eq!(
+        (lease.renew_at, lease.rebind_at, lease.expires_at),
+        (8003, 14003, 16003)
+    );
+    assert_eq!(client.receive(&unicast_ack, 4), Ok(Event::Ignored));
+    assert_eq!(client.poll(lease.renew_at - 1), Ok(Action::Idle));
+}
+
+#[test]
+fn renewal_and_rebinding_follow_lease_deadlines_and_accept_new_server() {
+    let mut client = Client::new(CLIENT, 1).unwrap();
+    let lease = bound(&mut client);
+    let renewal = send(&mut client, lease.renew_at);
+    request_header(&renewal, 3, HOST, SERVER);
+    assert_eq!(
+        renewal.payload[243], 61,
+        "select options must be absent in renew"
+    );
+    assert_eq!(client.state(), State::Renewing);
+    let xid = transaction(&renewal);
+    assert_eq!(
+        receive(&mut client, lease.renew_at + 1, 5, xid, HOST, OTHER),
+        Err(Error::Unsolicited)
+    );
+
+    let rebind = send(&mut client, lease.rebind_at);
+    request_header(&rebind, 3, HOST, LIMITED_BROADCAST);
+    assert_eq!(transaction(&rebind), xid);
+    assert_eq!(client.state(), State::Rebinding);
+    let reply = reply(
+        5,
+        xid,
+        HOST,
+        OTHER,
+        &[51, 4, 0, 0, 0, 10, 58, 4, 0, 0, 0, 2, 59, 4, 0, 0, 0, 8],
+    );
+    let ack = server_frame(&reply, OTHER, HOST, CLIENT);
+    let now = lease.rebind_at + 100;
+    let Event::Bound(extended) = client.receive(&ack, now).unwrap() else {
+        panic!("expected extended lease");
+    };
+    assert_eq!(extended.server, OTHER);
+    assert_eq!(extended.mask, lease.mask);
+    assert_eq!(extended.router, lease.router);
+    assert_eq!(extended.dns, lease.dns);
+    assert_eq!(
+        (extended.renew_at, extended.rebind_at, extended.expires_at),
+        (now + 2000, now + 8000, now + 10000)
+    );
+    let future = send(&mut client, extended.renew_at);
+    request_header(&future, 3, HOST, OTHER);
+    assert_ne!(transaction(&future), xid);
+}
+
+#[test]
+fn expiry_and_link_reset_withdraw_configuration_before_reuse() {
+    let mut client = Client::new(CLIENT, 2).unwrap();
+    let lease = bound(&mut client);
+    let request = send(&mut client, lease.rebind_at);
+    assert_eq!(
+        client.state(),
+        State::Rebinding,
+        "late timer can enter rebind directly"
+    );
+    let old = transaction(&request);
+    assert_eq!(client.deadline(), lease.expires_at - 1000);
+    assert_eq!(client.poll(lease.expires_at), Ok(Action::Expired));
+    assert_eq!(client.lease(), None);
+    let next = send(&mut client, lease.expires_at);
+    assert_ne!(transaction(&next), old);
+    assert_eq!(client.poll(lease.expires_at - 1), Err(Error::Header));
+    client.reset(lease.expires_at + 10);
+    assert_eq!(client.state(), State::Init);
+    assert_eq!(client.deadline(), lease.expires_at + 10);
+
+    let mut other = Client::new(CLIENT, 2).unwrap();
+    let lease = bound(&mut other);
+    let receive_after_expiry = other.receive(&[], lease.expires_at);
+    assert_eq!(receive_after_expiry, Ok(Event::Lost));
+    assert_eq!(other.lease(), None);
+}
+
+#[test]
+fn selected_server_nak_restarts_with_new_transaction_and_why_ack_is_ignored() {
+    let mut client = Client::new(CLIENT, 5).unwrap();
+    let lease = bound(&mut client);
+    let xid = transaction(&send(&mut client, lease.renew_at));
+    let now = lease.renew_at + 10;
+    let foreign = reply(6, xid, UNASSIGNED, OTHER, &[]);
+    assert_eq!(
+        client.receive(&server_frame(&foreign, OTHER, HOST, CLIENT), now),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(client.lease(), Some(lease));
+    let invalid_nak = reply(6, xid, HOST, SERVER, &[]);
+    assert_eq!(
+        client.receive(&server_frame(&invalid_nak, SERVER, HOST, CLIENT), now),
+        Err(Error::Header)
+    );
+    let nak = reply(6, xid, UNASSIGNED, SERVER, &[]);
+    assert_eq!(
+        client.receive(
+            &server_frame(&nak, SERVER, LIMITED_BROADCAST, BROADCAST),
+            now
+        ),
+        Ok(Event::Lost)
+    );
+    assert_eq!(client.lease(), None);
+    assert_eq!(client.deadline(), now + 1000);
+    assert_eq!(client.poll(now + 999), Ok(Action::Idle));
+    let restarted = send(&mut client, now + 1000);
+    assert_ne!(transaction(&restarted), xid);
+    assert_eq!(
+        client.receive(
+            &server_frame(&nak, SERVER, LIMITED_BROADCAST, BROADCAST),
+            now + 1001
+        ),
+        Err(Error::Unsolicited)
+    );
+}
+
+#[test]
+fn retries_are_bounded_and_roll_xid_after_unanswered_discovery_or_request() {
+    let mut client = Client::new(CLIENT, 42).unwrap();
+    let xid = transaction(&send(&mut client, 1));
+    for attempt in 0..3 {
+        let previous = client.clock;
+        let next = client.deadline();
+        let base = 3500 << attempt;
+        assert!((base..=base + 1023).contains(&(next - previous)));
+        assert_eq!(client.poll(next - 1), Ok(Action::Idle));
+        assert_eq!(transaction(&send(&mut client, next)), xid);
+    }
+    let next = client.deadline();
+    let fresh = transaction(&send(&mut client, next));
+    assert_ne!(fresh, xid);
+    assert_eq!(
+        receive(&mut client, next + 1, 2, fresh, HOST, SERVER),
+        Ok(Event::Offered)
+    );
+    for _ in 0..REQUEST_ATTEMPTS {
+        let next = client.deadline();
+        let result = send(&mut client, next);
+        request_header(&result, 3, UNASSIGNED, LIMITED_BROADCAST);
+        assert_eq!(transaction(&result), fresh);
+    }
+    let next = client.deadline();
+    let result = send(&mut client, next);
+    request_header(&result, 1, UNASSIGNED, LIMITED_BROADCAST);
+    assert_ne!(transaction(&result), fresh);
+}
+
+#[test]
+fn malformed_options_do_not_publish_an_offer_or_replace_selected_config() {
+    let mut client = Client::new(CLIENT, 9).unwrap();
+    let xid = transaction(&send(&mut client, 0));
+    for (tail, error) in [
+        (alloc::vec![51, 4, 0, 0, 0, 1], Error::Header),
+        (alloc::vec![1, 4, 255, 0, 255, 0], Error::Header),
+        (alloc::vec![53, 1, 2], Error::Header),
+        (alloc::vec![54, 4, 192, 0, 2, 1], Error::Header),
+        (alloc::vec![52, 1, 1], Error::Unsupported),
+        (
+            alloc::vec![58, 4, 0, 0, 0, 9, 59, 4, 0, 0, 0, 8],
+            Error::Header,
+        ),
+        (alloc::vec![255, 1], Error::Header),
+        (alloc::vec![199, 255], Error::Length),
+    ] {
+        let mut options = offer_options(LIFETIME);
+        options.extend_from_slice(&tail);
+        let malformed = reply(2, xid, HOST, SERVER, &options);
+        let wire = server_frame(&malformed, SERVER, LIMITED_BROADCAST, BROADCAST);
+        assert_eq!(client.receive(&wire, 1), Err(error), "tail {tail:?}");
+        assert_eq!(client.state(), State::Selecting);
+        assert_eq!(client.lease(), None);
+    }
+
+    let unreachable_router = [
+        1, 4, 255, 255, 255, 0, 51, 4, 0, 0, 0, 16, 3, 4, 10, 0, 0, 1,
+    ];
+    let malformed = reply(2, xid, HOST, SERVER, &unreachable_router);
+    assert_eq!(
+        client.receive(&server_frame(&malformed, SERVER, HOST, CLIENT), 1),
+        Err(Error::Address)
+    );
+    assert_eq!(
+        receive(&mut client, 1, 2, xid, HOST, SERVER),
+        Ok(Event::Offered)
+    );
+    send(&mut client, 1);
+    let bad_timer = [
+        51, 4, 0, 0, 0, 16, 1, 4, 255, 255, 255, 0, 58, 4, 0, 0, 0, 0,
+    ];
+    let bad_ack = reply(5, xid, HOST, SERVER, &bad_timer);
+    assert_eq!(
+        client.receive(&server_frame(&bad_ack, SERVER, HOST, CLIENT), 2),
+        Err(Error::Header)
+    );
+    assert_eq!(client.state(), State::Requesting);
+    assert!(matches!(
+        receive(&mut client, 2, 5, xid, HOST, SERVER),
+        Ok(Event::Bound(_))
+    ));
+}
+
+#[test]
+fn validates_udp_checksums_xid_and_direct_link_identity() {
+    let mut client = Client::new(CLIENT, 11).unwrap();
+    let xid = transaction(&send(&mut client, 0));
+    let reply = reply(2, xid, HOST, SERVER, &offer_options(LIFETIME));
+    let legitimate = server_frame(&reply, SERVER, HOST, CLIENT);
+    let mut corrupt = legitimate.clone();
+    let last = corrupt.len() - 1;
+    corrupt[last] ^= 1;
+    assert_eq!(client.receive(&corrupt, 1), Err(Error::Checksum));
+
+    let mut forged = reply.clone();
+    forged[4] ^= 1;
+    assert_eq!(
+        client.receive(&server_frame(&forged, SERVER, HOST, CLIENT), 1),
+        Err(Error::Unsolicited)
+    );
+    forged[4] ^= 1;
+    forged[28] ^= 1;
+    assert_eq!(
+        client.receive(&server_frame(&forged, SERVER, HOST, CLIENT), 1),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(
+        client.receive(&server_frame(&reply, OTHER, HOST, CLIENT), 1),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(
+        client.receive(&server_frame(&reply, SERVER, HOST, SERVER_MAC), 1),
+        Err(Error::Unsolicited)
+    );
+
+    assert_eq!(client.receive(&legitimate, 1), Ok(Event::Offered));
+}
+
+#[test]
+fn option_bounds_and_mutations_never_panic() {
+    let mut payload = reply(2, 9, HOST, SERVER, &offer_options(LIFETIME));
+    assert!(wire::reply(&payload).is_ok());
+    for length in 0..payload.len() {
+        assert!(wire::reply(&payload[..length]).is_err());
+    }
+
+    for index in 0..payload.len() {
+        let saved = payload[index];
+        for bits in [0, 0x55, 0xff] {
+            payload[index] = bits;
+            let _ = wire::reply(&payload);
+        }
+        payload[index] = saved;
+    }
+    let options = [231, 0].repeat(128);
+    let excessive = reply(2, 9, HOST, SERVER, &options);
+    assert!(matches!(wire::reply(&excessive), Err(Error::Capacity)));
+    payload.resize(crate::udp::MAX_PAYLOAD + 1, 0);
+    assert!(matches!(wire::reply(&payload), Err(Error::Length)));
+}
+
+#[test]
+fn infinite_lease_never_schedules_renewal_and_invalid_mac_is_refused() {
+    assert!(matches!(Client::new([0; 6], 1), Err(Error::Address)));
+    let mut client = Client::new(CLIENT, 0).unwrap();
+    let xid = select(&mut client);
+    send(&mut client, 1);
+    let payload = reply(5, xid, HOST, SERVER, &offer_options(u32::MAX));
+    let frame = server_frame(&payload, SERVER, HOST, CLIENT);
+    let Event::Bound(lease) = client.receive(&frame, 2).unwrap() else {
+        panic!("infinite lease refused");
+    };
+    assert_eq!(lease.expires_at, u64::MAX);
+    assert_eq!(client.deadline(), u64::MAX);
+    assert_eq!(client.poll(u64::MAX - 1000), Ok(Action::Idle));
+}

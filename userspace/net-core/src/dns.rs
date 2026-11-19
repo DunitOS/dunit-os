@@ -1,12 +1,18 @@
-//! Bounded DNS over the logical Peer's UDP endpoints. One transaction per
-//! resolver, eight cached answers, 512-byte UDP messages and 32 records/message.
-//! TC is Unsupported: TCP fallback and negative caching require later work.
+//! Bounded DNS over the logical Peer's UDP endpoints, with opt-in TCP fallback.
+//! One transaction per resolver, eight cached answers and 32 records/message.
 use super::udp::{Address, Send};
 use super::*;
+
+mod stream;
+pub use stream::TCP_DNS_LIMIT;
+
+#[cfg(test)]
+mod stream_tests;
 
 pub const DNS_LIMIT: usize = 512;
 pub const RETRY_MS: u64 = 1000;
 pub const ATTEMPTS: u8 = 3;
+pub const TCP_TIMEOUT_MS: u64 = 5000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     A,
@@ -176,8 +182,20 @@ enum Value {
     Alias(Vec<u8>),
     Other,
 }
+enum Response {
+    Answer(Answer),
+    Truncated,
+}
+
 pub fn parse_response(b: &[u8], question: &Question) -> Result<Answer, Error> {
-    if !(12..=DNS_LIMIT).contains(&b.len()) {
+    match parse_message(b, question, DNS_LIMIT)? {
+        Response::Answer(answer) => Ok(answer),
+        Response::Truncated => Err(Error::Unsupported),
+    }
+}
+
+fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response, Error> {
+    if !(12..=limit).contains(&b.len()) {
         return Err(Error::Length);
     }
     if word(b, 0) != question.id {
@@ -197,7 +215,7 @@ pub fn parse_response(b: &[u8], question: &Question) -> Result<Answer, Error> {
     }
     pos += 4;
     if flags & 0x0200 != 0 {
-        return Err(Error::Unsupported);
+        return Ok(Response::Truncated);
     }
     let counts = [
         word(b, 6) as usize,
@@ -277,10 +295,10 @@ pub fn parse_response(b: &[u8], question: &Question) -> Result<Answer, Error> {
             .find(|r| r.owner == target && r.kind == question.kind.wire())
         {
             if let Value::Address(address) = &record.value {
-                return Ok(Answer {
+                return Ok(Response::Answer(Answer {
                     address: address.clone(),
                     ttl: ttl.min(record.ttl),
-                });
+                }));
             }
         }
         let alias = records
@@ -306,6 +324,7 @@ struct Transaction {
     question: Question,
     attempts: u8,
     next: u64,
+    tcp: Option<stream::ResponseFrame>,
 }
 pub struct Resolver {
     server: Address,
@@ -314,16 +333,34 @@ pub struct Resolver {
     cache: Vec<Cached>,
     last: u64,
     next_id: u16,
+    tcp_fallback: bool,
 }
 #[derive(Debug, PartialEq, Eq)]
 pub enum Poll {
     Frame(Vec<u8>),
     Waiting,
     Answer(Answer),
+    /// Start one connected stream to this same DNS server. Pass received bytes
+    /// back in order via `Resolver::receive_tcp` before the absolute deadline.
+    TcpFallback {
+        server: Address,
+        query: Vec<u8>,
+        deadline_ms: u64,
+    },
 }
 impl Resolver {
     /// Owns a connected ephemeral UDP port until close. Caller configures server.
     pub fn new(peer: &mut Peer, server: Address) -> Result<Self, Error> {
+        Self::open(peer, server, false)
+    }
+
+    /// The caller owns connection establishment, transport and close. Only
+    /// bytes from that one connected stream may be passed to `receive_tcp`.
+    pub fn new_with_tcp(peer: &mut Peer, server: Address) -> Result<Self, Error> {
+        Self::open(peer, server, true)
+    }
+
+    fn open(peer: &mut Peer, server: Address, tcp_fallback: bool) -> Result<Self, Error> {
         let port = peer.udp_bind(0)?;
         if let Err(e) = peer.udp_connect(port, Some(server)) {
             peer.udp_close(port)?;
@@ -336,6 +373,7 @@ impl Resolver {
             cache: Vec::new(),
             last: 0,
             next_id: 1,
+            tcp_fallback,
         })
     }
     pub fn close(self, peer: &mut Peer) -> Result<(), Error> {
@@ -369,6 +407,7 @@ impl Resolver {
             question,
             attempts: 0,
             next: now,
+            tcp: None,
         });
         Ok(None)
     }
@@ -376,17 +415,34 @@ impl Resolver {
         self.advance(now)?;
         let tx = self.pending.as_mut().ok_or(Error::NotBound)?;
         // A packet arriving at/after the final deadline cannot rescue an expired query.
-        if tx.attempts == ATTEMPTS && now >= tx.next {
+        if (tx.attempts == ATTEMPTS || tx.tcp.is_some()) && now >= tx.next {
             self.pending = None;
             return Err(Error::Timeout);
+        }
+        if tx.tcp.is_some() {
+            return Ok(Poll::Waiting);
         }
         match peer.udp_recv(self.port) {
             Ok(packet) => {
                 if packet.source != self.server || tx.attempts == 0 {
                     return Err(Error::Unsolicited);
                 }
-                let answer = match parse_response(&packet.data, &tx.question) {
-                    Ok(a) => a,
+                let answer = match parse_message(&packet.data, &tx.question, DNS_LIMIT) {
+                    Ok(Response::Answer(answer)) => answer,
+                    Ok(Response::Truncated) if self.tcp_fallback => {
+                        let query = stream::encode(&tx.question.encode()?)?;
+                        tx.next = now.saturating_add(TCP_TIMEOUT_MS);
+                        tx.tcp = Some(stream::ResponseFrame::default());
+                        return Ok(Poll::TcpFallback {
+                            server: self.server,
+                            query,
+                            deadline_ms: tx.next,
+                        });
+                    }
+                    Ok(Response::Truncated) => {
+                        self.pending = None;
+                        return Err(Error::Unsupported);
+                    }
                     Err(e) => {
                         if matches!(e, Error::NameNotFound | Error::Unsupported) {
                             self.pending = None;
@@ -394,18 +450,7 @@ impl Resolver {
                         return Err(e);
                     }
                 };
-                if answer.ttl != 0 {
-                    if self.cache.len() == 8 {
-                        self.cache.remove(0);
-                    }
-                    self.cache.push(Cached {
-                        name: tx.question.name.clone(),
-                        kind: tx.question.kind,
-                        answer: answer.clone(),
-                        expires: now.saturating_add(answer.ttl as u64 * 1000),
-                    });
-                }
-                self.pending = None;
+                self.finish(&answer, now);
                 return Ok(Poll::Answer(answer));
             }
             Err(Error::WouldBlock) => {}
@@ -423,5 +468,76 @@ impl Resolver {
                 Ok(Poll::Frame(frame))
             }
         }
+    }
+
+    /// Supply bytes from the verified connected stream. Framing and DNS
+    /// matching are transactional: malformed responses never update the cache.
+    pub fn receive_tcp(
+        &mut self,
+        server: Address,
+        bytes: &[u8],
+        now: u64,
+    ) -> Result<Option<Answer>, Error> {
+        let tx = self.tcp_transaction(server, now)?;
+        let response = match tx.tcp.as_mut().ok_or(Error::NotBound)?.feed(bytes) {
+            Ok(Some(body)) => parse_message(body, &tx.question, TCP_DNS_LIMIT),
+            Ok(None) => return Ok(None),
+            Err(error) => Err(error),
+        };
+        match response {
+            Ok(Response::Answer(answer)) => {
+                self.finish(&answer, now);
+                Ok(Some(answer))
+            }
+            Ok(Response::Truncated) => {
+                self.pending = None;
+                Err(Error::Unsupported)
+            }
+            Err(error) => {
+                self.pending = None;
+                Err(error)
+            }
+        }
+    }
+
+    /// Abort an incomplete response when its stream reaches EOF.
+    pub fn tcp_eof(&mut self, server: Address, now: u64) -> Result<(), Error> {
+        self.tcp_transaction(server, now)?;
+        self.pending = None;
+        Err(Error::Length)
+    }
+
+    fn tcp_transaction(&mut self, server: Address, now: u64) -> Result<&mut Transaction, Error> {
+        if server != self.server {
+            return Err(Error::Unsolicited);
+        }
+        self.advance(now)?;
+        let tx = self.pending.as_ref().ok_or(Error::NotBound)?;
+        if tx.tcp.is_none() {
+            return Err(Error::NotBound);
+        }
+        if now >= tx.next {
+            self.pending = None;
+            return Err(Error::Timeout);
+        }
+        self.pending.as_mut().ok_or(Error::NotBound)
+    }
+
+    fn finish(&mut self, answer: &Answer, now: u64) {
+        let Some(tx) = self.pending.take() else {
+            return;
+        };
+        if answer.ttl == 0 {
+            return;
+        }
+        if self.cache.len() == 8 {
+            self.cache.remove(0);
+        }
+        self.cache.push(Cached {
+            name: tx.question.name,
+            kind: tx.question.kind,
+            answer: answer.clone(),
+            expires: now.saturating_add(answer.ttl as u64 * 1000),
+        });
     }
 }

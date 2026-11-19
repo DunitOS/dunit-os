@@ -37,9 +37,7 @@ fn udp_checksum(source: Ip, destination: Ip, bytes: &[u8]) -> u16 {
 }
 impl<'a> Udp<'a> {
     pub fn parse(source: Ip, destination: Ip, b: &'a [u8]) -> Result<Self, Error> {
-        if !(8..=MAX_PAYLOAD + 8).contains(&b.len()) || word(b, 4) as usize != b.len() {
-            return Err(Error::Length);
-        }
+        Self::validate_length(b)?;
         // RFC 768 allows an omitted source port (zero); destination zero is
         // reserved. Bound local endpoints always transmit nonzero source ports.
         if !valid_ip(source) {
@@ -50,6 +48,22 @@ impl<'a> Udp<'a> {
             port: word(b, 2),
         }
         .validate()?;
+        Self::parse_fields(source, destination, b)
+    }
+    /// Validate lengths and checksum without restricting IPv4 addresses.
+    pub(super) fn parse_framing(source: Ip, destination: Ip, b: &'a [u8]) -> Result<Self, Error> {
+        Self::validate_length(b)?;
+        Self::parse_fields(source, destination, b)
+    }
+
+    fn validate_length(b: &[u8]) -> Result<(), Error> {
+        if !(8..=MAX_PAYLOAD + 8).contains(&b.len()) || word(b, 4) as usize != b.len() {
+            return Err(Error::Length);
+        }
+        Ok(())
+    }
+
+    fn parse_fields(source: Ip, destination: Ip, b: &'a [u8]) -> Result<Self, Error> {
         // A zero checksum explicitly means absent for IPv4 UDP (RFC 768).
         if word(b, 6) != 0 && udp_checksum(source, destination, b) != 0 {
             return Err(Error::Checksum);
@@ -65,6 +79,9 @@ impl<'a> Udp<'a> {
             return Err(Error::Address);
         }
         destination.validate()?;
+        Self::encode_framing(source, destination, data)
+    }
+    pub(super) fn encode_framing(source: Address, destination: Address, data: &[u8]) -> Result<Vec<u8>, Error> {
         if data.len() > MAX_PAYLOAD {
             return Err(Error::Length);
         }

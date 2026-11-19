@@ -87,7 +87,7 @@ fn ipv4_rejects_lengths_options_fragments_ttl_protocol_and_addresses() {
         (0, 0x44, Error::Header),
         (0, 0x46, Error::Header),
         (8, 0, Error::Ttl),
-        (9, 6, Error::Protocol),
+        (9, 47, Error::Protocol),
         (12, 0, Error::Address),
         (16, 224, Error::Address),
     ] {

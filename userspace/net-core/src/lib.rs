@@ -159,8 +159,20 @@ pub struct Ipv4<'a> {
     pub payload: &'a [u8],
 }
 impl<'a> Ipv4<'a> {
-    /// ICMP and UDP only; no IP options or reassembly.
+    /// ICMP, TCP and UDP with fixed IPv4 headers and no reassembly.
     pub fn parse(b: &'a [u8]) -> Result<Self, Error> {
+        let packet = Self::parse_framing(b)?;
+        if ![1, 6, 17].contains(&packet.protocol) {
+            return Err(Error::Protocol);
+        }
+        if !valid_ip(packet.source) || !valid_ip(packet.destination) {
+            return Err(Error::Address);
+        }
+        Ok(packet)
+    }
+    /// Validate the envelope independently of addressing and protocol policy.
+    /// DHCP admits limited broadcast and the unassigned source separately.
+    fn parse_framing(b: &'a [u8]) -> Result<Self, Error> {
         if b.len() < 20 {
             return Err(Error::Length);
         }
@@ -180,17 +192,9 @@ impl<'a> Ipv4<'a> {
         if word(b, 6) & 0xbfff != 0 {
             return Err(Error::Fragment);
         }
-        if ![1, 17].contains(&b[9]) {
-            return Err(Error::Protocol);
-        }
-        let source = b[12..16].try_into().unwrap();
-        let destination = b[16..20].try_into().unwrap();
-        if !valid_ip(source) || !valid_ip(destination) {
-            return Err(Error::Address);
-        }
         Ok(Self {
-            source,
-            destination,
+            source: b[12..16].try_into().unwrap(),
+            destination: b[16..20].try_into().unwrap(),
             protocol: b[9],
             payload: &b[20..size],
         })
@@ -199,6 +203,16 @@ impl<'a> Ipv4<'a> {
         Self::encode_protocol(source, destination, 1, payload)
     }
     pub fn encode_protocol(
+        source: Ip,
+        destination: Ip,
+        protocol: u8,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        let packet = Self::encode_framing(source, destination, protocol, payload)?;
+        Ipv4::parse(&packet)?;
+        Ok(packet)
+    }
+    fn encode_framing(
         source: Ip,
         destination: Ip,
         protocol: u8,
@@ -219,7 +233,6 @@ impl<'a> Ipv4<'a> {
         let c = checksum(&b[..20]);
         put(&mut b, 10, c);
         b[20..].copy_from_slice(payload);
-        Ipv4::parse(&b)?;
         Ok(b)
     }
 }
@@ -669,6 +682,9 @@ impl Peer {
             self.udp.deliver(ip.source, datagram)?;
             return Ok(None);
         }
+        if ip.protocol != 1 {
+            return Err(Error::Protocol);
+        }
         let echo = Echo::parse(ip.payload)?;
         if echo.reply {
             return Ok(None);
@@ -704,6 +720,7 @@ impl Peer {
     }
 }
 
+pub mod dhcp;
 pub mod diagnostic;
 pub mod dns;
 #[cfg(test)]
@@ -711,4 +728,5 @@ mod tests;
 pub mod transport_diagnostic;
 #[cfg(test)]
 mod transport_tests;
+pub mod tcp;
 pub mod udp;
