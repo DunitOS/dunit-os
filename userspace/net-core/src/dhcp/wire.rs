@@ -1,12 +1,16 @@
-//! BOOTP fixed header and RFC 2132 options used by the DHCPv4 client.
-use super::{usable_ip, validate_config, Lease, Offer, LIMITED_BROADCAST};
+//! BOOTP fixed header and DHCPv4 options used by the client.
+use super::{
+    usable_ip, validate_config, ClasslessRoute, ClasslessRoutes, Lease, Offer, LIMITED_BROADCAST,
+};
 use crate::udp::MAX_PAYLOAD;
-use crate::{put, word, Error, Ip, Mac};
+use crate::{put, word, Error, Ip, Mac, ROUTE_CAPACITY};
 use alloc::vec::Vec;
 
 const OPTIONS: usize = 240;
 const MIN_REQUEST: usize = 300;
 const MAX_OPTIONS: usize = 128;
+const CLASSLESS_ROUTE: u8 = 121;
+const MAX_ROUTE_BYTES: usize = (ROUTE_CAPACITY - 1) * 9;
 const MAGIC: [u8; 4] = [99, 130, 83, 99];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +39,7 @@ struct Options {
     kind: Option<Kind>,
     mask: Option<Ip>,
     router: Option<Ip>,
+    routes: Option<ClasslessRoutes>,
     dns: Option<[Option<Ip>; 2]>,
     lease: Option<u32>,
     server: Option<Ip>,
@@ -50,16 +55,24 @@ impl Reply {
             .mask
             .or(previous.map(|lease| lease.mask))
             .ok_or(Error::Header)?;
-        let router = self
-            .options
-            .router
-            .or(previous.and_then(|lease| lease.router));
+        let routes = self.options.routes.or_else(|| {
+            previous
+                .filter(|lease| lease.server == self.server)
+                .and_then(|lease| lease.routes)
+        });
+        let router = if routes.is_some() {
+            None
+        } else {
+            self.options
+                .router
+                .or(previous.and_then(|lease| lease.router))
+        };
         let dns = self
             .options
             .dns
             .or(previous.map(|lease| lease.dns))
             .unwrap_or([None; 2]);
-        validate_config(self.address, mask, router)?;
+        validate_config(self.address, mask, router, routes.as_ref())?;
         let seconds = self.options.lease.ok_or(Error::Header)?;
         let (renew_at, rebind_at, expires_at) = if seconds == u32::MAX {
             (u64::MAX, u64::MAX, u64::MAX)
@@ -83,6 +96,7 @@ impl Reply {
             address: self.address,
             mask,
             router,
+            routes,
             dns,
             server: self.server,
             renew_at,
@@ -120,8 +134,49 @@ fn address_list(value: &[u8]) -> Result<[Option<Ip>; 2], Error> {
     Ok(addresses)
 }
 
+fn classless_routes(mut bytes: &[u8]) -> Result<ClasslessRoutes, Error> {
+    if bytes.is_empty() {
+        return Err(Error::Length);
+    }
+    let mut routes = [None; ROUTE_CAPACITY - 1];
+    for slot in &mut routes {
+        let Some((&prefix, rest)) = bytes.split_first() else {
+            break;
+        };
+        if prefix > 32 {
+            return Err(Error::Header);
+        }
+        let octets = usize::from(prefix).div_ceil(8);
+        let entry = rest.get(..octets + 4).ok_or(Error::Length)?;
+        let mut network = [0; 4];
+        network[..octets].copy_from_slice(&entry[..octets]);
+        let mask = u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0);
+        if u32::from_be_bytes(network) & !mask != 0 {
+            return Err(Error::Header);
+        }
+        let gateway = fixed(&entry[octets..])?;
+        if gateway == [0; 4] {
+            // The route table models a single directly connected subnet.
+            return Err(Error::Unsupported);
+        }
+        *slot = Some(ClasslessRoute {
+            network,
+            mask: mask.to_be_bytes(),
+            gateway,
+        });
+        bytes = &rest[entry.len()..];
+    }
+    if !bytes.is_empty() {
+        return Err(Error::Capacity);
+    }
+    Ok(routes)
+}
+
 fn parse_options(mut bytes: &[u8], mac: Mac) -> Result<Options, Error> {
     let mut options = Options::default();
+    let mut router = None;
+    let mut route_bytes = [0; MAX_ROUTE_BYTES];
+    let mut route_len = None;
     let mut count = 0;
     while let Some((&tag, remainder)) = bytes.split_first() {
         bytes = remainder;
@@ -129,11 +184,15 @@ fn parse_options(mut bytes: &[u8], mac: Mac) -> Result<Options, Error> {
             continue;
         }
         if tag == 255 {
-            return if bytes.iter().all(|&byte| byte == 0) {
-                Ok(options)
+            if bytes.iter().any(|&byte| byte != 0) {
+                return Err(Error::Header);
+            }
+            if let Some(length) = route_len {
+                options.routes = Some(classless_routes(&route_bytes[..length])?);
             } else {
-                Err(Error::Header)
-            };
+                options.router = router.transpose()?;
+            }
+            return Ok(options);
         }
         if count == MAX_OPTIONS {
             return Err(Error::Capacity);
@@ -145,8 +204,12 @@ fn parse_options(mut bytes: &[u8], mac: Mac) -> Result<Options, Error> {
         match tag {
             1 => unique(&mut options.mask, fixed(value)?)?,
             3 => {
-                let router = address_list(value)?[0].ok_or(Error::Address)?;
-                unique(&mut options.router, router)?;
+                // A received Classless Static Route option overrides Router.
+                router = Some(if router.is_some() {
+                    Err(Error::Header)
+                } else {
+                    address_list(value).and_then(|list| list[0].ok_or(Error::Address))
+                });
             }
             6 => unique(&mut options.dns, address_list(value)?)?,
             51 => unique(&mut options.lease, u32::from_be_bytes(fixed(value)?))?,
@@ -168,6 +231,16 @@ fn parse_options(mut bytes: &[u8], mac: Mac) -> Result<Options, Error> {
                     return Err(Error::Header);
                 }
                 options.client_id = true;
+            }
+            CLASSLESS_ROUTE => {
+                // RFC 3396 fragments form one option, including split entries.
+                let begin = route_len.unwrap_or(0);
+                let end = begin + value.len();
+                route_bytes
+                    .get_mut(begin..end)
+                    .ok_or(Error::Capacity)?
+                    .copy_from_slice(value);
+                route_len = Some(end);
             }
             _ => {}
         }
@@ -238,7 +311,7 @@ pub(super) fn request(
     client_id[1..].copy_from_slice(&mac);
     option(&mut out, 61, &client_id);
     if kind != Kind::Decline {
-        option(&mut out, 55, &[1, 3, 6]);
+        option(&mut out, 55, &[1, CLASSLESS_ROUTE, 3, 6]);
         option(&mut out, 57, &(MAX_PAYLOAD as u16).to_be_bytes());
     }
     out.push(255);

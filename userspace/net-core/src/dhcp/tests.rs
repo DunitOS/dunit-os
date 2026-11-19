@@ -107,6 +107,10 @@ fn direct_dora_uses_broadcast_exceptions_and_selects_exact_server() {
     let discover = send(&mut client, 0);
     request_header(&discover, 1, UNASSIGNED, LIMITED_BROADCAST);
     assert_eq!(word(&discover.payload, 10), 0x8000);
+    assert!(discover
+        .payload
+        .windows(6)
+        .any(|option| option == [55, 4, 1, 121, 3, 6]));
     let wire = discover.broadcast_frame(CLIENT).unwrap();
     let ethernet = Ethernet::parse(&wire).unwrap();
     assert_eq!(ethernet.destination, BROADCAST);
@@ -494,4 +498,131 @@ fn expired_lease_cannot_send_decline() {
     let lease = bound(&mut client);
     assert_eq!(client.decline(lease.expires_at), Err(Error::NotBound));
     assert_eq!(client.poll(lease.expires_at), Ok(Action::Expired));
+}
+
+fn with_classless(entries: &[u8]) -> Vec<u8> {
+    let mut options = offer_options(LIFETIME);
+    options.extend_from_slice(&[121, entries.len() as u8]);
+    options.extend_from_slice(entries);
+    options
+}
+
+#[test]
+fn classless_routes_override_router_and_select_longest_prefix() {
+    let mut client = Client::new(CLIENT, 29).unwrap();
+    let xid = select(&mut client);
+    send(&mut client, 1);
+
+    // Fragments split the default entry itself. Router's off-link value would
+    // be invalid were a classless option absent.
+    let mut options = [
+        1, 4, 255, 255, 255, 0, 51, 4, 0, 0, 0, 16, 3, 4, 10, 0, 0, 1, 121, 2, 0, 192,
+    ]
+    .to_vec();
+    options.extend_from_slice(&[
+        121, 21, 0, 2, 4, 25, 198, 51, 100, 128, 192, 0, 2, 1, 32, 198, 51, 100, 200, 192, 0, 2, 4,
+    ]);
+    let ack = reply(5, xid, HOST, SERVER, &options);
+    let Event::Bound(lease) = client
+        .receive(&server_frame(&ack, SERVER, HOST, CLIENT), 2)
+        .unwrap()
+    else {
+        panic!("expected accepted classless ACK");
+    };
+    assert_eq!(lease.router, None);
+    let advertised = lease.routes.unwrap();
+    assert_eq!(advertised.iter().flatten().count(), 3);
+    let mut routes = Routes::new(lease.address, lease.mask, MTU).unwrap();
+    for route in advertised.iter().flatten() {
+        routes
+            .add(route.network, route.mask, route.gateway)
+            .unwrap();
+    }
+    assert_eq!(routes.next_hop([198, 51, 100, 120]), Ok(OTHER));
+    assert_eq!(routes.next_hop([198, 51, 100, 132]), Ok(SERVER));
+    assert_eq!(routes.next_hop([198, 51, 100, 200]), Ok(OTHER));
+}
+
+#[test]
+fn classless_routes_survive_same_server_ack_and_are_replaced_on_rebind() {
+    let mut client = Client::new(CLIENT, 31).unwrap();
+    let xid = select(&mut client);
+    send(&mut client, 1);
+    let options = with_classless(&[24, 198, 51, 100, 192, 0, 2, 1]);
+    let ack = reply(5, xid, HOST, SERVER, &options);
+    let Event::Bound(lease) = client
+        .receive(&server_frame(&ack, SERVER, HOST, CLIENT), 2)
+        .unwrap()
+    else {
+        panic!("expected accepted classless ACK");
+    };
+    assert_eq!(
+        lease.router, None,
+        "no legacy default if option 121 lacks /0"
+    );
+
+    let xid = transaction(&send(&mut client, lease.renew_at));
+    let ack = reply(5, xid, HOST, SERVER, &[51, 4, 0, 0, 0, 16]);
+    let Event::Bound(renewed) = client
+        .receive(
+            &server_frame(&ack, SERVER, HOST, CLIENT),
+            lease.renew_at + 1,
+        )
+        .unwrap()
+    else {
+        panic!("expected accepted renewal");
+    };
+    assert_eq!(renewed.routes, lease.routes);
+    assert_eq!(renewed.router, None);
+
+    let xid = transaction(&send(&mut client, renewed.rebind_at));
+    let legacy = reply(5, xid, HOST, OTHER, &offer_options(LIFETIME));
+    let Event::Bound(rebound) = client
+        .receive(
+            &server_frame(&legacy, OTHER, HOST, CLIENT),
+            renewed.rebind_at + 1,
+        )
+        .unwrap()
+    else {
+        panic!("expected new server lease");
+    };
+    assert_eq!(rebound.router, Some(SERVER));
+    assert_eq!(rebound.routes, None);
+}
+
+#[test]
+fn invalid_classless_routes_cannot_publish_an_ack() {
+    let mut client = Client::new(CLIENT, 37).unwrap();
+    let lease = bound(&mut client);
+    let xid = transaction(&send(&mut client, lease.renew_at));
+    let duplicate = [24, 198, 51, 100, 192, 0, 2, 1].repeat(2);
+    let too_many = [
+        8, 1, 192, 0, 2, 1, 8, 2, 192, 0, 2, 1, 8, 3, 192, 0, 2, 1, 8, 4, 192, 0, 2, 1, 8, 5, 192,
+        0, 2, 1, 8, 6, 192, 0, 2, 1, 8, 7, 192, 0, 2, 1, 8, 8, 192, 0, 2, 1,
+    ];
+    for (entries, error) in [
+        (&[][..], Error::Length),
+        (&[33, 192, 0, 2, 1], Error::Header),
+        (&[24, 198, 51, 100, 192, 0, 2], Error::Length),
+        (&[25, 198, 51, 100, 129, 192, 0, 2, 1], Error::Header),
+        (&[0, 0, 0, 0, 0], Error::Unsupported),
+        (&[0, 198, 51, 100, 1], Error::Address),
+        (&[24, 192, 0, 2, 192, 0, 2, 1], Error::Header),
+        (&duplicate, Error::Header),
+        (&too_many, Error::Capacity),
+        (&[0; (ROUTE_CAPACITY - 1) * 9 + 1], Error::Capacity),
+    ] {
+        let options = with_classless(entries);
+        let ack = reply(5, xid, HOST, SERVER, &options);
+        assert_eq!(
+            client.receive(
+                &server_frame(&ack, SERVER, HOST, CLIENT),
+                lease.renew_at + 1
+            ),
+            Err(error),
+            "routes {entries:?}",
+        );
+        assert_eq!(client.lease(), Some(lease));
+        assert_eq!(client.state(), State::Renewing);
+    }
 }

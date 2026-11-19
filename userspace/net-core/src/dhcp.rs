@@ -1,7 +1,7 @@
 //! Bounded DHCPv4 client for one Ethernet interface. Callers own packet I/O and
 //! decide when to publish or remove the returned interface configuration.
 use super::udp::{Address, Udp};
-use super::{valid_mac, Error, Ethernet, Ip, Ipv4, Mac, Routes, BROADCAST, MTU};
+use super::{valid_mac, Error, Ethernet, Ip, Ipv4, Mac, Routes, BROADCAST, MTU, ROUTE_CAPACITY};
 use alloc::vec::Vec;
 
 #[cfg(test)]
@@ -27,10 +27,22 @@ pub enum State {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClasslessRoute {
+    pub network: Ip,
+    pub mask: Ip,
+    pub gateway: Ip,
+}
+
+/// The directly connected prefix occupies the remaining route-table slot.
+pub type ClasslessRoutes = [Option<ClasslessRoute>; ROUTE_CAPACITY - 1];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Lease {
     pub address: Ip,
     pub mask: Ip,
     pub router: Option<Ip>,
+    /// An advertised list replaces the Router option, even without a default route.
+    pub routes: Option<ClasslessRoutes>,
     pub dns: [Option<Ip>; 2],
     pub server: Ip,
     pub renew_at: u64,
@@ -420,12 +432,21 @@ impl Client {
     }
 }
 
-fn validate_config(address: Ip, mask: Ip, router: Option<Ip>) -> Result<(), Error> {
+fn validate_config(
+    address: Ip,
+    mask: Ip,
+    router: Option<Ip>,
+    classless: Option<&ClasslessRoutes>,
+) -> Result<(), Error> {
     if !usable_ip(address) || mask == UNASSIGNED {
         return Err(Error::Address);
     }
     let mut routes = Routes::new(address, mask, MTU)?;
-    if let Some(router) = router {
+    if let Some(classless) = classless {
+        for route in classless.iter().flatten() {
+            routes.add(route.network, route.mask, route.gateway)?;
+        }
+    } else if let Some(router) = router {
         routes.add(UNASSIGNED, UNASSIGNED, router)?;
     }
     Ok(())
