@@ -1,0 +1,4 @@
+name = "net-socket-test"
+exec = "/system/libexec/net_socket_test"
+net_connect = 3
+restart = "never"

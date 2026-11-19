@@ -62,7 +62,7 @@ USERSPACE_APPS = pointer_queue_test pointer_queue_denied pty_args_test pty_termi
 	scheduler_test spawn_ready_test yield_child yield_test resumable_child resumable_test \
 	ipc_child ipc_parent runtime_stress input_test pointer_test file_api_test env_test calc \
 	stdin_test fault_pf fault_ud dtop \
-	preempt_child preempt_test kill_target thread_test wait_test waitset_test waitset_pty_peer sdk_api_test sdk_catalog_test vm_test vm_peer vm_guard_fault vm_protect_fault tls_test futex_test handle_test gui_server gui_shbuf_peer gui_client gui_demo gui_calc gui_stat gui_files pty_echo pty_test dsh_calc_test dsh dufetch gui_terminal gui_settings setup init init_probe fsck_dunit abi_test svg_test net_packet_test dsh_backpressure_test netd netd_fixture
+	preempt_child preempt_test kill_target thread_test wait_test waitset_test waitset_pty_peer sdk_api_test sdk_catalog_test vm_test vm_peer vm_guard_fault vm_protect_fault tls_test futex_test handle_test gui_server gui_shbuf_peer gui_client gui_demo gui_calc gui_stat gui_files pty_echo pty_test dsh_calc_test dsh dufetch gui_terminal gui_settings setup init init_probe fsck_dunit abi_test svg_test net_packet_test dsh_backpressure_test netd netd_fixture net_socket_test
 ifneq ($(IMAGE_PROFILE),full)
 USERSPACE_APPS := $(shell python3 tools/image_profile.py $(IMAGE_PROFILE) --field programs)
 MUSL_CTESTS :=
