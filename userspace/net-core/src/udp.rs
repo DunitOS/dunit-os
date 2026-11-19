@@ -173,13 +173,7 @@ impl Endpoints {
         Ok(())
     }
 }
-#[derive(Debug, PartialEq, Eq)]
-pub enum Send {
-    /// Caller must exchange this ARP frame and retry the datagram.
-    Neighbor(Vec<u8>),
-    Waiting,
-    Sent(Vec<u8>),
-}
+pub use super::Egress as Send;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Received {
     pub source: Address,
@@ -249,17 +243,7 @@ impl Peer {
         if data.len() > self.routes.mtu - 28 {
             return Err(Error::Length);
         }
-        let next = self.routes.next_hop(destination.ip)?;
         let payload = Udp::encode(Address { ip: self.ip, port }, destination, data)?;
-        match self.neighbors.resolve(next, now)? {
-            Resolution::Wait => Ok(Send::Waiting),
-            Resolution::Request => Ok(Send::Neighbor(self.arp_request(next)?)),
-            Resolution::Ready(mac) => Ok(Send::Sent(Ethernet::encode(
-                mac,
-                self.mac,
-                0x0800,
-                &Ipv4::encode_protocol(self.ip, destination.ip, 17, &payload)?,
-            )?)),
-        }
+        self.route_payload(destination.ip, 17, &payload, now)
     }
 }

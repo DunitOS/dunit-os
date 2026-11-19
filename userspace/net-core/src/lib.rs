@@ -556,6 +556,14 @@ impl Routes {
     }
 }
 
+/// Outcome of routing one transport payload through the Ethernet interface.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Egress {
+    Sent(Vec<u8>),
+    Neighbor(Vec<u8>),
+    Waiting,
+}
+
 /// A logical peer: owned address, bounded ARP cache and eight echo replies per
 /// one-second window. Routes select outbound next hops; this endpoint does not
 /// forward packets and has no NIC or service authority.
@@ -618,6 +626,27 @@ impl Peer {
             )?)),
         }
     }
+    fn route_payload(
+        &mut self,
+        destination: Ip,
+        protocol: u8,
+        payload: &[u8],
+        now: u64,
+    ) -> Result<Egress, Error> {
+        if payload.len() > self.routes.mtu - 20 {
+            return Err(Error::Length);
+        }
+        let next = self.routes.next_hop(destination)?;
+        let packet = Ipv4::encode_protocol(self.ip, destination, protocol, payload)?;
+        match self.neighbors.resolve(next, now)? {
+            Resolution::Wait => Ok(Egress::Waiting),
+            Resolution::Request => Ok(Egress::Neighbor(self.arp_request(next)?)),
+            Resolution::Ready(mac) => {
+                Ethernet::encode(mac, self.mac, 0x0800, &packet).map(Egress::Sent)
+            }
+        }
+    }
+
     fn arp_request(&self, target_ip: Ip) -> Result<Vec<u8>, Error> {
         Ethernet::encode(
             BROADCAST,

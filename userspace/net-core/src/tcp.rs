@@ -4,6 +4,7 @@
 use crate::{Error, Ip, MTU};
 use alloc::{collections::VecDeque, vec::Vec};
 
+mod link;
 mod wire;
 pub use wire::{Endpoint, Segment, ACK, FIN, MAX_DATA, PSH, RST, SYN};
 
@@ -632,3 +633,4 @@ fn earlier(a: u32, b: u32) -> bool {
 mod tests;
 
 pub mod diagnostic;
+pub mod table;
