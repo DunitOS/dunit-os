@@ -4,6 +4,7 @@ use display::{sys_get_framebuffer, sys_get_terminal_cursor, sys_draw_pixel,
     sys_draw_rect, sys_fb_present, sys_set_video_mode};
 mod native_fd;
 mod packet;
+pub(crate) mod net_socket;
 mod pointer_input;
 mod file_cap;
 mod attached_ipc;
@@ -120,6 +121,10 @@ pub enum Syscall {
     IpcReceiveHandle = 94,
     NetDeviceGrant = 95,
     NetQueueOpen = 96,
+    NetServiceRegister = 97,
+    NetConnectGrant = 98,
+    NetSocketOpen = 99,
+    NetSocketOp = 100,
 }
 
 impl Syscall {
@@ -222,6 +227,10 @@ impl Syscall {
             94 => Some(Syscall::IpcReceiveHandle),
             95 => Some(Syscall::NetDeviceGrant),
             96 => Some(Syscall::NetQueueOpen),
+            97 => Some(Syscall::NetServiceRegister),
+            98 => Some(Syscall::NetConnectGrant),
+            99 => Some(Syscall::NetSocketOpen),
+            100 => Some(Syscall::NetSocketOp),
             _ => None,
         }
     }
@@ -552,6 +561,12 @@ pub extern "C" fn syscall_handler(
         Syscall::HandleCreateMemory => sys_handle_create_memory(arg0 as usize),
         Syscall::HandleCreateEndpoint => sys_handle_create_endpoint(arg0),
         Syscall::NetDeviceGrant => packet::grant(arg0, arg1, arg2, arg3),
+        Syscall::NetServiceRegister => net_socket::register(arg0, arg1 as *const u8, arg2 as usize),
+        Syscall::NetConnectGrant => net_socket::grant(arg0, arg1, arg2),
+        Syscall::NetSocketOpen => net_socket::open(arg0, arg1, arg2 as *const u8, arg3 as usize),
+        Syscall::NetSocketOp => net_socket::operation(
+            arg0, arg1, arg2 as *const u8, arg3 as usize, arg4 as *mut u8, arg5 as usize,
+        ),
         Syscall::NetQueueOpen => packet::open(arg0, arg1 as *const u8, arg2 as usize),
         Syscall::HandleRead => sys_handle_read(arg0 as u32, arg1 as *mut u8, arg2 as usize),
         Syscall::HandleWrite => sys_handle_write(arg0 as u32, arg1 as *const u8, arg2 as usize),
@@ -889,6 +904,9 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
         crate::process::FdTarget::Packet { generation, access } => {
             return packet::read(generation, access, buf, count);
         }
+        target @ (crate::process::FdTarget::NetSocket { .. } | crate::process::FdTarget::NetService { .. }) => {
+            return net_socket::read(target, buf, count);
+        }
         crate::process::FdTarget::Vfs(_) => {}
     }
 
@@ -1115,10 +1133,13 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
     }
 
     let entry = crate::process::get_fd(fd);
-    if let Some(crate::process::FdTarget::Packet { generation, access }) =
-        entry.as_ref().map(|entry| entry.target)
-    {
-        return packet::write(generation, access, buf, count);
+    use crate::process::FdTarget;
+    match entry.as_ref().map(|entry| entry.target) {
+        Some(FdTarget::Packet { generation, access }) => return packet::write(generation, access, buf, count),
+        Some(target @ (FdTarget::NetSocket { .. } | FdTarget::NetService { .. })) => {
+            return net_socket::write(target, buf, count);
+        }
+        _ => {}
     }
 
     let data = match copy_buffer_from_user(buf, count) {
@@ -1146,7 +1167,10 @@ fn sys_write(fd: u32, buf: *const u8, count: usize) -> i64 {
             return sys_pipe_write(id, &data, entry.status() & 64 != 0);
         }
         crate::process::FdTarget::Pipe { .. } => return EBADF, // write on read end
-        crate::process::FdTarget::Packet { .. } => unreachable!("packet write handled before copy"),
+        FdTarget::Packet { .. } | FdTarget::NetSocket { .. } | FdTarget::NetService { .. } => {
+            unreachable!("owner-bound write handled before copy")
+        }
+
         crate::process::FdTarget::Vfs(_) => {}
     }
 
@@ -1424,6 +1448,7 @@ fn apply_fd_cleanup(cleanup: crate::process::FdCleanup) {
         crate::process::FdCleanup::ClosePacket(generation) => {
             crate::drivers::net::packet::close(generation);
         }
+        crate::process::FdCleanup::CloseSocket(target) => net_socket::close(target),
         crate::process::FdCleanup::WakePipe(id) => {
             crate::process::wake_pipe_waiters(id);
         }
@@ -1454,7 +1479,10 @@ fn sys_fsync(fd: u32) -> i64 {
                 Err(error) => error,
             }
         }
-        crate::process::FdTarget::Pipe { .. } | crate::process::FdTarget::Packet { .. } => EINVAL,
+        crate::process::FdTarget::Pipe { .. }
+        | crate::process::FdTarget::Packet { .. }
+        | crate::process::FdTarget::NetSocket { .. }
+        | crate::process::FdTarget::NetService { .. } => EINVAL,
     }
 }
 
@@ -1746,7 +1774,10 @@ fn process_vfs_fd(fd: u32) -> Result<crate::fs::vfs::FileDescriptor, i64> {
             | crate::process::FdTarget::Stdout
             | crate::process::FdTarget::Stderr,
         ) => Err(EBADF),
-        Some(crate::process::FdTarget::Pipe { .. } | crate::process::FdTarget::Packet { .. }) => Err(EBADF),
+        Some(crate::process::FdTarget::Pipe { .. }
+            | crate::process::FdTarget::Packet { .. }
+            | crate::process::FdTarget::NetSocket { .. }
+            | crate::process::FdTarget::NetService { .. }) => Err(EBADF),
         None => Err(EBADF),
     }
 }

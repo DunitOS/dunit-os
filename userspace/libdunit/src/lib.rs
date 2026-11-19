@@ -976,6 +976,51 @@ pub fn net_queue_open(device: u32, options: &[u8]) -> isize {
     )
 }
 
+/// Publish the authorized netd generation and open its private service bridge.
+pub fn net_service_register(device: u32, options: &[u8]) -> isize {
+    syscall3(
+        SYSCALL_NET_SERVICE_REGISTER,
+        device as usize,
+        options.as_ptr() as usize,
+        options.len(),
+    )
+}
+
+/// Insert an outbound network grant into an authorized direct child.
+pub fn net_connect_grant(root: u32, recipient_pid: u32, scope: u32) -> isize {
+    syscall3(
+        SYSCALL_NET_CONNECT_GRANT,
+        root as usize,
+        recipient_pid as usize,
+        scope as usize,
+    )
+}
+
+/// Create a nonblocking IPv4 socket owned by the calling process.
+pub fn net_socket_open(connect: u32, protocol: u16, options: &[u8]) -> isize {
+    syscall5(
+        SYSCALL_NET_SOCKET_OPEN,
+        connect as usize,
+        protocol as usize,
+        options.as_ptr() as usize,
+        options.len(),
+        0,
+    )
+}
+
+/// Submit a native socket operation with explicitly sized buffers.
+pub fn net_socket_op(fd: usize, op: u16, input: &[u8], output: &mut [u8]) -> isize {
+    syscall6(
+        SYSCALL_NET_SOCKET_OP,
+        fd,
+        op as usize,
+        input.as_ptr() as usize,
+        input.len(),
+        output.as_mut_ptr() as usize,
+        output.len(),
+    )
+}
+
 /// Закрывает хэндл. Возвращает 0 или отрицательный errno.
 pub fn handle_close(handle: u32) -> isize {
     syscall1(SYSCALL_HANDLE_CLOSE, handle as usize)

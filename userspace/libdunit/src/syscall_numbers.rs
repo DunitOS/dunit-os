@@ -98,3 +98,7 @@ pub const SYSCALL_IPC_SEND_HANDLE: usize = 93;
 pub const SYSCALL_IPC_RECEIVE_HANDLE: usize = 94;
 pub const SYSCALL_NET_DEVICE_GRANT: usize = 95;
 pub const SYSCALL_NET_QUEUE_OPEN: usize = 96;
+pub const SYSCALL_NET_SERVICE_REGISTER: usize = 97;
+pub const SYSCALL_NET_CONNECT_GRANT: usize = 98;
+pub const SYSCALL_NET_SOCKET_OPEN: usize = 99;
+pub const SYSCALL_NET_SOCKET_OP: usize = 100;

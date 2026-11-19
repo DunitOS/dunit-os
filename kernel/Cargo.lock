@@ -21,6 +21,10 @@ name = "dunit_pointer_abi"
 version = "0.1.0"
 
 [[package]]
+name = "dunit_socket_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_wait_abi"
 version = "0.1.0"
 
@@ -32,6 +36,7 @@ dependencies = [
  "dunit_file_cap_abi",
  "dunit_packet_abi",
  "dunit_pointer_abi",
+ "dunit_socket_abi",
  "dunit_wait_abi",
  "term_theme",
 ]

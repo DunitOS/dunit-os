@@ -1,6 +1,6 @@
 //! Non-escaping task scopes. No current selector returns a Process reference.
 use super::{
-    current_entity_id, current_pid, registry, wake_wait_set_waiters, Handle, HandleError, Process,
+    current_entity_id, current_pid, registry, wake_poll_waiters, Handle, HandleError, Process,
     ProcessError, ProcessId,
 };
 use crate::sync::InterruptGuard;
@@ -35,7 +35,7 @@ pub fn with_process_mut<R>(
     };
     drop(retired);
     if wake {
-        wake_wait_set_waiters();
+        wake_poll_waiters();
     }
     result
 }

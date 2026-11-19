@@ -40,7 +40,7 @@ pub(super) fn fcntl(fd: u32, command: u32, arg: u64) -> i64 {
             if arg & !((READ | WRITE | APPEND | NONBLOCK) as u64) != 0 {
                 return EOPNOTSUPP;
             }
-            if matches!(entry.target, crate::process::FdTarget::Packet { .. }) && arg & NONBLOCK as u64 == 0 {
+            if entry.target.owner_bound() && arg & NONBLOCK as u64 == 0 {
                 return EOPNOTSUPP;
             }
             let status = (entry.status() & (READ | WRITE)) | (arg as u32 & (APPEND | NONBLOCK));
@@ -120,6 +120,9 @@ pub(super) fn readiness(fd: i32, events: u16) -> u16 {
                     let _ = crate::process::request_terminal_stdin_for_current();
                 }
             }
+        }
+        target @ (FdTarget::NetSocket { .. } | FdTarget::NetService { .. }) => {
+            result |= net_socket::readiness(target) & (events | POLL_HUP | POLL_ERROR);
         }
         FdTarget::Packet { generation, access } => {
             let ready = crate::drivers::net::packet::ready(generation) as u16;

@@ -12,5 +12,7 @@
 #define DUNIT_RIGHT_INPUT_MASTER (1u << 6)
 #define DUNIT_RIGHT_NET_CONTROL (1u << 7)
 #define DUNIT_RIGHT_NET_RAW (1u << 8)
+#define DUNIT_RIGHT_NET_CONNECT (1u << 9)
+#define DUNIT_RIGHT_NET_SERVICE (1u << 10)
 
 #endif /* DUNIT_RIGHTS_H */

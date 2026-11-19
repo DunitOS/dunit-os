@@ -55,6 +55,13 @@ impl Process {
                     FdCleanup::ClosePacket(generation)
                 }
             }
+            FdTarget::NetSocket { .. } | FdTarget::NetService { .. } => {
+                if self.fd_table.values().any(|entry| entry.target == target) {
+                    FdCleanup::None
+                } else {
+                    FdCleanup::CloseSocket(target)
+                }
+            }
             FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr => FdCleanup::None,
         }
     }
@@ -65,7 +72,8 @@ impl Process {
                 *self.vfs_fd_refs.entry(vfs_fd).or_insert(0) += 1;
             }
             FdTarget::Pipe { id, write } => crate::pipe::retain(id, write),
-            FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr | FdTarget::Packet { .. } => {}
+            FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr | FdTarget::Packet { .. }
+            | FdTarget::NetSocket { .. } | FdTarget::NetService { .. } => {}
         }
     }
 
@@ -149,7 +157,7 @@ impl Process {
     }
     pub fn inheritable_fds(&self) -> Vec<(u32, FdEntry)> {
         self.fd_table.iter().filter_map(|(&fd, entry)| {
-            if matches!(entry.target, FdTarget::Packet { .. }) {
+            if entry.target.owner_bound() {
                 None
             } else {
                 Some((fd, entry.clone()))

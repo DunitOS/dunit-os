@@ -43,6 +43,9 @@ impl FdResources {
                 }
                 // Driver close checks generation and is idempotent across dup slots.
                 FdTarget::Packet { generation, .. } => crate::drivers::net::packet::close(generation),
+                FdTarget::NetSocket { .. } | FdTarget::NetService { .. } => {
+                    crate::syscall::net_socket::close(entry.target);
+                }
                 FdTarget::Vfs(_) | FdTarget::Stdin | FdTarget::Stdout | FdTarget::Stderr => {}
             }
         }
@@ -58,7 +61,7 @@ impl FdResources {
         let mut result = Self::default();
         for (fd, entry) in entries {
             if *fd >= MAX_PROCESS_FD || result.entries.contains_key(fd)
-                || matches!(entry.target, FdTarget::Packet { .. })
+                || entry.target.owner_bound()
             {
                 return Err(ProcessError::InvalidFd);
             }
@@ -124,7 +127,7 @@ impl Drop for VmResources {
                 HandleObject::Input => crate::handle::release_input(self.pid),
                 HandleObject::SharedFrames { id } => shared_vm_release(id, 1),
                 HandleObject::NetDevice(device) => drop(device),
-                HandleObject::NetRoot | HandleObject::File(_) | HandleObject::Memory(_)
+                HandleObject::NetRoot | HandleObject::NetConnect { .. } | HandleObject::File(_) | HandleObject::Memory(_)
                 | HandleObject::Endpoint(_) => {}
             }
         }

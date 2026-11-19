@@ -26,12 +26,12 @@ class Headers(unittest.TestCase):
     def test_generated_umbrella_has_no_copied_definitions(self):
         source=(ROOT/'abi/include/dunit.h').read_text()
         self.assertEqual(source,render_c_api())
-        for name in ('syscall','errno','rights','transfer','packet'):
+        for name in ('syscall','errno','rights','transfer','packet','socket'):
             self.assertIn(f'#include <dunit/{name}.h>',source)
         self.assertNotRegex(source,r'#define\s+(?:SYS_|DUNIT_(?:E[A-Z]|RIGHT_|TRANSFER_))')
     def test_fresh_install(self):
         sysroot_tool.install_headers(self.root,self.sysroot);self.assert_installed()
-    def test_packet_layout_in_installed_umbrella(self):
+    def test_network_layout_in_installed_umbrella(self):
         sysroot_tool.install_headers(self.root, self.sysroot)
         subprocess.run(
             ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
@@ -49,6 +49,20 @@ _Static_assert(sizeof(struct dunit_packet_frame) == 8, "frame header length");
 _Static_assert(offsetof(struct dunit_packet_info, mac) == 8, "MAC");
 _Static_assert(offsetof(struct dunit_packet_info, rx_frames) == 16, "RX frames");
 _Static_assert(offsetof(struct dunit_packet_info, tx_errors) == 56, "TX errors");
+_Static_assert(SYS_NET_SERVICE_REGISTER == 97, "service register syscall");
+_Static_assert(SYS_NET_CONNECT_GRANT == 98, "connect grant syscall");
+_Static_assert(SYS_NET_SOCKET_OPEN == 99, "socket open syscall");
+_Static_assert(SYS_NET_SOCKET_OP == 100, "socket operation syscall");
+_Static_assert(DUNIT_RIGHT_NET_CONNECT == (1u << 9), "connect right");
+_Static_assert(DUNIT_RIGHT_NET_SERVICE == (1u << 10), "service right");
+_Static_assert(sizeof(struct dunit_socket_options) == 8, "socket options length");
+_Static_assert(sizeof(struct dunit_socket_endpoint) == 8, "socket endpoint length");
+_Static_assert(sizeof(struct dunit_socket_receive) == 16, "datagram metadata length");
+_Static_assert(sizeof(struct dunit_socket_endpoints) == 16, "endpoint pair length");
+_Static_assert(sizeof(struct dunit_socket_bridge) == 40, "socket bridge header length");
+_Static_assert(offsetof(struct dunit_socket_bridge, kind) == 16, "bridge kind");
+_Static_assert(offsetof(struct dunit_socket_bridge, ipv4) == 24, "bridge IPv4");
+_Static_assert(offsetof(struct dunit_socket_bridge, length) == 32, "bridge payload length");
 ''',
             text=True, check=True,
         )

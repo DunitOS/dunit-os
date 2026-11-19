@@ -28,6 +28,8 @@ pub const RIGHT_DISPLAY_MASTER: u32 = 1 << 5;
 pub const RIGHT_INPUT_MASTER: u32 = 1 << 6;
 pub const RIGHT_NET_CONTROL: u32 = 1 << 7;
 pub const RIGHT_NET_RAW: u32 = 1 << 8;
+pub const RIGHT_NET_CONNECT: u32 = 1 << 9;
+pub const RIGHT_NET_SERVICE: u32 = 1 << 10;
 
 pub const RIGHTS_ALL: u32 = RIGHT_READ
     | RIGHT_WRITE
@@ -37,7 +39,9 @@ pub const RIGHTS_ALL: u32 = RIGHT_READ
     | RIGHT_DISPLAY_MASTER
     | RIGHT_INPUT_MASTER
     | RIGHT_NET_CONTROL
-    | RIGHT_NET_RAW;
+    | RIGHT_NET_RAW
+    | RIGHT_NET_CONNECT
+    | RIGHT_NET_SERVICE;
 
 /// Верхняя граница размера объекта памяти за одним хэндлом (защита от исчерпания
 /// кучи по запросу из userspace).
@@ -87,6 +91,8 @@ impl Drop for NetDevice {
 pub enum HandleObject {
     NetRoot,
     NetDevice(Arc<NetDevice>),
+    /// Nontransferable scope for outbound application sockets.
+    NetConnect { scope: u32 },
     /// Actual filesystem open-description authority; transferable with attenuation.
     File(Arc<crate::fs::file_cap::FileCapability>),
     /// Буфер байтов в куче ядра. Права READ/WRITE/MAP.
@@ -201,7 +207,9 @@ impl HandleTable {
             return Err(HandleError::AccessDenied);
         }
         let object = match &current.object {
-            HandleObject::NetRoot => return Err(HandleError::AccessDenied),
+            HandleObject::NetRoot | HandleObject::NetConnect { .. } => {
+                return Err(HandleError::AccessDenied);
+            }
             HandleObject::NetDevice(device) => HandleObject::NetDevice(device.clone()),
             HandleObject::File(file) => HandleObject::File(Arc::clone(file)),
             HandleObject::Memory(data) => HandleObject::Memory(data.clone()),

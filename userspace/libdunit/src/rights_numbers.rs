@@ -11,3 +11,5 @@ pub const RIGHT_DISPLAY_MASTER: u32 = 1 << 5;
 pub const RIGHT_INPUT_MASTER: u32 = 1 << 6;
 pub const RIGHT_NET_CONTROL: u32 = 1 << 7;
 pub const RIGHT_NET_RAW: u32 = 1 << 8;
+pub const RIGHT_NET_CONNECT: u32 = 1 << 9;
+pub const RIGHT_NET_SERVICE: u32 = 1 << 10;

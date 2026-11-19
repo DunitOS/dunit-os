@@ -104,3 +104,7 @@
 94	IpcReceiveHandle
 95	NetDeviceGrant
 96	NetQueueOpen
+97	NetServiceRegister
+98	NetConnectGrant
+99	NetSocketOpen
+100	NetSocketOp

@@ -1,6 +1,6 @@
 mod fd;
 mod packet;
-pub(crate) use packet::{bootstrap_net_root, grant_net_device};
+pub(crate) use packet::{bootstrap_net_root, grant_net_connect, grant_net_device};
 mod runner;
 pub use runner::{exit_current_process, request_current_user_exit, request_current_user_fault, user_fault_escape_requested, preempt_switch_requested, clear_preempt_switch, set_preemption_enabled, preemption_enabled, preemption_count, reset_preemption_count, enter_user_process};
 mod lifecycle;
@@ -1089,7 +1089,7 @@ impl Process {
         handle: Handle,
     ) -> Result<(HandleObject, u32), HandleError> {
         let entry = self.handle_table.require(handle, RIGHT_TRANSFER)?;
-        if matches!(entry.object, HandleObject::Display | HandleObject::Input | HandleObject::NetRoot | HandleObject::NetDevice(_)) {
+        if matches!(entry.object, HandleObject::Display | HandleObject::Input | HandleObject::NetRoot | HandleObject::NetDevice(_) | HandleObject::NetConnect { .. }) {
             return Err(HandleError::WrongType);
         }
         self.handle_table.take_for_transfer(handle)
@@ -1197,6 +1197,16 @@ pub enum FdTarget {
     Pipe { id: u64, write: bool },
     /// Process-local native Ethernet queue, never inherited or exported.
     Packet { generation: u64, access: u32 },
+    /// Native application socket tied to the current process and service generation.
+    NetSocket { token: u64 },
+    /// Private request/response channel for the registered network service.
+    NetService { token: u64 },
+}
+
+impl FdTarget {
+    pub(crate) fn owner_bound(self) -> bool {
+        matches!(self, Self::Packet { .. } | Self::NetSocket { .. } | Self::NetService { .. })
+    }
 }
 
 /// What the fd layer asks the syscall layer to finish after a close/dup2 that
@@ -1208,6 +1218,7 @@ pub enum FdCleanup {
     CloseVfs(crate::fs::vfs::FileDescriptor),
     WakePipe(u64),
     ClosePacket(u64),
+    CloseSocket(FdTarget),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

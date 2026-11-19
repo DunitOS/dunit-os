@@ -291,6 +291,54 @@ Queue revocation yields EPIPE and device failure yields EIO.
 The shared codec lives in [`abi/packet`](packet). C layouts are in
 [`include/dunit/packet.h`](include/dunit/packet.h).
 
+## Outbound IPv4 application sockets
+
+The socket ABI defines four calls. Byte lengths use native pointer-sized
+arguments. Grant handles and descriptor numbers are process-local.
+
+| Call | Native arguments | Result |
+|---|---|---|
+| `NetServiceRegister` (97) | device handle, options pointer, options length | Private service bridge FD |
+| `NetConnectGrant` (98) | bootstrap root handle, direct child PID, scope mask | Connect handle in that child's table |
+| `NetSocketOpen` (99) | connect handle, protocol, options pointer, options length | Owner-bound nonblocking socket FD |
+| `NetSocketOp` (100) | FD, operation, input pointer, input length, output pointer, output length | Operation-specific result or negative errno |
+
+`NET_CONNECT` is right bit 9 and `NET_SERVICE` is bit 10. Scope bits 0 and 1
+authorize UDP and TCP respectively. Protocol values 1 and 2 select UDP and TCP.
+Both option records are eight bytes containing little-endian version 1 in
+the first two bytes and six reserved zero bytes. The native endpoint record
+contains four IPv4 octets, a little-endian u16 port and a reserved zero u16.
+An all-zero endpoint represents an unspecified address.
+
+Operations use these records:
+
+| Value | Operation | Input | Output |
+|---|---|---|---|
+| 1 | Connect | IPv4 endpoint | Empty |
+| 2 | UDP send-to | Destination endpoint followed by datagram | Empty |
+| 3 | UDP receive-from | Empty | 16-byte header followed by copied bytes |
+| 4 | TCP write shutdown | Empty | Empty |
+| 5 | Query error | Empty | Little-endian signed 32-bit errno |
+| 6 | Query endpoints | Empty | Local and remote endpoint records |
+
+The UDP receive header contains the source endpoint, a little-endian u32
+length before truncation, and four reserved zero bytes. The successful byte
+count includes the header. A header-only receive can report a zero-length
+datagram or explicitly truncate a nonempty datagram to zero bytes.
+
+The private bridge transports exact records with a 40-byte header and up to
+4096 payload bytes. The header contains u64 socket token and process owner,
+u16 kind and flags, i32 error, four IPv4 octets, u16 port, u16 protocol,
+u32 payload length and four reserved zero bytes. `COMPLETE` records identify
+the request kind in the flags field. All other records use zero flags.
+The kernel attaches the owner and token to requests. A `CREDIT` record
+reports that the application has consumed the preceding data record.
+
+C layouts are in [`include/dunit/socket.h`](include/dunit/socket.h).
+The equivalent checked codecs live in [`abi/socket`](socket).
+The [N4 design](../docs/network/application-sockets-proposal.md)
+describes the owner, service and authorization boundaries.
+
 ## Conformance and limits
 
 The freestanding `/app/c_hello` uses generated headers and its own crt0 to read

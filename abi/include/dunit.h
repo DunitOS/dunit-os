@@ -21,6 +21,7 @@
 #include <dunit/rights.h>
 #include <dunit/transfer.h>
 #include <dunit/packet.h>
+#include <dunit/socket.h>
 #include <dunit/ui.h>
 
 #endif /* DUNIT_H */
