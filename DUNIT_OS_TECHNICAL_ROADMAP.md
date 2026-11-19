@@ -592,16 +592,16 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
   NAKed or link-invalidated configurations.
 - [x] Prefer archive-provided static IPv4 with gateway/DNS settings over
   automatic DHCPv4. Probe before activation and withdraw on conflict.
-- [x] Install up to seven DHCP option 121 routes via connected gateways.
-  Prefer the classless list over Router option 3 and preserve it across
-  same-server renewals that omit route options.
+- [x] Install up to seven DHCP option 121 routes via connected gateways or
+  directly on-link. Prefer the classless list over Router option 3, preserve it
+  across same-server renewals that omit route options, and exercise direct
+  delivery and route withdrawal on E1000.
 - [x] Validate DNS fallback over TCP after a matched truncated UDP reply.
   Exercise loss of SYN, split TCP response framing and close through E1000.
 - [x] Probe each new DHCPv4 address before activation and announce it after
   the quiet interval. Decline an ARP conflict and verify reacquisition after
   the cooldown through the E1000 fixture.
-- [ ] Add DHCP relay support, on-link option 121 routes and reboot validation
-  before using persisted leases.
+- [ ] Add DHCP relay support and reboot validation before using persisted leases.
 - [ ] Integrate the resolver with lease changes, service entropy, and an
   application endpoint. Define admin/user configuration precedence.
 

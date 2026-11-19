@@ -109,7 +109,7 @@ impl Interface {
         let mut candidate = Peer::new(self.mac, config.address, config.mask, self.mtu)?;
         if let Some(routes) = config.routes {
             for route in routes.into_iter().flatten() {
-                candidate.add_route(route.network, route.mask, route.gateway)?;
+                candidate.add_classless_route(route)?;
             }
         } else if let Some(router) = config.router {
             candidate.add_route([0; 4], [0; 4], router)?;

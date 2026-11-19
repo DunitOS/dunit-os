@@ -520,7 +520,7 @@ fn classless_routes_override_router_and_select_longest_prefix() {
     ]
     .to_vec();
     options.extend_from_slice(&[
-        121, 21, 0, 2, 4, 25, 198, 51, 100, 128, 192, 0, 2, 1, 32, 198, 51, 100, 200, 192, 0, 2, 4,
+        121, 21, 0, 2, 4, 25, 198, 51, 100, 128, 192, 0, 2, 1, 32, 198, 51, 100, 200, 0, 0, 0, 0,
     ]);
     let ack = reply(5, xid, HOST, SERVER, &options);
     let Event::Bound(lease) = client
@@ -534,13 +534,11 @@ fn classless_routes_override_router_and_select_longest_prefix() {
     assert_eq!(advertised.iter().flatten().count(), 3);
     let mut routes = Routes::new(lease.address, lease.mask, MTU).unwrap();
     for route in advertised.iter().flatten() {
-        routes
-            .add(route.network, route.mask, route.gateway)
-            .unwrap();
+        route.install(&mut routes).unwrap();
     }
     assert_eq!(routes.next_hop([198, 51, 100, 120]), Ok(OTHER));
     assert_eq!(routes.next_hop([198, 51, 100, 132]), Ok(SERVER));
-    assert_eq!(routes.next_hop([198, 51, 100, 200]), Ok(OTHER));
+    assert_eq!(routes.next_hop([198, 51, 100, 200]), Ok([198, 51, 100, 200]));
 }
 
 #[test]
@@ -548,7 +546,7 @@ fn classless_routes_survive_same_server_ack_and_are_replaced_on_rebind() {
     let mut client = Client::new(CLIENT, 31).unwrap();
     let xid = select(&mut client);
     send(&mut client, 1);
-    let options = with_classless(&[24, 198, 51, 100, 192, 0, 2, 1]);
+    let options = with_classless(&[24, 198, 51, 100, 0, 0, 0, 0]);
     let ack = reply(5, xid, HOST, SERVER, &options);
     let Event::Bound(lease) = client
         .receive(&server_frame(&ack, SERVER, HOST, CLIENT), 2)
@@ -605,9 +603,9 @@ fn invalid_classless_routes_cannot_publish_an_ack() {
         (&[33, 192, 0, 2, 1], Error::Header),
         (&[24, 198, 51, 100, 192, 0, 2], Error::Length),
         (&[25, 198, 51, 100, 129, 192, 0, 2, 1], Error::Header),
-        (&[0, 0, 0, 0, 0], Error::Unsupported),
         (&[0, 198, 51, 100, 1], Error::Address),
         (&[24, 192, 0, 2, 192, 0, 2, 1], Error::Header),
+        (&[24, 192, 0, 2, 0, 0, 0, 0], Error::Header),
         (&duplicate, Error::Header),
         (&too_many, Error::Capacity),
         (&[0; (ROUTE_CAPACITY - 1) * 9 + 1], Error::Capacity),

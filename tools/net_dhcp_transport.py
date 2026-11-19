@@ -20,8 +20,11 @@ PROBER_MAC = bytes.fromhex("020000000004")
 ROUTE_GATEWAY = bytes([192, 0, 2, 254])
 ROUTE_MAC = bytes.fromhex("020000000007")
 ROUTED_HOST = bytes([198, 51, 100, 7])
+ON_LINK_HOST = bytes([198, 51, 101, 7])
+ON_LINK_MAC = bytes.fromhex("020000000008")
 OFF_PREFIX_HOST = bytes([203, 0, 113, 7])
 CLASSLESS_ROUTE = bytes([24]) + ROUTED_HOST[:3] + ROUTE_GATEWAY
+ON_LINK_ROUTE = bytes([24]) + ON_LINK_HOST[:3] + ZERO
 MASK = bytes([255, 255, 255, 0])
 DNS = bytes([192, 0, 2, 53])
 IPV4 = b"\x08\x00"
@@ -39,12 +42,15 @@ STAGES = (
     "first_lease_acd_and_probe_response",
     "first_lease_arp_icmp",
     "classless_route_and_router_option_ignored",
+    "on_link_route_direct_reply",
     "unicast_renewal_ack",
     "renewed_lease_arp_icmp",
     "renewal_retains_classless_route",
+    "renewal_retains_on_link_route",
     "unicast_renewal_lost_rebind_nak",
     "new_lease_acd",
     "new_lease_arp_icmp_old_address_silent",
+    "replacement_lease_removes_on_link_route",
 )
 
 
@@ -134,7 +140,8 @@ def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False,
     if kind != NAK:
         body += option(1, MASK) + option(6, DNS)
         if include_routes:
-            body += option(121, CLASSLESS_ROUTE) + option(3, SERVER)
+            routes = CLASSLESS_ROUTE if address == SECOND else CLASSLESS_ROUTE + ON_LINK_ROUTE
+            body += option(121, routes) + option(3, SERVER)
         body += option(51, struct.pack("!I", 28))
         body += option(58, struct.pack("!I", 14))
         body += option(59, struct.pack("!I", 20))
@@ -278,6 +285,16 @@ class NetDhcpPeer(EthernetPeer):
         return ethernet(BROADCAST_MAC, ARP, ARP_HEADER + b"\0\x01" +
                         HOST_MAC + SERVER + bytes(6) + address)
 
+    def _send_on_link_echo(self, connection: socket.socket, address: bytes, sequence: int) -> bytes:
+        echo = self._echo_request(sequence)
+        self._send(connection, ethernet(GUEST_MAC, IPV4, ipv4(1, ON_LINK_HOST, address, echo),
+                                        source=ON_LINK_MAC))
+        return echo
+
+    def _probe_on_link_route(self, connection: socket.socket, address: bytes, sequence: int) -> None:
+        echo = self._send_on_link_echo(connection, address, sequence)
+        self._expect_echo_reply(self._receive(connection), address, ON_LINK_HOST, ON_LINK_MAC, echo)
+
     def _renewal(self, connection: socket.socket, *, allow_rebind: bool = False) -> Request:
         # The stack may need one gateway/server ARP resolution before sending
         # the unicast renewal. It must target the server on the leased subnet.
@@ -320,6 +337,8 @@ class NetDhcpPeer(EthernetPeer):
         self._stages.append("first_lease_arp_icmp")
         self._probe_classless_route(connection, FIRST, 4, expect_arp=True)
         self._stages.append("classless_route_and_router_option_ignored")
+        self._probe_on_link_route(connection, FIRST, 6)
+        self._stages.append("on_link_route_direct_reply")
 
         renewal = self._renewal(connection)
         self._send(connection, reply(ACK, renewal.xid, FIRST, unicast=True, include_routes=False))
@@ -328,6 +347,8 @@ class NetDhcpPeer(EthernetPeer):
         self._stages.append("renewed_lease_arp_icmp")
         self._probe_classless_route(connection, FIRST, 5)
         self._stages.append("renewal_retains_classless_route")
+        self._probe_on_link_route(connection, FIRST, 7)
+        self._stages.append("renewal_retains_on_link_route")
 
         self._renewal(connection)  # Drop this renewal until T2.
         for _ in range(8):
@@ -344,8 +365,11 @@ class NetDhcpPeer(EthernetPeer):
         self._select(connection, discover, SECOND)
         self._complete_acd(connection, SECOND)
         self._stages.append("new_lease_acd")
+        # No ARP or echo may precede the expected response from the new lease.
+        self._send_on_link_echo(connection, SECOND, 8)
         self._probe_address(connection, SECOND, 3, silent=FIRST)
         self._stages.append("new_lease_arp_icmp_old_address_silent")
+        self._stages.append("replacement_lease_removes_on_link_route")
 
     def _finish_exchange(self) -> dict:
         if tuple(self._stages) != STAGES:

@@ -386,6 +386,39 @@ fn reverse_gateway_resolution_is_bounded_and_never_reflects_to_ingress() {
 }
 
 #[test]
+fn on_link_classless_route_resolves_the_destination_directly() {
+    let mut peer = Peer::new(A, IA, [255, 255, 255, 0], MTU).unwrap();
+    let remote = [198, 51, 100, 9];
+    let network = [198, 51, 100, 0];
+    let mask = [255, 255, 255, 0];
+    assert_eq!(peer.echo(remote, 1, 1, &[], 0), Err(Error::NoRoute));
+    peer.add_classless_route(dhcp::ClasslessRoute {
+        network,
+        mask,
+        gateway: None,
+    })
+    .unwrap();
+    for invalid in [network, [198, 51, 100, 255]] {
+        assert_eq!(peer.echo(invalid, 1, 1, &[], 0), Err(Error::Address));
+    }
+    let frame = peer.echo(remote, 1, 1, &[], 0).unwrap().unwrap();
+    let arp = Arp::parse(Ethernet::parse(&frame).unwrap().payload).unwrap();
+    assert_eq!(arp.target_ip, remote);
+    let reply = Arp {
+        sender_ip: remote,
+        ..arp_reply()
+    };
+    let frame = Ethernet::encode(A, B, 0x0806, &reply.encode().unwrap()).unwrap();
+    assert_eq!(peer.receive(&frame, 0), Ok(None));
+    let frame = peer.echo(remote, 1, 1, &[], 0).unwrap().unwrap();
+    let ethernet = Ethernet::parse(&frame).unwrap();
+    assert_eq!(ethernet.destination, B);
+    assert_eq!(Ipv4::parse(ethernet.payload).unwrap().destination, remote);
+    peer.remove_route(network, mask).unwrap();
+    assert_eq!(peer.echo(remote, 1, 1, &[], 0), Err(Error::NoRoute));
+}
+
+#[test]
 fn configured_endpoint_rejects_invalid_hosts_and_rx_over_mtu() {
     let mask = [255, 255, 255, 0];
     for local in [[192, 0, 2, 0], [192, 0, 2, 255], [0; 4], [224, 0, 0, 1]] {

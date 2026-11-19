@@ -1,0 +1,69 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "567f4a02ab1217e5976898e7fe7c6f75b0d6034e",
+  "scope": "DHCP option 121 direct routes in stock netd, including E1000 delivery, renewal and replacement.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "c089917a025d0311e7fe0b6a89f16d7b6c14d6f4bf61a639f8a112c8d433f049",
+    "docs/network/ipv4-services.md": "94febbafcb4381395ff39e297a59ccb4d65a8662f302a64047a6321583a65dc2",
+    "tools/net_dhcp_transport.py": "33944380db29391c6eaf10fe6b6a6377ac5f58d3b88ea01621b54cdb2a2ea5af",
+    "tools/test_net_dhcp_transport.py": "8f68df62f07dfe6f1d5abfae800e0134b0c6fcf3fe5f1ee3ee65904f25ed9700",
+    "userspace/net-core/src/dhcp.rs": "9330110035517c7bdbd1e4bf0010a58dd2b9d323500e07eda2a6fe872d046994",
+    "userspace/net-core/src/dhcp/tests.rs": "4fab24d47d5eafe523f35d3074713c94cfbdd2bb481fcf91a83cb33478ad0763",
+    "userspace/net-core/src/dhcp/wire.rs": "eb23725c2c935debcd4bc0e6f7d5e79baa6f9dab54881ffe6d014706b7e43ce6",
+    "userspace/net-core/src/lib.rs": "05df2d3501375c0a62f7a35a4986eae5b35c13806df0853b72d9788fae37dc50",
+    "userspace/net-core/src/tests.rs": "f5f883e17346c9abbfc764264f522ca39a968ed6244a8b822b10d8de4d7fe6bd",
+    "userspace/system_apps/netd/src/interface.rs": "062b1848963b55b191f0fe02f178b4476996d5b4d3a6236971b6c16ff7597637"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 67,
+    "python3 tools/test_net_dhcp_transport.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "command": "python3 tools/qemu_test.py --build --image-profile dwm --config limine_dwm.conf --markers-file tools/net_dhcp_markers.json --cpus 4 --accel tcg --timeout 170 --boot-timeout 120",
+    "started_utc": "2026-11-19T12:43:05.524823+00:00",
+    "iso_sha256": "3734084cbc9591dfc016d0594be2ffa556c06fb0e4a22d3f3b2bbea3a7b3ae4f",
+    "serial_sha256": "f6d445d06700f3415a77a16ec5a3922c7edce3bda526fe0b164e018cdada9b6a",
+    "network_peer_sha256": "fdfc8c46cfd1aa10d3a4ea933ae6f02b38d47b1d3f0fbdd469d69e2edea14037",
+    "result": {
+      "ok": true,
+      "reason": "completed",
+      "missing": [],
+      "forbidden": []
+    },
+    "network_peer": {
+      "ok": true,
+      "packets": 38,
+      "bytes": 6228,
+      "responses": 31,
+      "errors": [],
+      "transport": "localhost-tcp-qemu-socket",
+      "protocols": [
+        "ARP",
+        "ICMPv4",
+        "DHCPv4"
+      ],
+      "lease_stages": [
+        "discover_retried_after_loss",
+        "select_ignored_wrong_transaction",
+        "conflict_probe_declined_and_cooled_down",
+        "first_lease_acd_and_probe_response",
+        "first_lease_arp_icmp",
+        "classless_route_and_router_option_ignored",
+        "on_link_route_direct_reply",
+        "unicast_renewal_ack",
+        "renewed_lease_arp_icmp",
+        "renewal_retains_classless_route",
+        "renewal_retains_on_link_route",
+        "unicast_renewal_lost_rebind_nak",
+        "new_lease_acd",
+        "new_lease_arp_icmp_old_address_silent",
+        "replacement_lease_removes_on_link_route"
+      ],
+      "renewal_retries_before_rebind": 3,
+      "acd_probes": 7,
+      "acd_announcements": 4,
+      "decline_wall_cooldown_seconds": 10.007431338999595
+    }
+  }
+}

@@ -10,7 +10,8 @@ from pathlib import Path
 from net_dhcp_transport import (
     ACK, ARP, ARP_HEADER, BROADCAST, BROADCAST_MAC, CLASSLESS_ROUTE, CONFLICT, COOKIE,
     DECLINE, DISCOVER, FIRST, IPV4, NAK, OFFER, PROBER_MAC, REQUEST, SECOND,
-    OFF_PREFIX_HOST, ROUTED_HOST, ROUTE_GATEWAY, ROUTE_MAC, SERVER, STAGES, ZERO,
+    OFF_PREFIX_HOST, ON_LINK_HOST, ON_LINK_MAC, ON_LINK_ROUTE, ROUTED_HOST,
+    ROUTE_GATEWAY, ROUTE_MAC, SERVER, STAGES, ZERO,
     NetDhcpPeer, Request, ipv4, option, options, parse_request, pseudo,
 )
 from net_test_transport import GUEST_MAC, HOST_MAC, checksum
@@ -82,8 +83,8 @@ class DhcpPeerTests(unittest.TestCase):
                 result = peer.stop()
             self.assertTrue(result["ok"], result)
             self.assertEqual(result["lease_stages"], list(STAGES))
-            self.assertEqual(result["packets"], 34)
-            self.assertEqual(result["responses"], 28)
+            self.assertEqual(result["packets"], 36)
+            self.assertEqual(result["responses"], 31)
             self.assertEqual(result["acd_probes"], 7)
             self.assertEqual(result["acd_announcements"], 4)
             self.assertEqual(result["decline_wall_cooldown_seconds"], 10.125)
@@ -122,7 +123,8 @@ class DhcpPeerTests(unittest.TestCase):
         self.assertEqual(body[28:34], GUEST_MAC)
         self.assertEqual(body[236:243], COOKIE + option(53, bytes([kind])))
         parsed = options(body[240:])
-        self.assertEqual(parsed.get(121), CLASSLESS_ROUTE if includes_routes and kind != NAK else None)
+        routes = CLASSLESS_ROUTE if address == SECOND else CLASSLESS_ROUTE + ON_LINK_ROUTE
+        self.assertEqual(parsed.get(121), routes if includes_routes and kind != NAK else None)
         self.assertEqual(parsed.get(3), SERVER if includes_routes and kind != NAK else None)
 
     def answer_arp_and_echo(self, conn, address, silent=None):
@@ -160,6 +162,9 @@ class DhcpPeerTests(unittest.TestCase):
             self.assertEqual(reply[32:42], GUEST_MAC + address)
             self.assertEqual(self.read_frame(conn), routed)
         self.answer_echo(conn, routed, address, ROUTED_HOST, ROUTE_MAC)
+
+    def answer_on_link(self, conn, address):
+        self.answer_echo(conn, self.read_frame(conn), address, ON_LINK_HOST, ON_LINK_MAC)
 
     def acd_request(self, conn, candidate, sender=ZERO):
         self.send_frame(conn, guest_frame(BROADCAST_MAC, ARP, ARP_HEADER + b"\0\x01" +
@@ -206,6 +211,7 @@ class DhcpPeerTests(unittest.TestCase):
         self.answer_active_probe(conn, FIRST)
         self.answer_arp_and_echo(conn, FIRST)
         self.answer_classless(conn, FIRST, resolve=True)
+        self.answer_on_link(conn, FIRST)
 
         self.send_frame(conn, guest_frame(BROADCAST_MAC, ARP, ARP_HEADER + b"\0\x01" +
                                           GUEST_MAC + FIRST + bytes(6) + SERVER))
@@ -214,6 +220,7 @@ class DhcpPeerTests(unittest.TestCase):
         self.read_reply(conn, ACK, 13, FIRST, includes_routes=False)
         self.answer_arp_and_echo(conn, FIRST)
         self.answer_classless(conn, FIRST, resolve=False)
+        self.answer_on_link(conn, FIRST)
 
         self.send_frame(conn, client(REQUEST, 14, FIRST, SERVER))
         self.send_frame(conn, client(REQUEST, 14, FIRST, SERVER))
@@ -225,6 +232,10 @@ class DhcpPeerTests(unittest.TestCase):
         self.send_frame(conn, client(REQUEST, 15, selectors=option(50, SECOND) + option(54, SERVER)))
         self.read_reply(conn, ACK, 15, SECOND)
         self.complete_acd(conn, SECOND)
+        retired_route = self.read_frame(conn)
+        self.assertEqual(retired_route[:6], GUEST_MAC)
+        self.assertEqual(retired_route[6:12], ON_LINK_MAC)
+        self.assertEqual(retired_route[26:34], ON_LINK_HOST + SECOND)
         self.answer_arp_and_echo(conn, SECOND, silent=FIRST)
 
 

@@ -1,6 +1,7 @@
 //! BOOTP fixed header and DHCPv4 options used by the client.
 use super::{
     usable_ip, validate_config, ClasslessRoute, ClasslessRoutes, Lease, Offer, LIMITED_BROADCAST,
+    UNASSIGNED,
 };
 use crate::udp::MAX_PAYLOAD;
 use crate::{put, word, Error, Ip, Mac, ROUTE_CAPACITY};
@@ -155,14 +156,10 @@ fn classless_routes(mut bytes: &[u8]) -> Result<ClasslessRoutes, Error> {
             return Err(Error::Header);
         }
         let gateway = fixed(&entry[octets..])?;
-        if gateway == [0; 4] {
-            // The route table models a single directly connected subnet.
-            return Err(Error::Unsupported);
-        }
         *slot = Some(ClasslessRoute {
             network,
             mask: mask.to_be_bytes(),
-            gateway,
+            gateway: (gateway != UNASSIGNED).then_some(gateway),
         });
         bytes = &rest[entry.len()..];
     }

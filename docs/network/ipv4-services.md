@@ -34,13 +34,15 @@ backlog to one batch of 32 records so a slow transmitter cannot stall RX or
 lease transitions. The DHCP client uses a local noncryptographic transaction
 seed and bounded retries.
 
-DHCP option 121 carries up to seven classless routes via reachable gateways.
-A present classless list takes precedence over Router option 3, including
-when the list supplies no default route. A same-server renewal can omit the
-list and retain the previous routes. Invalid lists are rejected before
-publication. The DHCP peer checks a specific off-link prefix through its
-advertised next hop, a different prefix with no route, and the retained
-route after renewal.
+DHCP option 121 carries up to seven classless routes. A nonzero gateway
+must be reachable in the primary connected subnet. A zero gateway marks
+the prefix as on-link, so outbound traffic resolves the destination itself
+with ARP. Longest-prefix matching applies to both kinds of route. A present
+classless list takes precedence over Router option 3, including when the list
+supplies no default route. A same-server renewal can omit the list and retain
+the previous routes. Invalid lists are rejected before publication. The DHCP
+peer checks routed and direct delivery, retention on renewal, and loss of
+direct delivery when the replacement lease omits that route.
 
 The reference TCP connection owns one four-tuple, a 4 KiB send queue, a
 4 KiB receive queue and one segment in flight. It supports active and passive
@@ -85,7 +87,9 @@ also covers 2 MiB, sequence wrap and timer bounds.
 
 Stock netd also handles [explicitly granted outbound IPv4 sockets](application-sockets.md).
 Application DNS, TCP listener authority, production congestion control, DHCP
-relays, on-link classless routes and persisted lease recovery remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
+relays and persisted lease recovery remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
 [TCP admission verification](../verification/tcp-admission-2026-11-19.json),
 [DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json), and
-[static and classless route verification](../verification/ipv4-routing-2026-11-19.json).
+[static and gateway route verification](../verification/ipv4-routing-2026-11-19.json).
+The direct-route run is recorded in
+[on-link DHCP verification](../verification/dhcp-on-link-2026-11-19.json).

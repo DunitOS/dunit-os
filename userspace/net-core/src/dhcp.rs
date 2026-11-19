@@ -30,7 +30,14 @@ pub enum State {
 pub struct ClasslessRoute {
     pub network: Ip,
     pub mask: Ip,
-    pub gateway: Ip,
+    /// `None` means destinations in this prefix are directly reachable.
+    pub gateway: Option<Ip>,
+}
+
+impl ClasslessRoute {
+    pub(super) fn install(self, routes: &mut Routes) -> Result<(), Error> {
+        routes.add_via(self.network, self.mask, self.gateway)
+    }
 }
 
 /// The directly connected prefix occupies the remaining route-table slot.
@@ -444,7 +451,7 @@ fn validate_config(
     let mut routes = Routes::new(address, mask, MTU)?;
     if let Some(classless) = classless {
         for route in classless.iter().flatten() {
-            routes.add(route.network, route.mask, route.gateway)?;
+            route.install(&mut routes)?;
         }
     } else if let Some(router) = router {
         routes.add(UNASSIGNED, UNASSIGNED, router)?;

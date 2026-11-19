@@ -489,7 +489,8 @@ impl Route {
 }
 
 /// One interface owns its immutable connected route and seven removable routes.
-/// Gateways must be unicast hosts reachable on that connected interface.
+/// A removable route can resolve hosts directly or use a gateway on the
+/// interface's connected subnet.
 pub struct Routes {
     local: Ip,
     connected: Route,
@@ -519,9 +520,14 @@ impl Routes {
     /// Duplicate prefixes are rejected; remove before replacing. Validation is
     /// atomic, and the connected route cannot be replaced or removed.
     pub fn add(&mut self, network: Ip, mask: Ip, gateway: Ip) -> Result<(), Error> {
-        let route = Route::new(network, mask, Some(gateway))?;
-        if !valid_ip(gateway) || gateway == self.local || !self.connected.host(gateway) {
-            return Err(Error::Address);
+        self.add_via(network, mask, Some(gateway))
+    }
+    fn add_via(&mut self, network: Ip, mask: Ip, gateway: Option<Ip>) -> Result<(), Error> {
+        let route = Route::new(network, mask, gateway)?;
+        if let Some(gateway) = gateway {
+            if !valid_ip(gateway) || gateway == self.local || !self.connected.host(gateway) {
+                return Err(Error::Address);
+            }
         }
         if (route.network == self.connected.network && route.mask == self.connected.mask)
             || self
@@ -565,6 +571,9 @@ impl Routes {
             .filter(|r| r.contains(destination))
             .max_by_key(|r| r.mask.count_ones())
             .ok_or(Error::NoRoute)?;
+        if route.gateway.is_none() && !route.host(destination) {
+            return Err(Error::Address);
+        }
         Ok(route.gateway.unwrap_or(destination))
     }
 }
@@ -606,6 +615,9 @@ impl Peer {
     }
     pub fn add_route(&mut self, network: Ip, mask: Ip, gateway: Ip) -> Result<(), Error> {
         self.routes.add(network, mask, gateway)
+    }
+    pub fn add_classless_route(&mut self, route: dhcp::ClasslessRoute) -> Result<(), Error> {
+        route.install(&mut self.routes)
     }
     pub fn remove_route(&mut self, network: Ip, mask: Ip) -> Result<(), Error> {
         self.routes.remove(network, mask)
