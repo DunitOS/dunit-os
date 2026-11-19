@@ -10,12 +10,14 @@ from net_test_transport import GUEST_MAC, HOST_MAC, EthernetPeer, checksum
 
 GUEST = bytes((192, 0, 2, 2))
 HOST = bytes((192, 0, 2, 1))
+SECONDARY = bytes((192, 0, 2, 53))
 ARP = b"\x08\x06"
 IPV4 = b"\x08\x00"
 ETH_BROADCAST = b"\xff" * 6
 DNS_QUESTION = b"\x02du\x03net\x04test\x00\x00\x01\x00\x01"
 TCP_QUESTION = b"\x03tcp" + DNS_QUESTION
 MISSING_QUESTION = b"\x07missing" + DNS_QUESTION
+FAILOVER_QUESTION = b"\x08failover" + DNS_QUESTION
 DNS_PORT = 53
 LISTENER_PORT = 8080
 SYN, ACK, PSH, FIN = 0x02, 0x10, 0x08, 0x01
@@ -26,20 +28,20 @@ def ether(kind: bytes, payload: bytes) -> bytes:
     return (GUEST_MAC + HOST_MAC + kind + payload).ljust(60, b"\0")
 
 
-def ipv4(protocol: int, payload: bytes) -> bytes:
+def ipv4(protocol: int, payload: bytes, *, source: bytes = HOST) -> bytes:
     header = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 20 + len(payload), 0,
-                         0x4000, 64, protocol, 0, HOST, GUEST)
+                         0x4000, 64, protocol, 0, source, GUEST)
     header = header[:10] + struct.pack("!H", checksum(header)) + header[12:]
     return ether(IPV4, header + payload)
 
 
-def guest_ipv4(frame: bytes, protocol: int) -> bytes:
+def guest_ipv4(frame: bytes, protocol: int, *, target: bytes = HOST) -> bytes:
     if frame[:14] != HOST_MAC + GUEST_MAC + IPV4:
         raise ValueError("expected unicast guest IPv4")
     header = frame[14:34]
     total = int.from_bytes(header[2:4], "big")
     if (header[0] != 0x45 or not 20 <= total <= len(frame) - 14 or
-            header[9] != protocol or header[12:20] != GUEST + HOST or checksum(header)):
+            header[9] != protocol or header[12:20] != GUEST + target or checksum(header)):
         raise ValueError("invalid guest IPv4 header")
     return frame[34:14 + total]
 
@@ -68,13 +70,13 @@ def dns_answer(dns: bytes, question: bytes, answer_octet: int, truncated: bool) 
 
 
 def dns_response(frame: bytes, answer_octet: int, *, truncated: bool = False,
-                 negative: bool = False) -> bytes:
-    udp = guest_ipv4(frame, 17)
+                 negative: bool = False, failover: bool = False, server: bytes = HOST) -> bytes:
+    udp = guest_ipv4(frame, 17, target=server)
     if len(udp) < 8:
         raise ValueError("truncated UDP header")
     source, destination, length, check = struct.unpack("!HHHH", udp[:8])
     if (not source or destination != 53 or length != len(udp) or not check or
-            checksum(pseudo(GUEST, HOST, 17, length) + udp)):
+            checksum(pseudo(GUEST, server, 17, length) + udp)):
         raise ValueError("invalid DNS transport")
     if negative:
         query = udp[8:]
@@ -84,13 +86,17 @@ def dns_response(frame: bytes, answer_octet: int, *, truncated: bool = False,
         soa = struct.pack("!HHHIHHH5I", zone, 6, 1, 30, 24, zone, zone, 1, 60, 60, 60, 10)
         opt = struct.pack("!BHHIH", 0, 41, 512, 0, 0)
         dns_reply = query[:2] + struct.pack("!5H", 0x8183, 1, 0, 1, 1) + MISSING_QUESTION + soa + opt
+    elif failover:
+        dns_reply = dns_answer(udp[8:], FAILOVER_QUESTION, answer_octet, False)
+        if server == HOST:
+            dns_reply = dns_reply[:2] + struct.pack("!5H", 0x8182, 1, 0, 0, 0) + FAILOVER_QUESTION
     else:
         question = TCP_QUESTION if truncated else DNS_QUESTION
         dns_reply = dns_answer(udp[8:], question, answer_octet, truncated)
     udp_length = 8 + len(dns_reply)
     reply = struct.pack("!HHHH", 53, source, udp_length, 0) + dns_reply
-    udp_checksum = checksum(pseudo(HOST, GUEST, 17, udp_length) + reply) or 0xffff
-    return ipv4(17, reply[:6] + struct.pack("!H", udp_checksum) + reply[8:])
+    udp_checksum = checksum(pseudo(server, GUEST, 17, udp_length) + reply) or 0xffff
+    return ipv4(17, reply[:6] + struct.pack("!H", udp_checksum) + reply[8:], source=server)
 
 
 @dataclass(frozen=True)
@@ -171,6 +177,18 @@ class NetLivePeer(EthernetPeer):
             self._send(connection, reply)
             self._send(connection, dns_response(self._receive(connection), answer_octet))
             self._send(connection, dns_response(self._receive(connection), answer_octet, negative=True))
+            primary = self._receive(connection)
+            self._send(connection, dns_response(primary, answer_octet, failover=True))
+            request = (ETH_BROADCAST + GUEST_MAC + ARP + arp_prefix + b"\0\x01" +
+                       GUEST_MAC + GUEST + b"\0" * 6 + SECONDARY).ljust(60, b"\0")
+            if self._receive(connection) != request:
+                raise ValueError("expected ARP for secondary DNS server")
+            self._send(connection, ether(ARP, arp_prefix + b"\0\x02" +
+                                        HOST_MAC + SECONDARY + GUEST_MAC + GUEST))
+            secondary = self._receive(connection)
+            if guest_ipv4(secondary, 17, target=SECONDARY)[8:10] == guest_ipv4(primary, 17)[8:10]:
+                raise ValueError("DNS failover reused the primary transaction ID")
+            self._send(connection, dns_response(secondary, answer_octet, failover=True, server=SECONDARY))
             self._send(connection, dns_response(self._receive(connection), answer_octet, truncated=True))
             self._tcp_dns(connection, answer_octet)
             packets, responses = self._packets, self._responses
@@ -291,7 +309,7 @@ class NetLivePeer(EthernetPeer):
 
     def _finish_exchange(self) -> dict:
         baseline = self._packets - self._passive_packets, self._responses - self._passive_responses
-        if (*baseline, len(self._identifiers), self._tcp_rounds, self._passive_streams) != (20, 18, 2, 2, 4):
+        if (*baseline, len(self._identifiers), self._tcp_rounds, self._passive_streams) != (26, 24, 2, 2, 4):
             self.errors.append("incomplete ARP/ICMP/UDP/TCP DNS/passive TCP and restart exchange")
         return {"protocols": ["ARP", "ICMPv4", "UDP", "TCP", "DNS"],
                 "guest_identifiers": self._identifiers, "tcp_rounds": self._tcp_rounds,

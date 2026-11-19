@@ -601,6 +601,9 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
 - [x] Cache DNS NXDOMAIN and NODATA using the authority SOA lifetime and
   the existing eight-entry cache. Verify type scope, TTL expiry and a
   cached negative result through E1000.
+- [x] Bound DNS resolution while waiting for ARP. Retry on a secondary DNS
+  endpoint after primary UDP timeout, route loss, SERVFAIL or REFUSED.
+  Verify fresh transaction matching and failover over E1000.
 - [x] Probe each new DHCPv4 address before activation and announce it after
   the quiet interval. Decline an ARP conflict and verify reacquisition after
   the cooldown through the E1000 fixture.

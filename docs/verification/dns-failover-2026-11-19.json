@@ -1,0 +1,56 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "464db0c6f3e40c2f4d50ce100222b8c8d854ebb1",
+  "scope": "Bounded UDP DNS failover to a secondary server. E1000 checks SERVFAIL, fresh ID and an answer from a distinct IP before and after supervised restart. Production netd application resolver remains open.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "8352db53055fb040ba8d1a77779fd169079563cfbc30a9cce4fdd092e87aaf97",
+    "docs/network/ipv4-services.md": "f0f04229b8aa0186e22e58cac1e705c7f73b3859580ff77407183ebcc11bcead",
+    "tools/net_live_markers.json": "0e992cb0c3bdc6b147281040f0210df8a84a43970fbd481d1c99c9ca94fbb6f5",
+    "tools/net_live_transport.py": "879764f98c603a8bc7559bd471f75b6c61ed4add5547a521ff32855ed5588f2c",
+    "userspace/net-core/src/dns.rs": "068790c72f4fe86ff9ce03e1529c0c1d58d0fe72ac026e2bbff321ea90ada6cd",
+    "userspace/net-core/src/transport_tests.rs": "439460a48c3ac777a0024b9abfe41ccb898c222410708af40c1e772f634337d8",
+    "userspace/net-core/src/udp.rs": "95dfbaa3e2f4b9b94f109ac1a2942096ebfb4e60ab954c1487ce03dec61157a1",
+    "userspace/system_apps/netd_fixture/src/main.rs": "52c7400f5acb7926c32f6c9b47079c0b43a87328df19ffef7aa87ef73c9017b7"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 73,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "command": "python3 tools/qemu_test.py --build --markers-file tools/net_live_markers.json --cpus 4 --accel tcg --timeout 180 --boot-timeout 100",
+    "iso_sha256": "e72849e24f2a89cbafe3dc0eb56149a43f2bcca253f8f3de2af6296c4ffa5e62",
+    "serial_sha256": "82c92ef602d1ec6a6d3c4e4d06a1c4ace5b0bfef40eda8b89526f2a51d472c52",
+    "network_peer_sha256": "4a8413090a3c4d7d1eb38b9e0a2bbdda1d28d024cc02a3f766af50a276555ab3",
+    "failover_markers": 2,
+    "result": {
+      "ok": true,
+      "reason": "completed",
+      "missing": [],
+      "forbidden": []
+    },
+    "network_peer": {
+      "ok": true,
+      "packets": 40,
+      "bytes": 2674,
+      "responses": 46,
+      "errors": [],
+      "transport": "localhost-tcp-qemu-socket",
+      "protocols": [
+        "ARP",
+        "ICMPv4",
+        "UDP",
+        "TCP",
+        "DNS"
+      ],
+      "guest_identifiers": [
+        62,
+        77
+      ],
+      "tcp_rounds": 2,
+      "passive_streams": 4,
+      "passive_packets": 14
+    }
+  }
+}

@@ -97,6 +97,14 @@ type. Negative and positive results share the eight-entry cache. The
 E1000 fixture checks NXDOMAIN with an EDNS OPT record and verifies that
 the next query for the same name and a different type uses the cache.
 
+The reference resolver can use a secondary server after the primary UDP
+exchange times out, loses its route, or receives SERVFAIL or REFUSED. It
+reconnects its UDP endpoint to the secondary and uses a fresh transaction
+ID. NXDOMAIN and NODATA finish the query. The per-server UDP budget
+includes ARP resolution. Truncated replies can still trigger TCP on the
+server that returned them. The next cache miss starts at the primary.
+See [DNS failover verification](../verification/dns-failover-2026-11-19.json).
+
 ## Verification
 
 ```sh

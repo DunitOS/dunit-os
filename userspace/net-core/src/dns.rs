@@ -13,6 +13,7 @@ pub const DNS_LIMIT: usize = 512;
 pub const RETRY_MS: u64 = 1000;
 pub const ATTEMPTS: u8 = 3;
 pub const TCP_TIMEOUT_MS: u64 = 5000;
+const UDP_BUDGET_MS: u64 = ARP_RETRY_MS * ARP_ATTEMPTS as u64 + RETRY_MS * ATTEMPTS as u64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     A,
@@ -189,6 +190,7 @@ enum Value {
 enum Response {
     Answer(Answer),
     Negative { ttl: u32, all_types: bool },
+    ServerFailure,
     Truncated,
 }
 
@@ -196,7 +198,7 @@ pub fn parse_response(b: &[u8], question: &Question) -> Result<Answer, Error> {
     match parse_message(b, question, DNS_LIMIT)? {
         Response::Answer(answer) => Ok(answer),
         Response::Negative { .. } => Err(Error::NameNotFound),
-        Response::Truncated => Err(Error::Unsupported),
+        Response::Truncated | Response::ServerFailure => Err(Error::Unsupported),
     }
 }
 
@@ -299,6 +301,7 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
     let nxdomain = match flags & 15 {
         0 => false,
         3 => true,
+        2 | 5 => return Ok(Response::ServerFailure),
         _ => return Err(Error::Unsupported),
     };
     let mut target = question.name.clone();
@@ -360,12 +363,16 @@ struct Cached {
 }
 struct Transaction {
     question: Question,
+    server: Address,
     attempts: u8,
     next: u64,
+    expires: u64,
     tcp: Option<stream::ResponseFrame>,
 }
 pub struct Resolver {
-    server: Address,
+    primary: Address,
+    secondary: Option<Address>,
+    connected: Address,
     port: u16,
     pending: Option<Transaction>,
     cache: Vec<Cached>,
@@ -386,26 +393,61 @@ pub enum Poll {
         deadline_ms: u64,
     },
 }
+
+enum AttemptError {
+    Network(Error),
+    ServerFailure,
+}
+
+impl From<Error> for AttemptError {
+    fn from(error: Error) -> Self {
+        Self::Network(error)
+    }
+}
+
 impl Resolver {
     /// Owns a connected ephemeral UDP port until close. Caller configures server.
     pub fn new(peer: &mut Peer, server: Address) -> Result<Self, Error> {
-        Self::open(peer, server, false)
+        Self::open(peer, server, None, false)
     }
 
     /// The caller owns connection establishment, transport and close. Only
     /// bytes from that one connected stream may be passed to `receive_tcp`.
     pub fn new_with_tcp(peer: &mut Peer, server: Address) -> Result<Self, Error> {
-        Self::open(peer, server, true)
+        Self::open(peer, server, None, true)
     }
 
-    fn open(peer: &mut Peer, server: Address, tcp_fallback: bool) -> Result<Self, Error> {
+    /// Try the secondary on UDP timeout, route loss, SERVFAIL or REFUSED.
+    /// An authoritative negative result ends the query.
+    pub fn with_secondary(
+        peer: &mut Peer,
+        primary: Address,
+        secondary: Address,
+        tcp_fallback: bool,
+    ) -> Result<Self, Error> {
+        if primary == secondary {
+            return Err(Error::Address);
+        }
+        // Validate the secondary address independently of ARP state.
+        secondary.validate()?;
+        Self::open(peer, primary, Some(secondary), tcp_fallback)
+    }
+
+    fn open(
+        peer: &mut Peer,
+        primary: Address,
+        secondary: Option<Address>,
+        tcp_fallback: bool,
+    ) -> Result<Self, Error> {
         let port = peer.udp_bind(0)?;
-        if let Err(e) = peer.udp_connect(port, Some(server)) {
+        if let Err(e) = peer.udp_connect(port, Some(primary)) {
             peer.udp_close(port)?;
             return Err(e);
         }
         Ok(Self {
-            server,
+            primary,
+            secondary,
+            connected: primary,
             port,
             pending: None,
             cache: Vec::new(),
@@ -443,60 +485,89 @@ impl Resolver {
         self.next_id = self.next_id.wrapping_add(1);
         self.pending = Some(Transaction {
             question,
+            server: self.primary,
             attempts: 0,
             next: now,
+            expires: now.saturating_add(UDP_BUDGET_MS),
             tcp: None,
         });
         Ok(None)
     }
     pub fn poll(&mut self, peer: &mut Peer, now: u64) -> Result<Poll, Error> {
         self.advance(now)?;
+        loop {
+            let error = match self.poll_server(peer, now) {
+                Ok(result) => return Ok(result),
+                Err(AttemptError::ServerFailure) => Error::Unsupported,
+                Err(AttemptError::Network(error @ (Error::Timeout | Error::NoRoute))) => error,
+                Err(AttemptError::Network(error)) => return Err(error),
+            };
+            let tx = self.pending.as_mut().ok_or(Error::NotBound)?;
+            let Some(secondary) = self.secondary.filter(|_| tx.server == self.primary && tx.tcp.is_none()) else {
+                self.pending = None;
+                return Err(error);
+            };
+            tx.server = secondary;
+            tx.question.id = self.next_id;
+            self.next_id = self.next_id.wrapping_add(1);
+            tx.attempts = 0;
+            tx.next = now;
+            tx.expires = now.saturating_add(UDP_BUDGET_MS);
+        }
+    }
+
+    fn poll_server(&mut self, peer: &mut Peer, now: u64) -> Result<Poll, AttemptError> {
         let tx = self.pending.as_mut().ok_or(Error::NotBound)?;
+        if self.connected != tx.server {
+            peer.udp_connect(self.port, Some(tx.server))?;
+            self.connected = tx.server;
+        }
         // A packet arriving at/after the final deadline cannot rescue an expired query.
-        if (tx.attempts == ATTEMPTS || tx.tcp.is_some()) && now >= tx.next {
-            self.pending = None;
-            return Err(Error::Timeout);
+        if now >= tx.expires || ((tx.attempts == ATTEMPTS || tx.tcp.is_some()) && now >= tx.next) {
+            return Err(Error::Timeout.into());
         }
         if tx.tcp.is_some() {
             return Ok(Poll::Waiting);
         }
         match peer.udp_recv(self.port) {
             Ok(packet) => {
-                if packet.source != self.server || tx.attempts == 0 {
-                    return Err(Error::Unsolicited);
+                if packet.source != tx.server || tx.attempts == 0 {
+                    return Err(Error::Unsolicited.into());
                 }
                 let answer = match parse_message(&packet.data, &tx.question, DNS_LIMIT) {
                     Ok(Response::Answer(answer)) => answer,
+                    Ok(Response::ServerFailure) => return Err(AttemptError::ServerFailure),
                     Ok(Response::Negative { ttl, all_types }) => {
                         self.finish(None, ttl, all_types, now);
-                        return Err(Error::NameNotFound);
+                        return Err(Error::NameNotFound.into());
                     }
                     Ok(Response::Truncated) if self.tcp_fallback => {
                         let query = stream::encode(&tx.question.encode()?)?;
                         tx.next = now.saturating_add(TCP_TIMEOUT_MS);
+                        tx.expires = tx.next;
                         tx.tcp = Some(stream::ResponseFrame::default());
                         return Ok(Poll::TcpFallback {
-                            server: self.server,
+                            server: tx.server,
                             query,
                             deadline_ms: tx.next,
                         });
                     }
                     Ok(Response::Truncated) => {
                         self.pending = None;
-                        return Err(Error::Unsupported);
+                        return Err(Error::Unsupported.into());
                     }
                     Err(e) => {
                         if e == Error::Unsupported {
                             self.pending = None;
                         }
-                        return Err(e);
+                        return Err(e.into());
                     }
                 };
                 self.finish(Some(&answer), answer.ttl, false, now);
                 return Ok(Poll::Answer(answer));
             }
             Err(Error::WouldBlock) => {}
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         }
         if now < tx.next {
             return Ok(Poll::Waiting);
@@ -535,7 +606,7 @@ impl Resolver {
                 self.finish(None, ttl, all_types, now);
                 Err(Error::NameNotFound)
             }
-            Ok(Response::Truncated) => {
+            Ok(Response::Truncated | Response::ServerFailure) => {
                 self.pending = None;
                 Err(Error::Unsupported)
             }
@@ -554,11 +625,11 @@ impl Resolver {
     }
 
     fn tcp_transaction(&mut self, server: Address, now: u64) -> Result<&mut Transaction, Error> {
-        if server != self.server {
-            return Err(Error::Unsolicited);
-        }
         self.advance(now)?;
         let tx = self.pending.as_ref().ok_or(Error::NotBound)?;
+        if server != tx.server {
+            return Err(Error::Unsolicited);
+        }
         if tx.tcp.is_none() {
             return Err(Error::NotBound);
         }

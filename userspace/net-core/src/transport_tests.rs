@@ -397,6 +397,48 @@ fn dns_negative_cache_uses_soa_minimum_and_question_scope() {
 }
 
 #[test]
+fn dns_failover_on_timeout_ignores_primary_queue_and_restarts_with_primary() {
+    let mut peer = peer();
+    warm(&mut peer);
+    let primary = address(IB, 53);
+    let backup = address(IB, 5353);
+    let mut resolver = Resolver::with_secondary(&mut peer, primary, backup, false).unwrap();
+    resolver.start(b"missing.test", Kind::A, 0).unwrap();
+    let (port, original) = query_frame(&mut resolver, &mut peer, 0);
+    for now in [1000, 2000] {
+        assert_eq!(query_frame(&mut resolver, &mut peer, now), (port, original.clone()));
+    }
+    deliver_at(&mut peer, port, &original.response(&answer()).unwrap(), 3000).unwrap();
+    let (new_port, retry) = query_frame(&mut resolver, &mut peer, 3000);
+    assert_eq!(new_port, port);
+    assert_ne!(retry.id, original.id);
+    assert_eq!(retry.name, original.name);
+    assert_eq!(
+        deliver_at(&mut peer, port, &retry.response(&answer()).unwrap(), 3000),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(resolver.poll(&mut peer, 3000), Ok(Poll::Waiting));
+    query_frame(&mut resolver, &mut peer, 4000);
+    query_frame(&mut resolver, &mut peer, 5000);
+    assert_eq!(resolver.poll(&mut peer, 6000), Err(Error::Timeout));
+    resolver.start(b"other.test", Kind::A, 6000).unwrap();
+    let (_, current) = query_frame(&mut resolver, &mut peer, 6000);
+    deliver_at(&mut peer, port, &current.response(&answer()).unwrap(), 6000).unwrap();
+    assert_eq!(resolver.poll(&mut peer, 6000), Ok(Poll::Answer(answer())));
+}
+
+#[test]
+fn dns_unresolved_neighbor_does_not_leave_transaction_open() {
+    let mut peer = peer();
+    let mut resolver = Resolver::new(&mut peer, address(IB, 53)).unwrap();
+    resolver.start(b"missing.test", Kind::A, 0).unwrap();
+    assert!(matches!(resolver.poll(&mut peer, 0), Ok(Poll::Frame(_))));
+    // The caller missed several ARP wakeups. This must still be terminal.
+    assert_eq!(resolver.poll(&mut peer, 6000), Err(Error::Timeout));
+    assert_eq!(resolver.start(b"other.test", Kind::A, 6000), Ok(None));
+}
+
+#[test]
 fn dns_bounded_mutation_corpus_never_panics() {
     let q = question();
     let seed = q.response(&answer()).unwrap();

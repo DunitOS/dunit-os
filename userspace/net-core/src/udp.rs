@@ -12,7 +12,7 @@ pub struct Address {
     pub port: u16,
 }
 impl Address {
-    fn validate(self) -> Result<(), Error> {
+    pub(crate) fn validate(self) -> Result<(), Error> {
         if !valid_ip(self.ip) || self.port == 0 {
             return Err(Error::Address);
         }

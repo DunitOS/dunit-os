@@ -193,8 +193,12 @@ fn exchange() -> Result<()> {
         "live echo reply",
     )?;
 
-    let mut resolver =
-        Resolver::new(&mut peer, Address { ip: HOST, port: 53 }).map_err(net_error)?;
+    let mut resolver = Resolver::with_secondary(
+        &mut peer,
+        Address { ip: HOST, port: 53 },
+        Address { ip: [192, 0, 2, 53], port: 53 },
+        false,
+    ).map_err(net_error)?;
     require(
         resolver
             .start(NAME, Kind::A, clock(started)?)
@@ -242,6 +246,24 @@ fn exchange() -> Result<()> {
         "NXDOMAIN cached across record types",
     )?;
     dunit::println!("[NETD-FIXTURE] DNS NXDOMAIN cached from SOA across record types")?;
+    resolver.start(b"failover.du.net.test", Kind::A, clock(started)?).map_err(net_error)?;
+    // A primary query, ARP for the secondary, then a fresh secondary query.
+    for _ in 0..3 {
+        let Poll::Frame(frame) = resolver.poll(&mut peer, clock(started)?).map_err(net_error)? else {
+            return Err(Error(errno::EIO));
+        };
+        send_frame(&queue, &frame, &mut tx)?;
+        queue.wait(wait_set::READ, RX_TIMEOUT_NS)?;
+        let count = queue.receive(&mut rx)?;
+        for frame in Records::new(&rx[..count]).map_err(wire_error)? {
+            peer.receive(frame, clock(started)?).map_err(net_error)?;
+        }
+    }
+    require(
+        resolver.poll(&mut peer, clock(started)?).map_err(net_error)? == Poll::Answer(answer.clone()),
+        "secondary DNS answer after SERVFAIL",
+    )?;
+    dunit::println!("[NETD-FIXTURE] DNS secondary answered after primary SERVFAIL")?;
     resolver.close(&mut peer).map_err(net_error)?;
     let fallback = dns_tcp::exchange(
         &queue, &mut peer, info.mtu as usize, started, &mut rx, &mut tx,
