@@ -1,0 +1,159 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "45070e236cc8483bce5ed27875cb6d7d94066054",
+  "scope": "Stock netd static address probing and gateway, bounded DHCP option 121 routes and renewal.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "00f07d70cdef64d85f5923158409a5e655f2b68581280ecc7749c43a36d387c9",
+    "docs/network/ipv4-services.md": "a0202e447c0336f5ac29ec8b352c2ab92a1de9b27d00276523b744a8b68b7274",
+    "tests/fixtures/net-static/system/boot-services/netd-ipv4.conf": "e1a196bba3e3495f4bf8067e09fed711eea9f46edb7c1a8554a7a7f1e00bc14c",
+    "tools/net_dhcp_markers.json": "045041e911d5c1b361327d16ab720c7b9c1e99c8ba5a760cf5b77b7b6e9976ee",
+    "tools/net_dhcp_transport.py": "2ad128b3a8efb520df2f79b1c1be989e7ef44d0753388a4ee528c0789501ca50",
+    "tools/net_static_markers.json": "f16ca85447d3ae9b498bed7b0536f766bcb1a30757268d7dee438fb7ab1572e2",
+    "tools/net_static_transport.py": "99063a2c21b40d38e9e07384d1b3f0533444b3c1d7f14104817f23b4fbd0a9f4",
+    "tools/qemu_test.py": "e82ab43f7abec9b299b815d0a522613686d72eeb5bfb695a57931d883b972a98",
+    "tools/test_net_dhcp_transport.py": "221ed487473ec4623309c4ee919389c1965890c4fd4cf243bf5ca2079c426425",
+    "tools/test_net_static_transport.py": "759347794acbdc766359ef649f264d3b1b9268ef5e3c4820306b82c26722b22e",
+    "userspace/net-core/src/dhcp.rs": "ebf94f7d030531955d90727cd4c349beaaab9e7ebd2d53cb6558ea72bd280f89",
+    "userspace/net-core/src/dhcp/tests.rs": "bc64f7f298ec3109e323fd3d5891ce6aa688815bac275aef7de2fba9ef711c4c",
+    "userspace/net-core/src/dhcp/wire.rs": "4af580cb11030707b11819a90825a78798941b543069a0de77e9483a549c8645",
+    "userspace/system_apps/netd/src/address_probe.rs": "ccac984deb6a1687740c96ad6a36133d15fbfee9867ccde26fb11404c218b34c",
+    "userspace/system_apps/netd/src/dhcp_runtime.rs": "14d162a8b8ddbf5e47db800796395464b7ce3d3444f3c838e5107d2626aba629",
+    "userspace/system_apps/netd/src/interface.rs": "fe2781abb8887b2fd14ba4a66a1bee91ac12d9d9a61cc729c0558fc978ac8261",
+    "userspace/system_apps/netd/src/main.rs": "faf4f5363a2fc87ad432f77894093a1f89aabf521cc84d794d57352b2e192227",
+    "userspace/system_apps/netd/src/static_runtime.rs": "1fe1bc3d0ac3c1a2535b53eaf33380805608607c6ab985586db453b57575774b"
+  },
+  "native_cases": [
+    {
+      "name": "net-ipv4-static",
+      "scope": "DWM netd reads sealed static address, gateway and DNS settings. Three ARP probes and two announcements precede direct ARP/ICMP. The host verifies the gateway MAC and retained final IPv4 destination on off-link echo. A competing ARP claim withdraws the address and the link stays silent for one second.",
+      "marker_fixture": "tools/net_static_markers.json",
+      "metadata_sha256": "2ead213ab23e680675c14653cdc2d2dcfa9f987c17ab00dab2116ec768412153",
+      "serial_sha256": "e23391cad93dc7c1fda149b4fdc34a2a1428467ebfc59ee82e80e4a8856c1928",
+      "image_sha256": "8dfcec11a437907c6a4f4bda1fcee711db7bb799f234f996095806daf0196821",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 9,
+        "bytes": 540,
+        "responses": 9,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4"
+        ],
+        "static_stages": [
+          "three_probes_two_announcements",
+          "direct_arp_and_icmp",
+          "off_link_icmp_via_configured_gateway",
+          "active_conflict_withdrawn"
+        ],
+        "address": "192.0.2.12",
+        "gateway": "192.0.2.1",
+        "off_link_peer": "198.51.100.7",
+        "post_conflict_quiet_seconds": 1.0
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-ipv4-classless",
+      "scope": "Stock DHCP service through reference E1000. DHCP option 121 routes a /24 via 192.0.2.254; option 3 is ignored, including for an unreachable prefix. Same-server renewal omitting route options retains the classless route. Existing loss, conflict/DECLINE, probe, T2 rebind, NAK and replacement checks pass.",
+      "marker_fixture": "tools/net_dhcp_markers.json",
+      "metadata_sha256": "6453f5889fb1527ddf4c55f44ccd47512405b01841fe940ecccdfbb269cbbb30",
+      "serial_sha256": "5318f8b22f1d4d07d7d1327e255ec89e3bc3c1bf0060bfdd9b070e322d3f4815",
+      "image_sha256": "d490625fb6293da8bd984056f5b837ae07585f7e29cbaed7f01fc6fb4233a63c",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 36,
+        "bytes": 6108,
+        "responses": 28,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "discover_retried_after_loss",
+          "select_ignored_wrong_transaction",
+          "conflict_probe_declined_and_cooled_down",
+          "first_lease_acd_and_probe_response",
+          "first_lease_arp_icmp",
+          "classless_route_and_router_option_ignored",
+          "unicast_renewal_ack",
+          "renewed_lease_arp_icmp",
+          "renewal_retains_classless_route",
+          "unicast_renewal_lost_rebind_nak",
+          "new_lease_acd",
+          "new_lease_arp_icmp_old_address_silent"
+        ],
+        "renewal_retries_before_rebind": 3,
+        "acd_probes": 7,
+        "acd_announcements": 4,
+        "decline_wall_cooldown_seconds": 10.01886772099897
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-ipv4-route-slirp",
+      "scope": "Same default DWM image with restricted QEMU Slirp. Lease activates and desktop is ready with ordinary DHCP server options.",
+      "marker_fixture": "local DWM DHCP smoke for 10.0.2.15",
+      "metadata_sha256": "6d5762f5dedae406d50119b861eb746306cef5f634188d725f6a0c15d608c9bd",
+      "serial_sha256": "e6359ea457206e11290bd99e6caa9e337c814c7ee3ca9bad1dc9f7fdd91435e4",
+      "image_sha256": "d490625fb6293da8bd984056f5b837ae07585f7e29cbaed7f01fc6fb4233a63c",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": null,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "host_cases": {
+    "test_net_core.py": "63 core + 3 interface tests",
+    "test_net_static_transport.py": "3 passed",
+    "test_net_dhcp_transport.py": "3 passed",
+    "test_net_harness.py": "3 passed",
+    "gen_abi.py --check": "96 syscalls, 25 errno and 9 rights"
+  },
+  "limits": [
+    "TCG reference E1000 with one IPv4 interface. Static conflict recovery uses link transition or reboot.",
+    "Seven DHCP classless routes via connected gateways. On-link option 121 routes with a zero gateway are rejected as unsupported.",
+    "Configured DNS servers are stored with interface state. The production application resolver and N4 socket authority remain open."
+  ]
+}

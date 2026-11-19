@@ -566,7 +566,9 @@ ring wrap/starvation/completion/link-toggle/interrupt-storm/reset tests and
 - [ ] Validate Ethernet II sizes/padding/types; reject bad/unknown frames early.
 - [ ] Bound ARP INCOMPLETE/REACHABLE/STALE retry/expiry/poisoning policy.
 - [ ] Validate IPv4 version/IHL/length/checksum/TTL/protocol/address.
-- [ ] Provide connected/default routes and longest-prefix selection.
+- [x] Install the connected route and configured gateway in stock netd.
+  Use longest-prefix selection for validated DHCP classless gateway routes
+  and verify off-link return traffic through E1000.
 - [ ] Define MTU/TX fragmentation and bounded-or-deferred RX reassembly.
 - [ ] Rate-limit ICMP echo/unreachable/time-exceeded and provide logical loopback.
 
@@ -587,13 +589,18 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
 - [x] Run the single-interface DHCPv4 state machine in netd. Validate offers,
   publish address/prefix/gateway/DNS together, renew, rebind, and remove expired,
   NAKed or link-invalidated configurations.
-- [x] Prefer an archive-provided static address over automatic DHCPv4.
+- [x] Prefer archive-provided static IPv4 with gateway/DNS settings over
+  automatic DHCPv4. Probe before activation and withdraw on conflict.
+- [x] Install up to seven DHCP option 121 routes via connected gateways.
+  Prefer the classless list over Router option 3 and preserve it across
+  same-server renewals that omit route options.
 - [x] Validate DNS fallback over TCP after a matched truncated UDP reply.
   Exercise loss of SYN, split TCP response framing and close through E1000.
 - [x] Probe each new DHCPv4 address before activation and announce it after
   the quiet interval. Decline an ARP conflict and verify reacquisition after
   the cooldown through the E1000 fixture.
-- [ ] Add DHCP relay support and reboot validation before using persisted leases.
+- [ ] Add DHCP relay support, on-link option 121 routes and reboot validation
+  before using persisted leases.
 - [ ] Integrate the resolver with lease changes, service entropy, and an
   application endpoint. Define admin/user configuration precedence.
 

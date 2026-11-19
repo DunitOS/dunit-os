@@ -2,9 +2,22 @@
 
 The DWM image's `netd` uses the sealed boot catalog and the existing native
 packet queue. It prefers a static IPv4 address under
-`/system/boot-services/netd-ipv4.conf` in address/prefix form. With that file
+`/system/boot-services/netd-ipv4.conf`:
+
+```text
+192.0.2.12/24
+gateway=192.0.2.1
+dns=192.0.2.53,192.0.2.54
+```
+
+The address/prefix line is required. Gateway and one or two DNS servers are
+optional. Blank lines and comment lines starting with `#` are allowed.
+Netd validates the whole file and connected gateway before advertising the
+address. Static mode probes and announces the configured address, withdraws it
+on conflict, and retries on a detected link down/up or reboot. With the file
 absent, netd negotiates an IPv4 lease with a directly connected DHCP server.
-Other applications keep their existing authority.
+The configured DNS addresses are retained with the interface state. The
+application resolver service remains separate.
 
 DHCP validates the transaction ID, interface MAC, selected server, address,
 subnet, gateway, DNS servers and lifetime before activating a lease. The
@@ -20,6 +33,14 @@ The service waits on packet readiness and monotonic deadlines. It bounds TX
 backlog to one batch of 32 records so a slow transmitter cannot stall RX or
 lease transitions. The DHCP client uses a local noncryptographic transaction
 seed and bounded retries.
+
+DHCP option 121 carries up to seven classless routes via reachable gateways.
+A present classless list takes precedence over Router option 3, including
+when the list supplies no default route. A same-server renewal can omit the
+list and retain the previous routes. Invalid lists are rejected before
+publication. The DHCP peer checks a specific off-link prefix through its
+advertised next hop, a different prefix with no route, and the retained
+route after renewal.
 
 The reference TCP connection owns one four-tuple, a 4 KiB send queue, a
 4 KiB receive queue and one segment in flight. It supports active and passive
@@ -50,6 +71,8 @@ before and after a supervised restart. The UDP-only API stays available.
 python3 tools/test_net_core.py
 python3 tools/qemu_test.py --build --image-profile dwm --config limine_dwm.conf \
   --markers-file tools/net_dhcp_markers.json --cpus 4 --accel tcg --timeout 150
+python3 tools/qemu_test.py --build --image-profile dwm --config limine_dwm.conf \
+  --markers-file tools/net_static_markers.json --cpus 4 --accel tcg --timeout 140
 python3 tools/qemu_test.py --build --markers-file tools/net_live_markers.json \
   --cpus 8 --accel tcg --timeout 250
 ```
@@ -61,7 +84,8 @@ covers 8,192 bytes of TCP with losses and both half-closes. Its host counterpart
 also covers 2 MiB, sequence wrap and timer bounds.
 
 Application sockets, production netd integration for TCP and DNS, congestion
-control, DHCP relays, static-address conflict probing and persisted lease
-recovery remain open. See the [IPv4 verification](../verification/net-stack-2026-11-19.json)
+control, DHCP relays, on-link classless routes and persisted lease recovery
+remain open. See [IPv4 verification](../verification/net-stack-2026-11-19.json),
 [TCP admission verification](../verification/tcp-admission-2026-11-19.json),
-and [DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json).
+[DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json), and
+[static and classless route verification](../verification/ipv4-routing-2026-11-19.json).
