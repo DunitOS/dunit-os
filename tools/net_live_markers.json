@@ -1,5 +1,5 @@
 {
-  "description": "GUI supervisor launches the sealed boot service test. The isolated E1000 peer validates actual Ethernet ARP, ICMP, UDP DNS and TCP DNS wire bytes twice across a native service exit and restart.",
+  "description": "GUI supervisor launches the sealed boot service test. The isolated E1000 peer validates actual Ethernet ARP, ICMP, UDP DNS, TCP DNS and interleaved passive TCP streams twice across a native service exit and restart.",
   "run": {
     "config": "limine_test_gui.conf",
     "initrd_overlay": "tests/fixtures/net-live",
@@ -16,6 +16,7 @@
     {"marker": "[NETD-FIXTURE] child cannot inherit packet authority", "claim": "nested child could not use its parent's queue fd, device handle or root grant", "source": "userspace/system_apps/netd_fixture/src/main.rs"},
     {"marker": "[NETD-FIXTURE] native authority, faults, ARP, ICMP and UDP DNS passed", "claim": "descriptor duplication, rights attenuation, malformed TX and RX faults, followed by decoded wire replies", "source": "userspace/system_apps/netd_fixture/src/main.rs"},
     {"marker": "[NETD-FIXTURE] TCP DNS fallback after truncated UDP and SYN loss passed", "claim": "TCP retransmission, split framed response and final close after a valid truncated UDP reply", "source": "userspace/system_apps/netd_fixture/src/dns_tcp.rs"},
+    {"marker": "[NETD-FIXTURE] TCP listener echoed two interleaved streams and closed", "claim": "listener demultiplexed two concurrent opens, echoed distinct streams and retired both after half-close", "source": "userspace/system_apps/netd_fixture/src/tcp_listener.rs"},
     {"marker": "[INIT] netd: exited code=7 (failure)", "claim": "the first instance exited while owning the queue", "source": "userspace/system_apps/init/src/main.rs"},
     {"marker": "[INIT] netd: restart (1/1)", "claim": "init supervised the failure within its manifest restart budget", "source": "userspace/system_apps/init/src/main.rs"},
     {"marker": "[NETD-FIXTURE] fresh session after supervised restart", "claim": "the fresh process repeated verified Ethernet exchanges with fresh authority", "source": "userspace/system_apps/netd_fixture/src/main.rs"},

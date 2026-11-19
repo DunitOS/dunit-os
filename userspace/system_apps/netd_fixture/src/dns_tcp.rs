@@ -2,22 +2,16 @@
 use super::*;
 use dunit_net_core::{
     dns::Answer,
-    tcp::{Connection, Endpoint, State, StreamError},
-    Mac,
+    tcp::{table::{Table, MAX_STREAMS}, Endpoint, State, StreamError},
+    Egress,
 };
 
 const FALLBACK_NAME: &[u8] = b"tcp.du.net.test";
-const HOST_MAC: Mac = [2, 0, 0, 0, 0, 1];
-const CLIENT_PORT: u16 = 49153;
-
-fn tcp_error(_: StreamError) -> Error {
-    Error(errno::EIO)
-}
+use crate::tcp_listener::{tcp_error, Echoes};
 
 pub fn exchange(
     queue: &Queue,
     peer: &mut Peer,
-    mac: Mac,
     mtu: usize,
     started: Instant,
     rx: &mut [u8],
@@ -47,52 +41,62 @@ pub fn exchange(
     };
     require(endpoint == server, "DNS fallback endpoint")?;
 
-    let mut conn = Connection::connect(
-        Endpoint { ip: GUEST, port: CLIENT_PORT },
-        Endpoint { ip: HOST, port: server.port },
-        0x10000000 ^ process::id(),
-        mtu,
-        now,
-    ).map_err(tcp_error)?;
+    let mut table = Table::new(GUEST, mtu, 0x10000000 ^ process::id()).map_err(tcp_error)?;
+    let mut echo = Echoes::listen(&mut table)?;
+    let mut client = Some(table.connect(Endpoint { ip: HOST, port: server.port }, now).map_err(tcp_error)?);
+    let finish_by = deadline_ms.saturating_add(10_000);
     let mut answer = None;
     let mut submitted = false;
     let mut stream = [0; 128];
     loop {
         let now = clock(started)?;
-        if now >= deadline_ms {
+        if now >= finish_by || (answer.is_none() && now >= deadline_ms) {
             return Err(Error(errno::EAGAIN));
         }
-        if conn.state() == State::Established && !submitted {
-            require(conn.send(&query).map_err(tcp_error)? == query.len(), "TCP query send")?;
-            submitted = true;
-        }
-        if submitted && answer.is_none() {
-            match conn.read(&mut stream) {
-                Ok(0) => {
-                    resolver.tcp_eof(server, now).map_err(net_error)?;
-                    return Err(Error(errno::EIO));
-                }
-                Ok(count) => {
-                    answer = resolver.receive_tcp(server, &stream[..count], now).map_err(net_error)?;
-                    if answer.is_some() {
-                        conn.shutdown_write().map_err(tcp_error)?;
+        if let Some(id) = client {
+            if table.state(id).map_err(tcp_error)? == State::Established && !submitted {
+                require(table.send(id, &query).map_err(tcp_error)? == query.len(), "TCP query send")?;
+                submitted = true;
+            }
+            if submitted && answer.is_none() {
+                match table.read(id, &mut stream) {
+                    Ok(0) => {
+                        resolver.tcp_eof(server, now).map_err(net_error)?;
+                        return Err(Error(errno::EIO));
                     }
+                    Ok(count) => {
+                        answer = resolver.receive_tcp(server, &stream[..count], now).map_err(net_error)?;
+                        if answer.is_some() {
+                            table.shutdown_write(id).map_err(tcp_error)?;
+                        }
+                    }
+                    Err(StreamError::WouldBlock) => {}
+                    Err(error) => return Err(tcp_error(error)),
                 }
-                Err(StreamError::WouldBlock) => {}
-                Err(error) => return Err(tcp_error(error)),
+            }
+            if table.state(id).map_err(tcp_error)? == State::Closed {
+                require(answer.is_some() && !table.readiness(id).map_err(tcp_error)?.error, "DNS TCP close")?;
+                table.close(id).map_err(tcp_error)?;
+                client = None;
             }
         }
-        if let Some(segment) = conn.poll(now).map_err(tcp_error)? {
-            let packet = Ipv4::encode_protocol(GUEST, HOST, 6, &segment).map_err(net_error)?;
-            let frame = Ethernet::encode(HOST_MAC, mac, 0x0800, &packet).map_err(net_error)?;
-            send_frame(queue, &frame, tx)?;
-        }
-        if conn.state() == State::Closed {
+
+        echo.step(&mut table)?;
+        if client.is_none() && echo.complete() {
+            echo.close(&mut table)?;
             resolver.close(peer).map_err(net_error)?;
             return answer.ok_or(Error(errno::EIO));
         }
 
-        let deadline = conn.deadline().unwrap_or(deadline_ms).min(deadline_ms);
+        for _ in 0..MAX_STREAMS {
+            let Some(packet) = table.poll(now).map_err(tcp_error)? else { break };
+            match peer.tcp_egress(packet.source, packet.destination, &packet.bytes, now).map_err(net_error)? {
+                Egress::Sent(frame) | Egress::Neighbor(frame) => send_frame(queue, &frame, tx)?,
+                Egress::Waiting => {} // TCP's timer retries once ARP resolves.
+            }
+        }
+        let phase_limit = if answer.is_none() { deadline_ms } else { finish_by };
+        let deadline = table.deadline().unwrap_or(phase_limit).min(phase_limit);
         let timeout = deadline.saturating_sub(clock(started)?).saturating_mul(1_000_000);
         match queue.wait(wait_set::READ, timeout) {
             Err(Error(errno::EAGAIN)) => continue,
@@ -101,11 +105,12 @@ pub fn exchange(
         }
         let count = queue.receive(rx)?;
         for frame in Records::new(&rx[..count]).map_err(wire_error)? {
-            let frame = Ethernet::parse(frame).map_err(net_error)?;
-            require(frame.source == HOST_MAC && frame.destination == mac, "TCP frame MAC")?;
-            let ip = Ipv4::parse(frame.payload).map_err(net_error)?;
-            require(frame.kind == 0x0800 && ip.protocol == 6, "TCP frame protocol")?;
-            conn.receive(ip.source, ip.destination, ip.payload, clock(started)?).map_err(tcp_error)?;
+            let now = clock(started)?;
+            if let Some(ip) = peer.tcp_ingress(frame).map_err(net_error)? {
+                table.receive(ip.source, ip.destination, ip.payload, now).map_err(tcp_error)?;
+            } else if let Some(response) = peer.receive(frame, now).map_err(net_error)? {
+                send_frame(queue, &response, tx)?;
+            }
         }
     }
 }
