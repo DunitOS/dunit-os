@@ -36,6 +36,10 @@ name = "dunit_pointer_abi"
 version = "0.1.0"
 
 [[package]]
+name = "dunit_socket_abi"
+version = "0.1.0"
+
+[[package]]
 name = "dunit_wait_abi"
 version = "0.1.0"
 
@@ -55,6 +59,7 @@ dependencies = [
  "dunit",
  "dunit-net-core",
  "dunit_packet_abi",
+ "dunit_socket_abi",
  "libdunit",
 ]
 

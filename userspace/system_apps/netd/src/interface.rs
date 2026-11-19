@@ -1,5 +1,8 @@
 //! Address, route and DNS settings are published together with the packet peer.
-use dunit_net_core::{dhcp::{ClasslessRoutes, CLIENT_PORT}, Error, Ip, Mac, Peer};
+use dunit_net_core::{
+    dhcp::{ClasslessRoutes, CLIENT_PORT},
+    Error, Ip, Mac, Peer,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -15,7 +18,9 @@ impl Config {
         if text.len() > 512 {
             return None;
         }
-        let mut lines = text.lines().map(str::trim)
+        let mut lines = text
+            .lines()
+            .map(str::trim)
             .filter(|line| !line.is_empty() && !line.starts_with('#'));
         let (address, prefix) = lines.next()?.split_once('/')?;
         let prefix = prefix.parse::<u32>().ok()?;
@@ -32,7 +37,9 @@ impl Config {
         for line in lines {
             let (name, value) = line.split_once('=')?;
             match name.trim() {
-                "gateway" if config.router.is_none() => config.router = Some(parse_ip(value.trim())?),
+                "gateway" if config.router.is_none() => {
+                    config.router = Some(parse_ip(value.trim())?)
+                }
                 "dns" if config.dns[0].is_none() => {
                     let mut servers = value.split(',').map(str::trim);
                     config.dns[0] = Some(parse_ip(servers.next()?)?);
@@ -67,11 +74,21 @@ pub struct Interface {
     mac: Mac,
     mtu: usize,
     active: Option<(Config, Peer)>,
+    revision: u64,
 }
 
 impl Interface {
     pub fn new(mac: Mac, mtu: usize) -> Self {
-        Self { mac, mtu, active: None }
+        Self {
+            mac,
+            mtu,
+            active: None,
+            revision: 0,
+        }
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn config(&self) -> Option<Config> {
@@ -84,6 +101,7 @@ impl Interface {
         }
         let candidate = self.prepare(config, dynamic)?;
         self.active = Some((config, candidate));
+        self.revision = self.revision.wrapping_add(1);
         Ok(true)
     }
 
@@ -103,7 +121,11 @@ impl Interface {
     }
 
     pub fn clear(&mut self) -> bool {
-        self.active.take().is_some()
+        let removed = self.active.take().is_some();
+        if removed {
+            self.revision = self.revision.wrapping_add(1);
+        }
+        removed
     }
 
     pub fn peer(&mut self) -> Option<&mut Peer> {
@@ -128,11 +150,17 @@ mod tests {
         };
         assert_eq!(interface.apply(config, true), Ok(true));
         assert_eq!(interface.peer().unwrap().udp_bind(1122), Ok(1122));
-        let invalid = Config { router: Some([203, 0, 113, 1]), ..config };
+        let invalid = Config {
+            router: Some([203, 0, 113, 1]),
+            ..config
+        };
         assert_eq!(interface.apply(invalid, true), Err(Error::Address));
         assert_eq!(interface.config(), Some(config));
         assert_eq!(interface.apply(config, true), Ok(false));
-        assert_eq!(interface.peer().unwrap().udp_bind(1122), Err(Error::PortInUse));
+        assert_eq!(
+            interface.peer().unwrap().udp_bind(1122),
+            Err(Error::PortInUse)
+        );
         assert!(interface.clear());
         assert!(interface.peer().is_none());
     }
@@ -142,7 +170,10 @@ mod tests {
         let config = Config::static_address("192.0.2.2/24\n").unwrap();
         assert_eq!(config.address, [192, 0, 2, 2]);
         assert_eq!(config.mask, [255, 255, 255, 0]);
-        assert_eq!(Config::static_address("192.0.2.2/32").unwrap().mask, [255; 4]);
+        assert_eq!(
+            Config::static_address("192.0.2.2/32").unwrap().mask,
+            [255; 4]
+        );
         assert!(Config::static_address("192.0.2.2/0").is_none());
         assert!(Config::static_address("192.0.2.2/33").is_none());
         assert!(Config::static_address("192.0.2.2.3/24").is_none());
@@ -155,6 +186,7 @@ mod tests {
         assert_eq!(config.dns, [Some([192, 0, 2, 53]), Some([192, 0, 2, 54])]);
         let mut interface = Interface::new(MAC, 1500);
         assert!(interface.prepare(config, false).is_ok());
+        assert_eq!(interface.revision(), 0);
         assert!(interface.config().is_none());
         assert_eq!(interface.apply(config, false), Ok(true));
         for invalid in [
@@ -170,6 +202,6 @@ mod tests {
         let off_link = Config::static_address("192.0.2.12/24\ngateway=203.0.113.1").unwrap();
         assert_eq!(interface.apply(off_link, false), Err(Error::Address));
         assert_eq!(interface.config(), Some(config));
+        assert_eq!(interface.revision(), 1);
     }
-
 }

@@ -12,7 +12,11 @@ pub struct Outbound {
 
 impl Outbound {
     pub fn new() -> Self {
-        Self { bytes: vec![0; MAX_BATCH_LEN], used: 0, records: 0 }
+        Self {
+            bytes: vec![0; MAX_BATCH_LEN],
+            used: 0,
+            records: 0,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -26,12 +30,17 @@ impl Outbound {
 
     /// A full backlog drops subsequent frames. DHCP keeps its own retry timer.
     pub fn push(&mut self, frame: &[u8]) -> Result<()> {
+        self.try_push(frame).map(|_| ())
+    }
+
+    pub fn try_push(&mut self, frame: &[u8]) -> Result<bool> {
         let length = record_len(frame.len()).map_err(wire_error)?;
-        if self.records < MAX_RECORDS && length <= self.bytes.len() - self.used {
-            self.used += encode_record(frame, &mut self.bytes[self.used..]).map_err(wire_error)?;
-            self.records += 1;
+        if self.records == MAX_RECORDS || length > self.bytes.len() - self.used {
+            return Ok(false);
         }
-        Ok(())
+        self.used += encode_record(frame, &mut self.bytes[self.used..]).map_err(wire_error)?;
+        self.records += 1;
+        Ok(true)
     }
 
     pub fn flush(&mut self, queue: &Queue) -> Result<()> {
@@ -40,7 +49,9 @@ impl Outbound {
         }
         match queue.try_send(&self.bytes[..self.used]) {
             Ok(count) if (1..=self.used).contains(&count) => {
-                let accepted = Records::new(&self.bytes[..count]).map_err(wire_error)?.count();
+                let accepted = Records::new(&self.bytes[..count])
+                    .map_err(wire_error)?
+                    .count();
                 self.bytes.copy_within(count..self.used, 0);
                 self.used -= count;
                 self.records -= accepted;

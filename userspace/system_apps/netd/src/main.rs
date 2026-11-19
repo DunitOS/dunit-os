@@ -7,17 +7,19 @@ mod address_probe;
 mod dhcp_runtime;
 mod interface;
 mod outbound;
+mod socket_service;
 mod static_runtime;
 
 use alloc::vec;
+use dhcp_runtime::Dynamic;
 use dunit::{errno, process, time::Instant, Error, Result};
 use dunit_net_core::{acd, dhcp};
 use dunit_packet_abi::{Records, MAX_BATCH_LEN};
-use libdunit::wait_set;
-use netd::{wire_error, Device};
-use dhcp_runtime::Dynamic;
 use interface::{Config, Interface};
+use libdunit::wait_set;
+use netd::{wire_error, Device, Queue};
 use outbound::Outbound;
+use socket_service::SocketService;
 use static_runtime::Static;
 
 const CONFIG_PATH: &str = "/system/boot-services/netd-ipv4.conf";
@@ -34,7 +36,9 @@ fn static_ipv4() -> Result<Option<Config>> {
         Err(Error(errno::ENOENT)) => return Ok(None),
         Err(error) => return Err(error),
     };
-    Config::static_address(&text).map(Some).ok_or(Error(errno::EINVAL))
+    Config::static_address(&text)
+        .map(Some)
+        .ok_or(Error(errno::EINVAL))
 }
 
 fn clock_ms(started: Instant) -> Result<u64> {
@@ -43,6 +47,56 @@ fn clock_ms(started: Instant) -> Result<u64> {
 
 fn network_error(_: dunit_net_core::Error) -> Error {
     Error(errno::EINVAL)
+}
+
+fn refresh_socket_generation(
+    sockets: &mut Option<SocketService>,
+    permitted: bool,
+    interface: &Interface,
+    device: &Device,
+    mtu: usize,
+    seed: u32,
+) -> Result<()> {
+    if sockets
+        .as_ref()
+        .is_some_and(|service| service.obsolete(interface))
+    {
+        *sockets = None;
+    }
+    if permitted && sockets.is_none() && interface.config().is_some() {
+        *sockets = SocketService::open(device, mtu, seed ^ interface.revision() as u32)?;
+        dunit::println!("[NETD] socket bridge ready")?;
+    }
+    if let Some(service) = sockets {
+        service.sync(interface)?;
+    }
+    Ok(())
+}
+
+fn wait_ready(
+    queue: &Queue,
+    interests: u32,
+    sockets: Option<&SocketService>,
+    timeout: u64,
+) -> Result<()> {
+    let Some(sockets) = sockets else {
+        return queue.wait(interests, timeout);
+    };
+    let input = [
+        wait_set::Interest::descriptor(queue.descriptor(), interests, 0),
+        wait_set::Interest::descriptor(sockets.descriptor(), wait_set::READ, 1),
+    ];
+    let mut output = [wait_set::Event::default(); 2];
+    let count = wait_set::wait(&input, &mut output, timeout).map_err(Error)?;
+    for event in &output[..count] {
+        if event.events & wait_set::ERROR != 0 {
+            return Err(Error(errno::EIO));
+        }
+        if event.events & wait_set::HANGUP != 0 {
+            return Err(Error(errno::EPIPE));
+        }
+    }
+    Ok(())
 }
 
 #[dunit::main]
@@ -57,6 +111,12 @@ fn main() -> Result<()> {
     // Discovery uniqueness only. No cryptographic entropy is assumed.
     let ticks = dunit::system::stats().map_or(0, |stats| stats.uptime_ticks as u32);
     let seed = process::id() ^ ticks.rotate_left(13);
+    let socket_mtu = info.mtu as usize;
+    let mut sockets = SocketService::open(&device, socket_mtu, seed)?;
+    let sockets_permitted = sockets.is_some();
+    if sockets_permitted {
+        dunit::println!("[NETD] socket bridge ready")?;
+    }
     let mut mode = if let Some(config) = config {
         interface.prepare(config, false).map_err(network_error)?;
         let mut fixed = Static::new(config, info.mac, seed);
@@ -79,7 +139,9 @@ fn main() -> Result<()> {
             if current != link {
                 match &mut mode {
                     Configuration::Dhcp(client) => client.reset(now, &mut interface, &mut tx)?,
-                    Configuration::Static(fixed) => fixed.reset(current, now, &mut interface, &mut tx)?,
+                    Configuration::Static(fixed) => {
+                        fixed.reset(current, now, &mut interface, &mut tx)?
+                    }
                 }
                 link = current;
             }
@@ -102,19 +164,39 @@ fn main() -> Result<()> {
                             client.receive(frame, now, &mut interface, &mut tx)?;
                             true
                         }
-                        Configuration::Dhcp(client) => client.observe(frame, now, &mut interface, &mut tx)?,
-                        Configuration::Static(fixed) => fixed.observe(frame, &mut interface, &mut tx)?,
+                        Configuration::Dhcp(client) => {
+                            client.observe(frame, now, &mut interface, &mut tx)?
+                        }
+                        Configuration::Static(fixed) => {
+                            fixed.observe(frame, &mut interface, &mut tx)?
+                        }
                     };
                     if handled {
                         continue;
                     }
                     if let Some(config) = interface.config() {
-                        if let Ok(Some(response)) = acd::reply_to_probe(info.mac, config.address, frame) {
+                        if let Ok(Some(response)) =
+                            acd::reply_to_probe(info.mac, config.address, frame)
+                        {
                             tx.push(&response)?;
                             continue;
                         }
                     }
+                    refresh_socket_generation(
+                        &mut sockets,
+                        sockets_permitted,
+                        &interface,
+                        &device,
+                        socket_mtu,
+                        seed,
+                    )?;
                     if let Some(peer) = interface.peer() {
+                        if sockets
+                            .as_mut()
+                            .is_some_and(|service| service.ingress(peer, frame, now))
+                        {
+                            continue;
+                        }
                         if let Ok(Some(response)) = peer.receive(frame, now) {
                             tx.push(&response)?;
                         }
@@ -134,16 +216,44 @@ fn main() -> Result<()> {
                 Configuration::Static(fixed) => fixed.transmit(now, &queue, &mut interface)?,
             }
         }
+        refresh_socket_generation(
+            &mut sockets,
+            sockets_permitted,
+            &interface,
+            &device,
+            socket_mtu,
+            seed,
+        )?;
+        if let Some(service) = &mut sockets {
+            service.step(&mut interface, &mut tx, clock_ms(started)?)?;
+        }
         tx.flush(&queue)?;
 
         let (deadline, probe_write) = match &mode {
             Configuration::Dhcp(client) => (client.deadline(), client.waiting_for_probe_tx()),
             Configuration::Static(fixed) => (fixed.deadline(), fixed.waiting_for_tx()),
         };
-        let interests = wait_set::READ | if !tx.is_empty() || probe_write { wait_set::WRITE } else { 0 };
-        let next = if link { link_poll.min(deadline) } else { link_poll };
-        let timeout = next.saturating_sub(clock_ms(started)?).saturating_mul(1_000_000);
-        match queue.wait(interests, timeout) {
+        let interests = wait_set::READ
+            | if !tx.is_empty() || probe_write {
+                wait_set::WRITE
+            } else {
+                0
+            };
+        let next = if link {
+            link_poll.min(deadline)
+        } else {
+            link_poll
+        };
+        let next = next.min(
+            sockets
+                .as_ref()
+                .and_then(SocketService::deadline)
+                .unwrap_or(u64::MAX),
+        );
+        let timeout = next
+            .saturating_sub(clock_ms(started)?)
+            .saturating_mul(1_000_000);
+        match wait_ready(&queue, interests, sockets.as_ref(), timeout) {
             Ok(()) | Err(Error(errno::EAGAIN)) => {}
             Err(error) => return Err(error),
         }

@@ -75,6 +75,8 @@ struct Service {
     max_restarts: u32,
     fallback: Option<String>,
     net_device: Option<u32>,
+    net_service: bool,
+    net_connect: Option<u32>,
     state: RunState,
     restarts: u32,
     fallback_spawned: bool,
@@ -165,6 +167,8 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
     let mut max_restarts = DEFAULT_MAX_RESTARTS;
     let mut fallback: Option<String> = None;
     let mut net_device: Option<u32> = None;
+    let mut net_service = false;
+    let mut net_connect = None;
 
     for raw in text.lines() {
         let line = raw.trim();
@@ -204,6 +208,22 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
                 }
                 net_device = Some(parse_u32(val)?);
             }
+            "net_service" => {
+                if !boot_catalog || net_service || val != "true" {
+                    return None;
+                }
+                net_service = true;
+            }
+            "net_connect" => {
+                if !boot_catalog || net_connect.is_some() {
+                    return None;
+                }
+                let scope = parse_u32(val)?;
+                if !(1..=3).contains(&scope) {
+                    return None;
+                }
+                net_connect = Some(scope);
+            }
             _ => {}
         }
     }
@@ -219,7 +239,8 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
             || !executable
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
-            || net_device.is_none()
+            || (net_device.is_some() == net_connect.is_some())
+            || (net_service && net_device.is_none())
             || fallback.is_some()
         {
             return None;
@@ -236,6 +257,8 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
         max_restarts,
         fallback,
         net_device,
+        net_service,
+        net_connect,
         state: RunState::Idle,
         restarts: 0,
         fallback_spawned: false,
@@ -315,9 +338,9 @@ fn provision() {
 // ---- supervision -----------------------------------------------------------
 
 fn spawn_service(svc: &Service) -> dunit::Result<Child> {
-    let Some(interface) = svc.net_device else {
+    if svc.net_device.is_none() && svc.net_connect.is_none() {
         return Child::spawn(&svc.exec);
-    };
+    }
     let root = dunit::env::var("DUNIT_NET_ROOT")?
         .as_deref()
         .and_then(parse_u32)
@@ -327,12 +350,17 @@ fn spawn_service(svc: &Service) -> dunit::Result<Child> {
     push_u32(&mut sender, dunit::process::id());
     let mut child = Child::spawn_with_env(&svc.exec, &[&svc.exec], &[&sender, "DUNIT_NET_ROOT="])?;
     let grant = (|| {
-        let handle = libdunit::net_device_grant(
-            root,
-            interface,
-            child.id(),
-            libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_NET_RAW,
-        );
+        let handle = if let Some(interface) = svc.net_device {
+            let mut rights = libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_NET_RAW;
+            if svc.net_service {
+                rights |= libdunit::RIGHT_NET_SERVICE;
+            }
+            libdunit::net_device_grant(root, interface, child.id(), rights)
+        } else if let Some(scope) = svc.net_connect {
+            libdunit::net_connect_grant(root, child.id(), scope)
+        } else {
+            return Err(dunit::Error(dunit::errno::EACCES));
+        };
         if handle < 0 {
             return Err(dunit::Error(handle));
         }

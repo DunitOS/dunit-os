@@ -8,6 +8,7 @@ const BOOT_EXEC_PREFIX: &str = "/system/libexec/";
 const RIGHT_READ: u32 = 1;
 const RIGHT_WRITE: u32 = 2;
 const RIGHT_NET_RAW: u32 = 1 << 8;
+const RIGHT_NET_SERVICE: u32 = 1 << 10;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Error(pub isize);
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -42,6 +43,7 @@ struct Native {
     grant: Option<isize>,
     delivery: Option<isize>,
     grant_attempts: Vec<(u32, u32, u32, u32)>,
+    connect_grants: Vec<(u32, u32, u32)>,
     deliveries: Vec<(u32, [u8; 4])>,
 }
 thread_local! { static NATIVE: RefCell<Native> = RefCell::new(Native::default()); }
@@ -82,6 +84,14 @@ fn net_device_grant(root: u32, interface: u32, child: u32, rights: u32) -> isize
         let mut n = n.borrow_mut();
         assert!(n.live.contains(&child));
         n.grant_attempts.push((root, interface, child, rights));
+        n.grant.unwrap_or(32)
+    })
+}
+fn net_connect_grant(root: u32, child: u32, scope: u32) -> isize {
+    NATIVE.with(|n| {
+        let mut n = n.borrow_mut();
+        assert!(n.live.contains(&child));
+        n.connect_grants.push((root, child, scope));
         n.grant.unwrap_or(32)
     })
 }
@@ -225,5 +235,32 @@ fn grant_and_delivery_failures_retire_child_before_retrying() {
         assert_eq!(n.grant_attempts, [(16, 0, 1, rights), (16, 0, 2, rights), (16, 0, 3, rights)]);
         assert_eq!(n.deliveries, [(2, 32u32.to_le_bytes()), (3, 32u32.to_le_bytes())]);
         assert_eq!(n.live.iter().copied().collect::<Vec<_>>(), [3]);
+    });
+}
+
+
+#[test]
+fn only_sealed_catalog_can_grant_connect_or_register_netd() {
+    let client = "exec=/system/libexec/client\nnet_connect=3";
+    let daemon = "exec=/system/libexec/netd\nnet_device=0\nnet_service=true";
+    assert!(parse_service(client, false).is_none());
+    assert!(parse_service(daemon, false).is_none());
+    for invalid in [
+        "exec=/system/libexec/client\nnet_connect=4",
+        "exec=/system/libexec/client\nnet_connect=3\nnet_service=true",
+        "exec=/system/libexec/client\nnet_connect=3\nnet_device=0",
+        "exec=/system/libexec/client\nnet_connect=1\nnet_connect=2",
+    ] {
+        assert!(parse_service(invalid, true).is_none());
+    }
+    NATIVE.with(|n| n.borrow_mut().net_root = Some(16));
+    let mut client = parse_service(client, true).unwrap();
+    let mut daemon = parse_service(daemon, true).unwrap();
+    step(&mut daemon);
+    step(&mut client);
+    NATIVE.with(|n| {
+        let n = n.borrow();
+        assert_eq!(n.grant_attempts, [(16, 0, 1, RIGHT_READ | RIGHT_WRITE | RIGHT_NET_RAW | RIGHT_NET_SERVICE)]);
+        assert_eq!(n.connect_grants, [(16, 2, 3)]);
     });
 }
