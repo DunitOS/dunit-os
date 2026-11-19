@@ -360,6 +360,42 @@ fn deliver_at(peer: &mut Peer, port: u16, data: &[u8], now: u64) -> Result<Optio
         now,
     )
 }
+
+#[test]
+fn dns_negative_cache_uses_soa_minimum_and_question_scope() {
+    for nxdomain in [true, false] {
+        let mut peer = peer();
+        warm(&mut peer);
+        let mut resolver = Resolver::new(&mut peer, address(IB, 53)).unwrap();
+        resolver.start(b"missing.test", Kind::A, 0).unwrap();
+        let (port, question) = query_frame(&mut resolver, &mut peer, 0);
+        let mut negative = question.encode().unwrap();
+        put(&mut negative, 2, if nxdomain { 0x8183 } else { 0x8180 });
+        put(&mut negative, 8, 1);
+        put(&mut negative, 10, 1);
+        // SOA owner "test", two compressed names, TTL 30 and MINIMUM 2.
+        negative.extend_from_slice(&[0xc0, 20, 0, 6, 0, 1, 0, 0, 0, 30, 0, 24]);
+        negative.extend_from_slice(&[0xc0, 20, 0xc0, 20]);
+        negative.extend_from_slice(&[0; 19]);
+        negative.push(2);
+        // EDNS OPT uses a root owner and does not contribute cache policy.
+        negative.extend_from_slice(&[0, 0, 41, 2, 0, 0, 0, 0, 0, 0, 0]);
+        let mut malformed = negative.clone();
+        malformed[question.encode().unwrap().len() + 11] = 23;
+        deliver_at(&mut peer, port, &malformed, 1).unwrap();
+        assert_eq!(resolver.poll(&mut peer, 1), Err(Error::Length));
+        deliver_at(&mut peer, port, &negative, 2).unwrap();
+        assert_eq!(resolver.poll(&mut peer, 2), Err(Error::NameNotFound));
+        assert_eq!(resolver.start(b"MISSING.TEST.", Kind::A, 2001), Err(Error::NameNotFound));
+        if nxdomain {
+            assert_eq!(resolver.start(b"missing.test", Kind::Aaaa, 2001), Err(Error::NameNotFound));
+            assert_eq!(resolver.start(b"missing.test", Kind::A, 2002), Ok(None));
+        } else {
+            assert_eq!(resolver.start(b"missing.test", Kind::Aaaa, 2001), Ok(None));
+        }
+    }
+}
+
 #[test]
 fn dns_bounded_mutation_corpus_never_panics() {
     let q = question();

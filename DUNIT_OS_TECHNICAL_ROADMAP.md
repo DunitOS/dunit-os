@@ -598,6 +598,9 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
   delivery and route withdrawal on E1000.
 - [x] Validate DNS fallback over TCP after a matched truncated UDP reply.
   Exercise loss of SYN, split TCP response framing and close through E1000.
+- [x] Cache DNS NXDOMAIN and NODATA using the authority SOA lifetime and
+  the existing eight-entry cache. Verify type scope, TTL expiry and a
+  cached negative result through E1000.
 - [x] Probe each new DHCPv4 address before activation and announce it after
   the quiet interval. Decline an ARP conflict and verify reacquisition after
   the cooldown through the E1000 fixture.

@@ -1,0 +1,55 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "41f59b3a619f2d572220115d8127e25a96e86c00",
+  "scope": "Bounded SOA-based negative caching in the reference resolver. Native E1000 fixture runs twice across supervised restart. Production application resolver remains open.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "47ad5c373ca4b86ad3afc03b3194c8d53e33792df0950239ffe4b71992575ef3",
+    "docs/network/ipv4-services.md": "5031a3b19370ef62663d68ccc228661b9ea71ecf006583d72e4db9846efae3be",
+    "tools/net_live_markers.json": "3e1fe93b5d30e673eb21daf172de6c466b0f0738cba3064c75e0a78da538e1af",
+    "tools/net_live_transport.py": "6e69027cb62fd26b1d6a8a55651a81e62ac3eef55ff0908027a12f1c3518b8c6",
+    "userspace/net-core/src/dns.rs": "1ab1ace4031568a8f3a80cc6ec361f6bdbebd461d8bf5bbdd45d7d8df781b191",
+    "userspace/net-core/src/transport_tests.rs": "97b6e3a5972ebf8c20e80b7bf10a16e9fd871b906548d3855fa195aeaef29de9",
+    "userspace/system_apps/netd_fixture/src/main.rs": "de8f9961d16f6ad27f730ebba1297916f34959f7e6257106cbbe8a5e5e7b3560"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 71,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "command": "python3 tools/qemu_test.py --build --markers-file tools/net_live_markers.json --cpus 4 --accel tcg --timeout 180 --boot-timeout 100",
+    "iso_sha256": "7ba06f22d0f03b2b1ba972971809284565068cb854d46181ea2a22f0f084c6d8",
+    "serial_sha256": "089f538cd81fc3c7d8f1a16f328298f88b614418e771c586be7b38c58cbccf7c",
+    "network_peer_sha256": "683ddcf751a06e750ef701e09f01a30f8ef70eb81b966cf337b28bca0b93116b",
+    "negative_cache_markers": 2,
+    "result": {
+      "ok": true,
+      "reason": "completed",
+      "missing": [],
+      "forbidden": []
+    },
+    "network_peer": {
+      "ok": true,
+      "packets": 34,
+      "bytes": 2234,
+      "responses": 40,
+      "errors": [],
+      "transport": "localhost-tcp-qemu-socket",
+      "protocols": [
+        "ARP",
+        "ICMPv4",
+        "UDP",
+        "TCP",
+        "DNS"
+      ],
+      "guest_identifiers": [
+        62,
+        77
+      ],
+      "tcp_rounds": 2,
+      "passive_streams": 4,
+      "passive_packets": 14
+    }
+  }
+}

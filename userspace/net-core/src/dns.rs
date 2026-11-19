@@ -104,7 +104,11 @@ fn read_name(b: &[u8], pos: &mut usize) -> Result<Vec<u8>, Error> {
         }
         cursor += len as usize;
     }
-    normalize(&name)
+    if name.is_empty() {
+        Ok(name)
+    } else {
+        normalize(&name)
+    }
 }
 impl Question {
     pub fn new(id: u16, name: &[u8], kind: Kind) -> Result<Self, Error> {
@@ -184,12 +188,14 @@ enum Value {
 }
 enum Response {
     Answer(Answer),
+    Negative { ttl: u32, all_types: bool },
     Truncated,
 }
 
 pub fn parse_response(b: &[u8], question: &Question) -> Result<Answer, Error> {
     match parse_message(b, question, DNS_LIMIT)? {
         Response::Answer(answer) => Ok(answer),
+        Response::Negative { .. } => Err(Error::NameNotFound),
         Response::Truncated => Err(Error::Unsupported),
     }
 }
@@ -227,6 +233,7 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
         return Err(Error::Capacity);
     }
     let mut records = Vec::new();
+    let mut authorities = Vec::new();
     for index in 0..count {
         let owner = read_name(b, &mut pos)?;
         if pos + 10 > b.len() {
@@ -256,10 +263,22 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
             }
             (5, 1) => {
                 let alias = read_name(b, &mut pos)?;
-                if pos != end {
+                if pos != end || alias.is_empty() {
                     return Err(Error::Length);
                 }
                 Value::Alias(alias)
+            }
+            (6, 1) if (counts[0]..counts[0] + counts[1]).contains(&index) => {
+                // SOA contains two names followed by five u32 fields.
+                read_name(b, &mut pos)?;
+                read_name(b, &mut pos)?;
+                if pos + 20 != end {
+                    return Err(Error::Length);
+                }
+                let minimum = u32::from_be_bytes(b[end - 4..end].try_into().unwrap());
+                authorities.push((owner, ttl.min(minimum)));
+                pos = end;
+                continue;
             }
             _ => Value::Other,
         };
@@ -277,11 +296,11 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
     if pos != b.len() {
         return Err(Error::Length);
     }
-    match flags & 15 {
-        0 => {}
-        3 => return Err(Error::NameNotFound),
+    let nxdomain = match flags & 15 {
+        0 => false,
+        3 => true,
         _ => return Err(Error::Unsupported),
-    }
+    };
     let mut target = question.name.clone();
     let mut visited = Vec::new();
     let mut ttl = u32::MAX;
@@ -295,16 +314,35 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
             .find(|r| r.owner == target && r.kind == question.kind.wire())
         {
             if let Value::Address(address) = &record.value {
+                if nxdomain {
+                    return Err(Error::Header);
+                }
                 return Ok(Response::Answer(Answer {
                     address: address.clone(),
                     ttl: ttl.min(record.ttl),
                 }));
             }
         }
-        let alias = records
+        let Some(alias) = records
             .iter()
             .find(|r| r.owner == target && r.kind == 5)
-            .ok_or(Error::NameNotFound)?;
+        else {
+            let authority_ttl = authorities
+                .iter()
+                .filter(|(zone, _)| {
+                    zone.is_empty()
+                        || target == *zone
+                        || target.strip_suffix(zone.as_slice()).is_some_and(|prefix| prefix.ends_with(b"."))
+                })
+                .max_by_key(|(zone, _)| zone.len())
+                .map_or(0, |(_, ttl)| *ttl);
+            return Ok(Response::Negative {
+                ttl: ttl.min(authority_ttl),
+                // An alias may still have records of its own. Limit caching
+                // a negative result through an alias to this query type.
+                all_types: nxdomain && target == question.name,
+            });
+        };
         if let Value::Alias(name) = &alias.value {
             target = name.clone();
             ttl = ttl.min(alias.ttl);
@@ -316,8 +354,8 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
 }
 struct Cached {
     name: Vec<u8>,
-    kind: Kind,
-    answer: Answer,
+    kind: Option<Kind>,
+    answer: Option<Answer>,
     expires: u64,
 }
 struct Transaction {
@@ -396,9 +434,9 @@ impl Resolver {
         if let Some(cached) = self
             .cache
             .iter()
-            .find(|c| c.name == question.name && c.kind == kind)
+            .find(|c| c.name == question.name && (c.kind.is_none() || c.kind == Some(kind)))
         {
-            let mut answer = cached.answer.clone();
+            let mut answer = cached.answer.clone().ok_or(Error::NameNotFound)?;
             answer.ttl = ((cached.expires - now) / 1000) as u32;
             return Ok(Some(answer));
         }
@@ -429,6 +467,10 @@ impl Resolver {
                 }
                 let answer = match parse_message(&packet.data, &tx.question, DNS_LIMIT) {
                     Ok(Response::Answer(answer)) => answer,
+                    Ok(Response::Negative { ttl, all_types }) => {
+                        self.finish(None, ttl, all_types, now);
+                        return Err(Error::NameNotFound);
+                    }
                     Ok(Response::Truncated) if self.tcp_fallback => {
                         let query = stream::encode(&tx.question.encode()?)?;
                         tx.next = now.saturating_add(TCP_TIMEOUT_MS);
@@ -444,13 +486,13 @@ impl Resolver {
                         return Err(Error::Unsupported);
                     }
                     Err(e) => {
-                        if matches!(e, Error::NameNotFound | Error::Unsupported) {
+                        if e == Error::Unsupported {
                             self.pending = None;
                         }
                         return Err(e);
                     }
                 };
-                self.finish(&answer, now);
+                self.finish(Some(&answer), answer.ttl, false, now);
                 return Ok(Poll::Answer(answer));
             }
             Err(Error::WouldBlock) => {}
@@ -486,8 +528,12 @@ impl Resolver {
         };
         match response {
             Ok(Response::Answer(answer)) => {
-                self.finish(&answer, now);
+                self.finish(Some(&answer), answer.ttl, false, now);
                 Ok(Some(answer))
+            }
+            Ok(Response::Negative { ttl, all_types }) => {
+                self.finish(None, ttl, all_types, now);
+                Err(Error::NameNotFound)
             }
             Ok(Response::Truncated) => {
                 self.pending = None;
@@ -523,21 +569,26 @@ impl Resolver {
         self.pending.as_mut().ok_or(Error::NotBound)
     }
 
-    fn finish(&mut self, answer: &Answer, now: u64) {
+    fn finish(&mut self, answer: Option<&Answer>, ttl: u32, all_types: bool, now: u64) {
         let Some(tx) = self.pending.take() else {
             return;
         };
-        if answer.ttl == 0 {
+        if ttl == 0 {
             return;
         }
+        let kind = (!all_types).then_some(tx.question.kind);
+        self.cache.retain(|entry| {
+            entry.name != tx.question.name
+                || (kind.is_some() && entry.kind.is_some() && entry.kind != kind)
+        });
         if self.cache.len() == 8 {
             self.cache.remove(0);
         }
         self.cache.push(Cached {
             name: tx.question.name,
-            kind: tx.question.kind,
-            answer: answer.clone(),
-            expires: now.saturating_add(answer.ttl as u64 * 1000),
+            kind,
+            answer: answer.cloned(),
+            expires: now.saturating_add(ttl as u64 * 1000),
         });
     }
 }

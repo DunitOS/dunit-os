@@ -89,6 +89,14 @@ The native fixture deliberately drops the first SYN and sends the DNS length
 prefix across two TCP segments. It validates the response and close twice,
 before and after a supervised restart. The UDP-only API stays available.
 
+The reference resolver caches negative results when the authority section
+contains a matching SOA. The cache uses the lower of the SOA TTL and
+MINIMUM, capped by any CNAME TTL on the path. A direct NXDOMAIN applies
+to the queried name across record types. NODATA applies to the requested
+type. Negative and positive results share the eight-entry cache. The
+E1000 fixture checks NXDOMAIN with an EDNS OPT record and verifies that
+the next query for the same name and a different type uses the cache.
+
 ## Verification
 
 ```sh

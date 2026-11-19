@@ -221,6 +221,27 @@ fn exchange() -> Result<()> {
         return Err(Error(errno::EIO));
     };
     require(answer.ttl == 30, "live DNS TTL")?;
+    let missing = b"missing.du.net.test";
+    require(
+        resolver.start(missing, Kind::A, clock(started)?).map_err(net_error)?.is_none(),
+        "fresh negative DNS query",
+    )?;
+    let Poll::Frame(query) = resolver.poll(&mut peer, clock(started)?).map_err(net_error)? else {
+        return Err(Error(errno::EIO));
+    };
+    send_frame(&queue, &query, &mut tx)?;
+    queue.wait(wait_set::READ, RX_TIMEOUT_NS)?;
+    let count = queue.receive(&mut rx)?;
+    for frame in Records::new(&rx[..count]).map_err(wire_error)? {
+        peer.receive(frame, clock(started)?).map_err(net_error)?;
+    }
+    require(
+        resolver.poll(&mut peer, clock(started)?) == Err(dunit_net_core::Error::NameNotFound)
+            && resolver.start(missing, Kind::Aaaa, clock(started)?)
+                == Err(dunit_net_core::Error::NameNotFound),
+        "NXDOMAIN cached across record types",
+    )?;
+    dunit::println!("[NETD-FIXTURE] DNS NXDOMAIN cached from SOA across record types")?;
     resolver.close(&mut peer).map_err(net_error)?;
     let fallback = dns_tcp::exchange(
         &queue, &mut peer, info.mtu as usize, started, &mut rx, &mut tx,

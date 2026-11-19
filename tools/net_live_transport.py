@@ -15,6 +15,7 @@ IPV4 = b"\x08\x00"
 ETH_BROADCAST = b"\xff" * 6
 DNS_QUESTION = b"\x02du\x03net\x04test\x00\x00\x01\x00\x01"
 TCP_QUESTION = b"\x03tcp" + DNS_QUESTION
+MISSING_QUESTION = b"\x07missing" + DNS_QUESTION
 DNS_PORT = 53
 LISTENER_PORT = 8080
 SYN, ACK, PSH, FIN = 0x02, 0x10, 0x08, 0x01
@@ -66,7 +67,8 @@ def dns_answer(dns: bytes, question: bytes, answer_octet: int, truncated: bool) 
     return wire + struct.pack("!HHHIH4B", 0xc00c, 1, 1, 30, 4, 192, 0, 2, answer_octet)
 
 
-def dns_response(frame: bytes, answer_octet: int, *, truncated: bool = False) -> bytes:
+def dns_response(frame: bytes, answer_octet: int, *, truncated: bool = False,
+                 negative: bool = False) -> bytes:
     udp = guest_ipv4(frame, 17)
     if len(udp) < 8:
         raise ValueError("truncated UDP header")
@@ -74,8 +76,17 @@ def dns_response(frame: bytes, answer_octet: int, *, truncated: bool = False) ->
     if (not source or destination != 53 or length != len(udp) or not check or
             checksum(pseudo(GUEST, HOST, 17, length) + udp)):
         raise ValueError("invalid DNS transport")
-    question = TCP_QUESTION if truncated else DNS_QUESTION
-    dns_reply = dns_answer(udp[8:], question, answer_octet, truncated)
+    if negative:
+        query = udp[8:]
+        if query[2:12] != struct.pack("!5H", 0x0100, 1, 0, 0, 0) or query[12:] != MISSING_QUESTION:
+            raise ValueError("invalid negative-cache DNS question")
+        zone = 0xc014  # "du.net.test", after the first 8-byte label
+        soa = struct.pack("!HHHIHHH5I", zone, 6, 1, 30, 24, zone, zone, 1, 60, 60, 60, 10)
+        opt = struct.pack("!BHHIH", 0, 41, 512, 0, 0)
+        dns_reply = query[:2] + struct.pack("!5H", 0x8183, 1, 0, 1, 1) + MISSING_QUESTION + soa + opt
+    else:
+        question = TCP_QUESTION if truncated else DNS_QUESTION
+        dns_reply = dns_answer(udp[8:], question, answer_octet, truncated)
     udp_length = 8 + len(dns_reply)
     reply = struct.pack("!HHHH", 53, source, udp_length, 0) + dns_reply
     udp_checksum = checksum(pseudo(HOST, GUEST, 17, udp_length) + reply) or 0xffff
@@ -159,6 +170,7 @@ class NetLivePeer(EthernetPeer):
             self._identifiers.append(identifier)
             self._send(connection, reply)
             self._send(connection, dns_response(self._receive(connection), answer_octet))
+            self._send(connection, dns_response(self._receive(connection), answer_octet, negative=True))
             self._send(connection, dns_response(self._receive(connection), answer_octet, truncated=True))
             self._tcp_dns(connection, answer_octet)
             packets, responses = self._packets, self._responses
@@ -279,7 +291,7 @@ class NetLivePeer(EthernetPeer):
 
     def _finish_exchange(self) -> dict:
         baseline = self._packets - self._passive_packets, self._responses - self._passive_responses
-        if (*baseline, len(self._identifiers), self._tcp_rounds, self._passive_streams) != (18, 16, 2, 2, 4):
+        if (*baseline, len(self._identifiers), self._tcp_rounds, self._passive_streams) != (20, 18, 2, 2, 4):
             self.errors.append("incomplete ARP/ICMP/UDP/TCP DNS/passive TCP and restart exchange")
         return {"protocols": ["ARP", "ICMPv4", "UDP", "TCP", "DNS"],
                 "guest_identifiers": self._identifiers, "tcp_rounds": self._tcp_rounds,
