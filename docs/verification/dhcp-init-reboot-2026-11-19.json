@@ -1,0 +1,75 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "508eb60843a95ff22f84f7f510d3942cad306819",
+  "scope": "INIT-REBOOT with a boot-provided IPv4 address hint. Fresh leases are probed before activation. NAK and retry exhaustion return to discovery. Automatic disk persistence is outside this run.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "4224ff82041e008fcc3f49e5499fcae8ab305e7e53d583243cd4bc3b70fe8aaf",
+    "docs/network/ipv4-services.md": "7d9c746cace23f477d25b128a0a61eb720e1ce98973acfcc300ebd9e38bc7fb1",
+    "tests/fixtures/net-dhcp-reboot/system/boot-services/netd-dhcp-address.conf": "38b111232801d22e52dcfd2a1a1795465580b5bd86a991b1bceefd112a5b18e5",
+    "tools/net_dhcp_markers.json": "75bbb6669d1e20a2c74efb53e44a64605b95139a63a3fc66f0d4676496965299",
+    "tools/net_dhcp_transport.py": "dba78971ed5ee7ec1e9ad4d294e03c7ce173ec83890ee11457cb2d569f68d7eb",
+    "tools/qemu_test.py": "0a84eca84fbfaf5661b81474cbc395a87c4877d0d8e1aea92d4c797257794ef0",
+    "tools/test_net_dhcp_transport.py": "17fc5d68d2bffb8adbd1760502fd2e52b87d86e0564225e6e010e19ca33eec3c",
+    "userspace/net-core/src/dhcp.rs": "fd06d12f6dd877acbe2a28a802e5537af14217f54690f560dbe035a546493434",
+    "userspace/net-core/src/dhcp/tests.rs": "2df07659fc09fff61a3a43f1732c76e9f17d6b2ca6030d47488e7ec1db44936f",
+    "userspace/net-core/src/dhcp/wire.rs": "15fa7262a13636ad85fefc5fe1c218f4a55c3cd7296603d5affa3d922ef7dc03",
+    "userspace/system_apps/netd/src/dhcp_runtime.rs": "c2a5ef44cc7eeb07e1fb6aa093a86fe2dc8a7d0c6a1af648b87563e366232573",
+    "userspace/system_apps/netd/src/interface.rs": "4490b543a515ae0c2afc5f25632ec0f86de831971a4b4dd8db3dc600c3fa36b7",
+    "userspace/system_apps/netd/src/main.rs": "68d8a2e647901508f7a66cd4c2af38cd56c8844f198ed8ef9b6319b50f061a08"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 70,
+    "python3 tools/test_net_dhcp_transport.py": 3,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "command": "python3 tools/qemu_test.py --build --image-profile dwm --config limine_dwm.conf --markers-file tools/net_dhcp_markers.json --cpus 4 --accel tcg --timeout 175 --boot-timeout 120",
+    "started_utc": "2026-11-19T14:25:19.455082+00:00",
+    "iso_sha256": "e9b8433a8d92c85c4be541e00b506e9270c87fa068998a5aab56c6b49e24f37e",
+    "serial_sha256": "0f765a1d0404da14f37d3f3c6ca2f463d99b912499b94d01d7af7f977bb7535c",
+    "network_peer_sha256": "a062901bcfe9eb23222c68a10afc81f57d91084e8f670fccc29b40f7743f3774",
+    "result": {
+      "ok": true,
+      "reason": "completed",
+      "missing": [],
+      "forbidden": []
+    },
+    "network_peer": {
+      "ok": true,
+      "packets": 37,
+      "bytes": 6168,
+      "responses": 30,
+      "errors": [],
+      "transport": "localhost-tcp-qemu-socket",
+      "protocols": [
+        "ARP",
+        "ICMPv4",
+        "DHCPv4"
+      ],
+      "lease_stages": [
+        "remembered_address_retried_and_ack_probed",
+        "conflict_probe_declined_and_cooled_down",
+        "discover_retried_after_loss",
+        "select_ignored_wrong_transaction",
+        "relayed_offer_and_ack",
+        "first_lease_acd_and_probe_response",
+        "first_lease_arp_icmp",
+        "classless_route_and_router_option_ignored",
+        "on_link_route_direct_reply",
+        "unicast_renewal_to_remote_server_ack",
+        "renewed_lease_arp_icmp",
+        "renewal_retains_classless_route",
+        "renewal_retains_on_link_route",
+        "unicast_renewal_lost_rebind_relayed_nak",
+        "new_lease_acd",
+        "new_lease_arp_icmp_old_address_silent",
+        "replacement_lease_removes_on_link_route"
+      ],
+      "renewal_retries_before_rebind": 3,
+      "acd_probes": 7,
+      "acd_announcements": 4,
+      "decline_wall_cooldown_seconds": 10.022444119000284
+    }
+  }
+}

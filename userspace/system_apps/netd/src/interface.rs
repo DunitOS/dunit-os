@@ -58,7 +58,7 @@ impl Config {
     }
 }
 
-fn parse_ip(input: &str) -> Option<Ip> {
+pub(crate) fn parse_ip(input: &str) -> Option<Ip> {
     let mut address = [0; 4];
     let mut components = input.split('.');
     for octet in &mut address {

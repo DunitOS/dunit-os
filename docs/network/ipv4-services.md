@@ -40,6 +40,15 @@ the server and supplies the unicast renewal destination. An off-link server
 requires a matching route in the lease for unicast renewal. If renewal
 fails, rebinding uses broadcast as before.
 
+When static IPv4 is absent, the boot archive can supply one previously used
+IPv4 address in `/system/boot-services/netd-dhcp-address.conf`. Netd tries it
+once at startup using DHCP INIT-REBOOT. It broadcasts DHCPREQUEST from
+`0.0.0.0` with the Requested IP Address option and without a Server
+Identifier. Only a fresh ACK for that address supplies interface settings.
+The same ARP probing and conflict handling run before activation. A NAK or
+no response after four requests returns the client to discovery. Automatic
+on-disk storage of the address hint remains open.
+
 DHCP option 121 carries up to seven classless routes. A nonzero gateway
 must be reachable in the primary connected subnet. A zero gateway marks
 the prefix as on-link, so outbound traffic resolves the destination itself
@@ -85,7 +94,8 @@ python3 tools/qemu_test.py --build --markers-file tools/net_live_markers.json \
   --cpus 8 --accel tcg --timeout 250
 ```
 
-The DHCP host peer verifies retry after loss, unrelated OFFER rejection,
+The DHCP host peer verifies retry after loss, ARP probing after an ACK for
+a remembered address, unrelated OFFER rejection,
 lease acquisition through a relay, routed unicast renewal, broadcast
 rebinding, relayed NAK, and ARP/ICMP on the replacement address. The retired
 address is silent. The separate native logical test
@@ -100,3 +110,5 @@ persisted lease recovery remain open. See [IPv4 verification](../verification/ne
 [static and gateway route verification](../verification/ipv4-routing-2026-11-19.json).
 See [on-link DHCP verification](../verification/dhcp-on-link-2026-11-19.json)
 and [relayed DHCP verification](../verification/dhcp-relay-2026-11-19.json).
+The startup request and conflict checks are recorded in
+[INIT-REBOOT verification](../verification/dhcp-init-reboot-2026-11-19.json).

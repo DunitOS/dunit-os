@@ -705,7 +705,7 @@ def run(args: argparse.Namespace) -> RunResult:
             peer = NetStaticPeer(workdir)
         elif net_dhcp:
             from net_dhcp_transport import NetDhcpPeer
-            peer = NetDhcpPeer(workdir)
+            peer = NetDhcpPeer(workdir, reboot=bool(run_defaults.get("dhcp_reboot")))
         elif net_live:
             from net_live_transport import NetLivePeer
             peer = NetLivePeer(workdir)

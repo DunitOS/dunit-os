@@ -13,7 +13,7 @@ mod static_runtime;
 use alloc::vec;
 use dhcp_runtime::Dynamic;
 use dunit::{errno, process, time::Instant, Error, Result};
-use dunit_net_core::{acd, dhcp};
+use dunit_net_core::{acd, dhcp, Ip};
 use dunit_packet_abi::{Records, MAX_BATCH_LEN};
 use interface::{Config, Interface};
 use libdunit::wait_set;
@@ -23,6 +23,7 @@ use socket_service::SocketService;
 use static_runtime::Static;
 
 const CONFIG_PATH: &str = "/system/boot-services/netd-ipv4.conf";
+const DHCP_ADDRESS_PATH: &str = "/system/boot-services/netd-dhcp-address.conf";
 const LINK_PERIOD_MS: u64 = 1_000;
 
 enum Configuration {
@@ -39,6 +40,25 @@ fn static_ipv4() -> Result<Option<Config>> {
     Config::static_address(&text)
         .map(Some)
         .ok_or(Error(errno::EINVAL))
+}
+
+fn remembered_address() -> Result<Option<Ip>> {
+    match dunit::fs::read_bounded(DHCP_ADDRESS_PATH, 32) {
+        Ok(bytes) => {
+            let address = core::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|text| interface::parse_ip(text.trim()));
+            if address.is_none() {
+                dunit::println!("[NETD] ignoring malformed DHCP address hint")?;
+            }
+            Ok(address)
+        }
+        Err(Error(errno::ENOENT)) => Ok(None),
+        Err(error) => {
+            dunit::println!("[NETD] ignoring unreadable DHCP address hint: {:?}", error)?;
+            Ok(None)
+        }
+    }
 }
 
 fn clock_ms(started: Instant) -> Result<u64> {
@@ -124,7 +144,7 @@ fn main() -> Result<()> {
         dunit::println!("[NETD] packet queue ready with static IPv4")?;
         Configuration::Static(fixed)
     } else {
-        let dynamic = Dynamic::new(info.mac, seed)?;
+        let dynamic = Dynamic::new(info.mac, seed, remembered_address()?)?;
         dunit::println!("[NETD] packet queue ready for DHCPv4")?;
         Configuration::Dhcp(dynamic)
     };

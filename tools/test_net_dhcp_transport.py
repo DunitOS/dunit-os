@@ -70,7 +70,7 @@ class DhcpPeerTests(unittest.TestCase):
 
     def test_conflict_then_two_addresses_with_renewal_and_rebind(self):
         with tempfile.TemporaryDirectory() as directory:
-            peer = NetDhcpPeer(Path(directory))
+            peer = NetDhcpPeer(Path(directory), reboot=True)
             peer.start()
             host, port = peer.endpoint.split(":")
             try:
@@ -193,11 +193,9 @@ class DhcpPeerTests(unittest.TestCase):
                                          GUEST_MAC + address + PROBER_MAC + ZERO))
 
     def run_script(self, conn):
-        self.send_frame(conn, client(DISCOVER, 12))
-        self.send_frame(conn, client(DISCOVER, 12))
-        self.read_reply(conn, OFFER, 13, FIRST)
-        self.read_reply(conn, OFFER, 12, CONFLICT)
-        self.send_frame(conn, client(REQUEST, 12, selectors=option(50, CONFLICT) + option(54, SERVER)))
+        self.send_frame(conn, client(REQUEST, 12, selectors=option(50, CONFLICT)))
+        self.send_frame(conn, client(REQUEST, 12, selectors=option(50, CONFLICT)))
+        self.assertEqual(self.read_frame(conn)[38:42], CONFLICT)
         self.read_reply(conn, ACK, 12, CONFLICT)
         self.acd_request(conn, CONFLICT)
         conflict = self.read_frame(conn)
@@ -207,6 +205,8 @@ class DhcpPeerTests(unittest.TestCase):
         self.assertEqual(self.read_frame(conn)[38:42], CONFLICT)
 
         self.send_frame(conn, client(DISCOVER, 13))
+        self.send_frame(conn, client(DISCOVER, 13))
+        self.read_reply(conn, OFFER, 12, SECOND)
         self.read_reply(conn, OFFER, 13, FIRST, server=REMOTE_SERVER, relay=ROUTE_GATEWAY)
         self.send_frame(conn, client(REQUEST, 13, selectors=option(50, FIRST) + option(54, REMOTE_SERVER)))
         self.read_reply(conn, ACK, 13, FIRST, server=REMOTE_SERVER, relay=ROUTE_GATEWAY)

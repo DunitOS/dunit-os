@@ -3,7 +3,7 @@ use dunit::Result;
 use dunit_net_core::{
     dhcp::{self, Action, Client, Event, Lease, Transmission},
     udp::{Address, Send},
-    Mac,
+    Ip, Mac,
 };
 use netd::Queue;
 
@@ -18,15 +18,17 @@ pub struct Dynamic {
     mac: Mac,
     seed: u32,
     client: Client,
+    remembered: Option<Ip>,
     pending: Option<Transmission>,
     candidate: Option<Candidate>,
 }
 
 impl Dynamic {
-    pub fn new(mac: Mac, seed: u32) -> Result<Self> {
+    pub fn new(mac: Mac, seed: u32, remembered: Option<Ip>) -> Result<Self> {
         Ok(Self {
             mac, seed,
             client: Client::new(mac, seed).map_err(network_error)?,
+            remembered,
             pending: None,
             candidate: None,
         })
@@ -57,6 +59,11 @@ impl Dynamic {
     }
 
     pub fn tick(&mut self, now: u64, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
+        // The first tick runs with an active link. A later link reset discards
+        // the transaction along with any other address state.
+        if let Some(address) = self.remembered.take() {
+            self.client.revalidate(address, now).map_err(network_error)?;
+        }
         match self.client.poll(now).map_err(network_error)? {
             Action::Idle => Ok(()),
             Action::Send(message) => {

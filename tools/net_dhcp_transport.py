@@ -36,10 +36,7 @@ DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK = 1, 2, 3, 4, 5, 6
 # The guest verifies ten seconds of monotonic cooldown. Allow up to one second
 # of wall-clock skew when measuring the same interval across the socket.
 MIN_DECLINE_WALL_SECONDS = 9.0
-STAGES = (
-    "discover_retried_after_loss",
-    "select_ignored_wrong_transaction",
-    "conflict_probe_declined_and_cooled_down",
+LEASE_STAGES = (
     "relayed_offer_and_ack",
     "first_lease_acd_and_probe_response",
     "first_lease_arp_icmp",
@@ -54,6 +51,10 @@ STAGES = (
     "new_lease_arp_icmp_old_address_silent",
     "replacement_lease_removes_on_link_route",
 )
+DISCOVERY_STAGES = ("discover_retried_after_loss", "select_ignored_wrong_transaction")
+CONFLICT_STAGE = "conflict_probe_declined_and_cooled_down"
+REBOOT_STAGE = "remembered_address_retried_and_ack_probed"
+STAGES = (REBOOT_STAGE, CONFLICT_STAGE, *DISCOVERY_STAGES, *LEASE_STAGES)
 
 
 def ethernet(destination: bytes, kind: bytes, payload: bytes, *, source: bytes = HOST_MAC) -> bytes:
@@ -170,8 +171,10 @@ def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False,
 class NetDhcpPeer(EthernetPeer):
     """Verify link traffic through address acquisition, lease loss and replacement."""
 
-    def __init__(self, workdir: Path):
+    def __init__(self, workdir: Path, *, reboot: bool = False):
         super().__init__(workdir)
+        self._reboot = reboot
+        self._expected_stages = STAGES if reboot else (*DISCOVERY_STAGES, CONFLICT_STAGE, *LEASE_STAGES)
         self._stages: list[str] = []
         self._renew_retries = 0
         self._acd_probes = 0
@@ -180,7 +183,7 @@ class NetDhcpPeer(EthernetPeer):
 
     def wait_complete(self, timeout: float) -> bool:
         self._thread.join(timeout=timeout)
-        return tuple(self._stages) == STAGES and not self._thread.is_alive()
+        return tuple(self._stages) == self._expected_stages and not self._thread.is_alive()
 
     def _discover(self, connection: socket.socket) -> Request:
         request = parse_request(self._receive(connection), DISCOVER, ZERO, BROADCAST)
@@ -189,6 +192,12 @@ class NetDhcpPeer(EthernetPeer):
         requested = request.options.get(55, b"")
         if 121 not in requested or 3 not in requested or requested.index(121) > requested.index(3):
             raise ValueError("DHCP discovery must request classless routes before the router option")
+        return request
+
+    def _reboot_request(self, connection: socket.socket) -> Request:
+        request = parse_request(self._receive(connection), REQUEST, ZERO, BROADCAST)
+        if request.options.get(50) != CONFLICT or 54 in request.options:
+            raise ValueError("INIT-REBOOT must request the remembered address without a server ID")
         return request
 
     def _select(self, connection: socket.socket, discover: Request, address: bytes,
@@ -328,21 +337,44 @@ class NetDhcpPeer(EthernetPeer):
             return packet
         raise ValueError("ARP retries exhausted while waiting for DHCP renewal")
 
-    def _exchange(self, connection: socket.socket) -> None:
-        self._discover(connection)  # Intentionally lose the first discovery.
+    def _settle_initial_link(self) -> bool:
         # E1000 suppresses receives for 1000 ms after RX setup. The first
         # dropped frame normally covers this interval; avoid relying on it.
-        if self._stop.wait(1.25):
-            return
+        return not self._stop.wait(1.25)
+
+    def _confirm_remembered(self, connection: socket.socket) -> bool:
+        reboot = self._reboot_request(connection)  # Intentionally lose the first request.
+        if not self._settle_initial_link():
+            return False
+        retry = self._reboot_request(connection)
+        if retry.xid != reboot.xid:
+            raise ValueError("INIT-REBOOT retry used a different transaction ID")
+        # No ownership claim is allowed until a valid ACK followed by probing.
+        self._send(connection, self._arp_request(CONFLICT))
+        self._send(connection, reply(ACK, retry.xid, CONFLICT))
+        self._decline(connection, retry)
+        self._stages.extend((REBOOT_STAGE, CONFLICT_STAGE))
+        return True
+
+    def _exchange(self, connection: socket.socket) -> None:
+        if self._reboot:
+            if not self._confirm_remembered(connection):
+                return
+        else:
+            self._discover(connection)  # Intentionally lose the first discovery.
+            if not self._settle_initial_link():
+                return
         discover = self._discover(connection)
         self._stages.append("discover_retried_after_loss")
-        self._send(connection, reply(OFFER, discover.xid ^ 1, FIRST))
-        self._select(connection, discover, CONFLICT)
-        self._stages.append("select_ignored_wrong_transaction")
-        discover = self._decline(connection, discover)
-        self._stages.append("conflict_probe_declined_and_cooled_down")
-
+        self._send(connection, reply(OFFER, discover.xid ^ 1, FIRST if not self._reboot else SECOND))
+        if not self._reboot:
+            self._select(connection, discover, CONFLICT)
+            self._stages.append("select_ignored_wrong_transaction")
+            discover = self._decline(connection, discover)
+            self._stages.append("conflict_probe_declined_and_cooled_down")
         self._select(connection, discover, FIRST, server=REMOTE_SERVER, relay=ROUTE_GATEWAY)
+        if self._reboot:
+            self._stages.append("select_ignored_wrong_transaction")
         self._stages.append("relayed_offer_and_ack")
         self._complete_acd(connection, FIRST)
         self._active_probe_reply(connection, FIRST)
@@ -388,7 +420,7 @@ class NetDhcpPeer(EthernetPeer):
         self._stages.append("replacement_lease_removes_on_link_route")
 
     def _finish_exchange(self) -> dict:
-        if tuple(self._stages) != STAGES:
+        if tuple(self._stages) != self._expected_stages:
             self.errors.append(f"incomplete DHCP exchange; stages={self._stages!r}")
         return {
             "protocols": ["ARP", "ICMPv4", "DHCPv4"],

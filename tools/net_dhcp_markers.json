@@ -1,8 +1,10 @@
 {
-  "description": "Production netd verifies direct and relayed DHCPv4 over E1000, including address probing, RFC 3442 routes, off-link renewal, relayed NAK and lease replacement.",
+  "description": "Production netd verifies remembered-address revalidation, direct and relayed DHCPv4, address probing, RFC 3442 routes, off-link renewal, relayed NAK and lease replacement over E1000.",
   "run": {
     "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-dhcp-reboot",
     "net_dhcp": true,
+    "dhcp_reboot": true,
     "ready_marker": "[INIT] start: PID 1 userspace service manager",
     "actions": [
       {"wait_marker": "gui_server: desktop ready", "timeout": 60}

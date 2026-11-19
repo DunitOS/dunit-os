@@ -19,6 +19,7 @@ const DECLINE_RETRY_MS: u64 = 10_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Init,
+    Rebooting,
     Selecting,
     Requesting,
     Bound,
@@ -113,6 +114,7 @@ pub struct Client {
     attempts: u8,
     clock: u64,
     offer: Option<Offer>,
+    remembered: Option<Ip>,
     lease: Option<Lease>,
     lease_xid: u32,
     decline_until: u64,
@@ -177,6 +179,7 @@ impl Client {
             attempts: 0,
             clock: 0,
             offer: None,
+            remembered: None,
             lease: None,
             lease_xid: 0,
             decline_until: 0,
@@ -189,6 +192,21 @@ impl Client {
 
     pub fn lease(&self) -> Option<Lease> {
         self.lease
+    }
+
+    /// Confirm a remembered address using INIT-REBOOT before installing
+    /// any configuration. The caller starts address probing after a fresh ACK.
+    pub fn revalidate(&mut self, address: Ip, now_ms: u64) -> Result<(), Error> {
+        if !usable_ip(address) {
+            return Err(Error::Address);
+        }
+        if self.state != State::Init || now_ms < self.deadline() {
+            return Err(Error::WouldBlock);
+        }
+        self.advance(now_ms)?;
+        self.remembered = Some(address);
+        self.start(State::Rebooting, now_ms);
+        Ok(())
     }
 
     /// Earliest time the event loop should poll the client again.
@@ -206,6 +224,7 @@ impl Client {
     pub fn reset(&mut self, now_ms: u64) {
         self.state = State::Init;
         self.offer = None;
+        self.remembered = None;
         self.lease = None;
         self.lease_xid = 0;
         self.attempts = 0;
@@ -232,10 +251,10 @@ impl Client {
             0,
             UNASSIGNED,
             LIMITED_BROADCAST,
-            Some(Offer {
+            Some(wire::Target::Selected(Offer {
                 address: lease.address,
                 server: lease.server,
-            }),
+            })),
         );
         self.decline_until = deadline;
         self.reset(now_ms);
@@ -297,21 +316,28 @@ impl Client {
             return Ok(Action::Idle);
         }
         if self.state == State::Init
-            || (matches!(self.state, State::Selecting | State::Requesting)
+            || (matches!(self.state, State::Selecting | State::Requesting | State::Rebooting)
                 && self.attempts >= REQUEST_ATTEMPTS)
         {
             self.offer = None;
+            self.remembered = None;
             self.start(State::Selecting, now_ms);
         }
 
         let secs = (now_ms.saturating_sub(self.started) / 1000).min(u16::MAX as u64) as u16;
         let (kind, source, destination, chosen) = match self.state {
             State::Selecting => (wire::Kind::Discover, UNASSIGNED, LIMITED_BROADCAST, None),
+            State::Rebooting => (
+                wire::Kind::Request,
+                UNASSIGNED,
+                LIMITED_BROADCAST,
+                self.remembered.map(wire::Target::Remembered),
+            ),
             State::Requesting => (
                 wire::Kind::Request,
                 UNASSIGNED,
                 LIMITED_BROADCAST,
-                self.offer,
+                self.offer.map(wire::Target::Selected),
             ),
             State::Renewing | State::Rebinding => {
                 let lease = self.lease.ok_or(Error::Header)?;
@@ -399,7 +425,7 @@ impl Client {
                 Ok(Event::Offered)
             }
             (
-                State::Requesting | State::Renewing | State::Rebinding,
+                State::Rebooting | State::Requesting | State::Renewing | State::Rebinding,
                 wire::Kind::Ack | wire::Kind::Nak,
             ) => {
                 if self.attempts == 0 {
@@ -423,7 +449,9 @@ impl Client {
                     self.next_send = now_ms.saturating_add(1000);
                     return Ok(Event::Lost);
                 }
-                let expected_address = self.offer.map_or(current, |offer| offer.address);
+                let expected_address = self.remembered.unwrap_or_else(|| {
+                    self.offer.map_or(current, |offer| offer.address)
+                });
                 if reply.address != expected_address {
                     return Err(Error::Unsolicited);
                 }
@@ -431,6 +459,7 @@ impl Client {
                 self.lease = Some(lease);
                 self.lease_xid = self.xid;
                 self.offer = None;
+                self.remembered = None;
                 self.state = State::Bound;
                 Ok(Event::Bound(lease))
             }

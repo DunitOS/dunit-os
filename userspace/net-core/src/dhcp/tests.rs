@@ -102,6 +102,69 @@ fn bound(client: &mut Client) -> Lease {
 }
 
 #[test]
+fn remembered_address_waits_for_matching_ack_with_fresh_configuration() {
+    let mut client = Client::new(CLIENT, 71).unwrap();
+    assert_eq!(client.revalidate(UNASSIGNED, 0), Err(Error::Address));
+    client.revalidate(HOST, 0).unwrap();
+    let request = send(&mut client, 0);
+    request_header(&request, 3, UNASSIGNED, LIMITED_BROADCAST);
+    assert_eq!(word(&request.payload, 10), 0x8000);
+    assert_eq!(&request.payload[243..249], &[50, 4, 192, 0, 2, 7]);
+    assert_eq!(request.payload[249], 61); // Client identifier follows, with no server ID.
+    let xid = transaction(&request);
+    assert_eq!(client.lease(), None);
+    assert_eq!(
+        receive(&mut client, 1, 5, xid ^ 1, HOST, SERVER),
+        Err(Error::Unsolicited)
+    );
+    assert_eq!(
+        receive(&mut client, 1, 5, xid, OTHER, SERVER),
+        Err(Error::Unsolicited)
+    );
+    let no_mask = reply(5, xid, HOST, OTHER, &[51, 4, 0, 0, 0, 16]);
+    assert_eq!(
+        client.receive(&server_frame(&no_mask, OTHER, HOST, CLIENT), 1),
+        Err(Error::Header)
+    );
+    assert_eq!(client.lease(), None);
+    let Ok(Event::Bound(lease)) = receive(&mut client, 2, 5, xid, HOST, OTHER) else {
+        panic!("expected fresh configuration for remembered address");
+    };
+    assert_eq!(lease.address, HOST);
+    assert_eq!(lease.server, OTHER);
+    assert_eq!(lease.expires_at, 16_002);
+}
+
+#[test]
+fn remembered_address_is_discarded_on_nak_or_retry_exhaustion() {
+    for nak in [true, false] {
+        let mut client = Client::new(CLIENT, 73).unwrap();
+        client.revalidate(HOST, 0).unwrap();
+        let first = send(&mut client, 0);
+        let xid = transaction(&first);
+        if nak {
+            assert_eq!(receive(&mut client, 1, 6, xid, UNASSIGNED, SERVER), Ok(Event::Lost));
+        } else {
+            for _ in 1..REQUEST_ATTEMPTS {
+                let now = client.deadline();
+                let request = send(&mut client, now);
+                request_header(&request, 3, UNASSIGNED, LIMITED_BROADCAST);
+                assert_eq!(transaction(&request), xid);
+            }
+        }
+        assert_eq!(client.lease(), None);
+        let now = client.deadline();
+        let discover = send(&mut client, now);
+        request_header(&discover, 1, UNASSIGNED, LIMITED_BROADCAST);
+        assert_ne!(transaction(&discover), xid);
+        assert_eq!(
+            receive(&mut client, now, 5, xid, HOST, SERVER),
+            Err(Error::Unsolicited)
+        );
+    }
+}
+
+#[test]
 fn direct_dora_uses_broadcast_exceptions_and_selects_exact_server() {
     let mut client = Client::new(CLIENT, 95).unwrap();
     let discover = send(&mut client, 0);

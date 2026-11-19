@@ -26,6 +26,11 @@ pub(super) enum Kind {
     Nak = 6,
 }
 
+pub(super) enum Target {
+    Selected(Offer),
+    Remembered(Ip),
+}
+
 pub(super) struct Reply {
     pub kind: Kind,
     pub xid: u32,
@@ -295,7 +300,7 @@ pub(super) fn request(
     secs: u16,
     address: Ip,
     destination: Ip,
-    chosen: Option<Offer>,
+    target: Option<Target>,
 ) -> Vec<u8> {
     let mut out = Vec::with_capacity(MIN_REQUEST);
     out.resize(OPTIONS, 0);
@@ -309,9 +314,13 @@ pub(super) fn request(
     out[28..34].copy_from_slice(&mac);
     out[236..240].copy_from_slice(&MAGIC);
     option(&mut out, 53, &[kind as u8]);
-    if let Some(offer) = chosen {
-        option(&mut out, 50, &offer.address);
-        option(&mut out, 54, &offer.server);
+    match target {
+        Some(Target::Selected(offer)) => {
+            option(&mut out, 50, &offer.address);
+            option(&mut out, 54, &offer.server);
+        }
+        Some(Target::Remembered(address)) => option(&mut out, 50, &address),
+        None => {}
     }
     let mut client_id = [1; 7];
     client_id[1..].copy_from_slice(&mac);

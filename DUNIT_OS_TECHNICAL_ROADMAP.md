@@ -603,7 +603,10 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
   the cooldown through the E1000 fixture.
 - [x] Accept DHCPv4 replies forwarded by a relay. Verify leases from an
   off-link server, routed unicast renewal and relayed NAK over E1000.
-- [ ] Validate leases after reboot before using persisted configuration.
+- [x] Send INIT-REBOOT for a remembered address supplied at boot. Require a
+  fresh matching ACK and ARP conflict checks before activating it. Fall
+  back to discovery on NAK or retry exhaustion.
+- [ ] Persist and recover a DHCP address hint across installed-system reboots.
 - [ ] Integrate the resolver with lease changes, service entropy, and an
   application endpoint. Define admin/user configuration precedence.
 
