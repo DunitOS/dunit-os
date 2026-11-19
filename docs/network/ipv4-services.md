@@ -21,6 +21,16 @@ The reference TCP connection owns one four-tuple, a 4 KiB send queue, a
 open, retransmission, cumulative/partial ACKs, zero-window probes, FIN/RST and
 TIME_WAIT. Out-of-order gaps are acknowledged cumulatively and discarded.
 
+The reference connection table demultiplexes up to eight streams and four
+listeners. Each listener counts half-open and unaccepted connections against
+its backlog. At most four connections may be pending across all listeners.
+Pending and detached states expire with bounded lifetimes. Application
+readiness reports queued data or EOF, write capacity, hangup and errors.
+Generations invalidate IDs on close, slot reuse and interface replacement.
+The native fixture uses the table for both DNS and two concurrent incoming
+streams per supervised instance. The peer checks retransmitted SYN-ACK,
+backlog refusal, correct per-stream data, and FIN completion.
+
 An opt-in DNS resolver recognizes a validated truncated UDP reply and emits one
 length-prefixed query for the same server. The caller owns the TCP connection.
 The resolver accepts ordered stream bytes up to 4 KiB, checks the complete
@@ -45,6 +55,7 @@ address. The retired address is silent. The separate native logical test
 covers 8,192 bytes of TCP with losses and both half-closes. Its host counterpart
 also covers 2 MiB, sequence wrap and timer bounds.
 
-Application sockets, listener admission, production DNS service, congestion
+Application sockets, production netd integration for TCP and DNS, congestion
 control, DHCP relays, address-conflict probes and persisted lease recovery
-remain open. See the [verification receipt](../verification/net-stack-2026-11-19.json).
+remain open. See the [IPv4 verification](../verification/net-stack-2026-11-19.json)
+and [TCP admission verification](../verification/tcp-admission-2026-11-19.json).

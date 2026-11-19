@@ -606,8 +606,12 @@ renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
   probes. Test sequence wrap, half-close and timeout.
 - [x] Bound individual send/receive queues. A gap is discarded and acknowledged
   cumulatively so recovery can retransmit it.
-- [ ] Implement service-side admission, stream readiness, and resource limits
-  across live connections.
+- [x] Add reference four-tuple demultiplexing, bounded listener/backlog
+  admission, active ephemeral ports, stream readiness, fair polling and
+  generation-checked retirement. Exercise two concurrent incoming flows and
+  backlog refusal on the E1000 fixture.
+- [ ] Integrate those connection limits with production netd and application
+  socket ownership.
 - [ ] Test an initial congestion algorithm such as Reno before Internet release.
 - [ ] Define backlog/accept, ephemeral ports, SO_REUSEADDR/keepalive/TCP_NODELAY,
   quotas and rare-option boundaries.
@@ -616,6 +620,9 @@ Acceptance: multi-MiB streams under loss/reorder/duplicates, handshake/
 zero-window/reset/simultaneous-close/TIME_WAIT/SYN exhaustion without leaks.
 
 ### N4 and N5 — native sockets and musl adaptation
+
+The [application socket proposal](docs/network/application-sockets-proposal.md)
+describes an outbound-first native descriptor and the authority decision needed.
 
 - [ ] Define versioned native open/bind/connect/listen/accept/send/receive/send-to/
   receive-from/shutdown/options/resolver APIs with typed IPv4/IPv6 endpoints.

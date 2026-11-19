@@ -1,0 +1,127 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "8b877457d65e78d1c05282016c156d04c3f69063",
+  "scope": "Bounded TCP connection and listener table, shared UDP/TCP routing, passive and active TCP wire tests.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "3b9f0a63bc32762091a7daa4956072d6219ef813995a5d157ac557f6d25d9256",
+    "docs/network/application-sockets-proposal.md": "8617c2b55e67eed0a22f03935036dfb01aa6b8b9102fd8134c2bab5a280d5458",
+    "docs/network/ipv4-services.md": "178c36236478451e59a6dbcfca2964d28c27cb5b6519a2ba78dc07303b4cc93b",
+    "tools/net_live_markers.json": "7af47b8ce4be56bf8dd8378ad5cb5732bf5675b6d7c5385e5e445ec226ec9f69",
+    "tools/net_live_transport.py": "8dceafb9f8523b23d0274a36e477be847d9ded67eb973b65be50fbfb4f143ed5",
+    "userspace/net-core/src/lib.rs": "801848863bf5fc7ba7f18e36e22d0bc077ddfdddae90ca520974c619c001f985",
+    "userspace/net-core/src/tcp.rs": "ffd577945a75d8dd1bb54c76f5763b9d6f2c95db3455ccc120645244269d2bf4",
+    "userspace/net-core/src/tcp/link.rs": "43b9ce9912bef96d1bee49ee5e82338751f07b573c20e72d929473f63d448f5a",
+    "userspace/net-core/src/tcp/table.rs": "9f4ad641276705f87c321623236cfb0c026705ced8a443af77d6ac5ebec9d237",
+    "userspace/net-core/src/tcp/table/tests.rs": "1f3eaa40566947b799d460645dec2a73bc82e62aca134f7c65a1121232cb0886",
+    "userspace/net-core/src/udp.rs": "4cb20c992f87fe805f5947afd0d3b0e1ac815152eadcee87af55be779a0cdc71",
+    "userspace/system_apps/netd_fixture/src/dns_tcp.rs": "4ff8bdfb3c9b1b39847b0c2bac4b662e0b012848313ace03f3b82f7d81fdb778",
+    "userspace/system_apps/netd_fixture/src/main.rs": "44a1456f2316e809a838b1a634a13975b138b272f9ab3458b113a54fb6b8fc03",
+    "userspace/system_apps/netd_fixture/src/tcp_listener.rs": "271dd8859d67e61c3a3ba6896343c53374bb6c1e32881fd1d739754ba3dee246"
+  },
+  "native_cases": [
+    {
+      "name": "net-tcp-admission-final",
+      "scope": "Two supervised runs. Each keeps the existing ARP/ICMP and UDP/TCP DNS checks, loses the first passive SYN-ACK, interleaves two admitted streams, sends a third SYN while both slots are pending, and validates distinct echo bytes and FIN completion. The peer accepts wire frames only from the admitted tuples.",
+      "marker_fixture": "tools/net_live_markers.json",
+      "fixture_sha256": "7af47b8ce4be56bf8dd8378ad5cb5732bf5675b6d7c5385e5e445ec226ec9f69",
+      "metadata_sha256": "75dfb74ed984b970b0802bd8a7e548f3234991f2896bfa649405bdb76cb8bc9a",
+      "serial_sha256": "8f249cadcc9e489a2f0422bd50842dd4a80da6be92ae649babd779e615c6dc9d",
+      "image_sha256": "664c9b640ee475fcd5cd24c08b91409ea8d524f53ab55e187c9988019e5e22f2",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 32,
+        "bytes": 2076,
+        "responses": 38,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "UDP",
+          "TCP",
+          "DNS"
+        ],
+        "guest_identifiers": [
+          62,
+          77
+        ],
+        "tcp_rounds": 2,
+        "passive_streams": 4,
+        "passive_packets": 14
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-tcp-admission-dhcp",
+      "scope": "DWM with stock netd. DHCP loss, unrelated offer, renewal, rebind, NAK, replacement and old-address silence through the shared UDP routing path.",
+      "marker_fixture": "tools/net_dhcp_markers.json",
+      "fixture_sha256": "12353d4acb04017795cac02336cfaef239dd52cb67e0f9ebf837ede43b7622aa",
+      "metadata_sha256": "72adf11b03466a7ecd9dd0abf85177ed13b03e340ae4486ae2da5b7362936c46",
+      "serial_sha256": "82959d67355290f5236cf4e7be71ce21e742a74a654d5d5091f37d7e2a6d40cd",
+      "image_sha256": "e110f3abcbd89acb1205296af5907e21e0a2fa1bf0714aaa76cc079e5a31b5cc",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 17,
+        "bytes": 3840,
+        "responses": 15,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "discover_retried_after_loss",
+          "select_ignored_wrong_transaction",
+          "first_lease_arp_icmp",
+          "unicast_renewal_ack",
+          "renewed_lease_arp_icmp",
+          "unicast_renewal_lost_rebind_nak",
+          "new_lease_arp_icmp_old_address_silent"
+        ],
+        "renewal_retries_before_rebind": 2
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "host_cases": {
+    "test_net_core.py": "53 core and 2 interface tests; five table and two TCP route regressions among them",
+    "test_net_transport.py": "6 passed",
+    "test_net_harness.py": "3 passed",
+    "test_net_dhcp_transport.py": "2 passed",
+    "gen_abi.py --check": "96 syscalls, 25 errno and 9 rights"
+  },
+  "correction": "The initial live run passed with an atomic fetch_update deprecation. The final build uses portable compare_exchange_weak and repeats the live exchange including backlog refusal.",
+  "limits": [
+    "Single interface, eight streams, four listeners, and four globally pending connections.",
+    "Passive listener and DNS transport integration run in the developer fixture. Application socket authority and production netd transport integration are open.",
+    "TCG only. No congestion control, production entropy or throughput claim."
+  ]
+}
