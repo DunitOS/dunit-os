@@ -14,6 +14,7 @@ pub const LIMITED_BROADCAST: Ip = [255; 4];
 const UNASSIGNED: Ip = [0; 4];
 const REQUEST_ATTEMPTS: u8 = 4;
 const MAX_RETRY_MS: u64 = 64_000;
+const DECLINE_RETRY_MS: u64 = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -94,6 +95,8 @@ pub struct Client {
     clock: u64,
     offer: Option<Offer>,
     lease: Option<Lease>,
+    lease_xid: u32,
+    decline_until: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -156,6 +159,8 @@ impl Client {
             clock: 0,
             offer: None,
             lease: None,
+            lease_xid: 0,
+            decline_until: 0,
         })
     }
 
@@ -183,9 +188,43 @@ impl Client {
         self.state = State::Init;
         self.offer = None;
         self.lease = None;
+        self.lease_xid = 0;
         self.attempts = 0;
-        self.next_send = self.clock.max(now_ms);
-        self.clock = self.next_send;
+        self.clock = self.clock.max(now_ms);
+        self.next_send = self.clock.max(self.decline_until);
+    }
+
+    /// Withdraw a validated, live lease after IPv4 conflict detection.
+    /// The caller keeps the address inactive and sends the returned frame.
+    /// RFC 2131 section 3.1 recommends waiting at least ten seconds before
+    /// restarting, even if a link transition resets negotiation meanwhile.
+    pub fn decline(&mut self, now_ms: u64) -> Result<Transmission, Error> {
+        let lease = self
+            .lease
+            .filter(|lease| now_ms < lease.expires_at)
+            .ok_or(Error::NotBound)?;
+        let deadline = now_ms.checked_add(DECLINE_RETRY_MS).ok_or(Error::Header)?;
+        self.advance(now_ms)?;
+
+        let payload = wire::request(
+            wire::Kind::Decline,
+            self.lease_xid,
+            self.mac,
+            0,
+            UNASSIGNED,
+            LIMITED_BROADCAST,
+            Some(Offer {
+                address: lease.address,
+                server: lease.server,
+            }),
+        );
+        self.decline_until = deadline;
+        self.reset(now_ms);
+        Ok(Transmission {
+            source: UNASSIGNED,
+            destination: LIMITED_BROADCAST,
+            payload,
+        })
     }
 
     fn advance(&mut self, now_ms: u64) -> Result<(), Error> {
@@ -371,6 +410,7 @@ impl Client {
                 }
                 let lease = reply.lease(now_ms, self.lease)?;
                 self.lease = Some(lease);
+                self.lease_xid = self.xid;
                 self.offer = None;
                 self.state = State::Bound;
                 Ok(Event::Bound(lease))

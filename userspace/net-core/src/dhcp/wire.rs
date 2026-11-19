@@ -15,6 +15,7 @@ pub(super) enum Kind {
     Discover = 1,
     Offer = 2,
     Request = 3,
+    Decline = 4,
     Ack = 5,
     Nak = 6,
 }
@@ -222,7 +223,7 @@ pub(super) fn request(
     out[..4].copy_from_slice(&[1, 1, 6, 0]); // BOOTREQUEST, Ethernet, MAC length
     out[4..8].copy_from_slice(&xid.to_be_bytes());
     put(&mut out, 8, secs);
-    if destination == LIMITED_BROADCAST && address == [0; 4] {
+    if kind != Kind::Decline && destination == LIMITED_BROADCAST && address == [0; 4] {
         put(&mut out, 10, 0x8000);
     }
     out[12..16].copy_from_slice(&address);
@@ -236,8 +237,10 @@ pub(super) fn request(
     let mut client_id = [1; 7];
     client_id[1..].copy_from_slice(&mac);
     option(&mut out, 61, &client_id);
-    option(&mut out, 55, &[1, 3, 6]);
-    option(&mut out, 57, &(MAX_PAYLOAD as u16).to_be_bytes());
+    if kind != Kind::Decline {
+        option(&mut out, 55, &[1, 3, 6]);
+        option(&mut out, 57, &(MAX_PAYLOAD as u16).to_be_bytes());
+    }
     out.push(255);
     out.resize(MIN_REQUEST, 0);
     out

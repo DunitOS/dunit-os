@@ -438,3 +438,60 @@ fn infinite_lease_never_schedules_renewal_and_invalid_mac_is_refused() {
     assert_eq!(client.deadline(), u64::MAX);
     assert_eq!(client.poll(u64::MAX - 1000), Ok(Action::Idle));
 }
+
+#[test]
+fn decline_withdraws_acknowledged_lease_and_cools_down_across_link_resets() {
+    let mut client = Client::new(CLIENT, 92).unwrap();
+    assert_eq!(client.decline(0), Err(Error::NotBound));
+    let xid = select(&mut client);
+    assert_eq!(client.decline(1), Err(Error::NotBound));
+    send(&mut client, 1);
+    assert_eq!(client.decline(1), Err(Error::NotBound));
+    let Event::Bound(lease) = receive(&mut client, 2, 5, xid, HOST, SERVER).unwrap() else {
+        panic!("expected validated lease");
+    };
+
+    // A renewal started before the conflict uses a separate xid. Decline
+    // identifies the lease whose ACK was already accepted.
+    let renewal = send(&mut client, lease.renew_at);
+    assert_ne!(transaction(&renewal), xid);
+    assert_eq!(client.decline(lease.renew_at - 1), Err(Error::Header));
+    assert_eq!(client.lease(), Some(lease));
+    let now = lease.renew_at + 1;
+    let declined = client.decline(now).unwrap();
+    request_header(&declined, 4, UNASSIGNED, LIMITED_BROADCAST);
+    assert_eq!(transaction(&declined), xid);
+    assert_eq!(&declined.payload[8..28], &[0; 20]);
+    assert_eq!(
+        &declined.payload[243..265],
+        &[50, 4, 192, 0, 2, 7, 54, 4, 192, 0, 2, 1, 61, 7, 1, 2, 0, 0, 0, 0, 3, 255,]
+    );
+    assert!(declined.payload[265..].iter().all(|byte| *byte == 0));
+
+    let wire = declined.broadcast_frame(CLIENT).unwrap();
+    let ethernet = Ethernet::parse(&wire).unwrap();
+    assert_eq!(ethernet.destination, BROADCAST);
+    let ip = Ipv4::parse_framing(ethernet.payload).unwrap();
+    assert_eq!((ip.source, ip.destination), (UNASSIGNED, LIMITED_BROADCAST));
+    let udp = Udp::parse_framing(ip.source, ip.destination, ip.payload).unwrap();
+    assert_eq!((udp.source, udp.destination), (CLIENT_PORT, SERVER_PORT));
+    assert_eq!(udp.data, declined.payload);
+
+    assert_eq!(client.state(), State::Init);
+    assert_eq!(client.lease(), None);
+    assert_eq!(client.decline(now), Err(Error::NotBound));
+    client.reset(now + 1);
+    assert_eq!(client.deadline(), now + DECLINE_RETRY_MS);
+    assert_eq!(client.poll(now + DECLINE_RETRY_MS - 1), Ok(Action::Idle));
+    let rediscovery = send(&mut client, now + DECLINE_RETRY_MS);
+    request_header(&rediscovery, 1, UNASSIGNED, LIMITED_BROADCAST);
+    assert_ne!(transaction(&rediscovery), xid);
+}
+
+#[test]
+fn expired_lease_cannot_send_decline() {
+    let mut client = Client::new(CLIENT, 15).unwrap();
+    let lease = bound(&mut client);
+    assert_eq!(client.decline(lease.expires_at), Err(Error::NotBound));
+    assert_eq!(client.poll(lease.expires_at), Ok(Action::Expired));
+}

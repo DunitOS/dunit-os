@@ -113,6 +113,14 @@ pub struct Arp {
 }
 impl Arp {
     pub fn parse(b: &[u8]) -> Result<Self, Error> {
+        let packet = Self::parse_framing(b)?;
+        if !valid_ip(packet.sender_ip) || !valid_ip(packet.target_ip) {
+            return Err(Error::Address);
+        }
+        Ok(packet)
+    }
+
+    fn parse_framing(b: &[u8]) -> Result<Self, Error> {
         if b.len() < 28 {
             return Err(Error::Length);
         }
@@ -131,13 +139,19 @@ impl Arp {
             target_mac: b[18..24].try_into().unwrap(),
             target_ip: b[24..28].try_into().unwrap(),
         };
-        if !valid_mac(a.sender_mac) || !valid_ip(a.sender_ip) || !valid_ip(a.target_ip) {
+        if !valid_mac(a.sender_mac) {
             return Err(Error::Address);
         }
         Ok(a)
     }
     pub fn encode(self) -> Result<Vec<u8>, Error> {
-        let mut b = alloc::vec![0; 28];
+        let b = self.encode_framing();
+        Self::parse(&b)?;
+        Ok(b.to_vec())
+    }
+
+    fn encode_framing(self) -> [u8; 28] {
+        let mut b = [0; 28];
         put(&mut b, 0, 1);
         put(&mut b, 2, 0x0800);
         b[4] = 6;
@@ -147,8 +161,7 @@ impl Arp {
         b[14..18].copy_from_slice(&self.sender_ip);
         b[18..24].copy_from_slice(&self.target_mac);
         b[24..28].copy_from_slice(&self.target_ip);
-        Self::parse(&b)?;
-        Ok(b)
+        b
     }
 }
 #[derive(Debug)]
@@ -749,6 +762,7 @@ impl Peer {
     }
 }
 
+pub mod acd;
 pub mod dhcp;
 pub mod diagnostic;
 pub mod dns;
