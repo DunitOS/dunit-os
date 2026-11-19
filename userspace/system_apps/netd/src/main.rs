@@ -3,19 +3,17 @@
 
 extern crate alloc;
 
+mod dhcp_runtime;
 mod interface;
 mod outbound;
 
 use alloc::vec;
 use dunit::{errno, process, time::Instant, Error, Result};
-use dunit_net_core::{
-    dhcp::{self, Action, Client, Event, Lease, Transmission},
-    udp::{Address, Send},
-    Mac,
-};
+use dunit_net_core::{acd, dhcp};
 use dunit_packet_abi::{Records, MAX_BATCH_LEN};
 use libdunit::wait_set;
 use netd::{wire_error, Device};
+use dhcp_runtime::Dynamic;
 use interface::{Config, Interface};
 use outbound::Outbound;
 
@@ -31,116 +29,12 @@ fn static_ipv4() -> Result<Option<Config>> {
     Config::static_address(&text).map(Some).ok_or(Error(errno::EINVAL))
 }
 
+fn clock_ms(started: Instant) -> Result<u64> {
+    Ok(started.elapsed()?.as_millis() as u64)
+}
+
 fn network_error(_: dunit_net_core::Error) -> Error {
     Error(errno::EINVAL)
-}
-
-struct Dynamic {
-    client: Client,
-    pending: Option<Transmission>,
-}
-
-impl Dynamic {
-    fn remove(&mut self, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
-        self.pending = None;
-        tx.clear();
-        if interface.clear() {
-            dunit::println!("[NETD] DHCP lease removed")?;
-        }
-        Ok(())
-    }
-
-    fn tick(&mut self, now: u64, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
-        match self.client.poll(now).map_err(network_error)? {
-            Action::Idle => Ok(()),
-            Action::Send(message) => {
-                self.pending = Some(message);
-                Ok(())
-            }
-            Action::Expired => self.remove(interface, tx),
-        }
-    }
-
-    fn receive(
-        &mut self,
-        frame: &[u8],
-        now: u64,
-        interface: &mut Interface,
-        tx: &mut Outbound,
-    ) -> Result<()> {
-        match self.client.receive(frame, now) {
-            Ok(Event::Bound(lease)) => {
-                self.pending = None;
-                let renewed = interface.config().is_some();
-                match interface.apply(from_lease(lease), true) {
-                    Ok(changed) => {
-                        if changed {
-                            tx.clear();
-                        }
-                        let [a, b, c, d] = lease.address;
-                        let verb = if renewed { "renewed" } else { "bound" };
-                        dunit::println!("[NETD] DHCP {} {}.{}.{}.{}", verb, a, b, c, d)
-                    }
-                    Err(_) => {
-                        // The candidate never replaced the previous peer. Discard
-                        // the unusable lease and avoid serving an unowned address.
-                        self.client.reset(now);
-                        self.remove(interface, tx)
-                    }
-                }
-            }
-            Ok(Event::Lost) => self.remove(interface, tx),
-            Ok(Event::Offered) => {
-                self.pending = None;
-                Ok(())
-            }
-            Ok(Event::Ignored) | Err(_) => Ok(()),
-        }
-    }
-
-    fn transmit(
-        &mut self,
-        mac: Mac,
-        now: u64,
-        interface: &mut Interface,
-        tx: &mut Outbound,
-    ) -> Result<()> {
-        let Some(message) = self.pending.as_ref() else {
-            return Ok(());
-        };
-        if message.destination == dhcp::LIMITED_BROADCAST {
-            let frame = message.broadcast_frame(mac).map_err(network_error)?;
-            self.pending = None;
-            return tx.push(&frame);
-        }
-        let Some(peer) = interface.peer() else {
-            self.pending = None;
-            return Ok(());
-        };
-        let server = Address { ip: message.destination, port: dhcp::SERVER_PORT };
-        match peer.udp_send(dhcp::CLIENT_PORT, Some(server), &message.payload, now) {
-            Ok(Send::Sent(frame)) => {
-                self.pending = None;
-                tx.push(&frame)
-            }
-            Ok(Send::Neighbor(frame)) => tx.push(&frame),
-            Ok(Send::Waiting) => Ok(()),
-            Err(_) => {
-                // The lease timer drives retries and eventually rebroadcasts.
-                self.pending = None;
-                Ok(())
-            }
-        }
-    }
-}
-
-fn from_lease(lease: Lease) -> Config {
-    Config {
-        address: lease.address,
-        mask: lease.mask,
-        router: lease.router,
-        dns: lease.dns,
-    }
 }
 
 #[dunit::main]
@@ -159,9 +53,9 @@ fn main() -> Result<()> {
         // Transaction uniqueness only. No cryptographic entropy is assumed.
         let ticks = dunit::system::stats().map_or(0, |stats| stats.uptime_ticks as u32);
         let seed = process::id() ^ ticks.rotate_left(13);
-        let client = Client::new(info.mac, seed).map_err(network_error)?;
+        let dynamic = Dynamic::new(info.mac, seed)?;
         dunit::println!("[NETD] packet queue ready for DHCPv4")?;
-        Some(Dynamic { client, pending: None })
+        Some(dynamic)
     };
     let mut link = info.link_up;
     let mut link_poll = LINK_PERIOD_MS;
@@ -169,13 +63,12 @@ fn main() -> Result<()> {
     let mut tx = Outbound::new();
 
     loop {
-        let now = started.elapsed()?.as_millis() as u64;
+        let now = clock_ms(started)?;
         if let Some(dynamic) = &mut dynamic {
             if now >= link_poll {
                 let current = device.info()?.link_up;
                 if current != link {
-                    dynamic.client.reset(now);
-                    dynamic.remove(&mut interface, &mut tx)?;
+                    dynamic.reset(now, &mut interface, &mut tx)?;
                     link = current;
                 }
                 link_poll = now.saturating_add(LINK_PERIOD_MS);
@@ -196,6 +89,15 @@ fn main() -> Result<()> {
                             dynamic.receive(frame, now, &mut interface, &mut tx)?;
                             continue;
                         }
+                        if dynamic.observe(frame, now, &mut interface, &mut tx)? {
+                            continue;
+                        }
+                    }
+                    if let Some(config) = interface.config() {
+                        if let Ok(Some(response)) = acd::reply_to_probe(info.mac, config.address, frame) {
+                            tx.push(&response)?;
+                            continue;
+                        }
                     }
                     if let Some(peer) = interface.peer() {
                         if let Ok(Some(response)) = peer.receive(frame, now) {
@@ -209,15 +111,17 @@ fn main() -> Result<()> {
         }
         if link {
             if let Some(dynamic) = &mut dynamic {
-                dynamic.transmit(info.mac, now, &mut interface, &mut tx)?;
+                dynamic.drive_probe(clock_ms(started)?, &queue, &mut interface, &mut tx)?;
+                dynamic.transmit(clock_ms(started)?, &mut interface, &mut tx)?;
             }
         }
         tx.flush(&queue)?;
 
-        let interests = wait_set::READ | if tx.is_empty() { 0 } else { wait_set::WRITE };
+        let write = !tx.is_empty() || dynamic.as_ref().is_some_and(Dynamic::waiting_for_probe_tx);
+        let interests = wait_set::READ | if write { wait_set::WRITE } else { 0 };
         let timeout = if let Some(dynamic) = &dynamic {
-            let next = if link { link_poll.min(dynamic.client.deadline()) } else { link_poll };
-            let current = started.elapsed()?.as_millis() as u64;
+            let next = if link { link_poll.min(dynamic.deadline()) } else { link_poll };
+            let current = clock_ms(started)?;
             next.saturating_sub(current).saturating_mul(1_000_000)
         } else {
             wait_set::INFINITE
