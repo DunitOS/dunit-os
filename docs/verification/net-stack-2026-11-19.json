@@ -1,0 +1,202 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "baf3678f5678229e2c9679659b8d3d9a140008c4",
+  "scope": "Default DWM DHCPv4, bounded TCPv4 reference, and live DNS fallback over native E1000 queues.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "39dfdd7d35668212e0a258bfb469f9c9d90ae99b36e4abd7c8d16d5f50102bf8",
+    "docs/architecture/current-state.md": "ce9bdbfaf2959549c31e37e4caaefcdbb8dceb58e99140a81316238d262cca2b",
+    "docs/network/ipv4-services.md": "ccde7643388a5de4f2cadf21a67558978989ae98e2b0048406e3126c4148d814",
+    "docs/network/native-packet-queue.md": "934179dcf45b72810100a8ebac75f795f2ac4078178ff145423465c6ce8c6ce5",
+    "tools/net_core_markers.json": "ecea48a4ea3de2cd2a5653a53c6eaf495cbcee8bb82d7a348efd53a6607eafc9",
+    "tools/net_dhcp_markers.json": "12353d4acb04017795cac02336cfaef239dd52cb67e0f9ebf837ede43b7622aa",
+    "tools/net_dhcp_transport.py": "9955c0c0d09222b770a0364b7d6dee01ae9136e44e1972327d965f2649559b58",
+    "tools/net_live_markers.json": "05de3994ed067ccb8edd67d830fb1c455773feb98bf1425dba9e8abbb1e13683",
+    "tools/net_live_transport.py": "c9da2f97b2b18489920ae5e5a00a2cad993df8098a4a06cd986ce50c8d409c6e",
+    "tools/net_test_transport.py": "44ebec841c86bfda2af4b4348af814ac537c84b0227749101a9e3ee1822e2a3b",
+    "tools/qemu_test.py": "58790c49f0310827cd9d509b93d7167e03f30f918a402dda3af9c49f4a99458f",
+    "tools/test_net_core.py": "166a8192259790b1939d33d6fdf896028f5ffa468f90ea84963d9c2ceb281726",
+    "tools/test_net_dhcp_transport.py": "6946f690d3bb213af686d90fecc24b54f39b8c6be313a81a576c828c87bcfa2b",
+    "userspace/net-core/README.md": "a26ea0b3e0e3f820c31cd36cf78eb16f6aa0f627e4f1fb798d46d14e79ff8777",
+    "userspace/net-core/src/dhcp.rs": "17cb6fc42211ebc4ae5af276f1c0b6113ae12e2d56a60b02b62763cfc6feb7bc",
+    "userspace/net-core/src/dhcp/tests.rs": "5745a35439c2fdf3657db5d44ee2bd70f439f51f42c857667ad3914b6a21fad4",
+    "userspace/net-core/src/dhcp/wire.rs": "b6ccecb0bab95c04d3511c2b1721c974e9b45cc7e56720680d18f6c6c1d01026",
+    "userspace/net-core/src/dns.rs": "c1e7f32c1313831c422b98b035087562a96f6ab32de30c621e0f9811854a48cc",
+    "userspace/net-core/src/dns/stream.rs": "30276717de30fc927dcc1c6dd7789a939fc0e2501a774e8fa482771cde4c3638",
+    "userspace/net-core/src/dns/stream_tests.rs": "49fe540e7037ea4014cd21cde5b2491911b952d5dca304de5af67fb88f4131b9",
+    "userspace/net-core/src/lib.rs": "e089d216485331b64287524981ec41d3cf0a438c519bf17601d505aaffdb5b6d",
+    "userspace/net-core/src/tcp.rs": "ce6e7eab479602e8422eb1313e1b85f72351c6c775b5f4acb716ac014748ce37",
+    "userspace/net-core/src/tcp/diagnostic.rs": "9bf282c48ece08df6969655f1b4586142d377add5d67d8ce61dc27d6af0ac830",
+    "userspace/net-core/src/tcp/tests.rs": "2c3f134f8dec448e8ab89ccda09ec3ae53e3dc52500c23bfb7e42930646ad76e",
+    "userspace/net-core/src/tcp/wire.rs": "11269738064fe4a5beb9f0fc511cf27ecf3b55e5da2de587783b56705ae5ddb0",
+    "userspace/net-core/src/tests.rs": "14083983558cd191d58844ce2bda4df6a12576163c86011d15e4b675f05d690c",
+    "userspace/net-core/src/udp.rs": "28a33215777e4713a446791c255b0fc15a42c0ed66c0c842db166726eefec121",
+    "userspace/system_apps/net_packet_test/src/main.rs": "d4e73f5d814429a81c5104ee9d8b6a380722e5f110007fc20af0302f79677dab",
+    "userspace/system_apps/netd/src/interface.rs": "0979429de61e02cd134004b04361474547f3854a606e796e65b672f01b8a342d",
+    "userspace/system_apps/netd/src/lib.rs": "386ce1495b242b3cb95e2fbaaf42e0a52e55b0bda7c205c180185417643f3ad9",
+    "userspace/system_apps/netd/src/main.rs": "f226a8afe86eac503a2bb4163eebd47fc43badd320735b364fb737050f344adb",
+    "userspace/system_apps/netd/src/outbound.rs": "8b9998c4322d5eb1766273a887f0209e494710352171ee55a0ee24bebf2781e8",
+    "userspace/system_apps/netd_fixture/src/dns_tcp.rs": "621de04b7386497b29cf0553012b42c5bd7702ac29309f5175cec34f2fb99547",
+    "userspace/system_apps/netd_fixture/src/main.rs": "186683c5b9d493924b2282937eb0c311b42dbfcc0f51e6145e61a783d7603ed8"
+  },
+  "native_cases": [
+    {
+      "name": "net-dhcp-final",
+      "scope": "DWM stock netd, direct DHCPv4. Host drops first DISCOVER, sends foreign-XID OFFER, verifies acquisition, unicast renewal, broadcast rebind after forced loss, NAK and new lease. ARP/ICMP demonstrate the new configuration and old address silence.",
+      "marker_fixture": "tools/net_dhcp_markers.json",
+      "marker_fixture_sha256": "12353d4acb04017795cac02336cfaef239dd52cb67e0f9ebf837ede43b7622aa",
+      "metadata_sha256": "413dd037b9f5d40de233e8af527365b3cf7c5bebb9c1a7c194079bafabaabe1c",
+      "serial_sha256": "ffa9fadf641ecb361b780ec626639a0e94651c357431c2042c779d65a11bb3ba",
+      "image_sha256": "536acb6584012a5352d34f3f45e5a6a4f9bb34c53627ca68373ed2faf31e8ae2",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 17,
+        "bytes": 3840,
+        "responses": 15,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "discover_retried_after_loss",
+          "select_ignored_wrong_transaction",
+          "first_lease_arp_icmp",
+          "unicast_renewal_ack",
+          "renewed_lease_arp_icmp",
+          "unicast_renewal_lost_rebind_nak",
+          "new_lease_arp_icmp_old_address_silent"
+        ],
+        "renewal_retries_before_rebind": 2
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-dhcp-slirp",
+      "scope": "Same DWM ISO. QEMU restricted Slirp with reference E1000 leases 10.0.2.15 to stock netd and the desktop starts.",
+      "marker_fixture": "local QEMU Slirp DHCP and DWM smoke",
+      "marker_fixture_sha256": "881419f4be92891daab77115faa73ef2eadb8cea83764111c7483b482346aecf",
+      "metadata_sha256": "92e8f1767e5770631fa24b22a34c8ce7cbd6dde9243801415dfa1b8d69d2bbb3",
+      "serial_sha256": "a6ad4282be2d2806adef500abdbeb3ffbf0ff5cf913c3414f945626ef9a9faad",
+      "image_sha256": "536acb6584012a5352d34f3f45e5a6a4f9bb34c53627ca68373ed2faf31e8ae2",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": null,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-tcp-live",
+      "scope": "Native packet authority and wire suite. Two ARP, ICMP and UDP DNS sessions, plus matched TC, lost first SYN, segmented TCP DNS answer and graceful close. Repeats across service restart and then revokes stale descriptor.",
+      "marker_fixture": "tools/net_live_markers.json",
+      "marker_fixture_sha256": "05de3994ed067ccb8edd67d830fb1c455773feb98bf1425dba9e8abbb1e13683",
+      "metadata_sha256": "71178bc4d32fcd95ce0fa28f6b9c6d374567819de57ba9b55513785160f87099",
+      "serial_sha256": "c7abdc988fbb93e0b6116924eb020e70f577a0333256582cfafdfc20ad6c1e63",
+      "image_sha256": "975efdc07653dd378cacf431d19efab350d98bcf98c56add305ec02cf68247c0",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 18,
+        "bytes": 1190,
+        "responses": 16,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "UDP",
+          "TCP",
+          "DNS"
+        ],
+        "guest_identifiers": [
+          62,
+          77
+        ],
+        "tcp_rounds": 2
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-core-tcp-final",
+      "scope": "Terminal logical Ethernet/ARP/IPv4/ICMP/UDP/DNS/TCP; TCP verifies 8192 bytes, loss recovery, and both half-closes. Private E1000 PHY/INTx retains 103 validated frames and replies.",
+      "marker_fixture": "tools/net_core_markers.json",
+      "marker_fixture_sha256": "ecea48a4ea3de2cd2a5653a53c6eaf495cbcee8bb82d7a348efd53a6607eafc9",
+      "metadata_sha256": "61bc6b15b894fb3662b7da9f474aadcb6ece9ee9a6931e01435ad270ff5285c5",
+      "serial_sha256": "080a4b6fef6a7d2425600f9e28bf8b894057b87f29d13e4d261882e8847452ac",
+      "image_sha256": "a88b30d622b540e8570083f2c1f0b2dc7d75653f768b3819e7a8aeb7fd49f1de",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 103,
+        "bytes": 13184,
+        "responses": 103,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "ethertype": "0x88b5",
+        "payload_transform": "xor-0xa5"
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "host_cases": {
+    "test_net_core.py": "46 net-core + 2 actual interface publication tests; production no_std rlib built with -Dwarnings",
+    "test_net_dhcp_transport.py": "2 passed, complete scripted exchange and malformed request",
+    "test_net_transport.py": "6 passed",
+    "test_net_harness.py": "3 passed",
+    "gen_abi.py --check": "96 syscalls, 25 errno, 9 rights unchanged"
+  },
+  "limits": [
+    "TCG, reference E1000 and one configured interface. No hardware throughput claim.",
+    "DHCP handles directly attached servers; relays, address-conflict probing and persisted lease validation are open.",
+    "Native TCP/DNS fallback uses the developer service fixture. Production netd provisions IPv4 and responds to ARP/ICMP. User-facing sockets, resolver/RPC and entropy remain open.",
+    "The reference TCP connection bounds each direction to 4096 bytes and one in-flight segment. Connection admission, backlog and congestion control remain open."
+  ]
+}

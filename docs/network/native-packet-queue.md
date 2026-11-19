@@ -32,8 +32,9 @@ releasing DMA. An unverified stop quarantines the NIC.
 
 The reference netd accepts an optional address and prefix such as
 `192.0.2.2/24` in the boot archive at `/system/boot-services/netd-ipv4.conf`.
-It responds to ARP and ICMP for that address. The default image opens the queue
-and leaves IPv4 unconfigured.
+It responds to ARP and ICMP for that address. Without this file, netd starts
+DHCPv4 and responds after a validated lease. See
+[IPv4 configuration and transport verification](ipv4-services.md).
 
 Run the isolated wire and restart test with
 ```sh
@@ -45,5 +46,5 @@ host peer, process restart, stale queue revocation and desktop startup.
 The unmodified DWM profile booted the reference service separately.
 See the [verification receipt](../verification/native-packet-2026-11-18.json).
 
-Application socket/RPC interfaces, DHCP, production TCP/DNS integration,
+Application socket/RPC interfaces, production TCP/DNS integration,
 MSI/MSI-X, multi-NIC support and hardware recovery/flood qualification remain open.

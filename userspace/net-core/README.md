@@ -7,7 +7,8 @@ vectors with a logical peer supplied by its caller. It does not open an
 interface, send packets to a NIC, or provide Internet connectivity.
 
 The wire codecs implement Ethernet II (60–1514 bytes without preamble/FCS),
-Ethernet/IPv4 ARP, IPv4 with a fixed 20-byte header, ICMP echo request/reply, and IPv4 UDP.
+Ethernet/IPv4 ARP, IPv4 with a fixed 20-byte header, ICMP echo request/reply,
+UDP, DHCPv4 and a bounded TCPv4 connection.
 Encoders zero Ethernet padding. IPv4 total length bounds the ICMP slice, so
 padding never becomes echo data. Parsers check sizes before indexing, validate
 addresses and checksums, reject unsupported EtherTypes/protocols/options, and
@@ -110,7 +111,8 @@ response opcode/flags/rcode, all section framing and record lengths. DNS names
 are normalized to lowercase ASCII labels with a 253-byte limit; labels accept
 letters, digits, hyphens and underscores. Root names, IDNA conversion, EDNS,
 DNSSEC and arbitrary binary labels are outside this resolver's supported subset.
-Messages are at most 512 bytes with 32 records; compressed names use backward
+UDP messages are at most 512 bytes. TCP messages are at most 4 KiB.
+Both paths allow 32 records and compressed names use backward
 pointers, at most 16 hops and bounded expanded lengths. CNAME resolution follows
 at most eight aliases and rejects cycles. Only answer-section A/AAAA records
 satisfy the question; authority/additional records cannot supply an answer.
@@ -119,8 +121,9 @@ Three transmitted queries are allowed, one second apart, followed by `Timeout`
 at the final deadline. ARP attempts do not consume DNS attempts. Polling drives
 all work; clock regressions fail. Malformed or mismatched replies return an
 explicit error while preserving the transaction; NXDOMAIN terminates with
-`NameNotFound`. The TC bit returns `Unsupported`: TCP fallback is deferred,
-never reported as a successful answer. Positive answers use an eight-entry FIFO
+`NameNotFound`. An opt-in resolver emits a framed TCP query for a matched,
+truncated UDP response and accepts the answer from the connected stream.
+The UDP-only resolver returns `Unsupported` on TC. Positive answers use an eight-entry FIFO
 cache; expiry uses the minimum TTL across the CNAME chain. Zero TTL is not
 cached, expired entries are removed, and returned cache TTL is remaining whole
 seconds. Negative caching is deferred. This bounded diagnostic resolver has
@@ -135,7 +138,8 @@ all short lengths, zero/negative-zero checksums, endpoint capacity/reuse,
 connected filtering, MTU/route refusal, malformed DNS framing, bounded mutation
 corpora and monotonic clocks.
 
-This work adds no NIC transport, kernel path, syscall, rights, public socket ABI,
-netd, DHCP state machine, configuration precedence or TCP implementation. N2 and
-its external-network acceptance remain open; the native diagnostic establishes
-logical owned-frame execution only.
+The TCP logical diagnostic exchanges 8,192 payload bytes with induced SYN and
+data loss, then tests both half-closes. The `netd_fixture` developer service
+connects the opt-in resolver and TCP connection to actual E1000 packet I/O.
+The DHCP codec and state machine run in the default netd service. See
+[IPv4 service scope](../../docs/network/ipv4-services.md) for live tests and limits.

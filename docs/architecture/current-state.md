@@ -106,8 +106,9 @@ declared programs, preserving asset and overlay file bytes.
   full termios, POSIX ownership/accounts and disk-backed system root remain open.
 - The boot supervisor can grant the reference E1000 device to a service through
   a sealed catalog. Native packet descriptors provide bounded RX/TX and readiness.
-  Application sockets, address configuration, an app-facing resolver and TCP
-  remain open. HTTPS additionally requires entropy and TLS.
+  The reference netd configures IPv4 using DHCPv4 or an archive-supplied address.
+  A diagnostic exercises the reference TCP and DNS fallback through E1000.
+  Application sockets, resolver service integration and TLS remain open.
   See [packet queue scope](../network/native-packet-queue.md).
 - Audio, full USB enumeration and power services remain incomplete.
   xHCI compatibility heuristics need real-device validation.

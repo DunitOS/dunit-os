@@ -516,7 +516,8 @@ independent design can proceed, but releases cannot bypass these dependencies.
 The reference QEMU E1000 has a kernel-owned DMA and INTx path with copied
 packet queues for an authorized userspace service. The initial supervisor
 grants the device only from an immutable boot catalog. The default netd service
-opens the queue, with optional static IPv4 and ARP/ICMP support. See
+opens the queue, acquires DHCPv4 unless the image supplies static IPv4, and
+serves ARP/ICMP on the configured address. See
 [native packet queue](docs/network/native-packet-queue.md) and
 [private bring-up diagnostics](docs/network/e1000-bringup.md).
 
@@ -583,23 +584,30 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
   Verify wire bytes with the isolated peer before and after a supervised restart.
 - [ ] Expose UDP through production sockets and integrate blocking, timeout and
   readiness with live device transport.
-- [ ] Implement DHCP INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING and link reset.
-- [ ] Validate offers/options, atomically apply address/prefix/gateway/DNS with rollback,
-  and revalidate cached leases after reboot.
-- [ ] Integrate live DNS with DHCP configuration, service entropy and TCP
-  fallback on truncated replies.
-- [ ] Define static→DHCP→admin/user configuration precedence.
+- [x] Run the single-interface DHCPv4 state machine in netd. Validate offers,
+  publish address/prefix/gateway/DNS together, renew, rebind, and remove expired,
+  NAKed or link-invalidated configurations.
+- [x] Prefer an archive-provided static address over automatic DHCPv4.
+- [x] Validate DNS fallback over TCP after a matched truncated UDP reply.
+  Exercise loss of SYN, split TCP response framing and close through E1000.
+- [ ] Add leased-address conflict probing, relay support and reboot validation
+  before using persisted leases.
+- [ ] Integrate the resolver with lease changes, service entropy, and an
+  application endpoint. Define admin/user configuration precedence.
 
 Acceptance: DHCP loss/NAK/
 renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
 
 ### N3 — TCP
 
-- [ ] Implement TCP CLOSED→TIME_WAIT active/passive state transitions and 4-tuple/
-  sequence/ACK/flag/header/checksum/window validation.
-- [ ] Implement SYN/data retries, RTT/RTO and duplicate ACK handling.
-- [ ] Bound send/receive/out-of-order queues, half-close/FIN/RST, monotonic timers
-  and sequence wrap/jump behavior.
+- [x] Implement the reference TCPv4 connection with active/passive and close
+  states, four-tuple, sequence, ACK, flag, checksum and window validation.
+- [x] Add bounded SYN/data retries, RTT/RTO, cumulative ACKs and zero-window
+  probes. Test sequence wrap, half-close and timeout.
+- [x] Bound individual send/receive queues. A gap is discarded and acknowledged
+  cumulatively so recovery can retransmit it.
+- [ ] Implement service-side admission, stream readiness, and resource limits
+  across live connections.
 - [ ] Test an initial congestion algorithm such as Reno before Internet release.
 - [ ] Define backlog/accept, ephemeral ports, SO_REUSEADDR/keepalive/TCP_NODELAY,
   quotas and rare-option boundaries.
