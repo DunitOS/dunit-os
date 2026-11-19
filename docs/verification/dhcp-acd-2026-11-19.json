@@ -1,0 +1,151 @@
+{
+  "date": "2026-11-19",
+  "base_commit": "19a2514cc0c56ded3a04624f2ec23129e486361c",
+  "scope": "Production DHCP tentative address probing, activation, conflict withdrawal and retransmit cooldown.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "fddb5b58ccb579fe1fcff69334c4e39f2d9f0463a575f18ce6018f4dc6fd3070",
+    "docs/network/ipv4-services.md": "f4b44a50942b4e4137802f13c3a5e1106ebb2c4ae4e448ff87d3f9483a37bf1f",
+    "tools/net_dhcp_markers.json": "8f95eafcf1e069e91754cabf9b1e6302e7c367ea5d5c95b1d062163c4d5cef5e",
+    "tools/net_dhcp_transport.py": "2893685c95e66c6f154f2efbc5b40ef148e0cf153d71ad06c1443d4c1677e50b",
+    "tools/test_net_dhcp_transport.py": "162642451a5dcf7d56d4e463b8acbcdb050ac922a36de8733c0a4d467d5ce40a",
+    "userspace/net-core/src/acd.rs": "8a080b847fae2a5bd4f6f42b359c3015727309231ddfb1d8bfcf4ca8024c8d6e",
+    "userspace/net-core/src/acd/tests.rs": "874697d70e483e525e1477fd2cc2cd6867d2961e9f7b1d61c373653c533d77d2",
+    "userspace/net-core/src/dhcp.rs": "e163e491257f0adaf9e712fe57b014d654fe794e164cf9804448d7077c2c3db5",
+    "userspace/net-core/src/dhcp/tests.rs": "a56bef3551ccbb570a50396d00577052170b30337f727ffcef3b21af6fbdd1ec",
+    "userspace/net-core/src/dhcp/wire.rs": "8cf34eb3172e61ab4e81a6a4175d65522311cad0ad3619aa01c2eb477b25190b",
+    "userspace/net-core/src/lib.rs": "8eb5463acd87a37a67f66be2ebef882c9b11d66e382f83328a5d4ebb54be0fd1",
+    "userspace/system_apps/netd/src/dhcp_runtime.rs": "1366432c7e422741ed165b0c7f262e746f4b8954bb2476f73b5395d4e97f79c9",
+    "userspace/system_apps/netd/src/main.rs": "d3f620a05210739a303444c66386bf7bfa0dbcb816b7f21f2ab43310d01f5871"
+  },
+  "native_cases": [
+    {
+      "name": "net-dhcp-acd",
+      "scope": "DWM stock netd on the isolated E1000 peer. Declines the claimed .99 address and waits before rediscovery. Stays silent during new candidate probing. Verifies three probes and two announcements per clean .2/.3 address, active reply to a zero-SPA probe, renewal, rebind, NAK and old-address silence. Marker source annotations were corrected after the run with marker assertions intact.",
+      "marker_fixture": "tools/net_dhcp_markers.json",
+      "metadata_sha256": "0209c9266701bdedd2a1b2be642777c692f06ea98412ab0cb8f47e8b167090d6",
+      "serial_sha256": "5318f8b22f1d4d07d7d1327e255ec89e3bc3c1bf0060bfdd9b070e322d3f4815",
+      "image_sha256": "8443ede361c9b9bffcaffa3b77e5fa2e4bcb6e6b0ad94fc28d675c95a077c317",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 33,
+        "bytes": 5928,
+        "responses": 22,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "DHCPv4"
+        ],
+        "lease_stages": [
+          "discover_retried_after_loss",
+          "select_ignored_wrong_transaction",
+          "conflict_probe_declined_and_cooled_down",
+          "first_lease_acd_and_probe_response",
+          "first_lease_arp_icmp",
+          "unicast_renewal_ack",
+          "renewed_lease_arp_icmp",
+          "unicast_renewal_lost_rebind_nak",
+          "new_lease_acd",
+          "new_lease_arp_icmp_old_address_silent"
+        ],
+        "renewal_retries_before_rebind": 3,
+        "acd_probes": 7,
+        "acd_announcements": 4,
+        "decline_wall_cooldown_seconds": 10.017542046000017
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-dhcp-acd-slirp",
+      "scope": "Same DWM ISO under restricted QEMU user networking. The stock service activates 10.0.2.15 and the desktop starts.",
+      "marker_fixture": "local stock DWM DHCP smoke for 10.0.2.15",
+      "metadata_sha256": "cc38835702af16440393d65c5d2d28d486fc4d0c000a5e8fd5bfdc1269014bb4",
+      "serial_sha256": "e6359ea457206e11290bd99e6caa9e337c814c7ee3ca9bad1dc9f7fdd91435e4",
+      "image_sha256": "8443ede361c9b9bffcaffa3b77e5fa2e4bcb6e6b0ad94fc28d675c95a077c317",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 4,
+        "emulator_vcpus": 4,
+        "kernel_online_cpus": 4,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": null,
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    },
+    {
+      "name": "net-dhcp-acd-tcp",
+      "scope": "Regression for shared Ethernet/ARP framing, DNS over UDP and TCP, two TCP listener flows per supervised run and descriptor revocation on the reference E1000.",
+      "marker_fixture": "tools/net_live_markers.json",
+      "metadata_sha256": "41a69c88b298d258df546c4612572bc81b9c74a67095758f48c92623f9353977",
+      "serial_sha256": "8475ee409af0d13b3f92286c8199bcc0f9efad47860d884970cdbfa672ae24c8",
+      "image_sha256": "f95349d26d34aa78c1fefc98ac8acc9ab1710c38cceb7d43c71b6f9695e07491",
+      "guest": {
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 8,
+        "emulator_vcpus": 8,
+        "kernel_online_cpus": 8,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "host_peer": {
+        "ok": true,
+        "packets": 32,
+        "bytes": 2076,
+        "responses": 38,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "ICMPv4",
+          "UDP",
+          "TCP",
+          "DNS"
+        ],
+        "guest_identifiers": [
+          62,
+          77
+        ],
+        "tcp_rounds": 2,
+        "passive_streams": 4,
+        "passive_packets": 14
+      },
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      }
+    }
+  ],
+  "host_cases": {
+    "test_net_core.py": "60 core and 2 interface tests, including 5 conflict-probe and 2 decline tests",
+    "test_net_dhcp_transport.py": "3 passed",
+    "test_net_harness.py": "3 passed",
+    "gen_abi.py --check": "96 syscalls, 25 errno and 9 rights"
+  },
+  "limits": [
+    "TCP native regression uses the developer service fixture. ACD is exercised in the stock DHCP service.",
+    "Reference E1000 in QEMU TCG, one direct IPv4 interface.",
+    "Static addresses, DHCP relays, persisted leases and user-facing sockets are outside this slice."
+  ]
+}

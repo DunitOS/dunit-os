@@ -590,8 +590,10 @@ bad lengths/checksums/TTL, route/ARP timeout, MTU/fuzz cases without service pan
 - [x] Prefer an archive-provided static address over automatic DHCPv4.
 - [x] Validate DNS fallback over TCP after a matched truncated UDP reply.
   Exercise loss of SYN, split TCP response framing and close through E1000.
-- [ ] Add leased-address conflict probing, relay support and reboot validation
-  before using persisted leases.
+- [x] Probe each new DHCPv4 address before activation and announce it after
+  the quiet interval. Decline an ARP conflict and verify reacquisition after
+  the cooldown through the E1000 fixture.
+- [ ] Add DHCP relay support and reboot validation before using persisted leases.
 - [ ] Integrate the resolver with lease changes, service entropy, and an
   application endpoint. Define admin/user configuration precedence.
 

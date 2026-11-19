@@ -8,8 +8,13 @@ Other applications keep their existing authority.
 
 DHCP validates the transaction ID, interface MAC, selected server, address,
 subnet, gateway, DNS servers and lifetime before activating a lease. The
-service constructs the new interface and connected/default routes before
-publication. An unchanged renewal retains the peer and its ARP cache. Expiry,
+service waits for three RFC 5227 ARP probes and a quiet interval before
+activating a new DHCP address. It then sends two announcements and answers
+foreign probes for the configured address. The schedule advances when the
+packet queue accepts a probe or announcement. An ARP conflict withdraws the
+lease immediately and sends DHCPDECLINE, followed by a ten-second cooldown
+before rediscovery. An unchanged renewal retains the peer and its ARP cache.
+Expiry,
 link loss or an accepted NAK clears the addresses and transmit backlog.
 The service waits on packet readiness and monotonic deadlines. It bounds TX
 backlog to one batch of 32 records so a slow transmitter cannot stall RX or
@@ -56,6 +61,7 @@ covers 8,192 bytes of TCP with losses and both half-closes. Its host counterpart
 also covers 2 MiB, sequence wrap and timer bounds.
 
 Application sockets, production netd integration for TCP and DNS, congestion
-control, DHCP relays, address-conflict probes and persisted lease recovery
-remain open. See the [IPv4 verification](../verification/net-stack-2026-11-19.json)
-and [TCP admission verification](../verification/tcp-admission-2026-11-19.json).
+control, DHCP relays, static-address conflict probing and persisted lease
+recovery remain open. See the [IPv4 verification](../verification/net-stack-2026-11-19.json)
+[TCP admission verification](../verification/tcp-admission-2026-11-19.json),
+and [DHCP conflict verification](../verification/dhcp-acd-2026-11-19.json).

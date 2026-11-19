@@ -4,11 +4,13 @@ import socket
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from net_dhcp_transport import (
-    ACK, ARP, ARP_HEADER, BROADCAST, BROADCAST_MAC, COOKIE, DISCOVER, FIRST,
-    IPV4, NAK, OFFER, REQUEST, SECOND, SERVER, STAGES, ZERO, NetDhcpPeer,
+    ACK, ARP, ARP_HEADER, BROADCAST, BROADCAST_MAC, CONFLICT, COOKIE,
+    DECLINE, DISCOVER, FIRST, IPV4, NAK, OFFER, PROBER_MAC, REQUEST, SECOND,
+    SERVER, STAGES, ZERO, NetDhcpPeer, Request,
     ipv4, option, parse_request, pseudo,
 )
 from net_test_transport import GUEST_MAC, HOST_MAC, checksum
@@ -52,21 +54,37 @@ class DhcpPeerTests(unittest.TestCase):
             with self.subTest(index=index), self.assertRaises(ValueError):
                 parse_request(case, DISCOVER, ZERO, BROADCAST)
 
-    def test_two_addresses_with_renew_rebind_nak_and_genuine_wire_probes(self):
+    def test_discovery_earlier_than_conflict_cooldown_is_rejected(self):
+        peer = NetDhcpPeer(Path("."))
+        before = Request(12, BROADCAST, {})
+        after = Request(13, BROADCAST, {})
+        decline = client(DECLINE, 12, selectors=option(50, CONFLICT) + option(54, SERVER))
+        with (patch.object(peer, "_expect_acd"), patch.object(peer, "_send"),
+              patch.object(peer, "_receive", return_value=decline),
+              patch.object(peer, "_discover", return_value=after),
+              patch("net_dhcp_transport.monotonic", side_effect=(20.0, 20.1))):
+            with self.assertRaisesRegex(ValueError, "bypassed DECLINE cooldown"):
+                peer._decline(None, before)
+
+    def test_conflict_then_two_addresses_with_renewal_and_rebind(self):
         with tempfile.TemporaryDirectory() as directory:
             peer = NetDhcpPeer(Path(directory))
             peer.start()
             host, port = peer.endpoint.split(":")
             try:
                 with socket.create_connection((host, int(port)), timeout=5) as conn:
-                    self.run_script(conn)
-                    self.assertTrue(peer.wait_complete(2))
+                    with patch("net_dhcp_transport.monotonic", side_effect=(20.0, 30.125)):
+                        self.run_script(conn)
+                        self.assertTrue(peer.wait_complete(2))
             finally:
                 result = peer.stop()
             self.assertTrue(result["ok"], result)
             self.assertEqual(result["lease_stages"], list(STAGES))
-            self.assertEqual(result["packets"], 16)
-            self.assertEqual(result["responses"], 15)
+            self.assertEqual(result["packets"], 31)
+            self.assertEqual(result["responses"], 22)
+            self.assertEqual(result["acd_probes"], 7)
+            self.assertEqual(result["acd_announcements"], 4)
+            self.assertEqual(result["decline_wall_cooldown_seconds"], 10.125)
             self.assertEqual(result["renewal_retries_before_rebind"], 1)
 
     def read_frame(self, conn):
@@ -119,13 +137,49 @@ class DhcpPeerTests(unittest.TestCase):
         data = data[:2] + struct.pack("!H", checksum(data)) + data[4:]
         self.send_frame(conn, guest_frame(HOST_MAC, IPV4, ipv4(1, address, SERVER, data)))
 
+    def acd_request(self, conn, candidate, sender=ZERO):
+        self.send_frame(conn, guest_frame(BROADCAST_MAC, ARP, ARP_HEADER + b"\0\x01" +
+                                          GUEST_MAC + sender + bytes(6) + candidate))
+
+    def complete_acd(self, conn, address):
+        self.acd_request(conn, address)
+        tentative = self.read_frame(conn)
+        self.assertEqual(tentative[12:22], ARP + ARP_HEADER + b"\0\x01")
+        self.assertEqual(tentative[38:42], address)
+        for _ in range(2):
+            self.acd_request(conn, address)
+        for _ in range(2):
+            self.acd_request(conn, address, address)
+
+    def answer_active_probe(self, conn, address):
+        probe = self.read_frame(conn)
+        self.assertEqual(probe[6:12], PROBER_MAC)
+        self.assertEqual(probe[12:22], ARP + ARP_HEADER + b"\0\x01")
+        self.assertEqual(probe[28:32], ZERO)
+        self.assertEqual(probe[38:42], address)
+        self.send_frame(conn, guest_frame(PROBER_MAC, ARP, ARP_HEADER + b"\0\x02" +
+                                         GUEST_MAC + address + PROBER_MAC + ZERO))
+
     def run_script(self, conn):
         self.send_frame(conn, client(DISCOVER, 12))
         self.send_frame(conn, client(DISCOVER, 12))
-        self.read_reply(conn, OFFER, 13, bytes([192, 0, 2, 99]))
-        self.read_reply(conn, OFFER, 12, FIRST)
-        self.send_frame(conn, client(REQUEST, 12, selectors=option(50, FIRST) + option(54, SERVER)))
-        self.read_reply(conn, ACK, 12, FIRST)
+        self.read_reply(conn, OFFER, 13, FIRST)
+        self.read_reply(conn, OFFER, 12, CONFLICT)
+        self.send_frame(conn, client(REQUEST, 12, selectors=option(50, CONFLICT) + option(54, SERVER)))
+        self.read_reply(conn, ACK, 12, CONFLICT)
+        self.acd_request(conn, CONFLICT)
+        conflict = self.read_frame(conn)
+        self.assertEqual(conflict[28:32], CONFLICT)
+        self.assertEqual(conflict[38:42], CONFLICT)
+        self.send_frame(conn, client(DECLINE, 12, selectors=option(50, CONFLICT) + option(54, SERVER)))
+        self.assertEqual(self.read_frame(conn)[38:42], CONFLICT)
+
+        self.send_frame(conn, client(DISCOVER, 13))
+        self.read_reply(conn, OFFER, 13, FIRST)
+        self.send_frame(conn, client(REQUEST, 13, selectors=option(50, FIRST) + option(54, SERVER)))
+        self.read_reply(conn, ACK, 13, FIRST)
+        self.complete_acd(conn, FIRST)
+        self.answer_active_probe(conn, FIRST)
         self.answer_arp_and_echo(conn, FIRST)
 
         self.send_frame(conn, guest_frame(BROADCAST_MAC, ARP, ARP_HEADER + b"\0\x01" +
@@ -144,6 +198,7 @@ class DhcpPeerTests(unittest.TestCase):
         self.read_reply(conn, OFFER, 15, SECOND)
         self.send_frame(conn, client(REQUEST, 15, selectors=option(50, SECOND) + option(54, SERVER)))
         self.read_reply(conn, ACK, 15, SECOND)
+        self.complete_acd(conn, SECOND)
         self.answer_arp_and_echo(conn, SECOND, silent=FIRST)
 
 

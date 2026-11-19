@@ -1,5 +1,5 @@
 {
-  "description": "Production netd acquires a DHCPv4 lease through E1000 and keeps address ownership synchronized with renewal, rebinding, NAK and replacement.",
+  "description": "Production netd verifies tentative DHCPv4 addresses through E1000 and tracks ownership across renewal, rebinding, NAK and replacement.",
   "run": {
     "config": "limine_test_gui.conf",
     "net_dhcp": true,
@@ -10,10 +10,11 @@
   },
   "required": [
     {"marker": "[INIT] netd: network grant delivered", "claim": "the sealed catalog started the production service with a NIC capability", "source": "userspace/system_apps/init/src/main.rs"},
-    {"marker": "[NETD] DHCP bound 192.0.2.2", "claim": "netd published a lease only after matching OFFER and ACK", "source": "userspace/system_apps/netd/src/main.rs"},
-    {"marker": "[NETD] DHCP renewed 192.0.2.2", "claim": "netd accepted a unicast renewal without losing address ownership", "source": "userspace/system_apps/netd/src/main.rs"},
-    {"marker": "[NETD] DHCP lease removed", "claim": "netd invalidated the lease when the server NAKed a rebind", "source": "userspace/system_apps/netd/src/main.rs"},
-    {"marker": "[NETD] DHCP bound 192.0.2.3", "claim": "netd installed a new address after the old lease was invalidated", "source": "userspace/system_apps/netd/src/main.rs"},
+    {"marker": "[NETD] DHCP conflict 192.0.2.99", "claim": "netd detected a conflicting ARP claim and declined the tentative lease", "source": "userspace/system_apps/netd/src/dhcp_runtime.rs"},
+    {"marker": "[NETD] DHCP bound 192.0.2.2", "claim": "netd published a lease after DHCP selection and conflict probing", "source": "userspace/system_apps/netd/src/dhcp_runtime.rs"},
+    {"marker": "[NETD] DHCP renewed 192.0.2.2", "claim": "netd accepted a unicast renewal without losing address ownership", "source": "userspace/system_apps/netd/src/dhcp_runtime.rs"},
+    {"marker": "[NETD] DHCP lease removed", "claim": "netd invalidated the lease when the server NAKed a rebind", "source": "userspace/system_apps/netd/src/dhcp_runtime.rs"},
+    {"marker": "[NETD] DHCP bound 192.0.2.3", "claim": "netd installed a new address after the old lease was invalidated", "source": "userspace/system_apps/netd/src/dhcp_runtime.rs"},
     "gui_server: desktop ready"
   ],
   "forbidden": [
@@ -22,6 +23,7 @@
     "[INIT] netd: restart",
     "[INIT] netd: faulted",
     "[NETD-FIXTURE]",
+    "[NETD] DHCP bound 192.0.2.99",
     {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager", "why": "private boot smoke performs intentional faults before supervisor launch"}
   ]
 }

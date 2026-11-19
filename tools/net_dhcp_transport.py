@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import socket
 import struct
+from time import monotonic
 
 from net_test_transport import GUEST_MAC, HOST_MAC, EthernetPeer, checksum
 
@@ -14,20 +15,28 @@ BROADCAST_MAC = bytes([255]) * 6
 SERVER = bytes([192, 0, 2, 1])
 FIRST = bytes([192, 0, 2, 2])
 SECOND = bytes([192, 0, 2, 3])
+CONFLICT = bytes([192, 0, 2, 99])
+PROBER_MAC = bytes.fromhex("020000000004")
 MASK = bytes([255, 255, 255, 0])
 DNS = bytes([192, 0, 2, 53])
 IPV4 = b"\x08\x00"
 ARP = b"\x08\x06"
 ARP_HEADER = struct.pack("!HHBB", 1, 0x0800, 6, 4)
 COOKIE = b"\x63\x82\x53\x63"
-DISCOVER, OFFER, REQUEST, ACK, NAK = 1, 2, 3, 5, 6
+DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK = 1, 2, 3, 4, 5, 6
+# The guest verifies ten seconds of monotonic cooldown. Allow up to one second
+# of wall-clock skew when measuring the same interval across the socket.
+MIN_DECLINE_WALL_SECONDS = 9.0
 STAGES = (
     "discover_retried_after_loss",
     "select_ignored_wrong_transaction",
+    "conflict_probe_declined_and_cooled_down",
+    "first_lease_acd_and_probe_response",
     "first_lease_arp_icmp",
     "unicast_renewal_ack",
     "renewed_lease_arp_icmp",
     "unicast_renewal_lost_rebind_nak",
+    "new_lease_acd",
     "new_lease_arp_icmp_old_address_silent",
 )
 
@@ -116,9 +125,9 @@ def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False) -> byte
     body += option(53, bytes([kind])) + option(54, SERVER)
     if kind != NAK:
         body += option(1, MASK) + option(3, SERVER) + option(6, DNS)
-        body += option(51, struct.pack("!I", 16))
-        body += option(58, struct.pack("!I", 4))
-        body += option(59, struct.pack("!I", 8))
+        body += option(51, struct.pack("!I", 28))
+        body += option(58, struct.pack("!I", 14))
+        body += option(59, struct.pack("!I", 20))
     body += b"\xff"
     body = body.ljust(300, b"\0")
     target = address if unicast else BROADCAST
@@ -137,6 +146,9 @@ class NetDhcpPeer(EthernetPeer):
         super().__init__(workdir)
         self._stages: list[str] = []
         self._renew_retries = 0
+        self._acd_probes = 0
+        self._acd_announcements = 0
+        self._cooldown = None
 
     def wait_complete(self, timeout: float) -> bool:
         self._thread.join(timeout=timeout)
@@ -155,6 +167,51 @@ class NetDhcpPeer(EthernetPeer):
                 request.options.get(54) != SERVER):
             raise ValueError("client did not select the matching DHCP offer")
         self._send(connection, reply(ACK, request.xid, address))
+
+    def _expect_acd(self, connection: socket.socket, address: bytes, sender: bytes) -> None:
+        expected = (BROADCAST_MAC + GUEST_MAC + ARP + ARP_HEADER + b"\0\x01" +
+                    GUEST_MAC + sender + bytes(6) + address).ljust(60, b"\0")
+        if self._receive(connection) != expected:
+            raise ValueError(f"invalid RFC 5227 ARP frame for {list(address)}")
+        if sender == ZERO:
+            self._acd_probes += 1
+        else:
+            self._acd_announcements += 1
+
+    def _complete_acd(self, connection: socket.socket, address: bytes) -> None:
+        self._expect_acd(connection, address, ZERO)
+        # A tentative address must stay silent while we solicit it.
+        self._send(connection, self._arp_request(address))
+        for _ in range(2):
+            self._expect_acd(connection, address, ZERO)
+        for _ in range(2):
+            self._expect_acd(connection, address, address)
+
+    def _active_probe_reply(self, connection: socket.socket, address: bytes) -> None:
+        probe = (BROADCAST_MAC + PROBER_MAC + ARP + ARP_HEADER + b"\0\x01" +
+                 PROBER_MAC + ZERO + bytes(6) + address).ljust(60, b"\0")
+        self._send(connection, probe)
+        expected = (PROBER_MAC + GUEST_MAC + ARP + ARP_HEADER + b"\0\x02" +
+                    GUEST_MAC + address + PROBER_MAC + ZERO).ljust(60, b"\0")
+        if self._receive(connection) != expected:
+            raise ValueError("active address did not answer an incoming zero-SPA ARP probe")
+
+    def _decline(self, connection: socket.socket, before: Request) -> Request:
+        self._expect_acd(connection, CONFLICT, ZERO)
+        self._send(connection, ethernet(BROADCAST_MAC, ARP, ARP_HEADER + b"\0\x01" +
+                                        HOST_MAC + CONFLICT + bytes(6) + CONFLICT))
+        decline = parse_request(self._receive(connection), DECLINE, ZERO, BROADCAST)
+        if decline.options.get(50) != CONFLICT or decline.options.get(54) != SERVER:
+            raise ValueError("DHCP DECLINE did not identify the conflicting lease")
+        began = monotonic()
+        self._send(connection, self._arp_request(CONFLICT))
+        discover = self._discover(connection)
+        self._cooldown = monotonic() - began
+        if self._cooldown < MIN_DECLINE_WALL_SECONDS:
+            raise ValueError(f"DHCP DISCOVER bypassed DECLINE cooldown ({self._cooldown:.3f}s)")
+        if discover.xid == before.xid:
+            raise ValueError("DHCP DISCOVER retained the declined transaction ID")
+        return discover
 
     def _probe_address(self, connection: socket.socket, address: bytes,
                        sequence: int, *, silent: bytes | None = None) -> None:
@@ -207,18 +264,25 @@ class NetDhcpPeer(EthernetPeer):
         if self._stop.wait(1.25):
             return
         discover = self._discover(connection)
-        self._stages.append(STAGES[0])
-        self._send(connection, reply(OFFER, discover.xid ^ 1, bytes([192, 0, 2, 99])))
+        self._stages.append("discover_retried_after_loss")
+        self._send(connection, reply(OFFER, discover.xid ^ 1, FIRST))
+        self._select(connection, discover, CONFLICT)
+        self._stages.append("select_ignored_wrong_transaction")
+        discover = self._decline(connection, discover)
+        self._stages.append("conflict_probe_declined_and_cooled_down")
+
         self._select(connection, discover, FIRST)
-        self._stages.append(STAGES[1])
+        self._complete_acd(connection, FIRST)
+        self._active_probe_reply(connection, FIRST)
+        self._stages.append("first_lease_acd_and_probe_response")
         self._probe_address(connection, FIRST, 1)
-        self._stages.append(STAGES[2])
+        self._stages.append("first_lease_arp_icmp")
 
         renewal = self._renewal(connection)
         self._send(connection, reply(ACK, renewal.xid, FIRST, unicast=True))
-        self._stages.append(STAGES[3])
+        self._stages.append("unicast_renewal_ack")
         self._probe_address(connection, FIRST, 2)
-        self._stages.append(STAGES[4])
+        self._stages.append("renewed_lease_arp_icmp")
 
         self._renewal(connection)  # Drop this renewal until T2.
         for _ in range(8):
@@ -229,12 +293,14 @@ class NetDhcpPeer(EthernetPeer):
             self._renew_retries += 1
         else:
             raise ValueError("client did not broadcast DHCP rebind")
-        self._stages.append(STAGES[5])
+        self._stages.append("unicast_renewal_lost_rebind_nak")
 
         discover = self._discover(connection)
         self._select(connection, discover, SECOND)
+        self._complete_acd(connection, SECOND)
+        self._stages.append("new_lease_acd")
         self._probe_address(connection, SECOND, 3, silent=FIRST)
-        self._stages.append(STAGES[6])
+        self._stages.append("new_lease_arp_icmp_old_address_silent")
 
     def _finish_exchange(self) -> dict:
         if tuple(self._stages) != STAGES:
@@ -243,4 +309,7 @@ class NetDhcpPeer(EthernetPeer):
             "protocols": ["ARP", "ICMPv4", "DHCPv4"],
             "lease_stages": self._stages,
             "renewal_retries_before_rebind": self._renew_retries,
+            "acd_probes": self._acd_probes,
+            "acd_announcements": self._acd_announcements,
+            "decline_wall_cooldown_seconds": self._cooldown,
         }
