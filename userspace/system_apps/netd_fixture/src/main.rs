@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+mod dns_tcp;
+
 use alloc::{format, vec};
 use dunit::{
     errno,
@@ -218,6 +220,12 @@ fn exchange() -> Result<()> {
         return Err(Error(errno::EIO));
     };
     require(answer.ttl == 30, "live DNS TTL")?;
+    resolver.close(&mut peer).map_err(net_error)?;
+    let fallback = dns_tcp::exchange(
+        &queue, &mut peer, info.mac, info.mtu as usize, started, &mut rx, &mut tx,
+    )?;
+    require(fallback == answer, "split TCP DNS response")?;
+    dunit::println!("[NETD-FIXTURE] TCP DNS fallback after truncated UDP and SYN loss passed")?;
     dunit::println!("[NETD-FIXTURE] native authority, faults, ARP, ICMP and UDP DNS passed")?;
     match answer.address {
         AddressData::V4([192, 0, 2, 3]) => process::exit(7), // kernel closes live fd/session

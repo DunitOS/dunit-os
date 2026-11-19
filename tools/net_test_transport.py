@@ -29,6 +29,15 @@ def response_frame(frame: bytes) -> bytes:
     return frame[6:12] + frame[:6] + frame[12:14] + bytes(byte ^ 0xA5 for byte in frame[14:])
 
 
+def checksum(data: bytes) -> int:
+    if len(data) % 2:
+        data += b"\0"
+    total = sum(int.from_bytes(data[i:i+2], "big") for i in range(0, len(data), 2))
+    while total > 0xffff:
+        total = (total & 0xffff) + (total >> 16)
+    return (~total) & 0xffff
+
+
 class NetPeer:
     """One-use peer; start returns only after the listening socket is ready."""
 
@@ -155,3 +164,25 @@ class NetPeer:
         self.workdir.mkdir(parents=True, exist_ok=True)
         (self.workdir / "net-peer.json").write_text(json.dumps(self._result, indent=2) + "\n")
         return self._result
+
+
+class EthernetPeer(NetPeer):
+    """Framed transport for tests that exercise standard Ethernet protocols."""
+
+    def _receive(self, connection: socket.socket) -> bytes:
+        header = self._read(connection, 4)
+        if header is None:
+            raise ValueError("missing Ethernet length prefix")
+        length, = struct.unpack("!I", header)
+        if not 60 <= length <= 1514:
+            raise ValueError(f"invalid Ethernet frame length {length}")
+        frame = self._read(connection, length)
+        if frame is None:
+            raise ValueError("missing Ethernet payload")
+        self._packets += 1
+        self._bytes += length
+        return frame
+
+    def _send(self, connection: socket.socket, frame: bytes) -> None:
+        connection.sendall(struct.pack("!I", len(frame)) + frame)
+        self._responses += 1

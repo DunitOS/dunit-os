@@ -52,6 +52,22 @@ fn main() -> dunit::Result<()> {
                 transport.dns_answers,
                 transport.rejected
             )?;
+            let tcp = match dunit_net_core::tcp::diagnostic::run() {
+                Ok(report) => report,
+                Err(error) => {
+                    dunit::println!("[NET-CORE] FAIL TCP {:?}", error)?;
+                    return Err(dunit::Error(dunit::errno::EINVAL));
+                }
+            };
+            if tcp.bytes != dunit_net_core::tcp::diagnostic::STREAM_BYTES || tcp.retries != 2 {
+                dunit::println!("[NET-CORE] FAIL TCP counts")?;
+                return Err(dunit::Error(dunit::errno::EINVAL));
+            }
+            dunit::println!(
+                "[NET-TCP] logical-peer bytes={} retries={} half-close checked",
+                tcp.bytes,
+                tcp.retries
+            )?;
             dunit::println!("[NET-CORE] codec logical-peer OK; NIC service gate open")?;
             Ok(())
         }

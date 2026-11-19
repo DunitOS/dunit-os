@@ -1,0 +1,27 @@
+{
+  "description": "Production netd acquires a DHCPv4 lease through E1000 and keeps address ownership synchronized with renewal, rebinding, NAK and replacement.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "net_dhcp": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[INIT] netd: network grant delivered", "claim": "the sealed catalog started the production service with a NIC capability", "source": "userspace/system_apps/init/src/main.rs"},
+    {"marker": "[NETD] DHCP bound 192.0.2.2", "claim": "netd published a lease only after matching OFFER and ACK", "source": "userspace/system_apps/netd/src/main.rs"},
+    {"marker": "[NETD] DHCP renewed 192.0.2.2", "claim": "netd accepted a unicast renewal without losing address ownership", "source": "userspace/system_apps/netd/src/main.rs"},
+    {"marker": "[NETD] DHCP lease removed", "claim": "netd invalidated the lease when the server NAKed a rebind", "source": "userspace/system_apps/netd/src/main.rs"},
+    {"marker": "[NETD] DHCP bound 192.0.2.3", "claim": "netd installed a new address after the old lease was invalidated", "source": "userspace/system_apps/netd/src/main.rs"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NETD-FIXTURE]",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager", "why": "private boot smoke performs intentional faults before supervisor launch"}
+  ]
+}
