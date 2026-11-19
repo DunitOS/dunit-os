@@ -1,0 +1,27 @@
+{
+  "description": "Production netd probes a static IPv4 address, routes an off-link response via its configured gateway and withdraws the address on conflict.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-static",
+    "net_static": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[INIT] netd: network grant delivered", "claim": "the sealed catalog starts the production service with its NIC capability", "source": "userspace/system_apps/init/src/main.rs"},
+    {"marker": "[NETD] IPv4 static bound 192.0.2.12", "claim": "netd has completed probing and enabled the configured address", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "claim": "netd detected another station claiming the active address", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NETD-FIXTURE]",
+    "[NETD] DHCP",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager", "why": "private boot smoke performs intentional faults before supervisor launch"}
+  ]
+}

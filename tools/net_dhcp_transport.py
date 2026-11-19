@@ -17,6 +17,11 @@ FIRST = bytes([192, 0, 2, 2])
 SECOND = bytes([192, 0, 2, 3])
 CONFLICT = bytes([192, 0, 2, 99])
 PROBER_MAC = bytes.fromhex("020000000004")
+ROUTE_GATEWAY = bytes([192, 0, 2, 254])
+ROUTE_MAC = bytes.fromhex("020000000007")
+ROUTED_HOST = bytes([198, 51, 100, 7])
+OFF_PREFIX_HOST = bytes([203, 0, 113, 7])
+CLASSLESS_ROUTE = bytes([24]) + ROUTED_HOST[:3] + ROUTE_GATEWAY
 MASK = bytes([255, 255, 255, 0])
 DNS = bytes([192, 0, 2, 53])
 IPV4 = b"\x08\x00"
@@ -33,16 +38,18 @@ STAGES = (
     "conflict_probe_declined_and_cooled_down",
     "first_lease_acd_and_probe_response",
     "first_lease_arp_icmp",
+    "classless_route_and_router_option_ignored",
     "unicast_renewal_ack",
     "renewed_lease_arp_icmp",
+    "renewal_retains_classless_route",
     "unicast_renewal_lost_rebind_nak",
     "new_lease_acd",
     "new_lease_arp_icmp_old_address_silent",
 )
 
 
-def ethernet(destination: bytes, kind: bytes, payload: bytes) -> bytes:
-    return (destination + HOST_MAC + kind + payload).ljust(60, b"\0")
+def ethernet(destination: bytes, kind: bytes, payload: bytes, *, source: bytes = HOST_MAC) -> bytes:
+    return (destination + source + kind + payload).ljust(60, b"\0")
 
 
 def ipv4(protocol: int, src: bytes, dst: bytes, payload: bytes) -> bytes:
@@ -115,7 +122,8 @@ def parse_request(frame: bytes, kind: int, address: bytes, destination: bytes) -
     return Request(struct.unpack_from("!I", body, 4)[0], target, parsed)
 
 
-def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False) -> bytes:
+def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False,
+          include_routes: bool = True) -> bytes:
     body = bytearray(240)
     body[:4] = b"\x02\x01\x06\x00"
     struct.pack_into("!I", body, 4, xid)
@@ -124,7 +132,9 @@ def reply(kind: int, xid: int, address: bytes, *, unicast: bool = False) -> byte
     body[236:240] = COOKIE
     body += option(53, bytes([kind])) + option(54, SERVER)
     if kind != NAK:
-        body += option(1, MASK) + option(3, SERVER) + option(6, DNS)
+        body += option(1, MASK) + option(6, DNS)
+        if include_routes:
+            body += option(121, CLASSLESS_ROUTE) + option(3, SERVER)
         body += option(51, struct.pack("!I", 28))
         body += option(58, struct.pack("!I", 14))
         body += option(59, struct.pack("!I", 20))
@@ -158,6 +168,9 @@ class NetDhcpPeer(EthernetPeer):
         request = parse_request(self._receive(connection), DISCOVER, ZERO, BROADCAST)
         if 50 in request.options or 54 in request.options:
             raise ValueError("fresh DHCP discovery retained a former lease")
+        requested = request.options.get(55, b"")
+        if 121 not in requested or 3 not in requested or requested.index(121) > requested.index(3):
+            raise ValueError("DHCP discovery must request classless routes before the router option")
         return request
 
     def _select(self, connection: socket.socket, discover: Request, address: bytes) -> None:
@@ -223,14 +236,42 @@ class NetDhcpPeer(EthernetPeer):
         expected = (HOST_MAC + GUEST_MAC + ARP + ARP_HEADER + b"\0\x02" + response).ljust(60, b"\0")
         if arp != expected:
             raise ValueError(f"wrong ARP response for leased IPv4 address {list(address)}")
-        echo = struct.pack("!BBHHH", 8, 0, 0, 0xd017, sequence) + b"dunit-dhcp-lease"
-        echo = echo[:2] + struct.pack("!H", checksum(echo)) + echo[4:]
+        echo = self._echo_request(sequence)
         self._send(connection, ethernet(GUEST_MAC, IPV4, ipv4(1, SERVER, address, echo)))
-        frame = self._receive(connection)
+        self._expect_echo_reply(self._receive(connection), address, SERVER, HOST_MAC, echo)
+
+    @staticmethod
+    def _echo_request(sequence: int) -> bytes:
+        echo = struct.pack("!BBHHH", 8, 0, 0, 0xd017, sequence) + b"dunit-dhcp-lease"
+        return echo[:2] + struct.pack("!H", checksum(echo)) + echo[4:]
+
+    @staticmethod
+    def _expect_echo_reply(frame: bytes, address: bytes, remote: bytes,
+                           next_hop_mac: bytes, echo: bytes) -> None:
         source, target, payload = parse_ipv4(frame, 1)
-        if (source != address or target != SERVER or frame[:6] != HOST_MAC or
+        if (source != address or target != remote or frame[:6] != next_hop_mac or
                 payload[:2] != b"\0\0" or payload[4:] != echo[4:] or checksum(payload)):
             raise ValueError(f"wrong ICMP echo reply for leased IPv4 address {list(address)}")
+
+    def _probe_classless_route(self, connection: socket.socket, address: bytes,
+                               sequence: int, *, expect_arp: bool = False) -> None:
+        # Option 121 contains no default route, so the off-prefix packet
+        # must produce neither an echo reply nor ARP for the option-3 router.
+        echo = self._echo_request(sequence)
+        self._send(connection, ethernet(GUEST_MAC, IPV4, ipv4(1, OFF_PREFIX_HOST, address, echo)))
+        routed = ethernet(GUEST_MAC, IPV4, ipv4(1, ROUTED_HOST, address, echo))
+        self._send(connection, routed)
+        frame = self._receive(connection)
+        if expect_arp or frame[12:14] == ARP:
+            expected = (BROADCAST_MAC + GUEST_MAC + ARP + ARP_HEADER + b"\0\x01" +
+                        GUEST_MAC + address + bytes(6) + ROUTE_GATEWAY).ljust(60, b"\0")
+            if frame != expected:
+                raise ValueError("expected ARP for the classless route gateway")
+            reply = ARP_HEADER + b"\0\x02" + ROUTE_MAC + ROUTE_GATEWAY + GUEST_MAC + address
+            self._send(connection, ethernet(GUEST_MAC, ARP, reply, source=ROUTE_MAC))
+            self._send(connection, routed)
+            frame = self._receive(connection)
+        self._expect_echo_reply(frame, address, ROUTED_HOST, ROUTE_MAC, echo)
 
     @staticmethod
     def _arp_request(address: bytes) -> bytes:
@@ -277,12 +318,16 @@ class NetDhcpPeer(EthernetPeer):
         self._stages.append("first_lease_acd_and_probe_response")
         self._probe_address(connection, FIRST, 1)
         self._stages.append("first_lease_arp_icmp")
+        self._probe_classless_route(connection, FIRST, 4, expect_arp=True)
+        self._stages.append("classless_route_and_router_option_ignored")
 
         renewal = self._renewal(connection)
-        self._send(connection, reply(ACK, renewal.xid, FIRST, unicast=True))
+        self._send(connection, reply(ACK, renewal.xid, FIRST, unicast=True, include_routes=False))
         self._stages.append("unicast_renewal_ack")
         self._probe_address(connection, FIRST, 2)
         self._stages.append("renewed_lease_arp_icmp")
+        self._probe_classless_route(connection, FIRST, 5)
+        self._stages.append("renewal_retains_classless_route")
 
         self._renewal(connection)  # Drop this renewal until T2.
         for _ in range(8):

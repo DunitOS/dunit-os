@@ -610,7 +610,8 @@ def run(args: argparse.Namespace) -> RunResult:
     net_test = bool(getattr(args, "net_test", False) or run_defaults.get("net_test"))
     net_live = bool(getattr(args, "net_live", False) or run_defaults.get("net_live"))
     net_dhcp = bool(getattr(args, "net_dhcp", False) or run_defaults.get("net_dhcp"))
-    peers = sum((net_test, net_live, net_dhcp))
+    net_static = bool(getattr(args, "net_static", False) or run_defaults.get("net_static"))
+    peers = sum((net_test, net_live, net_dhcp, net_static))
     if peers > 1:
         raise ValueError("choose one network test peer")
     if peers and (args.interactive or args.variant or args.disk or args.build_disk):
@@ -695,7 +696,10 @@ def run(args: argparse.Namespace) -> RunResult:
                arg.startswith(("-nic=", "-netdev=", "-net=")) or
                arg.startswith("e1000,") for arg in extra_args):
             raise ValueError("network peer owns its reference NIC and backend")
-        if net_dhcp:
+        if net_static:
+            from net_static_transport import NetStaticPeer
+            peer = NetStaticPeer(workdir)
+        elif net_dhcp:
             from net_dhcp_transport import NetDhcpPeer
             peer = NetDhcpPeer(workdir)
         elif net_live:
@@ -826,8 +830,8 @@ def run(args: argparse.Namespace) -> RunResult:
         # Boot-scene waits can refer to this VM's startup output. Command waits
         # above remain scoped to their own launch.
         # The per-command budget applies only to command_actions above.
-        if net_dhcp and not peer.wait_complete(remaining()):
-            raise RuntimeError("DHCP peer did not complete the lease exchange")
+        if (net_dhcp or net_static) and not peer.wait_complete(remaining()):
+            raise RuntimeError("IPv4 peer did not complete the wire exchange")
         run_command_actions(qmp, serial, run_defaults.get("actions", []),
                             0, hard_deadline)
 
@@ -1006,6 +1010,8 @@ def main() -> int:
                         help="attach the isolated userspace ARP/ICMP/UDP/DNS peer and reference E1000")
     parser.add_argument("--net-dhcp", action="store_true",
                         help="verify DHCP leases against an isolated server and reference E1000")
+    parser.add_argument("--net-static", action="store_true",
+                        help="verify static IPv4, gateway routing and conflict withdrawal over E1000")
     parser.add_argument("--qmp-transport", choices=("unix", "stdio"), default="unix",
                         help="QMP control channel; stdio uses local pipes without sockets")
     parser.add_argument(
