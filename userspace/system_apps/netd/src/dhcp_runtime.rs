@@ -1,19 +1,17 @@
 //! DHCP timers, tentative address probes and interface activation.
-use dunit::{errno, Error, Result};
+use dunit::Result;
 use dunit_net_core::{
-    acd::{self, Probe},
     dhcp::{self, Action, Client, Event, Lease, Transmission},
     udp::{Address, Send},
     Mac,
 };
-use dunit_packet_abi::encode_record;
-use netd::{wire_error, Queue};
+use netd::Queue;
 
-use crate::{interface::{Config, Interface}, network_error, outbound::Outbound};
+use crate::{address_probe::AddressProbe, interface::{Config, Interface}, network_error, outbound::Outbound};
 
 struct Candidate {
     config: Config,
-    probe: Probe,
+    probe: AddressProbe,
 }
 
 pub struct Dynamic {
@@ -22,7 +20,6 @@ pub struct Dynamic {
     client: Client,
     pending: Option<Transmission>,
     candidate: Option<Candidate>,
-    probe_waits_for_tx: bool,
 }
 
 impl Dynamic {
@@ -32,21 +29,16 @@ impl Dynamic {
             client: Client::new(mac, seed).map_err(network_error)?,
             pending: None,
             candidate: None,
-            probe_waits_for_tx: false,
         })
     }
 
     pub fn deadline(&self) -> u64 {
-        let probe = if self.probe_waits_for_tx {
-            None
-        } else {
-            self.candidate.as_ref().and_then(|candidate| candidate.probe.deadline())
-        };
+        let probe = self.candidate.as_ref().and_then(|candidate| candidate.probe.deadline());
         self.client.deadline().min(probe.unwrap_or(u64::MAX))
     }
 
     pub fn waiting_for_probe_tx(&self) -> bool {
-        self.probe_waits_for_tx
+        self.candidate.as_ref().is_some_and(|candidate| candidate.probe.waiting_for_tx())
     }
 
     pub fn reset(&mut self, now: u64, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
@@ -57,7 +49,6 @@ impl Dynamic {
     fn remove(&mut self, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
         self.pending = None;
         self.candidate = None;
-        self.probe_waits_for_tx = false;
         tx.clear();
         if interface.clear() {
             dunit::println!("[NETD] DHCP lease removed")?;
@@ -104,6 +95,7 @@ impl Dynamic {
         self.pending = None;
         let config = Config {
             address: lease.address, mask: lease.mask, router: lease.router, dns: lease.dns,
+            routes: lease.routes,
         };
         if let Some(candidate) = &mut self.candidate {
             if candidate.config.address == config.address {
@@ -117,8 +109,7 @@ impl Dynamic {
 
         self.remove(interface, tx)?;
         self.seed = self.seed.wrapping_add(0x9e3779b9);
-        let probe = Probe::new(self.mac, config.address, self.seed ^ now as u32, now)
-            .map_err(network_error)?;
+        let probe = AddressProbe::new(self.mac, config.address, self.seed ^ now as u32, now)?;
         self.candidate = Some(Candidate { config, probe });
         Ok(())
     }
@@ -176,30 +167,7 @@ impl Dynamic {
         let Some(candidate) = &mut self.candidate else {
             return Ok(());
         };
-        // Commit a step and its timer only when the NIC accepted the record.
-        let mut next = candidate.probe;
-        let (frame, claim) = match next.poll(now).map_err(network_error)? {
-            acd::Action::Idle => return Ok(()),
-            acd::Action::Probe(frame) | acd::Action::Announce(frame) => (frame, false),
-            acd::Action::Claim(frame) => (frame, true),
-        };
-        // A minimum-size Ethernet frame requires one 72-byte packet record.
-        let mut record = [0; 72];
-        let size = encode_record(&frame, &mut record).map_err(wire_error)?;
-        match queue.try_send(&record[..size]) {
-            Ok(written) if written == size => {
-                candidate.probe = next;
-                self.probe_waits_for_tx = false;
-            }
-            Ok(_) => return Err(Error(errno::EIO)),
-            Err(Error(errno::EAGAIN)) => {
-                self.probe_waits_for_tx = true;
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        }
-
-        if claim {
+        if candidate.probe.transmit(now, queue)? {
             let config = candidate.config;
             self.apply(config, "bound", now, interface, tx)?;
         }
