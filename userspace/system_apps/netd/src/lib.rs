@@ -123,24 +123,32 @@ impl Queue {
         Ok(())
     }
 
+    pub fn try_receive(&self, buffer: &mut [u8]) -> Result<usize> {
+        checked(libdunit::read(self.0 as usize, buffer))
+    }
+
+    pub fn try_send(&self, bytes: &[u8]) -> Result<usize> {
+        checked(libdunit::write(self.0 as usize, bytes))
+    }
+
     pub fn receive(&self, buffer: &mut [u8]) -> Result<usize> {
         loop {
-            let result = libdunit::read(self.0 as usize, buffer);
-            if result != errno::EAGAIN {
-                return checked(result);
+            match self.try_receive(buffer) {
+                Err(Error(errno::EAGAIN)) => self.wait(wait_set::READ, wait_set::INFINITE)?,
+                result => return result,
             }
-            self.wait(wait_set::READ, wait_set::INFINITE)?;
         }
     }
 
     pub fn send(&self, mut bytes: &[u8]) -> Result<()> {
         while !bytes.is_empty() {
-            let result = libdunit::write(self.0 as usize, bytes);
-            if result == errno::EAGAIN {
-                self.wait(wait_set::WRITE, wait_set::INFINITE)?;
-                continue;
-            }
-            let count = checked(result)?;
+            let count = match self.try_send(bytes) {
+                Err(Error(errno::EAGAIN)) => {
+                    self.wait(wait_set::WRITE, wait_set::INFINITE)?;
+                    continue;
+                }
+                result => result?,
+            };
             if count == 0 || count > bytes.len() {
                 return Err(Error(errno::EIO));
             }
