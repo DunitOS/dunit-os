@@ -1,0 +1,101 @@
+{
+  "date": "2026-11-20",
+  "base_commit": "6d54cd2c619e7f53b3da20fadc36660539132c4e",
+  "scope": "TCP retransmission timer and RTT start at netd transmit-backlog admission. The separate egress reservation expires after 10 seconds. The peer withholds ARP until its third request and drops the first SYN on the wire.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "e24b5ddf1d5056b9e5e6c856b2b2c15c0cd21260b119c3324ed22f2f9dbf8eb5",
+    "docs/network/ipv4-services.md": "8c5b17e750d3ab1c6d87e16875da6682fc1e4ca69ffd434582dd784948638700",
+    "tools/net_socket_transport.py": "4472486bae7e962db35a17bb5d7da4230d63c55cb75d510966f3a3afc6530b01",
+    "tools/test_net_socket_transport.py": "649dd607763745545203c55cab122e246c5b5ba87582bfd46f3dce24c0d7b6df",
+    "userspace/net-core/src/tcp.rs": "57a22900ba19b69d76d23fa03619164aa2966325e264e1f68b319862ed4e3d51",
+    "userspace/net-core/src/tcp/table.rs": "ae5927d0ddc28fc3c5bbc3ef25bbe5c5d7542d85e87737c9c2b81a635fc43b6a",
+    "userspace/net-core/src/tcp/table/tests.rs": "453ecb0b56b96289f9de297bc6a03be0f0688536c7822d7258d820c509069995",
+    "userspace/system_apps/netd/src/socket_service.rs": "aeedacf016c3dbd5d96c2aa076f47c371387b55469c399d065094a3cf750728c"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 81,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "rust": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "7130735e7e78139cae5d631561ab942282a7c8d868cb4848e1e506e3e9c5b89f",
+      "serial_sha256": "794a93244ff71111731b7bde16d91e30254ca14daeed3ec6b8887877ca3f99bd",
+      "network_peer_sha256": "b7505eb2f839d705b84e154134bdabbe31922b4db59ba3efbf497ed8b45af350",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 34,
+        "bytes": 6983,
+        "responses": 27,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_syn_retry_after_egress",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "tcp_delayed_arp_requests": 3,
+        "tcp_syn_retry_seconds": 1.060756520000723,
+        "udp_reply_bytes": 24
+      }
+    },
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "3e1ea7d7d26b39511c3f16afd3d43a1ffe8aff892aec7a502cb691c3f4ff8463",
+      "serial_sha256": "4ca8bc6deca4e1ee87cd26cd48085c698adc12025b2fd41ec1e8118fcdc35d20",
+      "network_peer_sha256": "de5c7c6f1e6c473f720f981197773b6562755e9858c06d33ee50209386973247",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 34,
+        "bytes": 6983,
+        "responses": 27,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_syn_retry_after_egress",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "tcp_delayed_arp_requests": 3,
+        "tcp_syn_retry_seconds": 1.047166255000775,
+        "udp_reply_bytes": 24
+      }
+    }
+  }
+}

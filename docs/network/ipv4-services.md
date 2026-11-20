@@ -82,6 +82,13 @@ The connection table rejects pending segments that were acknowledged or
 whose flow closed. The socket suites withhold the first two ARP replies
 and require a single SYN once the neighbor is known.
 [Delayed ARP verification](../verification/tcp-arp-queue-2026-11-20.json)
+
+Stock netd starts the TCP retransmit clock when a frame enters its transmit
+backlog. Delay in ARP and admission to the backlog is excluded from the RTT
+sample. A reserved segment can wait up to ten seconds for egress. A route or
+neighbor error ends the reservation. The E1000 peer drops the first SYN
+after delayed ARP and measures the interval before the next copy.
+[Egress timing verification](../verification/tcp-egress-clock-2026-11-20.json)
 While the peer acknowledges probes with a closed receive window, the
 connection stays open and the probe interval backs off independently of
 the retransmission timeout. A window update retries the outstanding byte

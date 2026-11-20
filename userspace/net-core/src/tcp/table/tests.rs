@@ -85,6 +85,52 @@ fn delayed_egress_replaces_retries_and_rejects_acknowledged_packets() {
     assert!(client.outbound_current(&new_ack));
 }
 
+#[test]
+fn deferred_egress_starts_rto_and_rtt_at_the_actual_handoff() {
+    let mut client = new(A);
+    let remote = endpoint(B, PORT);
+    let id = client.connect(remote, 0).unwrap();
+    let pending = client.poll_deferred(0).unwrap().unwrap();
+    assert_eq!(client.deadline(), Some(super::super::EGRESS_WAIT_MS));
+    assert_eq!(client.poll_deferred(4000), Ok(None));
+    client.complete_egress(&pending, 4001, Ok(())).unwrap();
+    assert_eq!(client.deadline(), Some(5001));
+    assert_eq!(client.poll_deferred(5000), Ok(None));
+    let local = pending.source;
+    let syn = Segment::parse(local, remote, &pending.bytes).unwrap();
+    dispatch(&mut client, &wire(remote, local, 500, syn.sequence.wrapping_add(1), SYN | ACK, b""), 5000);
+    assert_eq!(client.state(id), Ok(State::Established));
+    assert_eq!(client.stream(id).unwrap().retransmission.estimate, Some((999, 499)));
+}
+
+#[test]
+fn deferred_retransmit_waits_for_handoff_or_a_terminal_route_error() {
+    let mut client = new(A);
+    let id = client.connect(endpoint(B, PORT), 0).unwrap();
+    let syn = client.poll_deferred(0).unwrap().unwrap();
+    client.complete_egress(&syn, 2500, Ok(())).unwrap();
+    let retry = client.poll_deferred(3500).unwrap().unwrap();
+    assert_eq!(retry, syn);
+    assert_eq!(client.deadline(), Some(3500 + super::super::EGRESS_WAIT_MS));
+    assert_eq!(client.poll_deferred(6500), Ok(None));
+    client.complete_egress(&retry, 6500, Err(Error::Timeout)).unwrap();
+    assert_eq!(client.failure(id), Ok(Some(StreamError::Packet(Error::Timeout))));
+    assert_eq!(client.deadline(), None);
+}
+
+#[test]
+fn deferred_egress_expires_when_the_transmit_queue_stalls() {
+    let mut client = new(A);
+    let id = client.connect(endpoint(B, PORT), 0).unwrap();
+    let pending = client.poll_deferred(0).unwrap().unwrap();
+    let expires = client.deadline().unwrap();
+    assert_eq!(client.poll_deferred(expires - 1), Ok(None));
+    assert!(client.outbound_current(&pending));
+    assert_eq!(client.poll_deferred(expires), Ok(None));
+    assert_eq!(client.failure(id), Ok(Some(StreamError::Timeout)));
+    assert!(!client.outbound_current(&pending));
+}
+
 fn passive_handshake(
     server: &mut Table,
     remote: Endpoint,

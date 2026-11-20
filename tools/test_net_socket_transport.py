@@ -77,7 +77,9 @@ class SocketPeerTests(unittest.TestCase):
                                                   arp(1, GUEST_MAC, GUEST, bytes(6), DELAYED_HOST)))
                     self.assertEqual(receive(connection), ethernet(
                         GUEST_MAC, HOST_MAC, ARP, arp(2, HOST_MAC, DELAYED_HOST, GUEST_MAC, GUEST)))
-                    send(connection, guest_tcp(guest_seq - 1, 0, SYN, remote=DELAYED_HOST))
+                    syn = guest_tcp(guest_seq - 1, 0, SYN, remote=DELAYED_HOST)
+                    send(connection, syn)
+                    send(connection, syn)
                     self.assertEqual(receive(connection), host_tcp(
                         49223, host_seq - 1, guest_seq, SYN | ACK, remote=DELAYED_HOST))
                     send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, b"r", remote=DELAYED_HOST))

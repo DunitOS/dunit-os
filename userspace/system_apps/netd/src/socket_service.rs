@@ -282,7 +282,7 @@ impl SocketService {
         if let (Some(peer), Some(tcp)) = (peer, &mut self.tcp) {
             self.wire.retain(|packet| tcp.outbound_current(packet));
             for _ in 0..MAX_STREAMS {
-                let Some(packet) = tcp.poll(now).map_err(|error| Error(tcp_errno(error)))? else {
+                let Some(packet) = tcp.poll_deferred(now).map_err(|error| Error(tcp_errno(error)))? else {
                     break;
                 };
                 if let Some(pending) = self.wire.iter_mut().find(|p| packet.same_pending_slot(p)) {
@@ -301,20 +301,25 @@ impl SocketService {
                 if !tcp.outbound_current(&packet) {
                     continue;
                 }
-                let sent =
+                let (sent, handoff) =
                     match peer.tcp_egress(packet.source, packet.destination, &packet.bytes, now) {
-                        Ok(Egress::Sent(frame)) => tx.try_push(&frame)?,
+                        Ok(Egress::Sent(frame)) => (tx.try_push(&frame)?, Ok(())),
                         Ok(Egress::Neighbor(frame)) => {
                             tx.push(&frame)?;
-                            false
+                            (false, Ok(()))
                         }
-                        Ok(Egress::Waiting) => false,
-                        // The TCP timer retries transient misses independently.
-                        Err(_) => true,
+                        Ok(Egress::Waiting) => (false, Ok(())),
+                        Err(error) => (true, Err(error)),
                     };
                 if !sent {
                     self.wire.push_back(packet);
+                } else {
+                    tcp.complete_egress(&packet, now, handoff)
+                        .map_err(|error| Error(tcp_errno(error)))?;
                 }
+            }
+            for socket in self.sockets.iter_mut().flatten() {
+                report_tcp_error(&mut self.bridge, socket, tcp, &mut self.wire)?;
             }
             retry |= !self.wire.is_empty();
         }

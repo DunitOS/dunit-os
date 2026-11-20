@@ -4,6 +4,7 @@ from __future__ import annotations
 import socket
 import struct
 from threading import Event
+from time import monotonic
 
 from net_dhcp_transport import ARP, BROADCAST_MAC, IPV4, ipv4, parse_ipv4
 from net_live_transport import ACK, FIN, PSH, SYN, advance, pseudo
@@ -21,7 +22,7 @@ TCP_LENGTH = 5000
 TCP_REPLY = b"fixture-tcp-partial-read-and-EOF"
 CONFLICT_MAC = bytes.fromhex("020000000044")
 RST = 0x04
-STAGES = ("udp_datagram", "tcp_single_syn_after_delayed_arp", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream",
+STAGES = ("udp_datagram", "tcp_syn_retry_after_egress", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream",
           "tcp_reordered_reply_and_fin",
           "tcp_fin",
           "address_conflict_injected")
@@ -89,6 +90,7 @@ class NetSocketPeer(EthernetPeer):
         self._announcements = 0
         self._tcp_received = 0
         self._delayed_arp_requests = 0
+        self._syn_retry_seconds = None
 
     def wait_complete(self, timeout: float) -> bool:
         return self._done.wait(timeout) and tuple(self._stages) == STAGES
@@ -238,6 +240,11 @@ class NetSocketPeer(EthernetPeer):
         endpoint, sequence, ack, flags, data = receive()
         if (ack, flags, data) != (0, SYN, b"") or self._delayed_arp_requests != 3:
             raise ValueError("expected TCP SYN for reset test")
+        started = monotonic()
+        # Drop the first SYN that actually reaches the wire.
+        if receive() != (endpoint, sequence, 0, SYN, b""):
+            raise ValueError("expected the same SYN after dropping its first transmission")
+        self._syn_retry_seconds = monotonic() - started
         guest_next = advance(sequence, 1)
         host_next = 0x50800001
         send(host_next - 1, guest_next, SYN | ACK)
@@ -246,7 +253,7 @@ class NetSocketPeer(EthernetPeer):
             first = receive()
         if first != (endpoint, guest_next, host_next, PSH | ACK, b"r"):
             raise ValueError("reset test never reached established data transfer")
-        self._stages.append("tcp_single_syn_after_delayed_arp")
+        self._stages.append("tcp_syn_retry_after_egress")
         guest_next = advance(guest_next, 1)
         send(host_next, guest_next, ACK)
         send(host_next + 1, 0, RST)
@@ -263,5 +270,6 @@ class NetSocketPeer(EthernetPeer):
             "socket_stages": self._stages,
             "tcp_bytes": self._tcp_received,
             "tcp_delayed_arp_requests": self._delayed_arp_requests,
+            "tcp_syn_retry_seconds": self._syn_retry_seconds,
             "udp_reply_bytes": len(UDP_REPLY),
         }

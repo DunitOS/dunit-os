@@ -14,6 +14,7 @@ const DEFAULT_MSS: u16 = 536;
 const INITIAL_RTO: u64 = 1000;
 const MAX_RTO: u64 = 60_000;
 const MAX_RETRANSMITS: u8 = 5;
+const EGRESS_WAIT_MS: u64 = 10_000;
 const TIME_WAIT: u64 = 60_000;
 const FIN_WAIT_LIMIT: u64 = 60_000;
 
@@ -65,6 +66,7 @@ struct Flight {
     deadline: u64,
     retries: u8,
     persist_delay: Option<u64>,
+    awaiting_egress: bool,
     /// Split acknowledgements make the remaining sample ambiguous.
     rtt_sample: bool,
 }
@@ -365,7 +367,9 @@ impl Connection {
             self.ack_due = true;
         } else {
             self.state = State::SynReceived; // Simultaneous open.
-            self.flight.as_mut().unwrap().deadline = self.now;
+            let flight = self.flight.as_mut().unwrap();
+            flight.awaiting_egress = false;
+            flight.deadline = self.now;
         }
         Ok(())
     }
@@ -379,6 +383,7 @@ impl Connection {
             if !segment.has(ACK) {
                 // An already emitted SYN-ACK still has a bounded retry budget.
                 if let Some(flight) = &mut self.flight {
+                    flight.awaiting_egress = false;
                     flight.deadline = self.now;
                 }
                 return Ok(());
@@ -554,12 +559,13 @@ impl Connection {
             flight.first = ack;
             flight.length -= count;
             flight.rtt_sample = false;
+            flight.awaiting_egress = false;
             flight.deadline = self.now.saturating_add(self.retransmission.timeout);
             self.flight = Some(flight);
             return Ok(true);
         }
         self.flight = None;
-        if flight.rtt_sample {
+        if flight.rtt_sample && !flight.awaiting_egress {
             self.retransmission.sample(self.now - flight.sent_at);
         }
         match (flight.kind, self.state) {
@@ -619,7 +625,7 @@ impl Connection {
         if let Some(mut flight) = self.flight {
             if now >= flight.deadline {
                 let reopened = flight.persist_delay.is_some() && self.remote_window != 0;
-                if !reopened && flight.retries == MAX_RETRANSMITS {
+                if flight.awaiting_egress || (!reopened && flight.retries == MAX_RETRANSMITS) {
                     self.fail(StreamError::Timeout);
                     return Err(StreamError::Timeout);
                 }
@@ -694,6 +700,7 @@ impl Connection {
             deadline: self.now.saturating_add(persist_delay.unwrap_or(self.retransmission.timeout)),
             retries: 0,
             persist_delay,
+            awaiting_egress: false,
             rtt_sample: persist_delay.is_none(),
         };
         self.send_next = self.send_next.wrapping_add(length as u32);

@@ -634,6 +634,8 @@ renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
   transport while the application descriptor can still report its error.
 - [x] Coalesce TCP retransmissions still waiting for ARP or TX capacity and
   retire obsolete pending segments before egress. Verify delayed ARP over E1000.
+- [x] Start TCP retransmission timing and RTT sampling at transmit-backlog
+  admission. Bound the separate wait for route resolution and TX capacity.
 - [x] Bound individual send/receive queues and reassemble out-of-order data
   within the receive window. ACK the missing prefix cumulatively and deliver
   buffered data and FIN only after their gaps close.

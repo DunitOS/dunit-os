@@ -352,6 +352,16 @@ impl Table {
     /// packets rotate across the fixed-size table. A timed-out connection
     /// becomes visible as an error to its owner without stalling its peers.
     pub fn poll(&mut self, now: u64) -> Result<Option<Outbound>> {
+        self.poll_egress(now, false)
+    }
+
+    /// Reserve a segment for queued egress. Report the handoff with
+    /// `complete_egress` before the flight's retransmit timer starts.
+    pub fn poll_deferred(&mut self, now: u64) -> Result<Option<Outbound>> {
+        self.poll_egress(now, true)
+    }
+
+    fn poll_egress(&mut self, now: u64, deferred: bool) -> Result<Option<Outbound>> {
         self.advance(now)?;
         for offset in 0..MAX_STREAMS {
             let index = (self.next_poll + offset) % MAX_STREAMS;
@@ -362,11 +372,18 @@ impl Table {
                 Ok(Some(bytes)) => {
                     let (source, destination) = stream.connection.endpoints();
                     self.next_poll = (index + 1) % MAX_STREAMS;
-                    return Ok(Some(Outbound {
+                    let outgoing = Outbound {
                         source,
                         destination,
                         bytes,
-                    }));
+                    };
+                    if deferred && !outgoing.ack_only() {
+                        if let Some(flight) = &mut stream.connection.flight {
+                            flight.awaiting_egress = true;
+                            flight.deadline = now.saturating_add(super::EGRESS_WAIT_MS);
+                        }
+                    }
+                    return Ok(Some(outgoing));
                 }
                 Ok(None) => {}
                 Err(error) if stream.connection.failure() != Some(error) => return Err(error),
@@ -407,9 +424,50 @@ impl Table {
             } else {
                 connection.flight.is_some_and(|flight| {
                     packet.bytes.get(4..8) == Some(flight.first.to_be_bytes().as_slice())
+                        && (flight.kind != super::FlightKind::Syn
+                            || (packet.bytes[13] & ACK != 0) == (connection.state() == State::SynReceived))
                 })
             }
         })
+    }
+
+    /// Start the reserved flight's timer, or fail it if routing has ended
+    /// with a terminal error. ACK-only packets have no retransmit timer.
+    pub fn complete_egress(
+        &mut self,
+        packet: &Outbound,
+        now: u64,
+        handoff: core::result::Result<(), Error>,
+    ) -> Result<()> {
+        self.advance(now)?;
+        if packet.ack_only() || !self.outbound_current(packet) {
+            return Ok(());
+        }
+        let Some(connection) = self.streams.iter_mut().flatten().map(|stream| &mut stream.connection)
+            .find(|connection| connection.endpoints() == (packet.source, packet.destination))
+        else {
+            return Ok(());
+        };
+        if let Some(flight) = connection.flight.as_mut().filter(|flight| flight.awaiting_egress) {
+            if now >= flight.deadline {
+                connection.fail(StreamError::Timeout);
+                return Ok(());
+            }
+            match handoff {
+                Ok(()) => {
+                    flight.awaiting_egress = false;
+                    flight.sent_at = now;
+                    if flight.persist_delay.is_some() && connection.remote_window != 0 {
+                        flight.persist_delay = None;
+                        flight.retries = 0;
+                    }
+                    let delay = flight.persist_delay.unwrap_or(connection.retransmission.timeout);
+                    flight.deadline = now.saturating_add(delay);
+                }
+                Err(error) => connection.fail(error.into()),
+            }
+        }
+        Ok(())
     }
 
     fn advance(&mut self, now: u64) -> Result<()> {
