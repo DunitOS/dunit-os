@@ -104,15 +104,17 @@ class SocketPeerTests(unittest.TestCase):
                         guest_seq = advance(guest_seq, len(data))
                         self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq,
                                                                          ACK))
-                    first, last = TCP_REPLY[:13], TCP_REPLY[13:]
-                    first_end = advance(host_seq, len(first))
-                    for _ in range(2):
-                        self.assertEqual(receive(connection), host_tcp(
-                            49223, first_end, guest_seq, ACK | PSH | FIN, last))
+                    first, middle, last = TCP_REPLY[:9], TCP_REPLY[9:18], TCP_REPLY[18:]
+                    middle_start = advance(host_seq, len(first))
+                    last_start = advance(middle_start, len(middle))
+                    tail = host_tcp(49223, last_start, guest_seq, ACK | PSH | FIN, last)
+                    body = host_tcp(49223, middle_start, guest_seq, ACK | PSH, middle)
+                    for frame in (tail, body, tail):
+                        self.assertEqual(receive(connection), frame)
                         send(connection, guest_tcp(guest_seq, host_seq, ACK))
                     self.assertEqual(receive(connection), host_tcp(
                         49223, host_seq, guest_seq, ACK | PSH, first))
-                    host_seq = advance(first_end, len(last) + 1)
+                    host_seq = advance(last_start, len(last) + 1)
                     send(connection, guest_tcp(guest_seq, host_seq, ACK | FIN))
                     self.assertEqual(receive(connection), host_tcp(
                         49223, host_seq, advance(guest_seq, 1), ACK))

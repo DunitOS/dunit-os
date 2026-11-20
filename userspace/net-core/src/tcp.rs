@@ -1,6 +1,6 @@
 //! Bounded TCPv4 state for a single four-tuple. The caller owns admission,
 //! address configuration and delivery of each complete outbound segment.
-//! One segment is in flight. The receiver can retain one out-of-order segment.
+//! One segment is in flight. The receiver buffers gaps within its receive window.
 use crate::{Error, Ip, MTU};
 use alloc::{collections::VecDeque, vec::Vec};
 
@@ -9,6 +9,7 @@ mod wire;
 pub use wire::{Endpoint, Segment, ACK, FIN, MAX_DATA, PSH, RST, SYN};
 
 pub const QUEUE_BYTES: usize = 4096;
+const _: () = assert!(QUEUE_BYTES.is_power_of_two());
 const DEFAULT_MSS: u16 = 536;
 const INITIAL_RTO: u64 = 1000;
 const MAX_RTO: u64 = 60_000;
@@ -74,9 +75,55 @@ struct Retransmission {
 }
 
 struct OutOfOrder {
-    sequence: u32,
-    data: Vec<u8>,
-    fin: bool,
+    bytes: Vec<Option<u8>>,
+    buffered: usize,
+    fin: Option<u32>,
+}
+
+impl OutOfOrder {
+    fn new() -> Self {
+        Self { bytes: alloc::vec![None; QUEUE_BYTES], buffered: 0, fin: None }
+    }
+
+    fn slot(sequence: u32) -> usize {
+        // QUEUE_BYTES divides the TCP sequence space. A receive window
+        // spans at most one turn of this ring, including across u32 wrap.
+        sequence as usize % QUEUE_BYTES
+    }
+
+    fn insert(&mut self, mut sequence: u32, data: &[u8], fin: bool) {
+        for &byte in data {
+            if self.fin == Some(sequence) {
+                return;
+            }
+            let slot = &mut self.bytes[Self::slot(sequence)];
+            if slot.is_none() {
+                *slot = Some(byte);
+                self.buffered += 1;
+            }
+            sequence = sequence.wrapping_add(1);
+        }
+        if fin && self.fin.is_none() && self.bytes[Self::slot(sequence)].is_none() {
+            self.fin = Some(sequence);
+        }
+    }
+
+    fn drain(&mut self, next: &mut u32, receive: &mut VecDeque<u8>) -> bool {
+        while receive.len() < QUEUE_BYTES {
+            if self.fin == Some(*next) {
+                return true;
+            }
+            let Some(byte) = self.bytes[Self::slot(*next)].take() else { break };
+            receive.push_back(byte);
+            self.buffered -= 1;
+            *next = next.wrapping_add(1);
+        }
+        false
+    }
+
+    fn is_empty(&self) -> bool {
+        self.buffered == 0 && self.fin.is_none()
+    }
 }
 
 impl Retransmission {
@@ -382,15 +429,11 @@ impl Connection {
             let available = QUEUE_BYTES - self.receive.len();
             if span != 0
                 && offset as usize + span <= available
-                && self.out_of_order.is_none()
                 && !self.peer_closed
             {
                 self.acknowledge(segment.acknowledgement)?;
-                self.out_of_order = Some(OutOfOrder {
-                    sequence: segment.sequence,
-                    data: segment.data.to_vec(),
-                    fin: segment.has(FIN),
-                });
+                self.out_of_order.get_or_insert_with(OutOfOrder::new)
+                    .insert(segment.sequence, segment.data, segment.has(FIN));
             }
             return Ok(());
         }
@@ -430,19 +473,21 @@ impl Connection {
     }
 
     fn receive_payload(&mut self, segment: Segment<'_>, overlap: usize) {
-        if let Some(buffered) = &self.out_of_order {
-            let gap = buffered.sequence.wrapping_sub(self.receive_next) as usize;
-            if segment.data.len().saturating_sub(overlap) >= gap {
-                // Fill the gap, then deliver the first copy of overlapping
-                // bytes. The saved segment already fits within this window.
-                self.deliver(&segment.data[overlap..overlap + gap], false);
-                let buffered = self.out_of_order.take().unwrap();
-                self.deliver(&buffered.data, buffered.fin);
+        let data = &segment.data[overlap..];
+        if let Some(buffered) = &mut self.out_of_order {
+            let available = QUEUE_BYTES - self.receive.len();
+            let count = data.len().min(available);
+            let fin = segment.has(FIN) && data.len() < available;
+            buffered.insert(self.receive_next, &data[..count], fin);
+            let fin = buffered.drain(&mut self.receive_next, &mut self.receive);
+            if fin || buffered.is_empty() {
+                self.out_of_order = None;
             }
-        }
-        let overlap = self.receive_next.wrapping_sub(segment.sequence) as usize;
-        if !self.peer_closed && overlap <= segment.data.len() {
-            self.deliver(&segment.data[overlap..], segment.has(FIN));
+            if fin {
+                self.deliver(&[], true);
+            }
+        } else {
+            self.deliver(data, segment.has(FIN));
         }
     }
 

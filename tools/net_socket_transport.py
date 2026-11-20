@@ -173,16 +173,18 @@ class NetSocketPeer(EthernetPeer):
             raise ValueError("guest TCP stream did not complete")
         self._stages.append("tcp_stream")
 
-        first, last = TCP_REPLY[:13], TCP_REPLY[13:]
-        first_end = advance(host_next, len(first))
-        tail = host_tcp(endpoint, first_end, next_guest, PSH | ACK | FIN, last)
+        first, middle, last = TCP_REPLY[:9], TCP_REPLY[9:18], TCP_REPLY[18:]
+        middle_start = advance(host_next, len(first))
+        last_start = advance(middle_start, len(middle))
+        tail = host_tcp(endpoint, last_start, next_guest, PSH | ACK | FIN, last)
+        body = host_tcp(endpoint, middle_start, next_guest, PSH | ACK, middle)
         gap_ack = (endpoint, next_guest, host_next, ACK, b"")
-        for _ in range(2):
-            self._send(connection, tail)
+        for frame in (tail, body, tail):
+            self._send(connection, frame)
             if parse_tcp(self._next_ipv4(connection)) != gap_ack:
                 raise ValueError("TCP acknowledged a gap before receiving its missing prefix")
         self._send(connection, host_tcp(endpoint, host_next, next_guest, PSH | ACK, first))
-        host_next = advance(first_end, len(last) + 1)
+        host_next = advance(last_start, len(last) + 1)
 
         for _ in range(12):
             source, seq, ack, flags, data = parse_tcp(self._next_ipv4(connection))

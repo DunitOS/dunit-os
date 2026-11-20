@@ -151,6 +151,24 @@ fn reordering_across_wrap_defers_fin_and_rejects_data_outside_window() {
 }
 
 #[test]
+fn multiple_gaps_release_only_contiguous_bytes_and_keep_first_copies() {
+    let (mut client, _) = pair();
+    client.receive(B.ip, A.ip, &packet(509, 101, ACK | FIN, 64, b"ij"), 1).unwrap();
+    client.receive(B.ip, A.ip, &packet(503, 101, ACK, 64, b"cd"), 1).unwrap();
+    client.receive(B.ip, A.ip, &packet(506, 101, ACK, 64, b"fghi"), 1).unwrap();
+    client.receive(B.ip, A.ip, &packet(504, 101, ACK, 64, b"XeX"), 1).unwrap();
+    let mut output = [0; 10];
+    assert_eq!(client.read(&mut output), Err(StreamError::WouldBlock));
+    let reply = client.poll(1).unwrap().unwrap();
+    assert_eq!(Segment::parse(A, B, &reply).unwrap().acknowledgement, 501);
+    client.receive(B.ip, A.ip, &packet(501, 101, ACK, 64, b"ab"), 2).unwrap();
+    assert_eq!(client.read(&mut output), Ok(10));
+    assert_eq!(&output, b"abcdefghij");
+    assert_eq!(client.read(&mut output), Ok(0));
+    assert!(client.out_of_order.is_none());
+}
+
+#[test]
 fn partial_and_invalid_ack_accounting() {
     let (mut client, _) = pair();
     assert_eq!(client.send(&[5; QUEUE_BYTES + 1]).unwrap(), QUEUE_BYTES);

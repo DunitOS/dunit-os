@@ -69,10 +69,12 @@ direct delivery when the replacement lease omits that route.
 The reference TCP connection owns one four-tuple, a 4 KiB send queue, a
 4 KiB receive queue and one segment in flight. It supports active and passive
 open, retransmission, cumulative/partial ACKs, zero-window probes, FIN/RST and
-TIME_WAIT. One out-of-order segment fits inside the advertised receive
-window. The receiver ACKs only contiguous bytes and holds an out-of-order
-FIN until the gap closes. Duplicate and overlapping copies deliver each
-byte once. [Reordering verification](../verification/tcp-reorder-2026-11-20.json)
+TIME_WAIT. Out-of-order bytes share the existing 4 KiB receive window with
+readable data. The receiver ACKs only contiguous bytes and holds an
+out-of-order FIN until every preceding gap closes. Duplicate and overlapping
+segments preserve the first accepted copy of each byte. The reorder storage
+is allocated on the first gap and freed when drained.
+[Reordering verification](../verification/tcp-multi-reorder-2026-11-20.json)
 While the peer acknowledges probes with a closed receive window, the
 connection stays open and the probe interval backs off independently of
 the retransmission timeout. A window update retries the outstanding byte
