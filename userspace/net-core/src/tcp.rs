@@ -63,6 +63,7 @@ struct Flight {
     sent_at: u64,
     deadline: u64,
     retries: u8,
+    persist_delay: Option<u64>,
     /// Split acknowledgements make the remaining sample ambiguous.
     rtt_sample: bool,
 }
@@ -380,6 +381,17 @@ impl Connection {
             if self.remote_window != 0 {
                 self.persist_at = None;
             }
+            if let Some(flight) = self.flight.as_mut().filter(|flight| flight.persist_delay.is_some()) {
+                if self.remote_window == 0 {
+                    // The peer still answers. Keep probing with backoff,
+                    // without charging successful probes as losses.
+                    flight.retries = 0;
+                } else {
+                    // Retry the outstanding probe immediately now that the
+                    // receiver can accept it.
+                    flight.deadline = self.now;
+                }
+            }
         }
         if span == 0 {
             return Ok(());
@@ -514,14 +526,26 @@ impl Connection {
         }
         if let Some(mut flight) = self.flight {
             if now >= flight.deadline {
-                if flight.retries == MAX_RETRANSMITS {
+                let reopened = flight.persist_delay.is_some() && self.remote_window != 0;
+                if !reopened && flight.retries == MAX_RETRANSMITS {
                     self.fail(StreamError::Timeout);
                     return Err(StreamError::Timeout);
                 }
-                self.retransmission.backoff();
-                flight.retries += 1;
+                let delay = if reopened {
+                    flight.persist_delay = None;
+                    flight.retries = 0;
+                    self.retransmission.timeout
+                } else if let Some(delay) = &mut flight.persist_delay {
+                    *delay = (*delay * 2).min(MAX_RTO);
+                    flight.retries += 1;
+                    *delay
+                } else {
+                    self.retransmission.backoff();
+                    flight.retries += 1;
+                    self.retransmission.timeout
+                };
                 flight.rtt_sample = false;
-                flight.deadline = now.saturating_add(self.retransmission.timeout);
+                flight.deadline = now.saturating_add(delay);
                 self.flight = Some(flight);
                 return self.render(Some(flight)).map(Some);
             }
@@ -568,14 +592,17 @@ impl Connection {
     }
 
     fn start_flight(&mut self, kind: FlightKind, length: usize) -> Result<Vec<u8>> {
+        let persist_delay = (kind != FlightKind::Syn && self.remote_window == 0)
+            .then_some(INITIAL_RTO);
         let flight = Flight {
             kind,
             first: self.send_next,
             length,
             sent_at: self.now,
-            deadline: self.now.saturating_add(self.retransmission.timeout),
+            deadline: self.now.saturating_add(persist_delay.unwrap_or(self.retransmission.timeout)),
             retries: 0,
-            rtt_sample: true,
+            persist_delay,
+            rtt_sample: persist_delay.is_none(),
         };
         self.send_next = self.send_next.wrapping_add(length as u32);
         self.flight = Some(flight);

@@ -1,0 +1,89 @@
+{
+  "date": "2026-11-20",
+  "base_commit": "e390192a64fea730369db3e84a4610242210ebdd",
+  "scope": "TCP zero-window persist with independent backoff, liveness from zero-window ACKs, immediate retry on reopening, and bounded unanswered probes.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "e2b6c76b19c9892a81a0debbe9550a491fcb1fc5eb159c01c13c8ba40260b221",
+    "docs/network/ipv4-services.md": "c50b675f76aae65a9bdd7213aca14a4cdab2be0dee413c055760e46a74c6eb95",
+    "tools/net_socket_transport.py": "714249ed6b036e0b0da7748ae42e85386777134bc6f44ba50079b7bb5095d4b9",
+    "tools/test_net_socket_transport.py": "b457f4a671ec00b3fff95dbe7d34b9f775eab61a823c9d46536e02b549f58550",
+    "userspace/net-core/src/tcp.rs": "3e011a037cbd730524b60346ec3795ae9a67bcd170b5646107e098830e45ea60",
+    "userspace/net-core/src/tcp/tests.rs": "6229daa4f6ea7e4ac37066bffeb7d19ec291e2d523090a1a8852c7b798b9be3f"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 75,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "rust": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "705fd00cdd1078b1064ad1fad10be3c092a26c94e2be4441ca31bb67a60d4620",
+      "serial_sha256": "b60e39f9d97aae1ef654a312f8be24501c030cbeb4ebc2e866c3c408ad4cccd3",
+      "network_peer_sha256": "83ebd930870b8f0adaaf80da2f4ecf901b32978fc2def132a8e6caa4086dd23f",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 23,
+        "bytes": 6323,
+        "responses": 20,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    },
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "6515e74a049c47ec70ac00222b19942f06b042ae63e0cd4d37995debffc2dc15",
+      "serial_sha256": "3c1ca5a83d22f1b5d3f8540e444894f0a4d85fdf17188ec32c0ba1040d293bf0",
+      "network_peer_sha256": "83ebd930870b8f0adaaf80da2f4ecf901b32978fc2def132a8e6caa4086dd23f",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 23,
+        "bytes": 6323,
+        "responses": 20,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    }
+  }
+}

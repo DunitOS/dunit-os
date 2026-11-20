@@ -627,6 +627,8 @@ renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
   states, four-tuple, sequence, ACK, flag, checksum and window validation.
 - [x] Add bounded SYN/data retries, RTT/RTO, cumulative ACKs and zero-window
   probes. Test sequence wrap, half-close and timeout.
+- [x] Keep TCP alive while the receiver acknowledges zero-window probes.
+  Resume queued bytes on a window update and keep unanswered probes bounded.
 - [x] Bound individual send/receive queues. A gap is discarded and acknowledged
   cumulatively so recovery can retransmit it.
 - [x] Add reference four-tuple demultiplexing, bounded listener/backlog

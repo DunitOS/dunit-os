@@ -70,6 +70,12 @@ The reference TCP connection owns one four-tuple, a 4 KiB send queue, a
 4 KiB receive queue and one segment in flight. It supports active and passive
 open, retransmission, cumulative/partial ACKs, zero-window probes, FIN/RST and
 TIME_WAIT. Out-of-order gaps are acknowledged cumulatively and discarded.
+While the peer acknowledges probes with a closed receive window, the
+connection stays open and the probe interval backs off independently of
+the retransmission timeout. A window update retries the outstanding byte
+immediately. Consecutive unanswered probes remain bounded. The native Rust
+and C socket suites exercise window reopening through E1000.
+[Verification](../verification/tcp-zero-window-2026-11-20.json)
 
 The reference connection table demultiplexes up to eight streams and four
 listeners. Each listener counts half-open and unaccepted connections against

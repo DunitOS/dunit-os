@@ -175,12 +175,59 @@ fn zero_window_probe_and_bounded_growth() {
     assert_eq!(server.read(&mut [0; QUEUE_BYTES]).unwrap(), QUEUE_BYTES);
     pass(&mut server, &mut client, deadline);
     let probe_retry = client.deadline().unwrap();
+    assert_eq!(probe_retry, deadline);
     pass(&mut client, &mut server, probe_retry);
     pass(&mut server, &mut client, probe_retry);
     pass(&mut client, &mut server, probe_retry);
     let mut output = [0u8; 4];
     assert_eq!(server.read(&mut output).unwrap(), 4);
     assert_eq!(&output, b"next");
+}
+
+#[test]
+fn answered_zero_window_probes_do_not_exhaust_retries() {
+    let mut client = Connection::connect(A, B, 100, MTU, 0).unwrap();
+    client.poll(0).unwrap();
+    client.receive(B.ip, A.ip, &packet(500, 101, SYN | ACK, 0, b""), 1).unwrap();
+    client.send(b"pending").unwrap();
+    client.poll(1).unwrap();
+
+    let mut last_delay = 0;
+    for _ in 0..(MAX_RETRANSMITS + 4) {
+        let now = client.deadline().unwrap();
+        let probe = client.poll(now).unwrap().unwrap();
+        let segment = Segment::parse(A, B, &probe).unwrap();
+        assert_eq!((segment.sequence, segment.data), (101, b"p".as_slice()));
+        client.receive(B.ip, A.ip, &packet(501, 101, ACK, 0, b""), now).unwrap();
+        let delay = client.deadline().unwrap() - now;
+        assert!(delay >= last_delay && delay <= MAX_RTO);
+        last_delay = delay;
+    }
+    let reopen = client.now + 1;
+    client.receive(B.ip, A.ip, &packet(501, 101, ACK, 4096, b""), reopen).unwrap();
+    assert_eq!(client.deadline(), Some(reopen));
+    let retry = client.poll(reopen).unwrap().unwrap();
+    let segment = Segment::parse(A, B, &retry).unwrap();
+    assert_eq!((segment.sequence, segment.data), (101, b"p".as_slice()));
+    client.receive(B.ip, A.ip, &packet(501, 102, ACK, 4096, b""), reopen).unwrap();
+    let rest = client.poll(reopen).unwrap().unwrap();
+    let segment = Segment::parse(A, B, &rest).unwrap();
+    assert_eq!((segment.sequence, segment.data), (102, b"ending".as_slice()));
+}
+
+#[test]
+fn unanswered_zero_window_probes_time_out() {
+    let (mut client, _) = pair();
+    client.remote_window = 0;
+    client.send(b"pending").unwrap();
+    assert_eq!(client.poll(2).unwrap(), None);
+    for _ in 0..=MAX_RETRANSMITS {
+        let deadline = client.deadline().unwrap();
+        assert!(client.poll(deadline).unwrap().is_some());
+    }
+    let deadline = client.deadline().unwrap();
+    assert_eq!(client.poll(deadline), Err(StreamError::Timeout));
+    assert_eq!(client.state(), State::Closed);
 }
 
 #[test]

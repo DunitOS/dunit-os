@@ -19,7 +19,8 @@ UDP_REPLY = b"fixture-udp-truncated-v1"
 TCP_LENGTH = 5000
 TCP_REPLY = b"fixture-tcp-partial-read-and-EOF"
 CONFLICT_MAC = bytes.fromhex("020000000044")
-STAGES = ("udp_datagram", "tcp_stream", "tcp_fin", "address_conflict_injected")
+STAGES = ("udp_datagram", "tcp_zero_window_reopened", "tcp_stream", "tcp_fin",
+          "address_conflict_injected")
 
 
 def host_ipv4(protocol: int, payload: bytes) -> bytes:
@@ -33,8 +34,9 @@ def host_udp(target: int, data: bytes) -> bytes:
     return host_ipv4(17, datagram[:6] + struct.pack("!H", check) + datagram[8:])
 
 
-def host_tcp(target: int, seq: int, ack: int, flags: int, data: bytes = b"") -> bytes:
-    header = struct.pack("!HHIIBBHHH", TCP_PORT, target, seq, ack, 0x50, flags, 4096, 0, 0)
+def host_tcp(target: int, seq: int, ack: int, flags: int, data: bytes = b"",
+             *, window: int = 4096) -> bytes:
+    header = struct.pack("!HHIIBBHHH", TCP_PORT, target, seq, ack, 0x50, flags, window, 0, 0)
     segment = header + data
     check = checksum(pseudo(HOST, GUEST, 6, len(segment)) + segment)
     return host_ipv4(6, segment[:16] + struct.pack("!H", check) + segment[18:])
@@ -132,7 +134,20 @@ class NetSocketPeer(EthernetPeer):
             raise ValueError("expected TCP SYN from application socket")
         next_guest = advance(seq, 1)
         host_next = 0x50900001
-        self._send(connection, host_tcp(endpoint, host_next - 1, next_guest, SYN | ACK))
+        self._send(connection, host_tcp(endpoint, host_next - 1, next_guest, SYN | ACK, window=0))
+        if parse_tcp(self._next_ipv4(connection)) != (endpoint, next_guest, host_next, ACK, b""):
+            raise ValueError("missing ACK for zero-window SYN-ACK")
+        probe = (endpoint, next_guest, host_next, ACK | PSH, b"\0")
+        if parse_tcp(self._next_ipv4(connection)) != probe:
+            raise ValueError("expected a one-byte zero-window probe")
+        self._send(connection, host_tcp(endpoint, host_next, next_guest, ACK, window=0))
+        self._send(connection, host_tcp(endpoint, host_next, next_guest, ACK))
+        if parse_tcp(self._next_ipv4(connection)) != probe:
+            raise ValueError("reopening the window did not retransmit the probe")
+        next_guest = advance(next_guest, 1)
+        self._tcp_received = 1
+        self._send(connection, host_tcp(endpoint, host_next, next_guest, ACK))
+        self._stages.append("tcp_zero_window_reopened")
 
         for _ in range(64):
             source, seq, ack, flags, data = parse_tcp(self._next_ipv4(connection))
@@ -152,7 +167,7 @@ class NetSocketPeer(EthernetPeer):
                 break
         else:
             raise ValueError("guest TCP stream did not complete")
-        self._stages.append(STAGES[1])
+        self._stages.append("tcp_stream")
 
         first, last = TCP_REPLY[:13], TCP_REPLY[13:]
         self._send(connection, host_tcp(endpoint, host_next, next_guest, PSH | ACK, first))
@@ -170,7 +185,7 @@ class NetSocketPeer(EthernetPeer):
                 if ack != host_next:
                     raise ValueError("guest FIN did not acknowledge peer EOF")
                 self._send(connection, host_tcp(endpoint, host_next, advance(next_guest, 1), ACK))
-                self._stages.append(STAGES[2])
+                self._stages.append("tcp_fin")
                 break
         else:
             raise ValueError("application TCP socket never closed its write side")
@@ -189,7 +204,7 @@ class NetSocketPeer(EthernetPeer):
         # withdraw it and close its service bridge generation.
         self._send(connection, ethernet(BROADCAST_MAC, CONFLICT_MAC, ARP,
                                          arp(1, CONFLICT_MAC, GUEST, bytes(6), GUEST)))
-        self._stages.append(STAGES[3])
+        self._stages.append("address_conflict_injected")
 
     def _finish_exchange(self) -> dict:
         if tuple(self._stages) != STAGES or self._announcements != 2:

@@ -76,11 +76,18 @@ class SocketPeerTests(unittest.TestCase):
                     send(connection, guest_tcp(guest_seq, 0, SYN))
                     guest_seq = advance(guest_seq, 1)
                     self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq,
-                                                                     SYN | ACK))
+                                                                     SYN | ACK, window=0))
                     host_seq = advance(host_seq, 1)
                     send(connection, guest_tcp(guest_seq, host_seq, ACK))
-                    for first in range(0, TCP_LENGTH, 500):
-                        data = bytes(index % 251 for index in range(first, first + 500))
+                    probe = guest_tcp(guest_seq, host_seq, ACK | PSH, b"\0")
+                    send(connection, probe)
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq, ACK, window=0))
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq, ACK))
+                    send(connection, probe)
+                    guest_seq = advance(guest_seq, 1)
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq, ACK))
+                    for first in range(1, TCP_LENGTH, 500):
+                        data = bytes(index % 251 for index in range(first, min(first + 500, TCP_LENGTH)))
                         send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, data))
                         guest_seq = advance(guest_seq, len(data))
                         self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq,
