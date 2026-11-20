@@ -201,6 +201,10 @@ impl Table {
         Ok(self.stream(id)?.endpoints())
     }
 
+    pub fn failure(&self, id: StreamId) -> Result<Option<StreamError>> {
+        Ok(self.stream(id)?.failure())
+    }
+
     pub fn readiness(&self, id: StreamId) -> Result<Readiness> {
         let connection = self.stream(id)?;
         let state = connection.state();

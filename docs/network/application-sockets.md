@@ -28,6 +28,13 @@ and operations fail with EPIPE. Netd retires its bridge when its active IPv4
 configuration disappears or changes. A subsequent configuration uses a
 fresh service generation with fresh descriptors.
 
+An established TCP socket challenges an in-window RST with the wrong
+sequence and only accepts an exact sequence. A valid reset wakes socket
+waiters with HANGUP/ERROR and reports EPIPE through the current native
+errno contract. Netd releases the failed TCP transport and discards
+its frames still waiting for egress. The application descriptor retains
+its error until closed. [Reset verification](../verification/tcp-reset-2026-11-20.json)
+
 The QEMU suite connects an explicitly granted boot client to a strict local
 E1000 peer. It checks 5,000 TCP bytes, partial writes and reads, FIN and EOF,
 UDP truncation, mapped read-only copyout rejection, and child isolation.

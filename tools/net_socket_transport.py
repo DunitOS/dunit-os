@@ -19,7 +19,8 @@ UDP_REPLY = b"fixture-udp-truncated-v1"
 TCP_LENGTH = 5000
 TCP_REPLY = b"fixture-tcp-partial-read-and-EOF"
 CONFLICT_MAC = bytes.fromhex("020000000044")
-STAGES = ("udp_datagram", "tcp_zero_window_reopened", "tcp_stream", "tcp_fin",
+RST = 0x04
+STAGES = ("udp_datagram", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream", "tcp_fin",
           "address_conflict_injected")
 
 
@@ -128,6 +129,7 @@ class NetSocketPeer(EthernetPeer):
         endpoint = check_udp(self._next_ipv4(connection))
         self._send(connection, host_udp(endpoint, UDP_REPLY))
         self._stages.append(STAGES[0])
+        self._check_reset(connection)
 
         endpoint, seq, ack, flags, data = parse_tcp(self._next_ipv4(connection))
         if (ack, flags, data) != (0, SYN, b""):
@@ -205,6 +207,26 @@ class NetSocketPeer(EthernetPeer):
         self._send(connection, ethernet(BROADCAST_MAC, CONFLICT_MAC, ARP,
                                          arp(1, CONFLICT_MAC, GUEST, bytes(6), GUEST)))
         self._stages.append("address_conflict_injected")
+
+    def _check_reset(self, connection: socket.socket) -> None:
+        endpoint, sequence, ack, flags, data = parse_tcp(self._next_ipv4(connection))
+        if (ack, flags, data) != (0, SYN, b""):
+            raise ValueError("expected TCP SYN for reset test")
+        guest_next = advance(sequence, 1)
+        host_next = 0x50800001
+        self._send(connection, host_tcp(endpoint, host_next - 1, guest_next, SYN | ACK))
+        first = parse_tcp(self._next_ipv4(connection))
+        if first == (endpoint, guest_next, host_next, ACK, b""):
+            first = parse_tcp(self._next_ipv4(connection))
+        if first != (endpoint, guest_next, host_next, PSH | ACK, b"r"):
+            raise ValueError("reset test never reached established data transfer")
+        guest_next = advance(guest_next, 1)
+        self._send(connection, host_tcp(endpoint, host_next, guest_next, ACK))
+        self._send(connection, host_tcp(endpoint, host_next + 1, 0, RST))
+        if parse_tcp(self._next_ipv4(connection)) != (endpoint, guest_next, host_next, ACK, b""):
+            raise ValueError("missing challenge ACK for in-window RST with a wrong sequence")
+        self._send(connection, host_tcp(endpoint, host_next, 0, RST))
+        self._stages.append("tcp_reset_challenged_and_delivered")
 
     def _finish_exchange(self) -> dict:
         if tuple(self._stages) != STAGES or self._announcements != 2:

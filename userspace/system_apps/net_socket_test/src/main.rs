@@ -260,8 +260,7 @@ fn udp(grant: &Grant) -> Result<Socket> {
     Ok(socket)
 }
 
-fn tcp(grant: &Grant) -> Result<()> {
-    let started = Instant::now()?;
+fn connect_tcp(grant: &Grant, started: Instant) -> Result<Socket> {
     let socket = Socket::open(grant, PROTO_TCP, started)?;
     let endpoint = Endpoint {
         ip: HOST,
@@ -296,6 +295,34 @@ fn tcp(grant: &Grant) -> Result<()> {
             && i32::from_le_bytes(error) == 0,
         "TCP connect error",
     )?;
+    Ok(socket)
+}
+
+fn tcp_reset(grant: &Grant) -> Result<Socket> {
+    let started = Instant::now()?;
+    let socket = connect_tcp(grant, started)?;
+    require(checked(sys::write(socket.0, b"r"), "TCP reset synchronization")? == 1,
+            "TCP reset synchronization byte")?;
+    let mut events = [wait_set::Event::default()];
+    let count = wait_set::wait(
+        &[wait_set::Interest::descriptor(socket.0 as u32, wait_set::READ, 0)],
+        &mut events,
+        left(started)?.as_nanos() as u64,
+    ).map_err(Error)?;
+    let terminal = wait_set::HANGUP | wait_set::ERROR;
+    require(count == 1 && events[0].events & terminal == terminal, "TCP reset wait-set")?;
+    let mut error = [0; 4];
+    require(socket.operation(OP_ERROR, &[], &mut error) == 4
+        && i32::from_le_bytes(error) as isize == errno::EPIPE
+        && sys::read(socket.0, &mut [0; 1]) == errno::EPIPE, "TCP reset error")?;
+    dunit::println!("[NET-SOCKET] TCP reset woke wait-set and returned EPIPE")?;
+    Ok(socket)
+}
+
+fn tcp(grant: &Grant) -> Result<()> {
+    let socket = connect_tcp(grant, Instant::now()?)?;
+    let started = Instant::now()?;
+    let endpoint = Endpoint { ip: HOST, port: TCP_PORT };
     let mut addresses = [0; ENDPOINTS_LEN];
     require(
         checked(
@@ -425,7 +452,9 @@ fn main() -> Result<()> {
     )?;
     let grant = receive_grant(Instant::now()?)?;
     let idle_udp = udp(&grant)?;
+    let reset = tcp_reset(&grant)?;
     tcp(&grant)?;
+    drop(reset);
     revoked(&idle_udp)?;
     dunit::println!("[NET-SOCKET] complete")
 }

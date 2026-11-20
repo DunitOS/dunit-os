@@ -15,6 +15,7 @@
     {"marker": "[NET-SOCKET] child denied inherited fd and grant", "source": "userspace/system_apps/net_socket_test/src/main.rs"},
     {"marker": "[NET-SOCKET] UDP validated truncation and copyout retry", "source": "userspace/system_apps/net_socket_test/src/main.rs"},
     {"marker": "[NET-SOCKET] TCP validated partial I/O and EOF", "source": "userspace/system_apps/net_socket_test/src/main.rs"},
+    {"marker": "[NET-SOCKET] TCP reset woke wait-set and returned EPIPE", "source": "userspace/system_apps/net_socket_test/src/main.rs"},
     {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
     {"marker": "[NET-SOCKET] address withdrawal revoked socket and woke wait-set", "source": "userspace/system_apps/net_socket_test/src/main.rs"},
     {"marker": "[NET-SOCKET] complete", "source": "userspace/system_apps/net_socket_test/src/main.rs"},

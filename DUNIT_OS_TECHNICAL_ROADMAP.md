@@ -629,6 +629,9 @@ renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
   probes. Test sequence wrap, half-close and timeout.
 - [x] Keep TCP alive while the receiver acknowledges zero-window probes.
   Resume queued bytes on a window update and keep unanswered probes bounded.
+- [x] Verify challenge ACK for an in-window, non-exact TCP reset and delivery
+  of a valid reset to native Rust and C socket waiters. Retire the failed
+  transport while the application descriptor can still report its error.
 - [x] Bound individual send/receive queues. A gap is discarded and acknowledged
   cumulatively so recovery can retransmit it.
 - [x] Add reference four-tuple demultiplexing, bounded listener/backlog

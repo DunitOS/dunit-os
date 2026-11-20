@@ -268,6 +268,9 @@ impl SocketService {
                     }
                 }
             }
+            if let Some(tcp) = &mut self.tcp {
+                report_tcp_error(&mut self.bridge, socket, tcp, &mut self.wire)?;
+            }
             receive(
                 &mut self.bridge,
                 socket,
@@ -282,6 +285,11 @@ impl SocketService {
                     break;
                 };
                 self.wire.push_back(packet);
+            }
+            // Poll can expire a transport. Report and retire it before any
+            // frames still waiting for egress are submitted to the NIC.
+            for socket in self.sockets.iter_mut().flatten() {
+                report_tcp_error(&mut self.bridge, socket, tcp, &mut self.wire)?;
             }
             for _ in 0..self.wire.len() {
                 let packet = self.wire.pop_front().unwrap();
@@ -301,9 +309,6 @@ impl SocketService {
                 }
             }
             retry |= !self.wire.is_empty();
-            for socket in self.sockets.iter_mut().flatten() {
-                report_tcp_error(&mut self.bridge, socket, tcp)?;
-            }
         }
         self.retry_at = retry.then_some(now.saturating_add(RETRY_MS));
         Ok(())
@@ -447,9 +452,7 @@ fn progress(
             match kind {
                 BRIDGE_CONNECT => match tcp.state(id).map_err(tcp_errno)? {
                     State::Established | State::CloseWait => Ok(true),
-                    State::Closed => Err(tcp
-                        .read(id, &mut [0; 1])
-                        .err()
+                    State::Closed => Err(tcp.failure(id).map_err(tcp_errno)?
                         .map_or(errno::EPIPE, tcp_errno)),
                     _ => Ok(false),
                 },
@@ -469,15 +472,18 @@ fn progress(
     }
 }
 
-fn report_tcp_error(bridge: &mut Bridge, socket: &mut Socket, tcp: &mut Table) -> Result<()> {
-    if let Transport::Tcp(id) = socket.transport {
-        if !socket.failed && tcp.readiness(id).is_ok_and(|ready| ready.error) {
-            let error = tcp
-                .read(id, &mut [0; 1])
-                .err()
-                .map_or(errno::EPIPE, tcp_errno);
-            fail(bridge, socket, error)?;
-        }
+fn report_tcp_error(
+    bridge: &mut Bridge,
+    socket: &mut Socket,
+    tcp: &mut Table,
+    wire: &mut VecDeque<TcpPacket>,
+) -> Result<()> {
+    let Transport::Tcp(id) = socket.transport else {
+        return Ok(());
+    };
+    if let Some(error) = tcp.failure(id).map_err(|error| Error(tcp_errno(error)))? {
+        fail(bridge, socket, tcp_errno(error))?;
+        retire(socket, None, Some(tcp), wire);
     }
     Ok(())
 }
@@ -509,7 +515,7 @@ fn receive(
             }
             (Transport::Tcp(id), _, Some(tcp)) => {
                 let ready = tcp.readiness(id).map_err(|error| Error(tcp_errno(error)))?;
-                if ready.readable || ready.error {
+                if ready.readable {
                     let mut data = alloc::vec![0; MAX_PAYLOAD];
                     match tcp.read(id, &mut data) {
                         Ok(0) => {

@@ -11,7 +11,7 @@ import unittest
 from net_dhcp_transport import ARP, BROADCAST_MAC, IPV4, ipv4
 from net_live_transport import ACK, FIN, PSH, SYN, advance, pseudo
 from net_socket_transport import (
-    CONFLICT_MAC, GUEST, HOST, STAGES, TCP_LENGTH, TCP_PORT, TCP_REPLY, UDP_PORT, UDP_REPLY,
+    CONFLICT_MAC, GUEST, HOST, RST, STAGES, TCP_LENGTH, TCP_PORT, TCP_REPLY, UDP_PORT, UDP_REPLY,
     UDP_REQUEST, NetSocketPeer, check_udp, host_tcp, host_udp,
 )
 from net_static_transport import arp, ethernet
@@ -69,6 +69,18 @@ class SocketPeerTests(unittest.TestCase):
                         GUEST_MAC, HOST_MAC, ARP, arp(2, HOST_MAC, HOST, GUEST_MAC, GUEST)))
                     send(connection, guest_udp())
                     self.assertEqual(receive(connection), host_udp(49222, UDP_REPLY))
+
+                    guest_seq = 801
+                    host_seq = 0x50800001
+                    send(connection, guest_tcp(guest_seq - 1, 0, SYN))
+                    self.assertEqual(receive(connection), host_tcp(
+                        49223, host_seq - 1, guest_seq, SYN | ACK))
+                    send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, b"r"))
+                    guest_seq += 1
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq, ACK))
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq + 1, 0, RST))
+                    send(connection, guest_tcp(guest_seq, host_seq, ACK))
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, 0, RST))
 
                     # Wrap the guest's sequence counter while submitting data.
                     guest_seq = 0xfffffff0

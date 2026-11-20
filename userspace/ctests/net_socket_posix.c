@@ -265,6 +265,27 @@ static void exercise_tcp(void)
     puts("[POSIX-SOCKET] TCP connect, partial I/O, endpoints and EOF passed");
 }
 
+static int exercise_tcp_reset(void)
+{
+    uint64_t deadline = monotonic_ms() + DEADLINE_MS;
+    int fd = open_socket(SOCK_STREAM, IPPROTO_TCP, deadline);
+    struct sockaddr_in peer = endpoint("192.0.2.1", TCP_PORT);
+    check(connect(fd, (const struct sockaddr *)&peer, sizeof peer) == -1 &&
+          errno == EINPROGRESS, "TCP reset connect reports EINPROGRESS");
+    check(wait_socket(fd, POLLOUT, deadline) & POLLOUT, "TCP connected before reset");
+    check(send(fd, "r", 1, MSG_NOSIGNAL) == 1, "TCP reset synchronization byte");
+    int flags = wait_socket(fd, POLLIN, deadline);
+    check((flags & (POLLERR | POLLHUP)) == (POLLERR | POLLHUP), "TCP reset poll");
+    int error;
+    socklen_t length = sizeof error;
+    check(getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0 &&
+          length == sizeof error && error == EPIPE, "TCP reset SO_ERROR");
+    char byte;
+    check(recv(fd, &byte, 1, 0) == -1 && errno == EPIPE, "TCP reset recv");
+    puts("[POSIX-SOCKET] TCP reset woke poll and returned EPIPE");
+    return fd;
+}
+
 int main(int argc, char **argv)
 {
     check_no_grant();
@@ -281,7 +302,9 @@ int main(int argc, char **argv)
     check(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) == -1 && errno == EOPNOTSUPP,
           "unsupported blocking socket");
     int idle = exercise_udp(grant);
+    int reset = exercise_tcp_reset();
     exercise_tcp();
+    check(close(reset) == 0, "close reset TCP socket");
     int flags = wait_socket(idle, POLLIN, monotonic_ms() + DEADLINE_MS);
     check((flags & (POLLERR | POLLHUP)) == (POLLERR | POLLHUP), "socket revoke poll");
     char byte;

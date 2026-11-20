@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-20",
+  "base_commit": "14aa664d508334e919dd84c37857153f4e2e92d2",
+  "scope": "Challenge ACK for a non-exact in-window TCP reset. An exact reset retires the transport and notifies native and POSIX waiters with EPIPE under the existing ABI. Both clients keep the failed descriptor through a second, successful TCP exchange.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "cfe953b34d50dbdd59e817bb3544bbe6f31c293112fc9deb4854cac27d6e4ce3",
+    "docs/network/application-sockets.md": "ccad6186f8e3b67c5c6a7db791a9510981fed0c352a264f77f778d3b491b9517",
+    "tools/net_socket_markers.json": "86413a102f2e1da46cdaf2f5742fead8389a8347798a814fd3c09ac712e0cbbb",
+    "tools/net_socket_posix_markers.json": "71c827ac1b7bd97f4793e2aebd6e231a96c92bf65ca00eb34661b6b2fe6a31a6",
+    "tools/net_socket_transport.py": "64e4e486a036a12d2bf5ce68b11809f2e23fa6fa30b0b0427543f819345ff65e",
+    "tools/test_net_socket_transport.py": "f18edebc966d5ac25c0de4d62595ff7641f730e2a641989e76fa2208982d0694",
+    "userspace/ctests/net_socket_posix.c": "63d5c51c38e2208773748d4355c947121f4fed84dcefc52763c1d73aad6d631f",
+    "userspace/net-core/src/tcp/table.rs": "a33ee5507e6d89e8e666b47a7079c04c78cc9df7d0bae747008f93defa6b8a69",
+    "userspace/system_apps/net_socket_test/src/main.rs": "9e169f0085d6e933bd107f429e038544467564bc5d2bc343e1cd7d0e1ff8d3ae",
+    "userspace/system_apps/netd/src/socket_service.rs": "c1ee558e243052d5ac6cc615b21e1ae69dd723d63bacdea721809b0b2b93f0d1"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 75,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "python3 tools/gen_abi.py --check": "passed",
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "rust": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "4d48a68b3309cad671a99b1086d17a286844eff119e9c7ce69cab6ef5fdb03bf",
+      "serial_sha256": "019b27d974b5f65131f00b7a729d499dcd4135cf9bf2fa5ceb4448e48eb168a3",
+      "network_peer_sha256": "a41f58d081790db76fba007e2d1767016b9391c2eb569ef50c59d5a33d4ae7b9",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 27,
+        "bytes": 6563,
+        "responses": 24,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    },
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "0ca8e76d7cc51350999007c50e1bd838bd33538ebd998cb3718e688e92cf245d",
+      "serial_sha256": "7b68709c75b62bd14778bd0c23048e1bb0a041d8eb334f7fee9d18e47533d14b",
+      "network_peer_sha256": "a41f58d081790db76fba007e2d1767016b9391c2eb569ef50c59d5a33d4ae7b9",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 27,
+        "bytes": 6563,
+        "responses": 24,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    }
+  }
+}

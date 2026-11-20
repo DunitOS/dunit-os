@@ -18,6 +18,10 @@
   },
   "required": [
     {
+      "marker": "[POSIX-SOCKET] TCP reset woke poll and returned EPIPE",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    {
       "marker": "[NETD] IPv4 static bound 192.0.2.12",
       "source": "userspace/system_apps/netd/src/static_runtime.rs"
     },
