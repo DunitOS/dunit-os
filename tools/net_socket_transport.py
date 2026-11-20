@@ -20,7 +20,9 @@ TCP_LENGTH = 5000
 TCP_REPLY = b"fixture-tcp-partial-read-and-EOF"
 CONFLICT_MAC = bytes.fromhex("020000000044")
 RST = 0x04
-STAGES = ("udp_datagram", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream", "tcp_fin",
+STAGES = ("udp_datagram", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
           "address_conflict_injected")
 
 
@@ -172,21 +174,26 @@ class NetSocketPeer(EthernetPeer):
         self._stages.append("tcp_stream")
 
         first, last = TCP_REPLY[:13], TCP_REPLY[13:]
+        first_end = advance(host_next, len(first))
+        tail = host_tcp(endpoint, first_end, next_guest, PSH | ACK | FIN, last)
+        gap_ack = (endpoint, next_guest, host_next, ACK, b"")
+        for _ in range(2):
+            self._send(connection, tail)
+            if parse_tcp(self._next_ipv4(connection)) != gap_ack:
+                raise ValueError("TCP acknowledged a gap before receiving its missing prefix")
         self._send(connection, host_tcp(endpoint, host_next, next_guest, PSH | ACK, first))
-        host_next = advance(host_next, len(first))
-        first_end = host_next
-        self._send(connection, host_tcp(endpoint, host_next, next_guest, PSH | ACK | FIN, last))
-        host_next = advance(host_next, len(last) + 1)
+        host_next = advance(first_end, len(last) + 1)
 
         for _ in range(12):
             source, seq, ack, flags, data = parse_tcp(self._next_ipv4(connection))
             if (source != endpoint or seq != next_guest or data or
-                    flags not in (ACK, FIN | ACK) or ack not in (first_end, host_next)):
+                    flags not in (ACK, FIN | ACK) or ack != host_next):
                 raise ValueError("unexpected guest TCP response during half-close")
             if flags == (FIN | ACK):
                 if ack != host_next:
                     raise ValueError("guest FIN did not acknowledge peer EOF")
                 self._send(connection, host_tcp(endpoint, host_next, advance(next_guest, 1), ACK))
+                self._stages.append("tcp_reordered_reply_and_fin")
                 self._stages.append("tcp_fin")
                 break
         else:

@@ -1,6 +1,6 @@
 //! Bounded TCPv4 state for a single four-tuple. The caller owns admission,
 //! address configuration and delivery of each complete outbound segment.
-//! One segment is in flight. Gaps trigger cumulative ACKs and go unbuffered.
+//! One segment is in flight. The receiver can retain one out-of-order segment.
 use crate::{Error, Ip, MTU};
 use alloc::{collections::VecDeque, vec::Vec};
 
@@ -73,6 +73,12 @@ struct Retransmission {
     timeout: u64,
 }
 
+struct OutOfOrder {
+    sequence: u32,
+    data: Vec<u8>,
+    fin: bool,
+}
+
 impl Retransmission {
     fn sample(&mut self, ms: u64) {
         let ms = ms.clamp(1, MAX_RTO);
@@ -103,6 +109,7 @@ pub struct Connection {
     remote_mss: u16,
     send: VecDeque<u8>,
     receive: VecDeque<u8>,
+    out_of_order: Option<OutOfOrder>,
     flight: Option<Flight>,
     retransmission: Retransmission,
     ack_due: bool,
@@ -180,6 +187,7 @@ impl Connection {
             remote_mss: DEFAULT_MSS,
             send: VecDeque::new(),
             receive: VecDeque::new(),
+            out_of_order: None,
             flight: None,
             retransmission: Retransmission {
                 estimate: None,
@@ -369,7 +377,24 @@ impl Connection {
             0
         };
         let span = segment.data.len() + usize::from(segment.has(FIN));
-        if offset > 0 || (overlap > 0 && overlap >= span) {
+        if offset > 0 {
+            self.ack_due |= span != 0 || self.in_receive_window(segment.sequence);
+            let available = QUEUE_BYTES - self.receive.len();
+            if span != 0
+                && offset as usize + span <= available
+                && self.out_of_order.is_none()
+                && !self.peer_closed
+            {
+                self.acknowledge(segment.acknowledgement)?;
+                self.out_of_order = Some(OutOfOrder {
+                    sequence: segment.sequence,
+                    data: segment.data.to_vec(),
+                    fin: segment.has(FIN),
+                });
+            }
+            return Ok(());
+        }
+        if overlap > 0 && overlap >= span {
             self.ack_due |= span != 0 || self.in_receive_window(segment.sequence);
             return Ok(());
         }
@@ -400,14 +425,36 @@ impl Connection {
         if self.peer_closed {
             return Ok(());
         }
+        self.receive_payload(segment, overlap);
+        Ok(())
+    }
+
+    fn receive_payload(&mut self, segment: Segment<'_>, overlap: usize) {
+        if let Some(buffered) = &self.out_of_order {
+            let gap = buffered.sequence.wrapping_sub(self.receive_next) as usize;
+            if segment.data.len().saturating_sub(overlap) >= gap {
+                // Fill the gap, then deliver the first copy of overlapping
+                // bytes. The saved segment already fits within this window.
+                self.deliver(&segment.data[overlap..overlap + gap], false);
+                let buffered = self.out_of_order.take().unwrap();
+                self.deliver(&buffered.data, buffered.fin);
+            }
+        }
+        let overlap = self.receive_next.wrapping_sub(segment.sequence) as usize;
+        if !self.peer_closed && overlap <= segment.data.len() {
+            self.deliver(&segment.data[overlap..], segment.has(FIN));
+        }
+    }
+
+    fn deliver(&mut self, data: &[u8], fin: bool) {
         let available = QUEUE_BYTES - self.receive.len();
-        let data = &segment.data[overlap.min(segment.data.len())..];
         let count = data.len().min(available);
         self.receive.extend(&data[..count]);
         self.receive_next = self.receive_next.wrapping_add(count as u32);
-        if segment.has(FIN) && count == data.len() && count < available {
+        if fin && count == data.len() && count < available {
             self.receive_next = self.receive_next.wrapping_add(1);
             self.peer_closed = true;
+            self.out_of_order = None;
             match self.state {
                 State::Established => self.state = State::CloseWait,
                 State::FinWait1 => self.state = State::Closing,
@@ -415,7 +462,6 @@ impl Connection {
                 _ => {}
             }
         }
-        Ok(())
     }
 
     fn in_receive_window(&self, sequence: u32) -> bool {
@@ -497,6 +543,7 @@ impl Connection {
         self.error = Some(error);
         self.send.clear();
         self.receive.clear();
+        self.out_of_order = None;
         self.flight = None;
         self.expire_at = None;
         self.persist_at = None;

@@ -111,8 +111,11 @@ fn gaps_and_overlap_keep_delivery_order() {
     assert_eq!(Segment::parse(A, B, &reply).unwrap().acknowledgement, 501);
     assert_eq!(client.read(&mut [0; 8]), Err(StreamError::WouldBlock));
     client
-        .receive(B.ip, A.ip, &packet(501, 101, ACK, 64, b"abc"), 2)
+        .receive(B.ip, A.ip, &packet(501, 101, ACK, 64, b"abX"), 2)
         .unwrap();
+    let reply = client.poll(2).unwrap().unwrap();
+    assert_eq!(Segment::parse(A, B, &reply).unwrap().acknowledgement, 505);
+    assert_eq!(client.receive.len(), 4);
     client
         .receive(B.ip, A.ip, &packet(503, 101, ACK, 64, b"cdef"), 3)
         .unwrap();
@@ -121,6 +124,30 @@ fn gaps_and_overlap_keep_delivery_order() {
     assert_eq!(&output[..6], b"abcdef");
     let reply = client.poll(3).unwrap().unwrap();
     assert_eq!(Segment::parse(A, B, &reply).unwrap().acknowledgement, 507);
+}
+
+#[test]
+fn reordering_across_wrap_defers_fin_and_rejects_data_outside_window() {
+    let (mut client, _) = pair();
+    client.receive_next = u32::MAX - 1;
+    let outside = client.receive_next.wrapping_add(QUEUE_BYTES as u32 - 1);
+    client.receive(B.ip, A.ip, &packet(outside, 101, ACK, 64, b"xx"), 1).unwrap();
+    assert!(client.out_of_order.is_none());
+    client.receive(B.ip, A.ip, &packet(0, 101, ACK | FIN, 64, b"cd"), 2).unwrap();
+    client.receive(B.ip, A.ip, &packet(0, 101, ACK | FIN, 64, b"XX"), 2).unwrap();
+    let ack = client.poll(2).unwrap().unwrap();
+    let ack = Segment::parse(A, B, &ack).unwrap();
+    assert_eq!(ack.acknowledgement, u32::MAX - 1);
+    assert_eq!(ack.window as usize, QUEUE_BYTES);
+    assert_eq!(client.read(&mut [0; 4]), Err(StreamError::WouldBlock));
+    client.receive(B.ip, A.ip, &packet(u32::MAX - 1, 101, ACK, 64, b"ab"), 3).unwrap();
+    assert_eq!(client.state(), State::CloseWait);
+    let mut output = [0; 4];
+    assert_eq!(client.read(&mut output), Ok(4));
+    assert_eq!(&output, b"abcd");
+    assert_eq!(client.read(&mut output), Ok(0));
+    let ack = client.poll(3).unwrap().unwrap();
+    assert_eq!(Segment::parse(A, B, &ack).unwrap().acknowledgement, 3);
 }
 
 #[test]

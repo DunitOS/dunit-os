@@ -1,0 +1,93 @@
+{
+  "date": "2026-11-20",
+  "base_commit": "6481807429ffe6b78a78c3685feddfffcc182fb9",
+  "scope": "One buffered out-of-order TCP segment within the receive window. The E1000 peer sends the tail with FIN twice before the missing prefix. Both clients recover the bytes once and observe EOF after the gap closes.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "92014c4d79fcca5767d583bdfcddddf824f05ee639ce42d8fb2537f53cd5db30",
+    "docs/network/ipv4-services.md": "78bc5f9a628bfd108a63f7b384a77d2bcb46b987579d6e2da274dfca5d459986",
+    "tools/net_socket_transport.py": "d26588c0c2412b9a2f39d127495e58535acd175bbcd39acb562b8d2d93f48304",
+    "tools/test_net_socket_transport.py": "525e03c0e4de3e2ad1fa61d960b3ac5735e5a917be403cb42766ff52a3fc24ac",
+    "userspace/net-core/src/tcp.rs": "0a160805624538a5ea38e2c73ce8afbe7c93779fb148b91f7e8a5727405b4cde",
+    "userspace/net-core/src/tcp/tests.rs": "a2f6708704b7bce82791e442248f86963d3d11ba4ff85b4c4862e8bb6435ad60"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 76,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "rust": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "f29a17cdd4cf1847888b294db903c64985c4cbcc5374d634d5d5e935e062b865",
+      "serial_sha256": "53223d58161a064637b3ee6a4c38d2658f07dafa9ed9938dcc3c1f2a1ba47b04",
+      "network_peer_sha256": "b0375422f35e820eeda688c7a44771ba2ceed97c94d988ed921020268829caa9",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 29,
+        "bytes": 6683,
+        "responses": 25,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    },
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "495b0ef288dd618c794c51563d32be31c27451cc272275e9176853dc18164b2c",
+      "serial_sha256": "1fad03bac933a80d40acdbc5ca6b04f5aa773ce04c3552ae0163cda1230cb2a2",
+      "network_peer_sha256": "b0375422f35e820eeda688c7a44771ba2ceed97c94d988ed921020268829caa9",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 29,
+        "bytes": 6683,
+        "responses": 25,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "udp_reply_bytes": 24
+      }
+    }
+  }
+}
