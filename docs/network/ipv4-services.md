@@ -75,6 +75,13 @@ out-of-order FIN until every preceding gap closes. Duplicate and overlapping
 segments preserve the first accepted copy of each byte. The reorder storage
 is allocated on the first gap and freed when drained.
 [Reordering verification](../verification/tcp-multi-reorder-2026-11-20.json)
+
+Before IPv4 egress netd holds at most one sequence-consuming segment and
+one standalone ACK per TCP flow. A newer retry replaces an unsent copy.
+The connection table rejects pending segments that were acknowledged or
+whose flow closed. The socket suites withhold the first two ARP replies
+and require a single SYN once the neighbor is known.
+[Delayed ARP verification](../verification/tcp-arp-queue-2026-11-20.json)
 While the peer acknowledges probes with a closed receive window, the
 connection stays open and the probe interval backs off independently of
 the retransmission timeout. A window update retries the outstanding byte

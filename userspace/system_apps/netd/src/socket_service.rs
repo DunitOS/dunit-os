@@ -165,7 +165,7 @@ impl SocketService {
             revision: 0,
             ip: None,
             tcp: None,
-            wire: VecDeque::with_capacity(MAX_STREAMS),
+            wire: VecDeque::with_capacity(MAX_STREAMS * 2),
             mtu,
             seed,
             retry_at: None,
@@ -280,11 +280,16 @@ impl SocketService {
         }
 
         if let (Some(peer), Some(tcp)) = (peer, &mut self.tcp) {
-            for _ in self.wire.len()..MAX_STREAMS {
+            self.wire.retain(|packet| tcp.outbound_current(packet));
+            for _ in 0..MAX_STREAMS {
                 let Some(packet) = tcp.poll(now).map_err(|error| Error(tcp_errno(error)))? else {
                     break;
                 };
-                self.wire.push_back(packet);
+                if let Some(pending) = self.wire.iter_mut().find(|p| packet.same_pending_slot(p)) {
+                    *pending = packet;
+                } else {
+                    self.wire.push_back(packet);
+                }
             }
             // Poll can expire a transport. Report and retire it before any
             // frames still waiting for egress are submitted to the NIC.
@@ -293,6 +298,9 @@ impl SocketService {
             }
             for _ in 0..self.wire.len() {
                 let packet = self.wire.pop_front().unwrap();
+                if !tcp.outbound_current(&packet) {
+                    continue;
+                }
                 let sent =
                     match peer.tcp_egress(packet.source, packet.destination, &packet.bytes, now) {
                         Ok(Egress::Sent(frame)) => tx.try_push(&frame)?,

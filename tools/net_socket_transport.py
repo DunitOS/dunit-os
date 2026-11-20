@@ -12,6 +12,7 @@ from net_test_transport import EthernetPeer, GUEST_MAC, HOST_MAC, checksum
 
 GUEST = bytes((192, 0, 2, 12))
 HOST = bytes((192, 0, 2, 1))
+DELAYED_HOST = bytes((192, 0, 2, 53))
 UDP_PORT = 5433
 TCP_PORT = 5432
 UDP_REQUEST = b"fixture-udp-request-v1"
@@ -20,14 +21,14 @@ TCP_LENGTH = 5000
 TCP_REPLY = b"fixture-tcp-partial-read-and-EOF"
 CONFLICT_MAC = bytes.fromhex("020000000044")
 RST = 0x04
-STAGES = ("udp_datagram", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream",
+STAGES = ("udp_datagram", "tcp_single_syn_after_delayed_arp", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream",
           "tcp_reordered_reply_and_fin",
           "tcp_fin",
           "address_conflict_injected")
 
 
-def host_ipv4(protocol: int, payload: bytes) -> bytes:
-    return ethernet(GUEST_MAC, HOST_MAC, IPV4, ipv4(protocol, HOST, GUEST, payload))
+def host_ipv4(protocol: int, payload: bytes, *, remote: bytes = HOST) -> bytes:
+    return ethernet(GUEST_MAC, HOST_MAC, IPV4, ipv4(protocol, remote, GUEST, payload))
 
 
 def host_udp(target: int, data: bytes) -> bytes:
@@ -38,16 +39,16 @@ def host_udp(target: int, data: bytes) -> bytes:
 
 
 def host_tcp(target: int, seq: int, ack: int, flags: int, data: bytes = b"",
-             *, window: int = 4096) -> bytes:
+             *, window: int = 4096, remote: bytes = HOST) -> bytes:
     header = struct.pack("!HHIIBBHHH", TCP_PORT, target, seq, ack, 0x50, flags, window, 0, 0)
     segment = header + data
-    check = checksum(pseudo(HOST, GUEST, 6, len(segment)) + segment)
-    return host_ipv4(6, segment[:16] + struct.pack("!H", check) + segment[18:])
+    check = checksum(pseudo(remote, GUEST, 6, len(segment)) + segment)
+    return host_ipv4(6, segment[:16] + struct.pack("!H", check) + segment[18:], remote=remote)
 
 
-def guest_transport(frame: bytes, protocol: int) -> bytes:
+def guest_transport(frame: bytes, protocol: int, *, remote: bytes = HOST) -> bytes:
     source, destination, payload = parse_ipv4(frame, protocol)
-    if frame[:6] != HOST_MAC or source != GUEST or destination != HOST:
+    if frame[:6] != HOST_MAC or source != GUEST or destination != remote:
         raise ValueError("unexpected destination or source in application socket frame")
     return payload
 
@@ -63,8 +64,8 @@ def check_udp(frame: bytes) -> int:
     return source
 
 
-def parse_tcp(frame: bytes) -> tuple[int, int, int, int, bytes]:
-    segment = guest_transport(frame, 6)
+def parse_tcp(frame: bytes, *, remote: bytes = HOST) -> tuple[int, int, int, int, bytes]:
+    segment = guest_transport(frame, 6, remote=remote)
     if len(segment) < 20:
         raise ValueError("short TCP segment")
     source, destination, seq, ack, offset, flags, _, _, urgent = struct.unpack(
@@ -72,7 +73,7 @@ def parse_tcp(frame: bytes) -> tuple[int, int, int, int, bytes]:
     size = (offset >> 4) * 4
     if (source < 49152 or destination != TCP_PORT or offset & 15 or urgent or
             not 20 <= size <= len(segment) or
-            checksum(pseudo(GUEST, HOST, 6, len(segment)) + segment)):
+            checksum(pseudo(GUEST, remote, 6, len(segment)) + segment)):
         raise ValueError("unexpected application TCP tuple or checksum")
     return source, seq, ack, flags, segment[size:]
 
@@ -87,6 +88,7 @@ class NetSocketPeer(EthernetPeer):
         self._probes = 0
         self._announcements = 0
         self._tcp_received = 0
+        self._delayed_arp_requests = 0
 
     def wait_complete(self, timeout: float) -> bool:
         return self._done.wait(timeout) and tuple(self._stages) == STAGES
@@ -123,6 +125,14 @@ class NetSocketPeer(EthernetPeer):
                                    arp(1, GUEST_MAC, GUEST, bytes(6), HOST)):
                 self._send(connection, ethernet(GUEST_MAC, HOST_MAC, ARP,
                                                  arp(2, HOST_MAC, HOST, GUEST_MAC, GUEST)))
+            elif frame == ethernet(BROADCAST_MAC, GUEST_MAC, ARP,
+                                   arp(1, GUEST_MAC, GUEST, bytes(6), DELAYED_HOST)):
+                self._delayed_arp_requests += 1
+                if self._delayed_arp_requests == 3:
+                    self._send(connection, ethernet(GUEST_MAC, HOST_MAC, ARP,
+                                                     arp(2, HOST_MAC, DELAYED_HOST, GUEST_MAC, GUEST)))
+                elif self._delayed_arp_requests > 3:
+                    raise ValueError("resolved TCP destination kept requesting ARP")
             else:
                 raise ValueError("unexpected ARP from socket fixture")
         raise ValueError("no IPv4 traffic within ARP frame budget")
@@ -218,23 +228,31 @@ class NetSocketPeer(EthernetPeer):
         self._stages.append("address_conflict_injected")
 
     def _check_reset(self, connection: socket.socket) -> None:
-        endpoint, sequence, ack, flags, data = parse_tcp(self._next_ipv4(connection))
-        if (ack, flags, data) != (0, SYN, b""):
+        def receive():
+            return parse_tcp(self._next_ipv4(connection), remote=DELAYED_HOST)
+
+        def send(packet_seq, packet_ack, packet_flags):
+            self._send(connection, host_tcp(endpoint, packet_seq, packet_ack, packet_flags,
+                                             remote=DELAYED_HOST))
+
+        endpoint, sequence, ack, flags, data = receive()
+        if (ack, flags, data) != (0, SYN, b"") or self._delayed_arp_requests != 3:
             raise ValueError("expected TCP SYN for reset test")
         guest_next = advance(sequence, 1)
         host_next = 0x50800001
-        self._send(connection, host_tcp(endpoint, host_next - 1, guest_next, SYN | ACK))
-        first = parse_tcp(self._next_ipv4(connection))
+        send(host_next - 1, guest_next, SYN | ACK)
+        first = receive()
         if first == (endpoint, guest_next, host_next, ACK, b""):
-            first = parse_tcp(self._next_ipv4(connection))
+            first = receive()
         if first != (endpoint, guest_next, host_next, PSH | ACK, b"r"):
             raise ValueError("reset test never reached established data transfer")
+        self._stages.append("tcp_single_syn_after_delayed_arp")
         guest_next = advance(guest_next, 1)
-        self._send(connection, host_tcp(endpoint, host_next, guest_next, ACK))
-        self._send(connection, host_tcp(endpoint, host_next + 1, 0, RST))
-        if parse_tcp(self._next_ipv4(connection)) != (endpoint, guest_next, host_next, ACK, b""):
+        send(host_next, guest_next, ACK)
+        send(host_next + 1, 0, RST)
+        if receive() != (endpoint, guest_next, host_next, ACK, b""):
             raise ValueError("missing challenge ACK for in-window RST with a wrong sequence")
-        self._send(connection, host_tcp(endpoint, host_next, 0, RST))
+        send(host_next, 0, RST)
         self._stages.append("tcp_reset_challenged_and_delivered")
 
     def _finish_exchange(self) -> dict:
@@ -244,5 +262,6 @@ class NetSocketPeer(EthernetPeer):
             "protocols": ["ARP", "UDP", "TCP"],
             "socket_stages": self._stages,
             "tcp_bytes": self._tcp_received,
+            "tcp_delayed_arp_requests": self._delayed_arp_requests,
             "udp_reply_bytes": len(UDP_REPLY),
         }

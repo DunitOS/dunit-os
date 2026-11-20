@@ -1,0 +1,100 @@
+{
+  "date": "2026-11-20",
+  "base_commit": "7f1400a7dbf96b39f0c4c8fe5388eb05583cbdcc",
+  "scope": "TCP retransmissions coalesced before IPv4 egress. E1000 leaves two ARP requests unanswered, responds to the third, and validates one SYN before the handshake continues for the Rust and C clients.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "9da1287fe243972a100eddeb731922871a39f7d1804c6b7fd8cbfd2b13355a4f",
+    "docs/network/ipv4-services.md": "0469da05cc69d7e61d2684e25fe21e2a01109b7b9eac3a162d883dae3a721617",
+    "tools/net_socket_transport.py": "bbba40fef69be724b9c2a0e1dfa499cacedcbb6a79783bd93d15dde0bebe5000",
+    "tools/test_net_socket_transport.py": "a609ca6026cb6075dc473dfcfe0add58b67e3fc48b3fdea49e713498a74c2a52",
+    "userspace/ctests/net_socket_posix.c": "326f26ed3a502f47401c7a62b800c30fef42ff00262bf3c2a1a262ae6db92b01",
+    "userspace/net-core/src/tcp/table.rs": "5b0d396201e7656bce06cf808ac9f6180b72b179709978436f9d104c8d395e48",
+    "userspace/net-core/src/tcp/table/tests.rs": "d05f49407e267626ad934ddf8eda8e355ca64329d2fef5c01e89156a0b616e3c",
+    "userspace/system_apps/net_socket_test/src/main.rs": "be9f69152a5f1e9d270461a5ec45f3ac9125e4efc78da5a084e23f5b6c6e174b",
+    "userspace/system_apps/netd/src/socket_service.rs": "11a35e5d171845e05ba1a952c6aaec18e16ae607cad19b63f1feb3a0b2d56388"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 78,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "rust": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "e5cb58f74f15dd5762eb2d6403fcee9b1799db162d8fa359523f9e25772af4c2",
+      "serial_sha256": "558b0e510f95e58a2650570c5812031ee89abea612e35d8fe1e13fe83c8151dc",
+      "network_peer_sha256": "b9f3ef374794e954ab6baa89865bf84982498bf56fda133c96edda7056d504fc",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 33,
+        "bytes": 6923,
+        "responses": 27,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_single_syn_after_delayed_arp",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "tcp_delayed_arp_requests": 3,
+        "udp_reply_bytes": 24
+      }
+    },
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "153e30f27c2076258495ced7dbec28fbf43628a11ce48b0349a961609403494c",
+      "serial_sha256": "49dbcaab027fc66d0d5ddcfe9f669ff5bf04965bd6acbd7713735c9f32e538a9",
+      "network_peer_sha256": "b9f3ef374794e954ab6baa89865bf84982498bf56fda133c96edda7056d504fc",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 33,
+        "bytes": 6923,
+        "responses": 27,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_single_syn_after_delayed_arp",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "tcp_delayed_arp_requests": 3,
+        "udp_reply_bytes": 24
+      }
+    }
+  }
+}

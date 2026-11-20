@@ -57,6 +57,34 @@ fn wire(
     }
 }
 
+#[test]
+fn delayed_egress_replaces_retries_and_rejects_acknowledged_packets() {
+    let mut client = new(A);
+    let remote = endpoint(B, PORT);
+    let id = client.connect(remote, 0).unwrap();
+    let original = packet(&mut client, 0);
+    let retry = packet(&mut client, 1000);
+    assert!(retry.same_pending_slot(&original));
+    assert!(client.outbound_current(&retry));
+    let local = retry.source;
+    let syn = Segment::parse(local, remote, &retry.bytes).unwrap();
+    let start = syn.sequence.wrapping_add(1);
+    dispatch(&mut client, &wire(remote, local, 500, start, SYN | ACK, b""), 1001);
+    assert!(!client.outbound_current(&retry));
+    let ack = packet(&mut client, 1001);
+    assert!(client.outbound_current(&ack));
+    client.send(id, b"abc").unwrap();
+    let data = packet(&mut client, 1001);
+    assert!(!data.same_pending_slot(&ack));
+    assert!(client.outbound_current(&data));
+    dispatch(&mut client, &wire(remote, local, 501, start.wrapping_add(1), ACK, b"x"), 1002);
+    assert!(!client.outbound_current(&data));
+    assert!(!client.outbound_current(&ack));
+    let new_ack = packet(&mut client, 1002);
+    assert!(new_ack.same_pending_slot(&ack));
+    assert!(client.outbound_current(&new_ack));
+}
+
 fn passive_handshake(
     server: &mut Table,
     remote: Endpoint,

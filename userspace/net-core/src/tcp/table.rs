@@ -45,6 +45,19 @@ pub struct Outbound {
     pub bytes: Vec<u8>,
 }
 
+impl Outbound {
+    fn ack_only(&self) -> bool {
+        self.bytes.len() == super::wire::HEADER && self.bytes[13] == ACK
+    }
+
+    /// A newer packet replaces an unsent packet of the same class for its
+    /// four-tuple. A pure ACK and a sequence-consuming flight can coexist.
+    pub fn same_pending_slot(&self, other: &Self) -> bool {
+        (self.source, self.destination) == (other.source, other.destination)
+            && self.ack_only() == other.ack_only()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ingress {
     Delivered,
@@ -378,6 +391,25 @@ impl Table {
                     .min()
             })
             .min()
+    }
+
+    /// Delayed egress may outlive an acknowledgement or a closed stream.
+    pub fn outbound_current(&self, packet: &Outbound) -> bool {
+        self.streams.iter().flatten().any(|stream| {
+            let connection = &stream.connection;
+            if connection.state() == State::Closed
+                || connection.endpoints() != (packet.source, packet.destination)
+            {
+                return false;
+            }
+            if packet.ack_only() {
+                packet.bytes[8..12] == connection.receive_next.to_be_bytes()
+            } else {
+                connection.flight.is_some_and(|flight| {
+                    packet.bytes.get(4..8) == Some(flight.first.to_be_bytes().as_slice())
+                })
+            }
+        })
     }
 
     fn advance(&mut self, now: u64) -> Result<()> {

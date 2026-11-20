@@ -20,6 +20,7 @@ use libdunit::{self as sys, wait_set};
 
 const PATH: &str = "/system/libexec/net_socket_test";
 const HOST: [u8; 4] = [192, 0, 2, 1];
+const DELAYED_HOST: [u8; 4] = [192, 0, 2, 53];
 const GUEST: [u8; 4] = [192, 0, 2, 12];
 const UDP_PORT: u16 = 5433;
 const TCP_PORT: u16 = 5432;
@@ -260,10 +261,10 @@ fn udp(grant: &Grant) -> Result<Socket> {
     Ok(socket)
 }
 
-fn connect_tcp(grant: &Grant, started: Instant) -> Result<Socket> {
+fn connect_tcp(grant: &Grant, ip: [u8; 4], started: Instant) -> Result<Socket> {
     let socket = Socket::open(grant, PROTO_TCP, started)?;
     let endpoint = Endpoint {
-        ip: HOST,
+        ip,
         port: TCP_PORT,
     };
     loop {
@@ -300,7 +301,7 @@ fn connect_tcp(grant: &Grant, started: Instant) -> Result<Socket> {
 
 fn tcp_reset(grant: &Grant) -> Result<Socket> {
     let started = Instant::now()?;
-    let socket = connect_tcp(grant, started)?;
+    let socket = connect_tcp(grant, DELAYED_HOST, started)?;
     require(checked(sys::write(socket.0, b"r"), "TCP reset synchronization")? == 1,
             "TCP reset synchronization byte")?;
     let mut events = [wait_set::Event::default()];
@@ -320,7 +321,7 @@ fn tcp_reset(grant: &Grant) -> Result<Socket> {
 }
 
 fn tcp(grant: &Grant) -> Result<()> {
-    let socket = connect_tcp(grant, Instant::now()?)?;
+    let socket = connect_tcp(grant, HOST, Instant::now()?)?;
     let started = Instant::now()?;
     let endpoint = Endpoint { ip: HOST, port: TCP_PORT };
     let mut addresses = [0; ENDPOINTS_LEN];

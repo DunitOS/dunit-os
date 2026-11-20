@@ -11,15 +11,15 @@ import unittest
 from net_dhcp_transport import ARP, BROADCAST_MAC, IPV4, ipv4
 from net_live_transport import ACK, FIN, PSH, SYN, advance, pseudo
 from net_socket_transport import (
-    CONFLICT_MAC, GUEST, HOST, RST, STAGES, TCP_LENGTH, TCP_PORT, TCP_REPLY, UDP_PORT, UDP_REPLY,
+    CONFLICT_MAC, DELAYED_HOST, GUEST, HOST, RST, STAGES, TCP_LENGTH, TCP_PORT, TCP_REPLY, UDP_PORT, UDP_REPLY,
     UDP_REQUEST, NetSocketPeer, check_udp, host_tcp, host_udp,
 )
 from net_static_transport import arp, ethernet
 from net_test_transport import GUEST_MAC, HOST_MAC, checksum
 
 
-def guest_ip(protocol: int, payload: bytes) -> bytes:
-    return ethernet(HOST_MAC, GUEST_MAC, IPV4, ipv4(protocol, GUEST, HOST, payload))
+def guest_ip(protocol: int, payload: bytes, *, remote: bytes = HOST) -> bytes:
+    return ethernet(HOST_MAC, GUEST_MAC, IPV4, ipv4(protocol, GUEST, remote, payload))
 
 
 def guest_udp() -> bytes:
@@ -29,11 +29,11 @@ def guest_udp() -> bytes:
     return guest_ip(17, datagram[:6] + struct.pack("!H", check) + datagram[8:])
 
 
-def guest_tcp(seq: int, ack: int, flags: int, data: bytes = b"") -> bytes:
+def guest_tcp(seq: int, ack: int, flags: int, data: bytes = b"", *, remote: bytes = HOST) -> bytes:
     header = struct.pack("!HHIIBBHHH", 49223, TCP_PORT, seq, ack, 0x50, flags, 4096, 0, 0)
     segment = header + data
-    check = checksum(pseudo(GUEST, HOST, 6, len(segment)) + segment)
-    return guest_ip(6, segment[:16] + struct.pack("!H", check) + segment[18:])
+    check = checksum(pseudo(GUEST, remote, 6, len(segment)) + segment)
+    return guest_ip(6, segment[:16] + struct.pack("!H", check) + segment[18:], remote=remote)
 
 
 def send(connection: socket.socket, frame: bytes) -> None:
@@ -72,15 +72,20 @@ class SocketPeerTests(unittest.TestCase):
 
                     guest_seq = 801
                     host_seq = 0x50800001
-                    send(connection, guest_tcp(guest_seq - 1, 0, SYN))
+                    for _ in range(3):
+                        send(connection, ethernet(BROADCAST_MAC, GUEST_MAC, ARP,
+                                                  arp(1, GUEST_MAC, GUEST, bytes(6), DELAYED_HOST)))
+                    self.assertEqual(receive(connection), ethernet(
+                        GUEST_MAC, HOST_MAC, ARP, arp(2, HOST_MAC, DELAYED_HOST, GUEST_MAC, GUEST)))
+                    send(connection, guest_tcp(guest_seq - 1, 0, SYN, remote=DELAYED_HOST))
                     self.assertEqual(receive(connection), host_tcp(
-                        49223, host_seq - 1, guest_seq, SYN | ACK))
-                    send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, b"r"))
+                        49223, host_seq - 1, guest_seq, SYN | ACK, remote=DELAYED_HOST))
+                    send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, b"r", remote=DELAYED_HOST))
                     guest_seq += 1
-                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq, ACK))
-                    self.assertEqual(receive(connection), host_tcp(49223, host_seq + 1, 0, RST))
-                    send(connection, guest_tcp(guest_seq, host_seq, ACK))
-                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, 0, RST))
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq, ACK, remote=DELAYED_HOST))
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq + 1, 0, RST, remote=DELAYED_HOST))
+                    send(connection, guest_tcp(guest_seq, host_seq, ACK, remote=DELAYED_HOST))
+                    self.assertEqual(receive(connection), host_tcp(49223, host_seq, 0, RST, remote=DELAYED_HOST))
 
                     # Wrap the guest's sequence counter while submitting data.
                     guest_seq = 0xfffffff0

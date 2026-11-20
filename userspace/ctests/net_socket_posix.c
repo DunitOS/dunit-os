@@ -269,7 +269,7 @@ static int exercise_tcp_reset(void)
 {
     uint64_t deadline = monotonic_ms() + DEADLINE_MS;
     int fd = open_socket(SOCK_STREAM, IPPROTO_TCP, deadline);
-    struct sockaddr_in peer = endpoint("192.0.2.1", TCP_PORT);
+    struct sockaddr_in peer = endpoint("192.0.2.53", TCP_PORT);
     check(connect(fd, (const struct sockaddr *)&peer, sizeof peer) == -1 &&
           errno == EINPROGRESS, "TCP reset connect reports EINPROGRESS");
     check(wait_socket(fd, POLLOUT, deadline) & POLLOUT, "TCP connected before reset");
