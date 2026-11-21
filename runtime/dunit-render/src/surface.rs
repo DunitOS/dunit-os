@@ -96,28 +96,10 @@ impl<'a> Surface<'a> {
         if x < self.clip.0 || y < self.clip.1 || x >= self.clip.2 || y >= self.clip.3 {
             return;
         }
-        // Effective source alpha folds the color's own alpha with coverage.
         let a = (color.a as u32 * cov as u32) / 255;
-        if a == 0 {
-            return;
+        if a != 0 {
+            blend_pixel(&mut self.pixels[y * self.stride + x], color, a);
         }
-        let idx = y * self.stride + x;
-        if a == 255 {
-            self.pixels[idx] = pack_argb(color);
-            return;
-        }
-        let dst = self.pixels[idx];
-        let inv = 255 - a;
-        let dr = (dst >> 16) & 0xff;
-        let dg = (dst >> 8) & 0xff;
-        let db = dst & 0xff;
-        let da = (dst >> 24) & 0xff;
-        let r = (color.r as u32 * a + dr * inv) / 255;
-        let g = (color.g as u32 * a + dg * inv) / 255;
-        let b = (color.b as u32 * a + db * inv) / 255;
-        // Resulting alpha: src over dst.
-        let out_a = a + da * inv / 255;
-        self.pixels[idx] = (out_a << 24) | (r << 16) | (g << 8) | b;
     }
 
     /// Composite a complete, tightly packed premultiplied ARGB layer through this surface's
@@ -164,9 +146,7 @@ impl<'a> Surface<'a> {
         let packed = pack_argb(color);
         for py in self.clip.1..self.clip.3 {
             let row = py * self.stride;
-            for px in self.clip.0..self.clip.2 {
-                self.pixels[row + px] = packed;
-            }
+            self.pixels[row + self.clip.0..row + self.clip.2].fill(packed);
         }
     }
 
@@ -177,9 +157,18 @@ impl<'a> Surface<'a> {
             return;
         }
         let (x0, y0, x1, y1) = self.clip_rect(x, y, w, h);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
         for py in y0..y1 {
-            for px in x0..x1 {
-                self.blend(px, py, color, 255);
+            let row = py * self.stride;
+            let pixels = &mut self.pixels[row + x0..row + x1];
+            if color.a == 255 {
+                pixels.fill(pack_argb(color));
+            } else {
+                for pixel in pixels {
+                    blend_pixel(pixel, color, u32::from(color.a));
+                }
             }
         }
     }
@@ -201,19 +190,31 @@ impl<'a> Surface<'a> {
     /// Blit a glyph coverage mask in `color`, with the mask's top-left at pixel
     /// `(ox, oy)`. Coverage scales the color's alpha per pixel (anti-aliasing).
     pub fn blit_glyph(&mut self, glyph: &GlyphBitmap, ox: i32, oy: i32, color: Color) {
-        for gy in 0..glyph.height {
-            let py = oy + gy as i32;
-            if py < 0 {
-                continue;
-            }
-            for gx in 0..glyph.width {
-                let px = ox + gx as i32;
-                if px < 0 {
-                    continue;
-                }
-                let cov = glyph.at(gx, gy);
-                if cov != 0 {
-                    self.blend(px as usize, py as usize, color, cov);
+        if color.a == 0 || glyph.width == 0 || glyph.height == 0
+            || glyph.coverage.len() < glyph.width.saturating_mul(glyph.height)
+        {
+            return;
+        }
+        let (ox, oy) = (i64::from(ox), i64::from(oy));
+        let (left, top, right, bottom) = self.clip;
+        let x0 = ox.max(left as i64);
+        let x1 = ox.saturating_add(glyph.width as i64).min(right as i64);
+        let y0 = oy.max(top as i64);
+        let y1 = oy.saturating_add(glyph.height as i64).min(bottom as i64);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let width = (x1 - x0) as usize;
+        let source_x = (x0 - ox) as usize;
+        for py in y0..y1 {
+            let dest = py as usize * self.stride + x0 as usize;
+            let source = (py - oy) as usize * glyph.width + source_x;
+            let pixels = &mut self.pixels[dest..dest + width];
+            let coverage = &glyph.coverage[source..source + width];
+            for (pixel, &cov) in pixels.iter_mut().zip(coverage) {
+                let a = (u32::from(color.a) * u32::from(cov)) / 255;
+                if a != 0 {
+                    blend_pixel(pixel, color, a);
                 }
             }
         }
@@ -254,6 +255,21 @@ impl<'a> Surface<'a> {
         let y1 = clamp_usize(round_i32(y + h), self.height).min(self.clip.3);
         (x0, y0, x1, y1)
     }
+}
+
+#[inline]
+fn blend_pixel(pixel: &mut u32, color: Color, a: u32) {
+    if a == 255 {
+        *pixel = pack_argb(color);
+        return;
+    }
+    let dst = *pixel;
+    let inv = 255 - a;
+    let r = (u32::from(color.r) * a + ((dst >> 16) & 0xff) * inv) / 255;
+    let g = (u32::from(color.g) * a + ((dst >> 8) & 0xff) * inv) / 255;
+    let b = (u32::from(color.b) * a + (dst & 0xff) * inv) / 255;
+    let out_a = a + (dst >> 24) * inv / 255;
+    *pixel = (out_a << 24) | (r << 16) | (g << 8) | b;
 }
 
 /// Round to nearest, ties toward +infinity; clamps below at 0.

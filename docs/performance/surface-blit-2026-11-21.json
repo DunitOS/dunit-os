@@ -1,0 +1,893 @@
+{
+  "date": "2026-11-21",
+  "base_commit": "79eaad7d68a50591a3600a689d13f7b2834cb26b",
+  "scope": "SDK surface glyph and rectangle row blits with scalar pixel parity. No public ABI or SMP changes.",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "704f2fdf582b756ad60e5757bb23261690e38f44b8aff3926e1259a53aee6e50",
+    "docs/performance/gui-performance.md": "58ed7ba9f8eb01d9e2358fc591d11c023262931053320f9fcfb096c7ae878b89",
+    "runtime/dunit-render/src/surface.rs": "7730a09440ae48f919e4d20250b11f4eac9cec86c9a927a96e92d59af747b0f8",
+    "runtime/dunit-render/tests/surface_tests.rs": "0489de8e6b0df40ad5bdb2b831e448e71dfc5fbf0ad45b57f7380798d8f5fea8"
+  },
+  "host_render": {
+    "command": "cargo run --release --manifest-path runtime/dunit-component/Cargo.toml --example input_render_bench",
+    "before": [
+      {
+        "case": "wheel",
+        "clock": "host_monotonic_wall",
+        "viewport": [
+          640,
+          360
+        ],
+        "events": 24,
+        "warmups": 1,
+        "trials": 5,
+        "median_wall_us": 9665,
+        "median_render_us": 9653,
+        "median_update_us": 10,
+        "damaged_frames": 24,
+        "damaged_pixels": 4494336,
+        "wall_samples_us": [
+          9782,
+          9039,
+          9665,
+          9186,
+          9887
+        ],
+        "render_samples_us": [
+          9770,
+          9026,
+          9653,
+          9124,
+          9873
+        ],
+        "update_samples_us": [
+          10,
+          10,
+          10,
+          60,
+          12
+        ]
+      },
+      {
+        "case": "short",
+        "clock": "host_monotonic_wall",
+        "viewport": [
+          640,
+          360
+        ],
+        "events": 24,
+        "warmups": 1,
+        "trials": 5,
+        "median_wall_us": 6773,
+        "median_render_us": 6636,
+        "median_update_us": 139,
+        "damaged_frames": 24,
+        "damaged_pixels": 691200,
+        "wall_samples_us": [
+          6937,
+          6469,
+          6658,
+          7033,
+          6773
+        ],
+        "render_samples_us": [
+          6793,
+          6344,
+          6516,
+          6891,
+          6636
+        ],
+        "update_samples_us": [
+          142,
+          123,
+          139,
+          140,
+          135
+        ]
+      },
+      {
+        "case": "long",
+        "clock": "host_monotonic_wall",
+        "viewport": [
+          640,
+          360
+        ],
+        "events": 24,
+        "warmups": 1,
+        "trials": 5,
+        "median_wall_us": 50428,
+        "median_render_us": 43890,
+        "median_update_us": 6452,
+        "damaged_frames": 24,
+        "damaged_pixels": 3168000,
+        "wall_samples_us": [
+          49721,
+          48564,
+          50428,
+          62529,
+          51532
+        ],
+        "render_samples_us": [
+          43266,
+          42770,
+          43890,
+          55126,
+          45576
+        ],
+        "update_samples_us": [
+          6452,
+          5791,
+          6535,
+          7400,
+          5954
+        ]
+      }
+    ],
+    "after": [
+      {
+        "case": "wheel",
+        "clock": "host_monotonic_wall",
+        "viewport": [
+          640,
+          360
+        ],
+        "events": 24,
+        "warmups": 1,
+        "trials": 5,
+        "median_wall_us": 4229,
+        "median_render_us": 4218,
+        "median_update_us": 8,
+        "damaged_frames": 24,
+        "damaged_pixels": 4494336,
+        "wall_samples_us": [
+          4358,
+          4253,
+          4173,
+          4229,
+          4161
+        ],
+        "render_samples_us": [
+          4331,
+          4242,
+          4162,
+          4218,
+          4151
+        ],
+        "update_samples_us": [
+          9,
+          8,
+          8,
+          8,
+          8
+        ]
+      },
+      {
+        "case": "short",
+        "clock": "host_monotonic_wall",
+        "viewport": [
+          640,
+          360
+        ],
+        "events": 24,
+        "warmups": 1,
+        "trials": 5,
+        "median_wall_us": 6095,
+        "median_render_us": 5970,
+        "median_update_us": 124,
+        "damaged_frames": 24,
+        "damaged_pixels": 691200,
+        "wall_samples_us": [
+          6095,
+          6102,
+          6528,
+          6023,
+          6086
+        ],
+        "render_samples_us": [
+          5970,
+          5981,
+          6379,
+          5899,
+          5960
+        ],
+        "update_samples_us": [
+          124,
+          119,
+          147,
+          122,
+          124
+        ]
+      },
+      {
+        "case": "long",
+        "clock": "host_monotonic_wall",
+        "viewport": [
+          640,
+          360
+        ],
+        "events": 24,
+        "warmups": 1,
+        "trials": 5,
+        "median_wall_us": 46185,
+        "median_render_us": 40001,
+        "median_update_us": 6049,
+        "damaged_frames": 24,
+        "damaged_pixels": 3168000,
+        "wall_samples_us": [
+          46972,
+          45887,
+          46657,
+          46010,
+          46185
+        ],
+        "render_samples_us": [
+          40929,
+          39835,
+          40546,
+          40001,
+          39926
+        ],
+        "update_samples_us": [
+          6039,
+          6049,
+          6108,
+          6006,
+          6256
+        ]
+      }
+    ]
+  },
+  "native_qemu": {
+    "before": {
+      "command": "python3 tools/test_sdk_gui_fixture.py latency --cpus 1 --accel tcg --run-dir build/performance/op7-blit-before --timeout 480 --cmd-timeout 380",
+      "iso_sha256": "2816090f99209c10be772ede0f113ebf2ded999b83b703ddd13d1c2d2a4e3bd2",
+      "host": {
+        "system": "Linux",
+        "release": "6.18.57",
+        "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+        "logical_cpus": 3,
+        "affinity": [
+          0,
+          1,
+          2
+        ],
+        "cgroup": {
+          "cpu.max": "max 100000",
+          "cpuset.cpus.effective": "0-2",
+          "memory.max": "max"
+        },
+        "kvm_accessible": false
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/op7-blit-before/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/op7-blit-before/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "tools": {
+        "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+        "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+        "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+      },
+      "serial_sha256": "467727466ca177ef1dbe1f1a4723583080faecaab8c20182a851459295d75157",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "scenes": {
+        "wheel": {
+          "trials": [
+            {
+              "wall_ms": 595.452812,
+              "accepted": 24,
+              "render_ms": 117.73229,
+              "redraw_ms": 558.94967,
+              "import_attach_ms": 57.86726,
+              "commit_result_ms": 3.88857,
+              "frame_done_ms": 213.68071,
+              "retire_ms": 158.10411,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            },
+            {
+              "wall_ms": 554.243493,
+              "accepted": 24,
+              "render_ms": 121.33384,
+              "redraw_ms": 510.27935,
+              "import_attach_ms": 78.35206,
+              "commit_result_ms": 0.27833,
+              "frame_done_ms": 143.09885,
+              "retire_ms": 159.46438,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            },
+            {
+              "wall_ms": 656.317804,
+              "accepted": 24,
+              "render_ms": 114.3702,
+              "redraw_ms": 619.40431,
+              "import_attach_ms": 46.8722,
+              "commit_result_ms": 6.74684,
+              "frame_done_ms": 290.01002,
+              "retire_ms": 154.39515,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            }
+          ],
+          "median": {
+            "wall_ms": 595.452812,
+            "render_ms": 117.73229,
+            "redraw_ms": 558.94967,
+            "import_attach_ms": 57.86726,
+            "commit_result_ms": 3.88857,
+            "frame_done_ms": 213.68071,
+            "retire_ms": 158.10411,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 23
+          },
+          "max_input_q": 23
+        },
+        "short": {
+          "trials": [
+            {
+              "wall_ms": 743.416614,
+              "accepted": 24,
+              "render_ms": 100.53168,
+              "redraw_ms": 699.21579,
+              "import_attach_ms": 17.07527,
+              "commit_result_ms": 0.19469,
+              "frame_done_ms": 422.03881,
+              "retire_ms": 157.45858,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 39
+            },
+            {
+              "wall_ms": 740.337598,
+              "accepted": 24,
+              "render_ms": 91.19879,
+              "redraw_ms": 697.96546,
+              "import_attach_ms": 16.87411,
+              "commit_result_ms": 0.19643,
+              "frame_done_ms": 441.45134,
+              "retire_ms": 146.21388,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 41
+            },
+            {
+              "wall_ms": 701.193999,
+              "accepted": 24,
+              "render_ms": 94.55686,
+              "redraw_ms": 676.32772,
+              "import_attach_ms": 19.06776,
+              "commit_result_ms": 0.19497,
+              "frame_done_ms": 401.09593,
+              "retire_ms": 159.55778,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 39
+            }
+          ],
+          "median": {
+            "wall_ms": 740.337598,
+            "render_ms": 94.55686,
+            "redraw_ms": 697.96546,
+            "import_attach_ms": 17.07527,
+            "commit_result_ms": 0.19497,
+            "frame_done_ms": 422.03881,
+            "retire_ms": 157.45858,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 39
+          },
+          "max_input_q": 41
+        },
+        "long": {
+          "trials": [
+            {
+              "wall_ms": 1387.590727,
+              "accepted": 24,
+              "render_ms": 584.76411,
+              "redraw_ms": 1288.94107,
+              "import_attach_ms": 29.60639,
+              "commit_result_ms": 3.29578,
+              "frame_done_ms": 517.17482,
+              "retire_ms": 148.09249,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 43
+            },
+            {
+              "wall_ms": 1372.998044,
+              "accepted": 24,
+              "render_ms": 600.7568,
+              "redraw_ms": 1269.23374,
+              "import_attach_ms": 32.36879,
+              "commit_result_ms": 3.25875,
+              "frame_done_ms": 467.34598,
+              "retire_ms": 159.52799,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 43
+            },
+            {
+              "wall_ms": 1364.518483,
+              "accepted": 24,
+              "render_ms": 576.67156,
+              "redraw_ms": 1252.3204,
+              "import_attach_ms": 38.10455,
+              "commit_result_ms": 0.67472,
+              "frame_done_ms": 472.53466,
+              "retire_ms": 158.40946,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 43
+            }
+          ],
+          "median": {
+            "wall_ms": 1372.998044,
+            "render_ms": 584.76411,
+            "redraw_ms": 1269.23374,
+            "import_attach_ms": 32.36879,
+            "commit_result_ms": 3.25875,
+            "frame_done_ms": 472.53466,
+            "retire_ms": 158.40946,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 43
+          },
+          "max_input_q": 43
+        },
+        "drag": {
+          "trials": [
+            {
+              "wall_ms": 275.125886,
+              "accepted": 0,
+              "render_ms": 17.82986,
+              "redraw_ms": 217.48511,
+              "import_attach_ms": 48.2141,
+              "commit_result_ms": 0.03312,
+              "frame_done_ms": 80.39692,
+              "retire_ms": 70.53135,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            },
+            {
+              "wall_ms": 272.090854,
+              "accepted": 0,
+              "render_ms": 19.42412,
+              "redraw_ms": 233.4284,
+              "import_attach_ms": 47.26576,
+              "commit_result_ms": 0.03239,
+              "frame_done_ms": 83.80124,
+              "retire_ms": 82.18132,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 3
+            },
+            {
+              "wall_ms": 252.028234,
+              "accepted": 0,
+              "render_ms": 17.99543,
+              "redraw_ms": 226.82101,
+              "import_attach_ms": 46.96174,
+              "commit_result_ms": 0.03504,
+              "frame_done_ms": 91.16298,
+              "retire_ms": 70.32004,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 3
+            }
+          ],
+          "median": {
+            "wall_ms": 272.090854,
+            "render_ms": 17.99543,
+            "redraw_ms": 226.82101,
+            "import_attach_ms": 47.26576,
+            "commit_result_ms": 0.03312,
+            "frame_done_ms": 83.80124,
+            "retire_ms": 70.53135,
+            "redraws": 5,
+            "commits": 4,
+            "input_qmax": 3
+          },
+          "max_input_q": 4
+        },
+        "wheel_burst": {
+          "trials": [
+            {
+              "wall_ms": 67.568003,
+              "accepted": 24,
+              "render_ms": 4.97768,
+              "redraw_ms": 38.36034,
+              "import_attach_ms": 2.1338,
+              "commit_result_ms": 0.00826,
+              "frame_done_ms": 24.64724,
+              "retire_ms": 6.16042,
+              "redraws": 1,
+              "commits": 1,
+              "input_qmax": 1
+            }
+          ],
+          "median": {
+            "wall_ms": 67.568003,
+            "render_ms": 4.97768,
+            "redraw_ms": 38.36034,
+            "import_attach_ms": 2.1338,
+            "commit_result_ms": 0.00826,
+            "frame_done_ms": 24.64724,
+            "retire_ms": 6.16042,
+            "redraws": 1,
+            "commits": 1,
+            "input_qmax": 1
+          },
+          "max_input_q": 1
+        }
+      }
+    },
+    "after": {
+      "command": "python3 tools/test_sdk_gui_fixture.py latency --cpus 1 --accel tcg --run-dir build/performance/op7-blit-after --timeout 480 --cmd-timeout 380",
+      "iso_sha256": "293a525650a968cffe84344f210e29438fbbffdf4a3c8643bdc7d70ba9c72328",
+      "host": {
+        "system": "Linux",
+        "release": "6.18.57",
+        "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+        "logical_cpus": 3,
+        "affinity": [
+          0,
+          1,
+          2
+        ],
+        "cgroup": {
+          "cpu.max": "max 100000",
+          "cpuset.cpus.effective": "0-2",
+          "memory.max": "max"
+        },
+        "kvm_accessible": false
+      },
+      "guest": {
+        "qemu_command": [
+          "qemu-system-x86_64",
+          "-no-reboot",
+          "-m",
+          "512M",
+          "-display",
+          "none",
+          "-serial",
+          "file:build/performance/op7-blit-after/qemu-serial.log",
+          "-qmp",
+          "unix:build/performance/op7-blit-after/qemu-qmp.sock,server,nowait",
+          "-vga",
+          "std",
+          "-global",
+          "VGA.vgamem_mb=32",
+          "-cdrom",
+          "/workspace/dunit-os/build/microkernel.iso",
+          "-boot",
+          "d",
+          "-machine",
+          "q35,accel=tcg",
+          "-smp",
+          "1"
+        ],
+        "machine": "q35,accel=tcg",
+        "requested_vcpus": 1,
+        "emulator_vcpus": 1,
+        "kernel_online_cpus": 1,
+        "kernel_scheduler": "up",
+        "dispatch_cpus": 1
+      },
+      "tools": {
+        "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)\nCopyright (c) 2003-2025 Fabrice Bellard and the QEMU Project developers",
+        "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)\nbinary: rustc\ncommit-hash: 92b5b8c87c61b20adc9001b41baf587634a74734\ncommit-date: 2026-10-29\nhost: x86_64-unknown-linux-gnu\nrelease: 1.101.0-nightly\nLLVM version: 23.1.4",
+        "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+      },
+      "serial_sha256": "b7e5b575e88b4e770fbb7054192bc27ac545af3a829b95fbe7a3d2fb3c009d00",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "scenes": {
+        "wheel": {
+          "trials": [
+            {
+              "wall_ms": 513.748697,
+              "accepted": 24,
+              "render_ms": 58.76785,
+              "redraw_ms": 477.50429,
+              "import_attach_ms": 39.3748,
+              "commit_result_ms": 0.75954,
+              "frame_done_ms": 201.19029,
+              "retire_ms": 169.03083,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            },
+            {
+              "wall_ms": 545.616511,
+              "accepted": 24,
+              "render_ms": 57.84501,
+              "redraw_ms": 507.63862,
+              "import_attach_ms": 28.79718,
+              "commit_result_ms": 0.26038,
+              "frame_done_ms": 261.16514,
+              "retire_ms": 152.33903,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            },
+            {
+              "wall_ms": 655.34582,
+              "accepted": 24,
+              "render_ms": 56.37278,
+              "redraw_ms": 639.44213,
+              "import_attach_ms": 33.97636,
+              "commit_result_ms": 0.39943,
+              "frame_done_ms": 389.04976,
+              "retire_ms": 152.01201,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            }
+          ],
+          "median": {
+            "wall_ms": 545.616511,
+            "render_ms": 57.84501,
+            "redraw_ms": 507.63862,
+            "import_attach_ms": 33.97636,
+            "commit_result_ms": 0.39943,
+            "frame_done_ms": 261.16514,
+            "retire_ms": 152.33903,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 23
+          },
+          "max_input_q": 23
+        },
+        "short": {
+          "trials": [
+            {
+              "wall_ms": 727.060967,
+              "accepted": 24,
+              "render_ms": 90.55936,
+              "redraw_ms": 679.92054,
+              "import_attach_ms": 19.80965,
+              "commit_result_ms": 0.22779,
+              "frame_done_ms": 415.41987,
+              "retire_ms": 151.71935,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 41
+            },
+            {
+              "wall_ms": 762.313558,
+              "accepted": 24,
+              "render_ms": 90.01502,
+              "redraw_ms": 701.23596,
+              "import_attach_ms": 18.34666,
+              "commit_result_ms": 0.67124,
+              "frame_done_ms": 432.71646,
+              "retire_ms": 157.31621,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 41
+            },
+            {
+              "wall_ms": 785.829202,
+              "accepted": 24,
+              "render_ms": 126.67085,
+              "redraw_ms": 726.75198,
+              "import_attach_ms": 18.64058,
+              "commit_result_ms": 0.19661,
+              "frame_done_ms": 428.80427,
+              "retire_ms": 150.2791,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 41
+            }
+          ],
+          "median": {
+            "wall_ms": 762.313558,
+            "render_ms": 90.55936,
+            "redraw_ms": 701.23596,
+            "import_attach_ms": 18.64058,
+            "commit_result_ms": 0.22779,
+            "frame_done_ms": 428.80427,
+            "retire_ms": 151.71935,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 41
+          },
+          "max_input_q": 41
+        },
+        "long": {
+          "trials": [
+            {
+              "wall_ms": 1353.567913,
+              "accepted": 24,
+              "render_ms": 612.79482,
+              "redraw_ms": 1252.19959,
+              "import_attach_ms": 39.80934,
+              "commit_result_ms": 0.516,
+              "frame_done_ms": 432.70679,
+              "retire_ms": 158.65424,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 43
+            },
+            {
+              "wall_ms": 1518.898828,
+              "accepted": 24,
+              "render_ms": 850.5471,
+              "redraw_ms": 1369.15341,
+              "import_attach_ms": 72.85094,
+              "commit_result_ms": 0.54907,
+              "frame_done_ms": 240.20069,
+              "retire_ms": 197.87132,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 45
+            },
+            {
+              "wall_ms": 1352.380138,
+              "accepted": 24,
+              "render_ms": 571.31923,
+              "redraw_ms": 1249.54287,
+              "import_attach_ms": 43.01372,
+              "commit_result_ms": 0.20103,
+              "frame_done_ms": 471.9777,
+              "retire_ms": 157.40939,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 43
+            }
+          ],
+          "median": {
+            "wall_ms": 1353.567913,
+            "render_ms": 612.79482,
+            "redraw_ms": 1252.19959,
+            "import_attach_ms": 43.01372,
+            "commit_result_ms": 0.516,
+            "frame_done_ms": 432.70679,
+            "retire_ms": 158.65424,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 43
+          },
+          "max_input_q": 45
+        },
+        "drag": {
+          "trials": [
+            {
+              "wall_ms": 273.677804,
+              "accepted": 0,
+              "render_ms": 18.08121,
+              "redraw_ms": 220.7857,
+              "import_attach_ms": 43.95067,
+              "commit_result_ms": 0.03258,
+              "frame_done_ms": 92.67267,
+              "retire_ms": 65.68671,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            },
+            {
+              "wall_ms": 295.393895,
+              "accepted": 0,
+              "render_ms": 17.26554,
+              "redraw_ms": 249.54449,
+              "import_attach_ms": 47.51654,
+              "commit_result_ms": 0.03253,
+              "frame_done_ms": 109.08215,
+              "retire_ms": 75.21486,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            },
+            {
+              "wall_ms": 292.905489,
+              "accepted": 0,
+              "render_ms": 16.83667,
+              "redraw_ms": 233.74141,
+              "import_attach_ms": 49.93941,
+              "commit_result_ms": 0.03311,
+              "frame_done_ms": 92.05796,
+              "retire_ms": 74.50983,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            }
+          ],
+          "median": {
+            "wall_ms": 292.905489,
+            "render_ms": 17.26554,
+            "redraw_ms": 233.74141,
+            "import_attach_ms": 47.51654,
+            "commit_result_ms": 0.03258,
+            "frame_done_ms": 92.67267,
+            "retire_ms": 74.50983,
+            "redraws": 5,
+            "commits": 4,
+            "input_qmax": 4
+          },
+          "max_input_q": 4
+        },
+        "wheel_burst": {
+          "trials": [
+            {
+              "wall_ms": 71.083776,
+              "accepted": 24,
+              "render_ms": 3.24871,
+              "redraw_ms": 42.5316,
+              "import_attach_ms": 1.48561,
+              "commit_result_ms": 0.00826,
+              "frame_done_ms": 29.2175,
+              "retire_ms": 8.20618,
+              "redraws": 1,
+              "commits": 1,
+              "input_qmax": 1
+            }
+          ],
+          "median": {
+            "wall_ms": 71.083776,
+            "render_ms": 3.24871,
+            "redraw_ms": 42.5316,
+            "import_attach_ms": 1.48561,
+            "commit_result_ms": 0.00826,
+            "frame_done_ms": 29.2175,
+            "retire_ms": 8.20618,
+            "redraws": 1,
+            "commits": 1,
+            "input_qmax": 1
+          },
+          "max_input_q": 1
+        }
+      }
+    }
+  },
+  "correctness": {
+    "dunit_render_tests": 65,
+    "git_diff_check": "passed"
+  },
+  "limits": [
+    "Five measured host trials per scene; three QEMU trials per continuous scene and one burst. No stable-runner numeric gate.",
+    "Native completion is wall time for an injected input stream with polling and presentation. Physical scanout and individual event latency are unmeasured.",
+    "The TCG wheel render stage improved, but native whole-stream typing and selection results are mixed. The one-vCPU experiment does not establish SMP scaling."
+  ]
+}

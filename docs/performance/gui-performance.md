@@ -69,6 +69,14 @@ retain identical damaged frame/pixel counts in every stage.
 | Long field | 131.853 | 87.013 | 46.111 |
 
 Cached/uncached and prepared/unprepared rendering have exact pixel checks.
+The 21 November SDK painter change clips each glyph once and writes visible
+rows directly. It also bulk-fills opaque rectangles. In the five-trial host
+benchmark, median wheel render time fell from 9.65 ms to 4.22 ms for the same
+24 events. Under one-vCPU TCG, wheel render time fell from 117.7 ms to 57.8 ms.
+Wheel stream completion fell from 595.5 ms to 545.6 ms, with overlapping trial
+ranges. The typing and selection streams showed mixed completion times.
+[Matched trials](surface-blit-2026-11-21.json)
+
 Stationary opaque cursors no longer block partial damage: copy client rectangles,
 redraw the cursor, present bounded damage. Moving cursors/unsafe scene changes
 retain full composition. Clipped-cursor tests compare with fresh full pixels.

@@ -2,6 +2,8 @@
 
 use dunit_render::{pack_argb, Surface};
 use dunit_style::value::Color;
+use dunit_text::GlyphBitmap;
+use dunit_ui::Rect;
 
 const W: usize = 10;
 const H: usize = 10;
@@ -138,6 +140,51 @@ fn blit_image_clips_out_of_bounds() {
     let short = [255u8; 5];
     s.blit_image(0, 0, &short, 2, 2);
     assert_eq!(s.get(0, 0), pack_argb(Color::rgb(255, 255, 255)));
+}
+
+#[test]
+fn glyph_blit_matches_scalar_coverage_on_a_strided_clipped_surface() {
+    const STRIDE: usize = 13;
+    let glyph = GlyphBitmap {
+        width: 5,
+        height: 4,
+        left: 0,
+        top: 0,
+        coverage: (0u8..20).map(|i| i.wrapping_mul(51)).collect(),
+    };
+    let clip = Rect { x: 1., y: 1., w: 8., h: 8. };
+    for (ox, oy) in [(-2, -1), (0, 0), (7, 7), (9, 9), (i32::MAX, i32::MAX)] {
+        for alpha in [0, 1, 128, 255] {
+            let ink = Color::rgba(31, 185, 247, alpha);
+            let mut pixels = [0x9d325487; H * STRIDE];
+            let mut expected = pixels;
+            for y in 1..9 {
+                for x in 1..9 {
+                    let gx = x as i64 - i64::from(ox);
+                    let gy = y as i64 - i64::from(oy);
+                    if gx < 0 || gy < 0 {
+                        continue;
+                    }
+                    let a = u32::from(alpha) * u32::from(glyph.at(gx as usize, gy as usize)) / 255;
+                    if a != 0 {
+                        let pixel = &mut expected[y * STRIDE + x];
+                        let original = *pixel;
+                        let channel = |shift: u32, source: u32| {
+                            (source * a + ((original >> shift) & 255u32) * (255 - a)) / 255
+                        };
+                        *pixel = (a + (original >> 24) * (255 - a) / 255) << 24
+                            | channel(16, 31) << 16
+                            | channel(8, 185) << 8
+                            | channel(0, 247);
+                    }
+                }
+            }
+            let mut surface = Surface::new(&mut pixels, W, H);
+            surface.stride = STRIDE;
+            surface.with_clip(clip, |s| s.blit_glyph(&glyph, ox, oy, ink));
+            assert_eq!(pixels, expected, "origin ({ox}, {oy}), alpha {alpha}");
+        }
+    }
 }
 
 #[test]

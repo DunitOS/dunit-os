@@ -309,6 +309,10 @@ Public protocol changes require an approved contract first.
 
 ## OP7 — software rendering and parallel SDK work
 
+- [x] Clip glyphs once per blit and draw visible rows directly. Fill opaque
+  spans in bulk and verify coverage, color and stride against scalar pixels.
+  Retain host render and TCG continuous-input measurements in
+  [the surface blit comparison](docs/performance/surface-blit-2026-11-21.json).
 - [ ] Profile damage/occlusion, layout/diff, glyph/text caches, SVG/icons,
   ARGB/blur and memory bandwidth.
 - [ ] Remove repeated layout/allocations/repaints with proven pixels and bounded caches.
