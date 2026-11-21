@@ -50,6 +50,18 @@ errors/test markers remain. Trace gating alone improves these streams by about
 No per-event profiling logs were added. Optional server metrics report every
 128 frames; client metrics are opt-in. Both are off by default.
 
+### Idle commit wakeup
+
+Once the allotted interval from the last presenting frame has elapsed, a
+commit for an already visible window can end an idle desktop wait. The
+regular cadence still applies after a presentation. FrameDone still follows
+composition and does not change the buffer release barrier.
+
+In one-vCPU TCG, the long-field fixture's median completion time over six
+trials fell from 1365.1 ms to 854.4 ms. Its cumulative FrameDone wait across
+24 characters fell from 573.5 ms to 3.6 ms. The other scenes have overlapping
+before and after ranges. [Raw trials and wake counts](idle-commit-wake-2026-11-21.json)
+
 ## Render cost
 
 PreparedInput shares one immutable VisualLines map within rendering/hit-testing,

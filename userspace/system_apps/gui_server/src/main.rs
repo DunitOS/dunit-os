@@ -426,6 +426,7 @@ fn run_desktop_session(
     let mut notify_requests: Vec<alloc::string::String> = Vec::new();
     let mut shell_clicks: Vec<(u32,bool)> = Vec::new();
     let mut performance = performance::Profiler::new(cfg.diagnostics.performance);
+    let mut presentation_pacing = frame_pacing::PresentationPacing::new();
     let mut render=cfg.render;
     loop {
         let frame_start=frame_runtime::monotonic_ns().unwrap_or_else(|error|{
@@ -1412,14 +1413,15 @@ fn run_desktop_session(
             ||animation::progress(animation_now,ws_switch_tick,damage_duration,lua_ease_out)<255
             ||desktop_tracks.animating(animation_now)||desktop_motion::changed(&workspace_damage_view,bw,bh);
         let perf_compose = performance.begin_compose();
-        let partial=damage_cache.compose(damage_runtime::Context{
+        let composition=damage_cache.compose(damage_runtime::Context{
             wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),cursor_visible:!pointer_modes.hidden(),now:animation_now,
             duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,effects:&fx,
             shell:&shell,window_effects:&effects,blocked:damage_blocked,
             widgets:(wg.enabled,widget_seconds,desktop_widget_stats.memory_used_percent(),desktop_widget_stats.live_processes()),
         },clients,&mut back,bw,bh,&mut performance);
-        performance.composition(partial,damage_blocked);
-        if !partial {
+        let full = matches!(composition, damage_runtime::Composition::Full);
+        performance.composition(!full,damage_blocked);
+        if full {
             desktop_painter::paint(desktop_painter::Context {
                 back: &mut back,
                 bw,
@@ -1501,7 +1503,12 @@ fn run_desktop_session(
         transfers.input(keyboard_lifecycle.current(),pressed_win.filter(|i|wins[*i].alive&&pointer.state.left()).map(|i|wins[i].pid));
         transfers.flush();
         let deadline=frame_pacing::FrameDeadline::new(frame_start,render.frame_interval_ms);
-        if let Err(error)=frame_runtime::wait_for_frame(deadline,server,clients,&mut reload_requested,&mut notify_requests,&mut performance,transfers){
+        let commit_wake_after = presentation_pacing.commit_wake_after(
+            frame_start, render.frame_interval_ms,
+            !matches!(composition, damage_runtime::Composition::Idle),
+        );
+        let visible = |pid| wins.iter().any(|w| w.pid == pid && w.alive && !w.minimized && w.ws == current_ws);
+        if let Err(error)=frame_runtime::wait_for_frame(deadline,commit_wake_after,visible,server,clients,&mut reload_requested,&mut notify_requests,&mut performance,transfers){
             libdunit::println(&alloc::format!("gui_server: FAIL frame wait {}",error));libdunit::exit(1);
         }
         performance.frame();

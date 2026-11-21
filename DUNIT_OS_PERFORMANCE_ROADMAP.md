@@ -295,6 +295,9 @@ Extra timer interrupts alone are not an optimization.
 
 ## OP6 — input, IPC and SDK latency
 
+- [x] Wake an idle desktop frame for a visible window's accepted commit once the last
+  presenting frame's interval has elapsed. Retain FrameDone after composition
+  and record [the TCG comparison](docs/performance/idle-commit-wake-2026-11-21.json).
 - [ ] Measure queue→scheduling→IPC→client update/render→commit/composition,
   queue depth and burst recovery.
 - [ ] Remove unnecessary wakes/copies/syscalls and batch bounded updates while

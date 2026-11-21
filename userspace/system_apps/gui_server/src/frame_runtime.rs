@@ -21,6 +21,8 @@ pub(super) fn monotonic_ns() -> Result<u64, isize> {
 }
 pub(super) fn wait_for_frame(
     deadline: FrameDeadline,
+    commit_wake_after: Option<FrameDeadline>,
+    visible: impl Fn(u32) -> bool,
     server: &mut Server,
     clients: &mut Vec<ClientState>,
     reload: &mut bool,
@@ -29,9 +31,25 @@ pub(super) fn wait_for_frame(
     transfers: &mut transfer_runtime::Runtime,
 ) -> Result<(), isize> {
     use libdunit::wait_set::{self, Event, Interest, INFINITE, READ};
-    let interests = [Interest::ipc(0), Interest::timer(deadline.ns, 1)];
     let mut events = [Event::default(); 2];
-    while !deadline.due(monotonic_ns()?) {
+    loop {
+        let now = monotonic_ns()?;
+        if deadline.due(now) {
+            return Ok(());
+        }
+        let mut timer = deadline;
+        if let Some(earliest) = commit_wake_after {
+            if clients.iter().any(|c| {
+                c.win_created && c.presented && c.dirty.is_some() && visible(c.pid)
+            }) {
+                if earliest.due(now) {
+                    performance.commit_wake();
+                    return Ok(());
+                }
+                timer.ns = timer.ns.min(earliest.ns);
+            }
+        }
+        let interests = [Interest::ipc(0), Interest::timer(timer.ns, 1)];
         let stamp = performance.stamp();
         let result = wait_set::wait(&interests, &mut events, INFINITE);
         performance.finish(performance::Stage::Sleep, stamp);
@@ -53,5 +71,4 @@ pub(super) fn wait_for_frame(
             performance.finish(performance::Stage::Pump, stamp);
         }
     }
-    Ok(())
 }

@@ -41,6 +41,12 @@ pub struct Cache {
     present: Vec<u32>,
     announced: bool,
 }
+pub(super) enum Composition {
+    Full,
+    Partial,
+    Idle,
+}
+
 pub struct Context<'a> {
     pub wins: &'a [Win],
     pub z: &'a [usize],
@@ -75,7 +81,7 @@ impl Cache {
         bw: usize,
         bh: usize,
         performance: &mut crate::performance::Profiler,
-    ) -> bool {
+    ) -> Composition {
         let mut stable =
             !c.blocked && c.shell.reusable(c.now) && !c.window_effects.animating(c.now);
         let mut wins = Vec::new();
@@ -180,14 +186,14 @@ impl Cache {
         let same = stable && self.previous.as_ref() == Some(&key);
         self.previous = if stable { Some(key) } else { None };
         if !same {
-            return false;
+            return Composition::Full;
         }
         // The cache key includes pointer position: this path has a stationary
         // opaque software cursor. Restore its pixels after applying client
         // damage instead of treating it as a whole-scene fallback blocker.
         let blockers = c.shell.damage_blockers(c.now, c.effects);
         let Some(p) = plan::plan(&surfaces, &updates, &blockers, bw as u32, bh as u32) else {
-            return false;
+            return Composition::Full;
         };
         let visible: Vec<_> =
             c.z.iter()
@@ -201,7 +207,7 @@ impl Cache {
             let w = &c.wins[visible[copy.surface]];
             let count = (w.surface_w as usize).saturating_mul(w.surface_h as usize);
             if w.buf_ptr.is_null() || count * 4 > w.buf_size {
-                return false;
+                return Composition::Full;
             }
             let pixels = unsafe { core::slice::from_raw_parts(w.buf_ptr as *const u32, count) };
             if !plan::apply(
@@ -213,7 +219,7 @@ impl Cache {
                 bw,
                 bh,
             ) {
-                return false;
+                return Composition::Full;
             }
         }
         if c.cursor_visible {draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1, &c.shell.cursor, c.shell.visuals.cursor_colors());}
@@ -235,7 +241,7 @@ impl Cache {
             let present_result = libdunit::fb_present(bytes, r.w, r.h, r.x as u32, r.y as u32);
             performance.present(perf_present,(r.w as u64)*(r.h as u64));
             if present_result != 0 {
-                return false;
+                return Composition::Full;
             }
         }
         if p.pixels > 0 {
@@ -251,6 +257,10 @@ impl Cache {
                 libdunit::println("[DAMAGE] partial frame OK");
             }
         }
-        true
+        if p.pixels > 0 {
+            Composition::Partial
+        } else {
+            Composition::Idle
+        }
     }
 }

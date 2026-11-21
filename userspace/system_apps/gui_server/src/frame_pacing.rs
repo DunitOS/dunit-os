@@ -19,6 +19,32 @@ impl FrameDeadline {
         now_ns >= self.ns
     }
 }
+
+/// Empty composition passes do not spend a presentation slot. A commit can
+/// wake a stable idle scene only after the last presenting frame's interval.
+pub struct PresentationPacing {
+    last_present_start: Option<u64>,
+}
+
+impl PresentationPacing {
+    pub const fn new() -> Self {
+        Self { last_present_start: None }
+    }
+
+    pub fn commit_wake_after(
+        &mut self,
+        frame_start: u64,
+        interval_ms: u32,
+        presented: bool,
+    ) -> Option<FrameDeadline> {
+        if presented {
+            self.last_present_start = Some(frame_start);
+            None
+        } else {
+            self.last_present_start.map(|start| FrameDeadline::new(start, interval_ms))
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PointerSample<T> {
     Queued(T),
@@ -90,6 +116,18 @@ mod tests {
     #[test]
     fn deadline_saturates_without_wrapping() {
         assert_eq!(FrameDeadline::new(u64::MAX - 3, 16).ns, u64::MAX);
+    }
+    #[test]
+    fn only_an_idle_pass_can_wake_on_a_commit_without_spending_the_rate_budget() {
+        let mut pacing = PresentationPacing::new();
+        assert_eq!(pacing.commit_wake_after(0, 16, false), None);
+        assert_eq!(pacing.commit_wake_after(5_000_000, 16, true), None);
+        let earliest = pacing.commit_wake_after(18_000_000, 16, false).unwrap();
+        assert!(!earliest.due(20_999_999));
+        assert!(earliest.due(21_000_000));
+        let next_idle = pacing.commit_wake_after(32_000_000, 16, false).unwrap();
+        assert_eq!(next_idle, earliest);
+        assert_eq!(pacing.commit_wake_after(33_000_000, 16, true), None);
     }
     #[test]
     fn batch_preserves_each_edge_wheel_direction_and_loss_record() {
