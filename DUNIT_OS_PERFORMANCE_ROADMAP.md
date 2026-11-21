@@ -312,6 +312,9 @@ Public protocol changes require an approved contract first.
 
 ## OP7 — software rendering and parallel SDK work
 
+- [x] Move per-frame damage traces behind opt-in diagnostics. Keep aggregate
+  partial-present and copied-texture counters, and verify the exact-pixel
+  fixture with traces enabled. [TCG comparison](docs/performance/damage-trace-2026-11-21.json)
 - [x] Clip glyphs once per blit and draw visible rows directly. Fill opaque
   spans in bulk and verify coverage, color and stride against scalar pixels.
   Retain host render and TCG continuous-input measurements in

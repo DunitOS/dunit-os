@@ -975,7 +975,7 @@ impl Config {
     pub fn defaults() -> Config {
         Config {
             appearance: String::new(),
-            diagnostics: Diagnostics {performance:false},
+            diagnostics: Diagnostics::default(),
             render: Render::default(),
             settings: Settings::defaults(),
             apps: Applications::baseline(),

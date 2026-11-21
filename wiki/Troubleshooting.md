@@ -28,7 +28,7 @@ Verify that your serial log contains the standard operational markers in chronol
 6. `[INITRD] Initrd: 1126 file(s) loaded`
 7. `[VFS] Root MemFS mounted at /`
 8. `[DRV] PS/2: Keyboard detected on port 1` & `Mouse detected on port 2`
-9. `[DAMAGE] partial frame OK` (DWM compositor actively running)
+9. `gui_server: desktop ready` (DWM compositor initialized)
 
 ---
 

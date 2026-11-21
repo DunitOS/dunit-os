@@ -33,6 +33,8 @@ struct Sample {
     present_calls: u64,
     present_pixels: u64,
     commit_wakes: u64,
+    partial_present_frames: u64,
+    partial_texture_pixels: u64,
     clock_failures: u64,
 }
 pub struct Profiler {
@@ -95,6 +97,16 @@ impl Profiler {
     pub fn commit_wake(&mut self) {
         if self.enabled {
             self.sample.commit_wakes += 1;
+        }
+    }
+    pub fn collecting(&self) -> bool {
+        self.enabled
+    }
+    pub fn partial_present(&mut self, texture_pixels: u64) {
+        if self.enabled {
+            self.sample.partial_present_frames += 1;
+            self.sample.partial_texture_pixels = self.sample.partial_texture_pixels
+                .saturating_add(texture_pixels);
         }
     }
     pub fn composition(&mut self, partial: bool, blocked: bool) {
@@ -192,8 +204,8 @@ impl Profiler {
     fn emit(&mut self) {
         let s = &self.sample;
         libdunit::println(&alloc::format!(
-            "[PERF-SERVER] seq={} frames={} work_ms={} pump_ms={} input_ms={} compose_ms={} present_ms={} done_ms={} sleep_ms={} max_work_ms={} max_sleep_ms={} pointer={} wheel={} lost={} keys={} ipc_rx={} ipc_qmax={} ready_max={} full={} partial={} blocked={} present_calls={} present_pixels={} clock_failures={} commit_wakes={}",
-            self.sequence,s.frames,s.elapsed[Stage::Work as usize],s.elapsed[Stage::Pump as usize],s.elapsed[Stage::Input as usize],s.elapsed[Stage::Compose as usize],s.elapsed[Stage::Present as usize],s.elapsed[Stage::FrameDone as usize],s.elapsed[Stage::Sleep as usize],s.max_work,s.max_sleep,s.pointer,s.wheel,s.lost,s.keys,s.ipc_rx,s.ipc_qmax,s.ready_max,s.full,s.partial,s.blocked,s.present_calls,s.present_pixels,s.clock_failures,s.commit_wakes));
+            "[PERF-SERVER] seq={} frames={} work_ms={} pump_ms={} input_ms={} compose_ms={} present_ms={} done_ms={} sleep_ms={} max_work_ms={} max_sleep_ms={} pointer={} wheel={} lost={} keys={} ipc_rx={} ipc_qmax={} ready_max={} full={} partial={} blocked={} present_calls={} present_pixels={} clock_failures={} commit_wakes={} partial_present_frames={} partial_texture_pixels={}",
+            self.sequence,s.frames,s.elapsed[Stage::Work as usize],s.elapsed[Stage::Pump as usize],s.elapsed[Stage::Input as usize],s.elapsed[Stage::Compose as usize],s.elapsed[Stage::Present as usize],s.elapsed[Stage::FrameDone as usize],s.elapsed[Stage::Sleep as usize],s.max_work,s.max_sleep,s.pointer,s.wheel,s.lost,s.keys,s.ipc_rx,s.ipc_qmax,s.ready_max,s.full,s.partial,s.blocked,s.present_calls,s.present_pixels,s.clock_failures,s.commit_wakes,s.partial_present_frames,s.partial_texture_pixels));
         self.reset();
     }
     pub fn flush(&mut self) {
@@ -213,6 +225,7 @@ mod tests {
         p.key();
         p.ipc_packet();
         p.commit_wake();
+        p.partial_present(100);
         p.composition(false, true);
         p.queue_sample(9, 2);
         p.record(Stage::Work, Some(0), Some(100));
@@ -221,6 +234,8 @@ mod tests {
         }
         assert_eq!((p.sample.present_calls, p.sample.present_pixels), (0, 0));
         assert_eq!(p.sample.commit_wakes, 0);
+        assert_eq!(p.sample.partial_present_frames, 0);
+        assert_eq!(p.sample.partial_texture_pixels, 0);
         assert_eq!(
             (
                 p.sample.pointer,
@@ -240,6 +255,8 @@ mod tests {
         p.key();
         p.ipc_packet();
         p.commit_wake();
+        p.partial_present(100);
+        p.partial_present(200);
         p.composition(false, true);
         p.composition(true, false);
         p.presentation(200);
@@ -255,6 +272,8 @@ mod tests {
         assert!(p.frame_complete());
         assert_eq!(p.sample.pointer, 2);
         assert_eq!(p.sample.commit_wakes, 1);
+        assert_eq!(p.sample.partial_present_frames, 2);
+        assert_eq!(p.sample.partial_texture_pixels, 300);
         assert_eq!((p.sample.present_calls, p.sample.present_pixels), (2, 230));
         assert_eq!(p.sample.wheel, 2);
         assert_eq!(p.sample.lost, 1);

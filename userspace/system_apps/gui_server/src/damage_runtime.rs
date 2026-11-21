@@ -63,6 +63,7 @@ pub struct Context<'a> {
     pub shell: &'a shell_runtime::Shell,
     pub window_effects: &'a window_effects::Effects,
     pub blocked: bool,
+    pub trace: bool,
     pub widgets: (bool, u64, u32, u64),
 }
 impl Cache {
@@ -244,17 +245,20 @@ impl Cache {
                 return Composition::Full;
             }
         }
-        if p.pixels > 0 {
+        if p.pixels > 0 && (c.trace || performance.collecting()) {
             let texture: u64 = clients.iter().map(|c| c.buffers.copied).sum();
-            libdunit::println(&alloc::format!(
-                "[DAMAGE] partial composed={} presented={} texture={} screen={}",
-                p.pixels,
-                p.pixels,
-                texture,
-                bw * bh
-            ));
-            if p.pixels < (bw * bh) as u64 && texture > 0 && texture <= p.pixels {
-                libdunit::println("[DAMAGE] partial frame OK");
+            performance.partial_present(texture);
+            if c.trace {
+                libdunit::println(&alloc::format!(
+                    "[DAMAGE] partial composed={} presented={} texture={} screen={}",
+                    p.pixels,
+                    p.pixels,
+                    texture,
+                    bw * bh
+                ));
+                if p.pixels < (bw * bh) as u64 && texture > 0 && texture <= p.pixels {
+                    libdunit::println("[DAMAGE] partial frame OK");
+                }
             }
         }
         if p.pixels > 0 {

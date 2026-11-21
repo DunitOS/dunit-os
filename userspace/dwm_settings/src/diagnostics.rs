@@ -4,10 +4,11 @@ use alloc::{format, string::String};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Diagnostics {
     pub performance: bool,
+    pub damage_trace: bool,
 }
 impl Diagnostics {
     pub(crate) fn field(key: &str, value: &str) -> Result<bool, &'static str> {
-        if key != "performance" {
+        if !matches!(key, "performance" | "damage_trace") {
             return Err("unknown diagnostics field");
         }
         crate::parse_bool(value).ok_or("expected a boolean")
@@ -25,12 +26,18 @@ impl Diagnostics {
                     field: String::from("diagnostics"),
                     reason: "expected key = value",
                 })?;
-                result.performance =
-                    Self::field(key.trim(), value.trim()).map_err(|reason| ConfigError {
+                let key = key.trim();
+                let enabled =
+                    Self::field(key, value.trim()).map_err(|reason| ConfigError {
                         line: index + 1,
-                        field: format!("diagnostics.{}", key.trim()),
+                        field: format!("diagnostics.{key}"),
                         reason,
                     })?;
+                match key {
+                    "performance" => result.performance = enabled,
+                    "damage_trace" => result.damage_trace = enabled,
+                    _ => unreachable!(),
+                }
             }
         }
         Ok(result)

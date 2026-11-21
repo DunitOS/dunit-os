@@ -11,6 +11,8 @@ win_close = true
 enabled = false
 [notifications]
 enabled = false
+[diagnostics]
+damage_trace = true
 [panels.header]
 edge = "top"
 size = 28

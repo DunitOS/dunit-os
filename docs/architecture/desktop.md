@@ -441,6 +441,11 @@ Counters cover pointer/wheel/loss/key/client IPC records, full/partial/blocked
 frames and present attempts/pixels. Sampled ipc_qmax/ready_max come from iteration
 SystemStats, not exact per-client peaks or kernel pointer depth.
 
+`[diagnostics] damage_trace=true` enables the per-frame partial damage trace
+for pixel accounting tests. It defaults to false and can be reloaded.
+Performance aggregates separately count partial presentations that touched the
+framebuffer and the client texture pixels copied for those presentations.
+
 `[render] frame_interval_ms=16` is reloadable 1..1000 ms. Absolute frame-start
 deadlines charge work against pacing; IPC readiness wakes wait-set before the
 next compose. FrameDone follows composition; at most 64 pointer records drain

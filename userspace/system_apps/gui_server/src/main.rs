@@ -426,6 +426,7 @@ fn run_desktop_session(
     let mut notify_requests: Vec<alloc::string::String> = Vec::new();
     let mut shell_clicks: Vec<(u32,bool)> = Vec::new();
     let mut performance = performance::Profiler::new(cfg.diagnostics.performance);
+    let mut damage_trace = cfg.diagnostics.damage_trace;
     let mut presentation_pacing = frame_pacing::PresentationPacing::new();
     let mut render=cfg.render;
     loop {
@@ -507,6 +508,7 @@ fn run_desktop_session(
                     return true;
                 }
                 performance.configure(ncfg.diagnostics.performance);
+                damage_trace = ncfg.diagnostics.damage_trace;
                 render=ncfg.render;
                 lua_engine.cancel();
                 event_engine.cancel();
@@ -1417,6 +1419,7 @@ fn run_desktop_session(
             wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),cursor_visible:!pointer_modes.hidden(),now:animation_now,
             duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,effects:&fx,
             shell:&shell,window_effects:&effects,blocked:damage_blocked,
+            trace: damage_trace,
             widgets:(wg.enabled,widget_seconds,desktop_widget_stats.memory_used_percent(),desktop_widget_stats.live_processes()),
         },clients,&mut back,bw,bh,&mut performance);
         let full = matches!(composition, damage_runtime::Composition::Full);
