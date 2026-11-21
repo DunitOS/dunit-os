@@ -83,6 +83,50 @@ fn empty_tree_paints_nothing() {
 }
 
 #[test]
+fn clipped_label_matches_the_buffered_raster_with_overhang() {
+    use dunit_render::paint_clipped;
+    use dunit_ui::Rect;
+
+    let font = load_font();
+    let px = 64.;
+    let text = "fJ Åp e\u{301} Ж 0123456789";
+    let tree = parse_dui(&format!(r#"Column {{ Text width=180 height=100 "{text}" }}"#)).unwrap();
+    let layout = layout(&tree, 180., 100.);
+    let mut cascade = Cascade::new();
+    cascade.push(parse_dss("Text { font-size: 64; color: #ffffff; }").unwrap());
+    let style = |id| cascade.resolve(&NodeStyle::element(tree.node(id).kind.tag()));
+    let baseline = (font.line_metrics(px).ascent + 0.5) as i32;
+    for (x, y, w, h) in [(0., 0., 11., 100.), (18., 21., 18., 8.), (93., 55., 39., 35.)] {
+        let clip = Rect { x, y, w, h };
+        let mut expected = vec![0; 180 * 100];
+        Surface::new(&mut expected, 180, 100).with_clip(clip, |surface| {
+            for g in font.layout_line(text, px).0 {
+                if let Some(bitmap) = font.rasterize(g.glyph, px) {
+                    surface.blit_glyph(
+                        &bitmap,
+                        (g.x + 0.5) as i32 + bitmap.left,
+                        baseline - bitmap.top,
+                        Color::rgb(255, 255, 255),
+                    );
+                }
+            }
+        });
+        assert!(expected.iter().any(|&pixel| pixel != 0), "empty test crop {clip:?}");
+        let mut actual = vec![0; expected.len()];
+        paint_clipped(
+            &tree,
+            &layout,
+            &style,
+            &font,
+            &mut Surface::new(&mut actual, 180, 100),
+            clip,
+        )
+        .unwrap();
+        assert!(actual == expected, "clipped label differs for {clip:?}");
+    }
+}
+
+#[test]
 fn explicit_rect_clip_contains_descendants_in_the_raw_painter() {
     let font = load_font();
     let tree =

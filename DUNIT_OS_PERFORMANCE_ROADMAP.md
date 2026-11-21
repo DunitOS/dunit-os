@@ -330,6 +330,9 @@ Public protocol changes require an approved contract first.
   [host and TCG typing measurements](docs/performance/line-prefix-2026-11-21.json).
 - [x] Bound text input painting by the active damage clip. Compare cropped
   output against full painting and retain [narrow damage timings](docs/performance/text-damage-2026-11-21.json).
+- [x] Paint horizontally clipped labels without building a glyph run. Skip
+  clipped ink while preserving overhang and advances.
+  [Prepared scene and label measurements](docs/performance/label-clip-2026-11-21.json)
 - [ ] Profile damage/occlusion, layout/diff, glyph/text caches, SVG/icons,
   ARGB/blur and memory bandwidth.
 - [ ] Remove repeated layout/allocations/repaints with proven pixels and bounded caches.

@@ -502,15 +502,36 @@ pub(crate) fn paint_text(
     } else {
         0.
     };
-    let baseline = rect.y + border + pad_t + offset_y + metrics.ascent;
-
-    let (glyphs, _advance) = font.layout_line(text, px);
-    for g in glyphs {
-        if let Some(bmp) = surface.rasterize(font, g.glyph, px) {
-            let ox = round_i32(origin_x + g.x) + bmp.left;
-            let oy = round_i32(baseline) - bmp.top;
-            surface.blit_glyph(&bmp, ox, oy, ink);
+    let baseline = round_i32(rect.y + border + pad_t + offset_y + metrics.ascent);
+    let (left, _, right, _) = surface.clip_bounds();
+    let cropped = left > round_i32(rect.x) as usize || right < round_i32(rect.x + rect.w) as usize;
+    let mut draw_glyph = |glyph, x| {
+        if let Some(bitmap) = surface.rasterize(font, glyph, px) {
+            surface.blit_glyph(&bitmap, x + bitmap.left, baseline - bitmap.top, ink);
         }
+    };
+    if !cropped || !px.is_finite() || px <= 0. || !origin_x.is_finite() {
+        for g in font.layout_line(text, px).0 {
+            draw_glyph(g.glyph, round_i32(origin_x + g.x));
+        }
+        return;
+    }
+
+    let (ink_left, ink_right) = font.horizontal_bounds_px(px);
+    let scale = font.scale_for_px(px);
+    let mut pen = 0.;
+    for ch in text.chars() {
+        let x = round_i32(origin_x + pen);
+        // Unkerned advances are nonnegative. Allow for outline overhang
+        // and the rasterizer's pixel padding before skipping ink.
+        if x as f32 + ink_left - 2. >= right as f32 {
+            break;
+        }
+        let glyph = font.glyph_index(ch);
+        if x as f32 + ink_right + 2. >= left as f32 {
+            draw_glyph(glyph, x);
+        }
+        pen += font.glyph_metrics(glyph).advance as f32 * scale;
     }
 }
 

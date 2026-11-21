@@ -1,0 +1,422 @@
+{
+  "date": "2026-11-21",
+  "base_commit": "e366d8760c3217f10f933b2781c144e87eed9473",
+  "scope": "Cull label ink against horizontally clipped paint bounds.",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "71b681c2fb698887dd0770b70fbb30a811832f4de3f5e436745ad6141dc2ee4f",
+    "docs/performance/gui-performance.md": "d8af34d0f227590a929069d12a1a2ae55bfb7ebcb84a372cc925d39fa56de2ef",
+    "runtime/dunit-render/src/paint.rs": "a8d12ed001a3a67812039371e39dac433a59048ee073d48e32f08560bb0a0e51",
+    "runtime/dunit-render/tests/paint_tests.rs": "f39cfe7e9c4d690d38f8fe995ea48644e962f55b1053a1e7cb29ccffabc0edd7",
+    "runtime/dunit-render/examples/label_clip_bench.rs": "a452faff64badb55ce0ceeb17473f7ab92c42394fde5af902418d02f83b46f0a"
+  },
+  "host": {
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)",
+    "label_command": "cargo run --release --manifest-path runtime/dunit-render/Cargo.toml --example label_clip_bench",
+    "method": "Three alternating baseline and updated batches, five trials in each batch. The label benchmark crops a 57 by 36 pixel rectangle with a warm glyph cache and 1000 paints per trial.",
+    "label_pixel_checksum": "3b38ab321d0d83eb",
+    "measurements": {
+      "before": {
+        "binary_sha256": "a2677a333bf91328715bcf74c6fe5ed62e516d6580628652b0b3b3d4ea416393",
+        "median_us": 13685,
+        "range_us": [
+          13365,
+          15683
+        ],
+        "samples_us": [
+          13447,
+          13509,
+          13511,
+          15683,
+          13685,
+          13811,
+          13752,
+          13655,
+          13578,
+          13365,
+          13847,
+          14492,
+          13710,
+          13665,
+          14101
+        ]
+      },
+      "after": {
+        "binary_sha256": "04793d7043d8bcbb044b852d89a91e11637aa2cf31f2f3eaecbc7203dae88f7e",
+        "median_us": 2290,
+        "range_us": [
+          2228,
+          2747
+        ],
+        "samples_us": [
+          2290,
+          2306,
+          2329,
+          2296,
+          2228,
+          2703,
+          2747,
+          2299,
+          2232,
+          2259,
+          2254,
+          2228,
+          2478,
+          2275,
+          2258
+        ]
+      }
+    },
+    "checks_passed": 33,
+    "test_log_sha256": "93390ed1e4a55d43f737e8ca9e486b45cb74261af27fe018b284becf5b2f4df4"
+  },
+  "qemu": {
+    "guest": "q35,accel=tcg, 1 online vCPU",
+    "version": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "suite_command": "python3 tools/test_sdk_gui_fixture.py SUITE --cpus 1 --accel tcg --run-dir RUN_DIR",
+    "runs": {
+      "collections": {
+        "run": "op7-label-final-collections",
+        "image_sha256": "c9020f14a21af275c30a2fa459cdab981db0532c5ec28f59eab9395ed39db12d",
+        "serial_sha256": "0895a3d887d2551afee684f19a5583c3a2b17d8ddb308c32159008635b771e23",
+        "harness_log_sha256": "e263bc6c558d9cb4c1c29ad0fd9592c162aec89b5cffe15e5775be892d6ffb72",
+        "status": "completed",
+        "markers": [
+          "[WIDGETS] ok",
+          "[COLLECTIONS] pointer header descending",
+          "[COLLECTIONS] pointer header ascending",
+          "[COLLECTIONS] wrap resize"
+        ]
+      },
+      "latency_after": {
+        "run": "op7-label-final",
+        "image_sha256": "e80a32c37824ea3c6449d6fa433c2c5d092abf65c54b4b75dd4315bd4d7af338",
+        "serial_sha256": "ae141510155d647cb3f5df32b87a120adde08fea873da24a57b24038762511b6",
+        "harness_log_sha256": "3e5e9d59b988adb9bcb6b74c24dc3bb17e6905af953b75ed57468a2182f65d9b",
+        "status": "completed",
+        "scenes": {
+          "wheel": {
+            "wall_ms": [
+              492.492717,
+              496.153032,
+              515.522908
+            ],
+            "client_render_ms": [
+              54.62995,
+              52.88256,
+              52.2708
+            ]
+          },
+          "short": {
+            "wall_ms": [
+              563.164419,
+              719.961183,
+              694.424306
+            ],
+            "client_render_ms": [
+              118.71559,
+              90.85403,
+              107.59099
+            ]
+          },
+          "long": {
+            "wall_ms": [
+              801.541812,
+              763.314531,
+              805.151525
+            ],
+            "client_render_ms": [
+              446.19198,
+              415.61151,
+              443.18582
+            ]
+          },
+          "drag": {
+            "wall_ms": [
+              255.015124,
+              253.206263,
+              312.422199
+            ],
+            "client_render_ms": [
+              26.97489,
+              17.2198,
+              20.34577
+            ]
+          },
+          "wheel_burst": {
+            "wall_ms": [
+              32.107938
+            ],
+            "client_render_ms": [
+              2.61636
+            ]
+          }
+        }
+      },
+      "latency_before": {
+        "run": "op7-text-damage-after",
+        "image_sha256": "59af7fdf7ea8fd07a2e38a241e0a3942b7fdfa4f4489895af8e41113d7a2592a",
+        "serial_sha256": "b2c0d0efbd960e7342506b532f247f9611dbb319ee336696de6e7f32d3e42ff2",
+        "harness_log_sha256": "151f0e058d88046efd645b49e11c2f59d5b890d22d8b5cadb7cb05be4d42b31c",
+        "status": "completed",
+        "scenes": {
+          "wheel": {
+            "wall_ms": [
+              713.918318,
+              724.830962,
+              715.790837
+            ],
+            "client_render_ms": [
+              56.973,
+              64.8296,
+              57.25961
+            ]
+          },
+          "short": {
+            "wall_ms": [
+              730.615906,
+              618.999263,
+              720.82664
+            ],
+            "client_render_ms": [
+              102.22062,
+              100.30207,
+              97.52963
+            ]
+          },
+          "long": {
+            "wall_ms": [
+              680.676938,
+              671.463019,
+              699.689478
+            ],
+            "client_render_ms": [
+              366.85654,
+              371.7749,
+              382.8296
+            ]
+          },
+          "drag": {
+            "wall_ms": [
+              311.28106,
+              230.973902,
+              313.866798
+            ],
+            "client_render_ms": [
+              29.27257,
+              15.3304,
+              18.91249
+            ]
+          },
+          "wheel_burst": {
+            "wall_ms": [
+              46.788334
+            ],
+            "client_render_ms": [
+              2.23946
+            ]
+          }
+        }
+      },
+      "latency_fresh_before": {
+        "run": "op7-label-fresh-before",
+        "image_sha256": "e70314de8b5bcbabe11c150c4fce39d1f412045329ba2bed09ea10d818ecc890",
+        "serial_sha256": "2b8031de30b5b6bed2a6f8518cf1700c695f1f994adbab97d028eaf634f85fdf",
+        "harness_log_sha256": "c19cb52e03f9ebfa3fb76c755727ee052b89778c53b88013e32c1b7e67399920",
+        "status": "completed",
+        "scenes": {
+          "wheel": {
+            "wall_ms": [
+              743.608603,
+              694.888935,
+              747.7852
+            ],
+            "client_render_ms": [
+              59.27709,
+              51.23611,
+              61.67915
+            ]
+          },
+          "short": {
+            "wall_ms": [
+              725.693991,
+              745.131541,
+              719.464848
+            ],
+            "client_render_ms": [
+              91.61534,
+              93.76678,
+              81.02855
+            ]
+          },
+          "long": {
+            "wall_ms": [
+              732.135291,
+              763.804877,
+              722.469206
+            ],
+            "client_render_ms": [
+              370.24272,
+              392.30197,
+              391.23432
+            ]
+          },
+          "drag": {
+            "wall_ms": [
+              293.217957,
+              356.08504,
+              250.096028
+            ],
+            "client_render_ms": [
+              18.90018,
+              19.0246,
+              14.76496
+            ]
+          },
+          "wheel_burst": {
+            "wall_ms": [
+              46.202016
+            ],
+            "client_render_ms": [
+              4.8174
+            ]
+          }
+        }
+      },
+      "prototype_latency": {
+        "run": "op7-label-after",
+        "image_sha256": "ba7dfcb73d3eb4683ac40180a9df4e1c7069c1597ac39c6a3724c87fea1fde65",
+        "serial_sha256": "c2b06a29cfa1d60f9346b9dc1c61a38ce0bff6a3aa45f05c865b4f88b8cfcbfd",
+        "harness_log_sha256": "f3588d9189c32dd7a564f79b8b32dd9bd601685f1b0385804fe9020e5795bb84",
+        "status": "completed",
+        "scenes": {
+          "wheel": {
+            "wall_ms": [
+              690.006212,
+              735.267053,
+              700.268716
+            ],
+            "client_render_ms": [
+              56.64996,
+              53.57862,
+              55.13809
+            ]
+          },
+          "short": {
+            "wall_ms": [
+              726.485996,
+              701.082712,
+              680.287876
+            ],
+            "client_render_ms": [
+              108.95274,
+              113.27948,
+              124.30248
+            ]
+          },
+          "long": {
+            "wall_ms": [
+              799.16796,
+              822.868068,
+              827.991044
+            ],
+            "client_render_ms": [
+              481.86581,
+              492.32825,
+              499.15019
+            ]
+          },
+          "drag": {
+            "wall_ms": [
+              300.323969,
+              274.085359,
+              291.940289
+            ],
+            "client_render_ms": [
+              19.50749,
+              19.24513,
+              23.95054
+            ]
+          },
+          "wheel_burst": {
+            "wall_ms": [
+              49.273873
+            ],
+            "client_render_ms": [
+              2.35149
+            ]
+          }
+        }
+      },
+      "prototype_latency_repeat": {
+        "run": "op7-label-after-repeat",
+        "image_sha256": "ba7dfcb73d3eb4683ac40180a9df4e1c7069c1597ac39c6a3724c87fea1fde65",
+        "serial_sha256": "5f78e2f98823a468129b213fcb9efb1f82579d1cfce03503ed1ebb388bc09c90",
+        "harness_log_sha256": "043f0ae9ecad0b71f575d72523aaae17daaceb8ebb8e1a19ad3541a007e8483f",
+        "status": "completed",
+        "scenes": {
+          "wheel": {
+            "wall_ms": [
+              655.235572,
+              638.317597,
+              714.160211
+            ],
+            "client_render_ms": [
+              60.21293,
+              57.90031,
+              53.2571
+            ]
+          },
+          "short": {
+            "wall_ms": [
+              699.029156,
+              644.82977,
+              702.843093
+            ],
+            "client_render_ms": [
+              114.44942,
+              118.31697,
+              124.43917
+            ]
+          },
+          "long": {
+            "wall_ms": [
+              839.871553,
+              862.375183,
+              863.843122
+            ],
+            "client_render_ms": [
+              499.50124,
+              520.40036,
+              516.21282
+            ]
+          },
+          "drag": {
+            "wall_ms": [
+              290.837969,
+              271.678384,
+              250.007116
+            ],
+            "client_render_ms": [
+              19.70498,
+              19.84764,
+              22.29044
+            ]
+          },
+          "wheel_burst": {
+            "wall_ms": [
+              46.123578
+            ],
+            "client_render_ms": [
+              2.27481
+            ]
+          }
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "The broader prototype also replaced the shared font line measurement and allocation path. Its two native long-input runs were slower than a rebuilt unmodified baseline. The committed change is limited to horizontally clipped labels.",
+    "The host label workload isolates narrow clipped painting with a warm glyph cache. Native wall stream times include input injection and polling."
+  ]
+}

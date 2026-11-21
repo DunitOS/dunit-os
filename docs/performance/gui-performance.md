@@ -90,6 +90,14 @@ host benchmark for 500 repaints of a 54×27 crop took 3.78 ms median, down from
 38.08 ms, with identical pixels. The benchmark isolates the paint stage for a
 narrow crop. [Damage paint measurements](text-damage-2026-11-21.json)
 
+Horizontally clipped labels stream glyph positions and stop at the right
+damage edge with a margin for glyph overhang. In 15 host trials per build,
+median time for 1,000 narrow paints of a long label fell from 13.69 ms to
+2.29 ms. The crop matches full painting pixel for pixel. Native input
+completion in one-vCPU TCG was mixed. The long-field median was 801.5 ms
+on the clipped-label build and 732.1 ms on the rebuilt baseline.
+[Label and continuous-input measurements](label-clip-2026-11-21.json)
+
 The quiet-host release benchmark isolates render work from IPC/QEMU/scheduling:
 24 events, warmup and five measured trials. [Raw render samples](input-render-results.json)
 retain identical damaged frame/pixel counts in every stage.
