@@ -83,6 +83,13 @@ and median stream completion from 844.1 ms to 775.9 ms. Completion time ranges
 overlap. Clients still redraw synchronously per event.
 [Typing measurements](line-prefix-2026-11-21.json)
 
+Text input painting uses the intersection of its viewport, ancestor clips and
+the damage rectangle to bound row traversal and glyph rasterization. The crop
+preserves selection pixels, fractional scroll and glyph overhang. A warmed
+host benchmark for 500 repaints of a 54×27 crop took 3.78 ms median, down from
+38.08 ms, with identical pixels. The benchmark isolates the paint stage for a
+narrow crop. [Damage paint measurements](text-damage-2026-11-21.json)
+
 The quiet-host release benchmark isolates render work from IPC/QEMU/scheduling:
 24 events, warmup and five measured trials. [Raw render samples](input-render-results.json)
 retain identical damaged frame/pixel counts in every stage.

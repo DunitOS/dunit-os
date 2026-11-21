@@ -81,6 +81,10 @@ impl<'a> Surface<'a> {
         self.clip = previous;
     }
 
+    pub(crate) fn clip_bounds(&self) -> (usize, usize, usize, usize) {
+        self.clip
+    }
+
     /// The pixel at `(x, y)`, or 0 if out of bounds (test/debug helper).
     pub fn get(&self, x: usize, y: usize) -> u32 {
         if x < self.width && y < self.height {

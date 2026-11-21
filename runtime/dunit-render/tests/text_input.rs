@@ -438,6 +438,36 @@ fn multiline_selection_respects_damage_clip_and_later_sibling() {
 }
 
 #[test]
+fn narrow_fractional_damage_matches_full_text_paint() {
+    let mut text = input(&"W e\u{301} Ж Åp̱y e\u{301} W\n".repeat(24));
+    text.multiline = true;
+    text.soft_wrap = true;
+    text.focused = true;
+    text.caret_visible = true;
+    text.scroll_x = 5.25;
+    text.scroll_y = 96.75;
+    text.anchor = 11;
+    text.cursor = text.value.len();
+    let source = "Column { Input width=80 height=70 }";
+    let full = Rect { x: 0., y: 0., w: 100., h: 40. };
+    for masked in [false, true] {
+        text.password = masked;
+        let expected = render(&text, source, full);
+        for (x, y, w, h) in [(9.4, 10.5, 18.2, 7.1), (43.5, 26.4, 24., 1.2), (67., 17., 7., 22.)] {
+            let damage = Rect { x, y, w, h };
+            let actual = render(&text, source, damage);
+            for (index, &pixel) in actual.iter().enumerate() {
+                let px = (index % 100) as f32;
+                let py = (index / 100) as f32;
+                let in_clip = px >= x.round() && px < (x + w).round()
+                    && py >= y.round() && py < (y + h).round();
+                assert_eq!(pixel, if in_clip { expected[index] } else { 0 }, "pixel {px},{py}");
+            }
+        }
+    }
+}
+
+#[test]
 fn scrolled_ink_overhang_matches_unculled_clip_reference() {
     let f = font();
     let px = 128.;

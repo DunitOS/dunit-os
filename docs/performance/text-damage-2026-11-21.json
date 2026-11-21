@@ -1,0 +1,381 @@
+{
+  "date": "2026-11-21",
+  "base_commit": "6dfb8b2b36acf0d3c2c293ab5ccee55481169647",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "75099c933aea4c5d58e973f2b91223f3ba0a620e8d3e55b393ee6452b122de01",
+    "docs/performance/gui-performance.md": "031a7da7d7ce998436625d67b7b631e0fd8d0e8020776078b7ea9201f6217fb6",
+    "runtime/dunit-render/src/surface.rs": "fc3558cc1c2155c597a46a735330e4d3bd706d41aed1a4b81ecf4e4982e19060",
+    "runtime/dunit-render/src/text_input.rs": "97f56499a4ef38462eb415f008a89678ebdd7eb12ba3eec3e2ab1512fb992184",
+    "runtime/dunit-render/tests/text_input.rs": "e594a3203b7db7e9f4127fcc26d654580505b1e15fbe3da9f88383050903169d",
+    "runtime/dunit-render/examples/text_damage_bench.rs": "9d43b32dddc5de3ea618b45f5b966f22c14bb53dc351d198d0b27bfc23023422"
+  },
+  "host_cpu": "AMD EPYC 9V74 80-Core Processor",
+  "host_benchmark": {
+    "command": "cargo run --release --manifest-path runtime/dunit-render/Cargo.toml --example text_damage_bench",
+    "workload": "Warmed glyph cache and prepared layout of 100 text lines, 500 paints per trial of a 54 by 27 pixel damage clip.",
+    "host_order": "three alternating baseline and updated batches, five trials per batch",
+    "pixel_checksum": "26d3f62722f7498a",
+    "measurements": {
+      "before": {
+        "binary_sha256": "a86077a6c477e9a44f05e0c7cc1f8d5936026d174b6d897bf6f0381499fc9ffd",
+        "samples_us": [
+          37984,
+          36440,
+          38539,
+          37345,
+          37184,
+          37472,
+          37711,
+          38830,
+          38076,
+          38912,
+          44002,
+          39186,
+          46555,
+          44759,
+          37388
+        ],
+        "median_us": 38076,
+        "range_us": [
+          36440,
+          46555
+        ]
+      },
+      "after": {
+        "binary_sha256": "45e95fc61460cf1d0516172389b86794c0b05f312722c978a4c785e010c4dd50",
+        "samples_us": [
+          3787,
+          8459,
+          5614,
+          10676,
+          10734,
+          3780,
+          3612,
+          3726,
+          3571,
+          3577,
+          3796,
+          3741,
+          3691,
+          3674,
+          3846
+        ],
+        "median_us": 3780,
+        "range_us": [
+          3571,
+          10734
+        ]
+      }
+    }
+  },
+  "host_checks": {
+    "passed": 39,
+    "log_sha256": "80073dd3b6fdef34a5d847438f0275fc70175a20c95be6f5fed108b351ad122b"
+  },
+  "native_qemu": {
+    "guest": "q35,accel=tcg, 1 online vCPU",
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "component_command": "python3 tools/test_sdk_gui_fixture.py component --cpus 1 --accel tcg",
+    "latency_command": "python3 tools/test_sdk_gui_fixture.py latency --cpus 1 --accel tcg --run-dir RUN_DIR",
+    "component": {
+      "iso_sha256": "17602c8a1a75304175bdda294c42ebad578ecaba495a80128ae4015c4cedd191",
+      "serial_sha256": "d5c8624234b30f313d1bf8d917611b3c96dae5145dcba05356e2824e66bd30e5",
+      "harness_log_sha256": "8e3452f6b87d3f3e34cb6b38061a0abeece53e3e0b54f236104a6c4e6669c837",
+      "result": "completed",
+      "pixel_columns": [
+        "composed",
+        "presented",
+        "texture",
+        "screen"
+      ],
+      "pixel_counts": [
+        [
+          15360,
+          15360,
+          15360,
+          2073600
+        ],
+        [
+          15360,
+          15360,
+          15360,
+          2073600
+        ]
+      ]
+    },
+    "latency": {
+      "before": [
+        {
+          "run": "op7-line-prefix-after",
+          "image_sha256": "906a12805f346d9cbdd9b32ebf73c4973169735f5c1745bd87f907db3b71cbb2",
+          "serial_sha256": "669d449e6a429a81b09eda7bc8d8ae97c53b32e3d0d00aca95611b72afde743a",
+          "harness_log_sha256": "ab1dfd1d22b166d48c64d0f7967eeac8e609bffe3887b35370e5c9ea2f96bd8f",
+          "result": "completed",
+          "scenes": {
+            "wheel": {
+              "wall_ms": [
+                696.821491,
+                756.563524,
+                694.424553
+              ],
+              "client_render_ms": [
+                54.91698,
+                53.88722,
+                54.67869
+              ],
+              "client_frame_done_ms": [
+                418.20867,
+                431.70448,
+                405.13156
+              ]
+            },
+            "short": {
+              "wall_ms": [
+                721.969257,
+                719.246623,
+                700.540941
+              ],
+              "client_render_ms": [
+                108.44635,
+                98.98419,
+                101.10472
+              ],
+              "client_frame_done_ms": [
+                387.67139,
+                391.37909,
+                370.44132
+              ]
+            },
+            "long": {
+              "wall_ms": [
+                829.428823,
+                784.470625,
+                867.902786
+              ],
+              "client_render_ms": [
+                466.19168,
+                433.10324,
+                486.39244
+              ],
+              "client_frame_done_ms": [
+                0.58332,
+                1.84085,
+                0.72591
+              ]
+            },
+            "drag": {
+              "wall_ms": [
+                293.291061,
+                275.490178,
+                273.562056
+              ],
+              "client_render_ms": [
+                21.39548,
+                29.83201,
+                29.40204
+              ],
+              "client_frame_done_ms": [
+                59.88083,
+                74.50999,
+                69.1005
+              ]
+            },
+            "wheel_burst": {
+              "wall_ms": [
+                47.352195
+              ],
+              "client_render_ms": [
+                2.63543
+              ],
+              "client_frame_done_ms": [
+                0.01741
+              ]
+            }
+          }
+        },
+        {
+          "run": "op7-line-prefix-after-repeat",
+          "image_sha256": "906a12805f346d9cbdd9b32ebf73c4973169735f5c1745bd87f907db3b71cbb2",
+          "serial_sha256": "4663bab72ff62db25188955b24025e20c5e5f92f33103d854b55ddc16a890b05",
+          "harness_log_sha256": "ac2810d46aef65aaf95190c567725ebd1353b3afd8c93ff66af22f81aafb9598",
+          "result": "completed",
+          "scenes": {
+            "wheel": {
+              "wall_ms": [
+                719.054231,
+                716.761861,
+                635.486442
+              ],
+              "client_render_ms": [
+                56.83739,
+                54.94849,
+                62.29856
+              ],
+              "client_frame_done_ms": [
+                405.27292,
+                430.69724,
+                257.52188
+              ]
+            },
+            "short": {
+              "wall_ms": [
+                669.180026,
+                687.020494,
+                643.640966
+              ],
+              "client_render_ms": [
+                126.53963,
+                111.05531,
+                108.55007
+              ],
+              "client_frame_done_ms": [
+                265.76994,
+                310.53052,
+                299.55001
+              ]
+            },
+            "long": {
+              "wall_ms": [
+                767.396878,
+                756.205771,
+                726.339499
+              ],
+              "client_render_ms": [
+                422.32667,
+                425.06384,
+                409.34132
+              ],
+              "client_frame_done_ms": [
+                5.16515,
+                1.82211,
+                3.94976
+              ]
+            },
+            "drag": {
+              "wall_ms": [
+                292.762535,
+                253.395905,
+                253.036671
+              ],
+              "client_render_ms": [
+                17.9506,
+                17.88365,
+                18.4944
+              ],
+              "client_frame_done_ms": [
+                92.95871,
+                80.25605,
+                87.08638
+              ]
+            },
+            "wheel_burst": {
+              "wall_ms": [
+                67.096189
+              ],
+              "client_render_ms": [
+                2.67819
+              ],
+              "client_frame_done_ms": [
+                0.0207
+              ]
+            }
+          }
+        }
+      ],
+      "after": [
+        {
+          "run": "op7-text-damage-after",
+          "image_sha256": "59af7fdf7ea8fd07a2e38a241e0a3942b7fdfa4f4489895af8e41113d7a2592a",
+          "serial_sha256": "b2c0d0efbd960e7342506b532f247f9611dbb319ee336696de6e7f32d3e42ff2",
+          "harness_log_sha256": "151f0e058d88046efd645b49e11c2f59d5b890d22d8b5cadb7cb05be4d42b31c",
+          "result": "completed",
+          "scenes": {
+            "wheel": {
+              "wall_ms": [
+                713.918318,
+                724.830962,
+                715.790837
+              ],
+              "client_render_ms": [
+                56.973,
+                64.8296,
+                57.25961
+              ],
+              "client_frame_done_ms": [
+                395.76589,
+                416.30684,
+                415.88378
+              ]
+            },
+            "short": {
+              "wall_ms": [
+                730.615906,
+                618.999263,
+                720.82664
+              ],
+              "client_render_ms": [
+                102.22062,
+                100.30207,
+                97.52963
+              ],
+              "client_frame_done_ms": [
+                361.76835,
+                261.44139,
+                353.76623
+              ]
+            },
+            "long": {
+              "wall_ms": [
+                680.676938,
+                671.463019,
+                699.689478
+              ],
+              "client_render_ms": [
+                366.85654,
+                371.7749,
+                382.8296
+              ],
+              "client_frame_done_ms": [
+                3.04173,
+                0.71346,
+                8.37385
+              ]
+            },
+            "drag": {
+              "wall_ms": [
+                311.28106,
+                230.973902,
+                313.866798
+              ],
+              "client_render_ms": [
+                29.27257,
+                15.3304,
+                18.91249
+              ],
+              "client_frame_done_ms": [
+                93.83324,
+                81.43262,
+                108.6639
+              ]
+            },
+            "wheel_burst": {
+              "wall_ms": [
+                46.788334
+              ],
+              "client_render_ms": [
+                2.23946
+              ],
+              "client_frame_done_ms": [
+                0.01788
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "The host benchmark isolates painting with prepared geometry and a narrow damage clip. It excludes layout, IPC and presentation.",
+    "The native benchmark uses standard continuous-input scenes and does not reproduce the narrow host clip. One patched QEMU run is available. QEMU wall times include QMP injection and polling."
+  ]
+}

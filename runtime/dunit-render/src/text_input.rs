@@ -593,17 +593,23 @@ impl TextInput {
         let ink_min = ink_min - 2.;
         let ink_max = ink_max + 2.;
         surface.with_clip(content, |surface| {
-            for (row, visual) in lines.lines.iter().enumerate() {
+            let (clip_left, clip_top, clip_right, clip_bottom) = surface.clip_bounds();
+            // Keep the viewport's existing visibility rules and narrow them to
+            // the ancestor/damage clip. Allow for rounded selection boxes and
+            // for ink outside the logical glyph and row boxes.
+            let first_in_clip =
+                ((clip_top as f32 - top - row_ink_bottom - 2.).max(0.) / height) as usize;
+            let bottom = (clip_bottom as f32 + 2.).min(content.y + content.h);
+            let left = (clip_left as f32 - 2.).max(content.x);
+            let right = (clip_right as f32 + 2.).min(content.x + content.w);
+            for (row, visual) in lines.lines.iter().enumerate().skip(first.max(first_in_clip)) {
+                let y = top + row as f32 * height;
+                if y + row_ink_top >= bottom {
+                    break;
+                }
                 let start = visual.start;
                 let end = visual.end;
                 let line = &text[start..end];
-                if row < first {
-                    continue;
-                }
-                let y = top + row as f32 * height;
-                if y + row_ink_top >= content.y + content.h {
-                    break;
-                }
                 if !placeholder
                     && self.focused
                     && selection_start < selection_end
@@ -633,7 +639,7 @@ impl TextInput {
                 if let Some(color) = ink {
                     let mut pen = origin;
                     for ch in line.chars() {
-                        if pen + ink_min >= content.x + content.w {
+                        if pen + ink_min >= right {
                             break;
                         }
                         let displayed = if self.password && !placeholder {
@@ -644,7 +650,7 @@ impl TextInput {
                         let glyph = font.glyph_index(displayed);
                         let advance =
                             font.glyph_metrics(glyph).advance as f32 * font.scale_for_px(px);
-                        if pen + ink_max >= content.x {
+                        if pen + ink_max >= left {
                             if let Some(bitmap) = surface.rasterize(font, glyph, px) {
                                 let round = |v: f32| {
                                     if v < 0. {
