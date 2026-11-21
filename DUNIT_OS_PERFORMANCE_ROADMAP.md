@@ -313,6 +313,9 @@ Public protocol changes require an approved contract first.
   spans in bulk and verify coverage, color and stride against scalar pixels.
   Retain host render and TCG continuous-input measurements in
   [the surface blit comparison](docs/performance/surface-blit-2026-11-21.json).
+- [x] Reuse ASCII glyph advances inside text layout and build unwrapped caret
+  stops without a temporary cluster list. Verify Unicode and password geometry
+  and retain [render and TCG measurements](docs/performance/visual-lines-2026-11-21.json).
 - [ ] Profile damage/occlusion, layout/diff, glyph/text caches, SVG/icons,
   ARGB/blur and memory bandwidth.
 - [ ] Remove repeated layout/allocations/repaints with proven pixels and bounded caches.

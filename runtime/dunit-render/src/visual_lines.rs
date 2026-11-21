@@ -27,11 +27,8 @@ pub struct VisualLine {
 }
 impl VisualLine {
     pub fn x(&self, index: usize) -> f32 {
-        self.stops
-            .iter()
-            .take_while(|(i, _)| *i <= index)
-            .last()
-            .map_or(0., |(_, x)| *x)
+        let end = self.stops.partition_point(|(byte, _)| *byte <= index);
+        if end == 0 { 0. } else { self.stops[end - 1].1 }
     }
     pub fn hit(&self, x: f32) -> TextPosition {
         for pair in self.stops.windows(2) {
@@ -74,25 +71,54 @@ impl VisualLines {
     ) -> Self {
         let width = if width.is_finite() { width.max(0.) } else { 0. };
         let scale = font.scale_for_px(px);
+        let measure = |ch| font.glyph_metrics(font.glyph_index(ch)).advance as f32 * scale;
+        // The same font and scale apply to this entire map. Repeated ASCII
+        // scalars need one cmap/metrics lookup, even across hard line breaks.
+        let mut ascii = [None; 128];
+        let mask = password.then(|| measure('•'));
+        let mut cluster_width = |cluster: &str| {
+            cluster.chars().map(|ch| {
+                if let Some(advance) = mask {
+                    advance
+                } else if ch.is_ascii() {
+                    *ascii[ch as usize].get_or_insert_with(|| measure(ch))
+                } else {
+                    measure(ch)
+                }
+            }).sum::<f32>()
+        };
         let mut lines = Vec::new();
+        let mut clusters = Vec::new();
         let mut logical_start = 0;
+        let wrap = wrap && multiline;
         for logical in value.split(|ch| multiline && ch == '\n') {
-            let clusters: Vec<_> = logical
+            if !wrap {
+                let mut stops = alloc::vec![(logical_start, 0.)];
+                let mut x = 0.;
+                for (byte, cluster) in logical.grapheme_indices(true) {
+                    x += cluster_width(cluster);
+                    stops.push((logical_start + byte + cluster.len(), x));
+                }
+                lines.push(VisualLine {
+                    start: logical_start,
+                    end: logical_start + logical.len(),
+                    width: x,
+                    soft_break: false,
+                    stops,
+                });
+                logical_start += logical.len() + 1;
+                continue;
+            }
+
+            clusters.clear();
+            clusters.extend(logical
                 .grapheme_indices(true)
                 .map(|(i, g)| Cluster {
                     start: logical_start + i,
                     end: logical_start + i + g.len(),
-                    width: g
-                        .chars()
-                        .map(|ch| {
-                            font.glyph_metrics(font.glyph_index(if password { '•' } else { ch }))
-                                .advance as f32
-                                * scale
-                        })
-                        .sum(),
+                    width: cluster_width(g),
                     whitespace: g.chars().all(char::is_whitespace),
-                })
-                .collect();
+                }));
             if clusters.is_empty() {
                 lines.push(VisualLine {
                     start: logical_start,
@@ -109,7 +135,7 @@ impl VisualLines {
                 let mut word_break = None;
                 while end < clusters.len() {
                     let cluster = &clusters[end];
-                    if wrap && multiline && end > start && used + cluster.width > width {
+                    if end > start && used + cluster.width > width {
                         break;
                     }
                     used += cluster.width;

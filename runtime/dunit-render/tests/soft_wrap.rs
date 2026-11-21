@@ -3,6 +3,7 @@ use dunit_style::{Style, Value};
 use dunit_text::Font;
 use dunit_ui::Rect;
 use dunit_widgets::text_input::EditCommand as E;
+use unicode_segmentation::UnicodeSegmentation;
 fn font() -> Font {
     Font::parse(include_bytes!("../../../assets/fonts/DejaVuSans.ttf").to_vec()).unwrap()
 }
@@ -35,6 +36,41 @@ fn input(value: &str) -> TextInput {
         caret_visible: true,
         scroll_x: 0.,
         scroll_y: 0.,
+    }
+}
+
+#[test]
+fn unwrapped_caret_positions_match_uncached_metrics_at_every_byte() {
+    let font = font();
+    let value = "a aé e\u{301} 👩\u{200d}💻 a\n\nЖ Ж\n";
+    for multiline in [false, true] {
+        for password in [false, true] {
+            let map = VisualLines::new(value, &font, 16., 1., multiline, false, password);
+            let mut start = 0;
+            for (line, text) in map.lines.iter().zip(value.split(|ch| multiline && ch == '\n')) {
+                assert_eq!((line.start, line.end), (start, start + text.len()));
+                let mut x = 0.;
+                for (byte, cluster) in text.grapheme_indices(true) {
+                    for index in byte..byte + cluster.len() {
+                        assert_eq!(line.x(start + index), x);
+                    }
+                    let advance = cluster
+                        .chars()
+                        .map(|ch| {
+                            let shown = if password { '•' } else { ch };
+                            font.glyph_metrics(font.glyph_index(shown)).advance as f32
+                                * font.scale_for_px(16.)
+                        })
+                        .sum::<f32>();
+                    x += advance;
+                }
+                assert_eq!(line.width, x);
+                assert_eq!(line.x(line.end), x);
+                assert!(!line.soft_break);
+                start += text.len() + 1;
+            }
+            assert_eq!(map.lines.len(), if multiline { 4 } else { 1 });
+        }
     }
 }
 #[test]
