@@ -558,6 +558,10 @@ impl Connection {
         if count != flight.length {
             flight.first = ack;
             flight.length -= count;
+            // A cumulative ACK advanced the left edge. The outstanding
+            // suffix gets a fresh retry budget, while Karn's rule still
+            // excludes this flight from RTT sampling.
+            flight.retries = 0;
             flight.rtt_sample = false;
             flight.awaiting_egress = false;
             flight.deadline = self.now.saturating_add(self.retransmission.timeout);

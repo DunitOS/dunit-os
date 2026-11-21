@@ -89,6 +89,12 @@ sample. A reserved segment can wait up to ten seconds for egress. A route or
 neighbor error ends the reservation. The E1000 peer drops the first SYN
 after delayed ARP and measures the interval before the next copy.
 [Egress timing verification](../verification/tcp-egress-clock-2026-11-20.json)
+
+A partial cumulative ACK removes the acknowledged prefix and refreshes the
+retry budget for the outstanding bytes. Duplicate ACKs leave the timer
+and budget alone. Retransmission keeps the current RTO backoff and sends
+only the unacknowledged suffix.
+[Partial ACK verification](../verification/tcp-partial-ack-2026-11-21.json)
 While the peer acknowledges probes with a closed receive window, the
 connection stays open and the probe interval backs off independently of
 the retransmission timeout. A window update retries the outstanding byte

@@ -201,6 +201,30 @@ fn partial_and_invalid_ack_accounting() {
 }
 
 #[test]
+fn partial_ack_after_many_retries_preserves_the_remaining_flight() {
+    let (mut client, _) = pair();
+    client.send(b"abcdefgh").unwrap();
+    let initial = client.poll(1).unwrap().unwrap();
+    for _ in 0..MAX_RETRANSMITS {
+        let now = client.deadline().unwrap();
+        assert_eq!(client.poll(now).unwrap().unwrap(), initial);
+    }
+    let before_expiry = client.deadline().unwrap() - 1;
+    let prior_estimate = client.retransmission.estimate;
+    client.receive(B.ip, A.ip, &packet(501, 104, ACK, 4096, b""), before_expiry).unwrap();
+    let retry_at = client.deadline().unwrap();
+    client.receive(B.ip, A.ip, &packet(501, 104, ACK, 4096, b""), before_expiry + 1).unwrap();
+    assert_eq!(client.deadline(), Some(retry_at));
+    let retry = client.poll(retry_at).unwrap().unwrap();
+    let segment = Segment::parse(A, B, &retry).unwrap();
+    assert_eq!((segment.sequence, segment.data), (104, b"defgh".as_slice()));
+    client.receive(B.ip, A.ip, &packet(501, 109, ACK, 4096, b""), retry_at + 1).unwrap();
+    assert_eq!(client.failure(), None);
+    assert_eq!(client.retransmission.estimate, prior_estimate);
+    assert!(client.send.is_empty());
+}
+
+#[test]
 fn zero_window_probe_and_bounded_growth() {
     let (mut client, mut server) = pair();
     let chunk = [3u8; QUEUE_BYTES];

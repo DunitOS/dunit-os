@@ -22,7 +22,8 @@ TCP_LENGTH = 5000
 TCP_REPLY = b"fixture-tcp-partial-read-and-EOF"
 CONFLICT_MAC = bytes.fromhex("020000000044")
 RST = 0x04
-STAGES = ("udp_datagram", "tcp_syn_retry_after_egress", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened", "tcp_stream",
+STAGES = ("udp_datagram", "tcp_syn_retry_after_egress", "tcp_reset_challenged_and_delivered", "tcp_zero_window_reopened",
+          "tcp_partial_ack_retried_suffix", "tcp_stream",
           "tcp_reordered_reply_and_fin",
           "tcp_fin",
           "address_conflict_injected")
@@ -165,6 +166,7 @@ class NetSocketPeer(EthernetPeer):
         self._send(connection, host_tcp(endpoint, host_next, next_guest, ACK))
         self._stages.append("tcp_zero_window_reopened")
 
+        retry_suffix = None
         for _ in range(64):
             source, seq, ack, flags, data = parse_tcp(self._next_ipv4(connection))
             if (source != endpoint or seq != next_guest or ack != host_next or
@@ -172,6 +174,16 @@ class NetSocketPeer(EthernetPeer):
                 raise ValueError("unexpected guest TCP transmit")
             if not data:
                 continue
+            if retry_suffix is not None:
+                if data != retry_suffix:
+                    raise ValueError("TCP partial ACK did not retransmit exactly the unacknowledged suffix")
+                retry_suffix = None
+                self._stages.append("tcp_partial_ack_retried_suffix")
+            elif self._tcp_received == 1:
+                if len(data) < 2:
+                    raise ValueError("TCP partial ACK fixture requires a multi-byte segment")
+                split = len(data) // 2
+                data, retry_suffix = data[:split], data[split:]
             first = self._tcp_received
             self._tcp_received += len(data)
             if self._tcp_received > TCP_LENGTH or data != bytes(

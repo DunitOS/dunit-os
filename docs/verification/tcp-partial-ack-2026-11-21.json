@@ -1,0 +1,101 @@
+{
+  "date": "2026-11-21",
+  "base_commit": "5c80e4b40d368ec095b3880d043f6aa2e4fb43c6",
+  "scope": "TCP partial cumulative acknowledgements refresh the retry budget for the remaining flight. Host testing covers exhausted retries and duplicate ACK timing. The isolated E1000 peer acknowledges half of a segment and validates retransmission of the exact suffix.",
+  "source_sha256": {
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "108bb58f4cfe24f5b1c1236921922a30bbfb2896d6339f330567e9729f12dbc2",
+    "docs/network/ipv4-services.md": "824b99358b7da4acbefbb56fa76ee9f0b752ab96d9f0898ec600a1903221b160",
+    "tools/net_socket_transport.py": "b5017d6d3732b87588b2a6149bec9c2bb064e2667b187d637ee691ff52e0def8",
+    "tools/test_net_socket_transport.py": "5d3227dfbc918a3436a8a65093a55dd753038b2fc301d1295a5c05daf9aa08b9",
+    "userspace/net-core/src/tcp.rs": "a18a2ce2daba6003666ac29eeedc84b5ee35d21663650d10f7315727260a20a3",
+    "userspace/net-core/src/tcp/tests.rs": "578f61c29922998b935c36b9d3494bfb9576b43710fa1f9095c071aaa085535f"
+  },
+  "host_checks": {
+    "python3 tools/test_net_core.py": 82,
+    "python3 tools/test_net_socket_transport.py": 2,
+    "python3 tools/test_net_harness.py": 3,
+    "git diff --check": "passed"
+  },
+  "native_qemu": {
+    "rust": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "9707e0ca92671dca1bb5313456dddc4a8bf7c7969249f7035c7a0bd1ea053e33",
+      "serial_sha256": "9a939446ee790c6d3d2e1ddd6f8067e7609c8e8ccf8f19b58831f70e7546a448",
+      "network_peer_sha256": "544da885d493d66096b10685bfd408e62f36660bbebffff7f5a87074cdbd9326",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 35,
+        "bytes": 7305,
+        "responses": 28,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_syn_retry_after_egress",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_partial_ack_retried_suffix",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "tcp_delayed_arp_requests": 3,
+        "tcp_syn_retry_seconds": 1.00967175400001,
+        "udp_reply_bytes": 24
+      }
+    },
+    "posix_c": {
+      "command": "python3 tools/qemu_test.py --build --markers-file tools/net_socket_posix_markers.json --cpus 4 --accel tcg --timeout 160 --boot-timeout 100",
+      "iso_sha256": "55ee483c6a30ae540d2d4c07f3ac5c80cc8e27b0aa7752e11a54def34d77c3c0",
+      "serial_sha256": "262378b4595780a16b3850b4f2a7d7f3a7e670c1a10f858c6f5f9d3269f4f769",
+      "network_peer_sha256": "6c33615d249b954d36699832ed94fdc91ff71c1abf5b571b3b7f131c8be93a4e",
+      "result": {
+        "ok": true,
+        "reason": "completed",
+        "missing": [],
+        "forbidden": []
+      },
+      "network_peer": {
+        "ok": true,
+        "packets": 35,
+        "bytes": 7305,
+        "responses": 28,
+        "errors": [],
+        "transport": "localhost-tcp-qemu-socket",
+        "protocols": [
+          "ARP",
+          "UDP",
+          "TCP"
+        ],
+        "socket_stages": [
+          "udp_datagram",
+          "tcp_syn_retry_after_egress",
+          "tcp_reset_challenged_and_delivered",
+          "tcp_zero_window_reopened",
+          "tcp_partial_ack_retried_suffix",
+          "tcp_stream",
+          "tcp_reordered_reply_and_fin",
+          "tcp_fin",
+          "address_conflict_injected"
+        ],
+        "tcp_bytes": 5000,
+        "tcp_delayed_arp_requests": 3,
+        "tcp_syn_retry_seconds": 1.019708577000003,
+        "udp_reply_bytes": 24
+      }
+    }
+  }
+}

@@ -108,6 +108,13 @@ class SocketPeerTests(unittest.TestCase):
                     for first in range(1, TCP_LENGTH, 500):
                         data = bytes(index % 251 for index in range(first, min(first + 500, TCP_LENGTH)))
                         send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, data))
+                        if first == 1:
+                            split = len(data) // 2
+                            guest_seq = advance(guest_seq, split)
+                            self.assertEqual(receive(connection), host_tcp(
+                                49223, host_seq, guest_seq, ACK))
+                            data = data[split:]
+                            send(connection, guest_tcp(guest_seq, host_seq, ACK | PSH, data))
                         guest_seq = advance(guest_seq, len(data))
                         self.assertEqual(receive(connection), host_tcp(49223, host_seq, guest_seq,
                                                                          ACK))
