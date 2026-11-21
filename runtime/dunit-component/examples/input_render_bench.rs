@@ -1,9 +1,9 @@
-//! Host-only rendering benchmark for the native input-latency fixture scenes.
+//! Host-only rendering benchmark for the input-latency scenes and long selection.
 //! Run with `cargo run --release --example input_render_bench` from this crate.
 //! Times are host monotonic wall durations, not exclusive CPU accounting.
 use dunit_component::{
-    Application, Attrs, Component, Font, InputOptions, Key, ListItem, ListSelection, PointerEvent,
-    RenderStats, Renderer, SelectionMode, Sizing, Theme, View,
+    Application, Attrs, Component, EditCommand, Font, InputOptions, Key, ListItem, ListSelection,
+    PointerEvent, RenderStats, Renderer, SelectionMode, Sizing, Theme, View,
 };
 use std::{hint::black_box, time::Instant};
 
@@ -17,6 +17,7 @@ enum Scene {
     Wheel,
     Short,
     Long,
+    Selection,
 }
 impl Scene {
     fn field(self) -> &'static str {
@@ -24,6 +25,7 @@ impl Scene {
             Self::Wheel => "field-wheel-1",
             Self::Short => "field-short-1",
             Self::Long => "field-long-1",
+            Self::Selection => "field-selection-1",
         }
     }
     fn name(self) -> &'static str {
@@ -31,6 +33,7 @@ impl Scene {
             Self::Wheel => "wheel",
             Self::Short => "short",
             Self::Long => "long",
+            Self::Selection => "selection",
         }
     }
 }
@@ -71,7 +74,7 @@ impl Component for Demo {
                 width: Sizing::Grow(1.),
                 ..Default::default()
             }),
-            Scene::Long => View::text_area(
+            Scene::Long | Scene::Selection => View::text_area(
                 self.scene.field(),
                 "Long text",
                 &self.value,
@@ -140,7 +143,7 @@ fn trial(scene: Scene) -> Trial {
     );
     renderer.set_motion_enabled(false);
     let value = match scene {
-        Scene::Long => "alpha beta gamma delta epsilon\n".repeat(400),
+        Scene::Long | Scene::Selection => "alpha beta gamma delta epsilon\n".repeat(400),
         _ => String::new(),
     };
     let base_len = value.len();
@@ -176,6 +179,12 @@ fn trial(scene: Scene) -> Trial {
         let update = Instant::now();
         match scene {
             Scene::Wheel => assert!(renderer.scroll_wheel(Some(field), 1)),
+            Scene::Selection => assert!(app
+                .edit(EditCommand::Left {
+                    extend: true,
+                    word: false,
+                })
+                .unwrap()),
             _ => assert!(app.key(Key::plain('a')).unwrap()),
         }
         update_ns += update.elapsed().as_nanos();
@@ -195,6 +204,12 @@ fn trial(scene: Scene) -> Trial {
             assert!((renderer.scroll_offset(field).unwrap() - step * EVENTS as f32).abs() < 0.01);
             assert!(renderer.list_visible_rows(field).unwrap() < 30);
         }
+        Scene::Selection => {
+            assert_eq!(app.component().value.len(), base_len);
+            let context = app.input_context().unwrap();
+            let selection = context.export_text().unwrap();
+            assert_eq!(selection, &app.component().value[base_len - EVENTS..]);
+        }
         _ => {
             assert_eq!(app.component().value.len(), base_len + EVENTS);
             assert!(app.component().value.ends_with(&"a".repeat(EVENTS)));
@@ -207,7 +222,7 @@ fn median(mut samples: Vec<u128>) -> u128 {
     samples[samples.len() / 2]
 }
 fn main() {
-    for scene in [Scene::Wheel, Scene::Short, Scene::Long] {
+    for scene in [Scene::Wheel, Scene::Short, Scene::Long, Scene::Selection] {
         black_box(trial(scene)); // Complete unmeasured code/font/page warmup.
         let samples: Vec<_> = (0..TRIALS).map(|_| trial(scene)).collect();
         assert!(samples

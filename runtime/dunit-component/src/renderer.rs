@@ -1,5 +1,5 @@
 use crate::{Color, Result, UiError, View};
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use dunit_render::{
     paint_clipped_with_prepared_inputs, PreparedInput, ScrollArea, Surface, TextInput,
 };
@@ -70,7 +70,7 @@ struct Snapshot {
     styles: Vec<Style>,
     targets: Vec<Style>,
     inputs: Vec<Option<TextInput>>,
-    input_layouts: Vec<Option<PreparedInput>>,
+    input_layouts: Vec<Option<Arc<PreparedInput>>>,
     sliders: Vec<Option<f32>>,
     progress: Vec<Option<dunit_widgets::progress::ProgressPaint>>,
     busy_interval_ms: Option<u64>,
@@ -427,17 +427,17 @@ impl Renderer {
             &areas,
             &measure_after,
         )?;
-        let mut input_layouts: Vec<Option<PreparedInput>> = (0..tree.len()).map(|_| None).collect();
+        let mut input_layouts = alloc::vec![None; tree.len()];
         let inputs: Vec<Option<TextInput>> = tree
             .iter()
             .map(|n| {
                 let view = views[n.id.0 as usize];
                 view.input.as_ref().map(|input| {
-                    let previous = self.previous.as_ref().and_then(|p| {
-                        p.tree
-                            .by_name(&view.key)
-                            .and_then(|id| p.inputs[id.0 as usize].as_ref())
-                    });
+                    let prior = self
+                        .previous
+                        .as_ref()
+                        .and_then(|p| p.tree.by_name(&view.key).map(|id| (p, id)));
+                    let previous = prior.and_then(|(p, id)| p.inputs[id.0 as usize].as_ref());
                     let mut paint = TextInput {
                         spinbox: view.spinbox.as_ref().map(|s| {
                             let base = s.draft_value(input.editor.text());
@@ -478,36 +478,24 @@ impl Renderer {
                         scroll_y: previous.map_or(0., |p| p.scroll_y),
                     };
                     let rect = layout.rect(n.id);
-                    let geometry_changed = self
-                        .previous
-                        .as_ref()
-                        .and_then(|p| {
-                            p.tree.by_name(&view.key).map(|id| {
-                                p.layout.rect(id) != rect
-                                    || [
-                                        "font-size",
-                                        "padding",
-                                        "border-width",
-                                        "caret-width",
-                                        "scrollbar-width",
-                                    ]
-                                    .iter()
-                                    .any(|property| {
-                                        p.styles[id.0 as usize].get(property)
-                                            != styles[n.id.0 as usize].get(property)
-                                    })
+                    let style = &styles[n.id.0 as usize];
+                    let geometry_changed = prior.is_none_or(|(p, id)| {
+                        p.layout.rect(id) != rect
+                            || [
+                                "font-size",
+                                "padding",
+                                "border-width",
+                                "caret-width",
+                                "scrollbar-width",
+                            ]
+                            .iter()
+                            .any(|property| {
+                                p.styles[id.0 as usize].get(property) != style.get(property)
                             })
-                        })
-                        .unwrap_or(true);
-                    let activity_changed = self
-                        .previous
-                        .as_ref()
-                        .and_then(|p| {
-                            p.tree
-                                .by_name(&view.key)
-                                .map(|id| p.input_activity[id.0 as usize] != input.caret_revision)
-                        })
-                        .unwrap_or(true);
+                    });
+                    let activity_changed = prior.is_none_or(|(p, id)| {
+                        p.input_activity[id.0 as usize] != input.caret_revision
+                    });
                     let caret_changed = previous.map_or(true, |p| {
                         p.value != paint.value
                             || p.cursor != paint.cursor
@@ -518,20 +506,28 @@ impl Renderer {
                             || p.password != paint.password
                             || (!p.focused && paint.focused)
                     });
-                    let prepared = paint.prepare(&self.font, &styles[n.id.0 as usize], rect);
+                    // The previous snapshot is cleared whenever the font changes.
+                    let prepared = prior
+                        .zip(previous)
+                        .filter(|((p, id), previous)| {
+                            paint.has_same_line_layout(
+                                style,
+                                rect,
+                                previous,
+                                &p.styles[id.0 as usize],
+                                p.layout.rect(*id),
+                            )
+                        })
+                        .and_then(|((p, id), _)| p.input_layouts[id.0 as usize].clone())
+                        .unwrap_or_else(|| Arc::new(paint.prepare(&self.font, style, rect)));
                     if geometry_changed || caret_changed || activity_changed || !paint.multiline {
-                        paint.fit_scroll_with_lines(
-                            &self.font,
-                            &styles[n.id.0 as usize],
-                            rect,
-                            prepared.lines(),
-                        );
+                        paint.fit_scroll_with_lines(&self.font, style, rect, prepared.lines());
                     }
                     if !view.interaction.disabled {
                         if let Some(&(x, y)) = self.input_offsets.get(&view.key) {
                             let (mut ax, mut ay) = paint.scroll_axes_with_lines(
                                 &self.font,
-                                &styles[n.id.0 as usize],
+                                style,
                                 rect,
                                 prepared.lines(),
                             );
@@ -698,7 +694,7 @@ impl Renderer {
                 &|id| next.sliders[id.0 as usize],
                 &|id| next.progress[id.0 as usize],
                 &|id| next.lists[id.0 as usize].as_ref(),
-                &|id| next.input_layouts[id.0 as usize].as_ref(),
+                &|id| next.input_layouts[id.0 as usize].as_deref(),
             );
             let painted =
                 painted.and_then(|()| next.overlays.paint(&self.font, &mut surface, rect));

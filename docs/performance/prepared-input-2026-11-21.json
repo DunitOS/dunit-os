@@ -1,0 +1,888 @@
+{
+  "date": "2026-11-21",
+  "base_commit": "ce5d535a4b2419ff7c99fb56185137d3a66c9aa2",
+  "scope": "Reuse immutable prepared input geometry between consecutive renderer snapshots.",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "1934e8973d9b5fc33867292609f780c90e880449520046707a8efc16d0773d00",
+    "docs/performance/gui-performance.md": "d484c66ede0e499fd45bc0195862e3af7341c97d711252d64539abc62940acef",
+    "runtime/dunit-component/examples/input_render_bench.rs": "da1d577dea2f69d67750bbc03d15ca7f0fb37c81351877a10f42d0de3ed7ed94",
+    "runtime/dunit-component/src/renderer.rs": "9a03cc5bd6ae4fbec53f55df307f2aac8985a5f3fa60f6341ca854acd4bddc22",
+    "runtime/dunit-component/tests/prepared_input.rs": "6fae500cc5238dea877a9cca9e43c7eecbb17e2b800c083aea64fbc1ecb082b0",
+    "runtime/dunit-render/src/text_input.rs": "ba1b7d120e68bcd5a09be9b16150addfd833a0d0c6c14600b6b2cc2c96a0adb2"
+  },
+  "setup": {
+    "host": "AMD EPYC 9V74 80-Core Processor",
+    "rustc": "rustc 1.101.0-nightly (92b5b8c87 2026-10-29)",
+    "qemu": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "guest": "q35,accel=tcg, 1 online vCPU",
+    "host_build": "cargo build --release --manifest-path runtime/dunit-component/Cargo.toml --example input_render_bench",
+    "host_run": "runtime/dunit-component/target/release/examples/input_render_bench",
+    "batches_per_build": 3,
+    "warmups_per_batch": 1,
+    "host_trials_per_batch": 5,
+    "host_viewport": [
+      640,
+      360
+    ],
+    "events_per_trial": 24,
+    "native_latency_baseline": "damage-trace-2026-11-21.json#after"
+  },
+  "host_release": {
+    "before": {
+      "wheel": {
+        "damaged_frames": 24,
+        "damaged_pixels": 4494336,
+        "render_median_us": 4369,
+        "render_range_us": [
+          4110,
+          5078
+        ],
+        "render_samples_us": [
+          4217,
+          4379,
+          4208,
+          4190,
+          4184,
+          4433,
+          4202,
+          4513,
+          4110,
+          4369,
+          4419,
+          4360,
+          4666,
+          5078,
+          4855
+        ],
+        "wall_median_us": 4380,
+        "wall_range_us": [
+          4121,
+          5090
+        ],
+        "wall_samples_us": [
+          4228,
+          4390,
+          4218,
+          4200,
+          4194,
+          4445,
+          4213,
+          4527,
+          4121,
+          4380,
+          4430,
+          4371,
+          4681,
+          5090,
+          4868
+        ],
+        "update_median_us": 9,
+        "update_range_us": [
+          7,
+          12
+        ],
+        "update_samples_us": [
+          8,
+          8,
+          7,
+          8,
+          8,
+          9,
+          9,
+          12,
+          9,
+          9,
+          9,
+          8,
+          12,
+          10,
+          10
+        ]
+      },
+      "short": {
+        "damaged_frames": 24,
+        "damaged_pixels": 691200,
+        "render_median_us": 6647,
+        "render_range_us": [
+          5844,
+          14889
+        ],
+        "render_samples_us": [
+          5882,
+          5980,
+          5904,
+          5844,
+          5864,
+          9103,
+          14889,
+          10353,
+          8564,
+          7178,
+          6377,
+          6713,
+          6517,
+          7396,
+          6647
+        ],
+        "wall_median_us": 6798,
+        "wall_range_us": [
+          5963,
+          15046
+        ],
+        "wall_samples_us": [
+          6009,
+          6107,
+          6030,
+          5963,
+          5987,
+          9277,
+          15046,
+          10520,
+          8745,
+          7342,
+          6518,
+          6870,
+          6679,
+          7555,
+          6798
+        ],
+        "update_median_us": 154,
+        "update_range_us": [
+          116,
+          179
+        ],
+        "update_samples_us": [
+          124,
+          125,
+          124,
+          116,
+          121,
+          171,
+          154,
+          165,
+          179,
+          162,
+          139,
+          154,
+          160,
+          157,
+          149
+        ]
+      },
+      "long": {
+        "damaged_frames": 24,
+        "damaged_pixels": 3168000,
+        "render_median_us": 38775,
+        "render_range_us": [
+          36145,
+          42938
+        ],
+        "render_samples_us": [
+          36145,
+          36726,
+          36563,
+          38205,
+          38587,
+          37714,
+          37975,
+          39531,
+          42938,
+          39911,
+          38887,
+          40743,
+          39457,
+          38775,
+          41964
+        ],
+        "wall_median_us": 44917,
+        "wall_range_us": [
+          42386,
+          49829
+        ],
+        "wall_samples_us": [
+          42386,
+          42842,
+          42599,
+          44468,
+          44917,
+          44178,
+          44468,
+          46223,
+          49829,
+          46434,
+          45249,
+          48256,
+          46309,
+          44916,
+          48206
+        ],
+        "update_median_us": 6359,
+        "update_range_us": [
+          6033,
+          7510
+        ],
+        "update_samples_us": [
+          6238,
+          6113,
+          6033,
+          6261,
+          6327,
+          6461,
+          6489,
+          6689,
+          6887,
+          6520,
+          6359,
+          7510,
+          6849,
+          6137,
+          6238
+        ]
+      },
+      "selection": {
+        "damaged_frames": 24,
+        "damaged_pixels": 3168000,
+        "render_median_us": 38574,
+        "render_range_us": [
+          36858,
+          42160
+        ],
+        "render_samples_us": [
+          37659,
+          37687,
+          38574,
+          38273,
+          39448,
+          40410,
+          38918,
+          36970,
+          36858,
+          38793,
+          40526,
+          39395,
+          42160,
+          38568,
+          37691
+        ],
+        "wall_median_us": 49183,
+        "wall_range_us": [
+          47460,
+          52527
+        ],
+        "wall_samples_us": [
+          48372,
+          48821,
+          48820,
+          48996,
+          50916,
+          50932,
+          49315,
+          47950,
+          47460,
+          49467,
+          51100,
+          50032,
+          52527,
+          48774,
+          49183
+        ],
+        "update_median_us": 10633,
+        "update_range_us": [
+          10203,
+          11489
+        ],
+        "update_samples_us": [
+          10710,
+          11131,
+          10243,
+          10720,
+          11465,
+          10518,
+          10394,
+          10975,
+          10599,
+          10670,
+          10569,
+          10633,
+          10363,
+          10203,
+          11489
+        ]
+      }
+    },
+    "after": {
+      "wheel": {
+        "damaged_frames": 24,
+        "damaged_pixels": 4494336,
+        "render_median_us": 4598,
+        "render_range_us": [
+          4185,
+          5675
+        ],
+        "render_samples_us": [
+          4306,
+          4550,
+          5675,
+          5139,
+          4436,
+          4327,
+          4641,
+          4185,
+          4605,
+          5041,
+          4839,
+          4377,
+          4446,
+          4598,
+          4612
+        ],
+        "wall_median_us": 4610,
+        "wall_range_us": [
+          4195,
+          5687
+        ],
+        "wall_samples_us": [
+          4318,
+          4561,
+          5687,
+          5153,
+          4447,
+          4338,
+          4653,
+          4195,
+          4617,
+          5054,
+          4852,
+          4389,
+          4458,
+          4610,
+          4624
+        ],
+        "update_median_us": 9,
+        "update_range_us": [
+          8,
+          11
+        ],
+        "update_samples_us": [
+          8,
+          8,
+          9,
+          11,
+          9,
+          9,
+          10,
+          8,
+          10,
+          11,
+          11,
+          9,
+          9,
+          10,
+          10
+        ]
+      },
+      "short": {
+        "damaged_frames": 24,
+        "damaged_pixels": 691200,
+        "render_median_us": 6365,
+        "render_range_us": [
+          6051,
+          8816
+        ],
+        "render_samples_us": [
+          6154,
+          6365,
+          6538,
+          6547,
+          6299,
+          6427,
+          6535,
+          7160,
+          6824,
+          6126,
+          6146,
+          6071,
+          6269,
+          6051,
+          8816
+        ],
+        "wall_median_us": 6510,
+        "wall_range_us": [
+          6174,
+          9009
+        ],
+        "wall_samples_us": [
+          6316,
+          6510,
+          6693,
+          6692,
+          6439,
+          6565,
+          6682,
+          7329,
+          6979,
+          6250,
+          6288,
+          6192,
+          6480,
+          6174,
+          9009
+        ],
+        "update_median_us": 143,
+        "update_range_us": [
+          119,
+          209
+        ],
+        "update_samples_us": [
+          159,
+          143,
+          152,
+          143,
+          138,
+          136,
+          145,
+          167,
+          153,
+          123,
+          140,
+          119,
+          209,
+          121,
+          190
+        ]
+      },
+      "long": {
+        "damaged_frames": 24,
+        "damaged_pixels": 3168000,
+        "render_median_us": 38991,
+        "render_range_us": [
+          37017,
+          56125
+        ],
+        "render_samples_us": [
+          37411,
+          37343,
+          45996,
+          56125,
+          38746,
+          38608,
+          38991,
+          39870,
+          38715,
+          47618,
+          49742,
+          37017,
+          39834,
+          37498,
+          39025
+        ],
+        "wall_median_us": 45294,
+        "wall_range_us": [
+          43412,
+          62687
+        ],
+        "wall_samples_us": [
+          43631,
+          43765,
+          55122,
+          62687,
+          45277,
+          45020,
+          45604,
+          46624,
+          45294,
+          55602,
+          61040,
+          43412,
+          46122,
+          43585,
+          45108
+        ],
+        "update_median_us": 6528,
+        "update_range_us": [
+          6081,
+          11293
+        ],
+        "update_samples_us": [
+          6217,
+          6419,
+          9122,
+          6558,
+          6528,
+          6408,
+          6610,
+          6750,
+          6576,
+          7979,
+          11293,
+          6392,
+          6285,
+          6085,
+          6081
+        ]
+      },
+      "selection": {
+        "damaged_frames": 24,
+        "damaged_pixels": 3168000,
+        "render_median_us": 31656,
+        "render_range_us": [
+          29331,
+          56849
+        ],
+        "render_samples_us": [
+          29809,
+          30512,
+          30229,
+          29996,
+          29331,
+          34561,
+          32248,
+          32945,
+          32707,
+          56849,
+          31708,
+          31955,
+          31006,
+          31656,
+          31028
+        ],
+        "wall_median_us": 42034,
+        "wall_range_us": [
+          39254,
+          69858
+        ],
+        "wall_samples_us": [
+          39870,
+          40906,
+          40321,
+          40057,
+          39254,
+          46066,
+          42731,
+          44898,
+          43486,
+          69858,
+          42876,
+          42034,
+          41225,
+          42581,
+          41237
+        ],
+        "update_median_us": 10391,
+        "update_range_us": [
+          9921,
+          12909
+        ],
+        "update_samples_us": [
+          10057,
+          10391,
+          10088,
+          10057,
+          9921,
+          11501,
+          10480,
+          11949,
+          10774,
+          12909,
+          11165,
+          10076,
+          10216,
+          10923,
+          10206
+        ]
+      }
+    }
+  },
+  "host_checks": {
+    "passed": 300,
+    "log_sha256": "b28555eca3b78e644cbfc7855ade815498b180ecbd6c92351da9e4b587e0dda9"
+  },
+  "native_checks": {
+    "autoscroll": {
+      "command": "python3 tools/test_sdk_gui_fixture.py autoscroll --cpus 1 --accel tcg --run-dir build/performance/op7-prepared-autoscroll",
+      "result": "completed",
+      "image_profile": "dwm",
+      "iso_sha256": "9f2170ca6d943300f1bb15c61e984f35594ea0115e0b4072281f02dc4cdeb818",
+      "serial_sha256": "b141ef464ede5687c9dab8f3156e14ee0a261fe245e00559cb139be7b4d72e30",
+      "harness_log_sha256": "0634bdb97505a9db7c4b6baa5166723622e9228073e21ace71f54fc0d864cfc5",
+      "markers": [
+        "[AUTOSCROLL] textarea stationary xy ticks OK",
+        "[AUTOSCROLL] textarea stopped OK",
+        "[AUTOSCROLL] undo LF history OK",
+        "[AUTOSCROLL] input stationary ticks OK",
+        "[AUTOSCROLL] input stopped OK",
+        "[AUTOSCROLL] ok"
+      ]
+    },
+    "latency": {
+      "command": "python3 tools/test_sdk_gui_fixture.py latency --cpus 1 --accel tcg --run-dir build/performance/op7-prepared-after",
+      "result": "completed",
+      "image_profile": "full",
+      "iso_sha256": "5b31a9b5c599c7d93a81912e003d85245f0c14c160838b73f05b3d013edbe936",
+      "serial_sha256": "81debe6e1cff72f924be4d0d821f88fd882ca18f168c7c189b49c5bb82cdd5cb",
+      "harness_log_sha256": "67e9071148291647254268d1a43d26acf1b5c01b0bb658734b8fa16747986027",
+      "input_scenes": {
+        "wheel": {
+          "trials": [
+            {
+              "wall_ms": 703.084642,
+              "accepted": 24,
+              "render_ms": 54.8033,
+              "redraw_ms": 663.98605,
+              "import_attach_ms": 36.27276,
+              "commit_result_ms": 1.27113,
+              "frame_done_ms": 404.53526,
+              "retire_ms": 159.463,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            },
+            {
+              "wall_ms": 705.941408,
+              "accepted": 24,
+              "render_ms": 56.92629,
+              "redraw_ms": 662.26033,
+              "import_attach_ms": 37.99849,
+              "commit_result_ms": 2.77412,
+              "frame_done_ms": 405.24369,
+              "retire_ms": 152.12737,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            },
+            {
+              "wall_ms": 725.49247,
+              "accepted": 24,
+              "render_ms": 56.00753,
+              "redraw_ms": 683.1039,
+              "import_attach_ms": 34.46527,
+              "commit_result_ms": 0.22963,
+              "frame_done_ms": 424.49407,
+              "retire_ms": 160.53628,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 23
+            }
+          ],
+          "median": {
+            "wall_ms": 705.941408,
+            "render_ms": 56.00753,
+            "redraw_ms": 663.98605,
+            "import_attach_ms": 36.27276,
+            "commit_result_ms": 1.27113,
+            "frame_done_ms": 405.24369,
+            "retire_ms": 159.463,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 23
+          },
+          "max_input_q": 23
+        },
+        "short": {
+          "trials": [
+            {
+              "wall_ms": 682.227703,
+              "accepted": 24,
+              "render_ms": 104.60579,
+              "redraw_ms": 631.13793,
+              "import_attach_ms": 20.33266,
+              "commit_result_ms": 0.30191,
+              "frame_done_ms": 327.20171,
+              "retire_ms": 176.69188,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 35
+            },
+            {
+              "wall_ms": 708.080812,
+              "accepted": 24,
+              "render_ms": 91.87445,
+              "redraw_ms": 682.73433,
+              "import_attach_ms": 19.70858,
+              "commit_result_ms": 0.20159,
+              "frame_done_ms": 405.20993,
+              "retire_ms": 163.53855,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 39
+            },
+            {
+              "wall_ms": 741.466209,
+              "accepted": 24,
+              "render_ms": 87.33993,
+              "redraw_ms": 678.19517,
+              "import_attach_ms": 17.7134,
+              "commit_result_ms": 0.21503,
+              "frame_done_ms": 421.29283,
+              "retire_ms": 149.57319,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 39
+            }
+          ],
+          "median": {
+            "wall_ms": 708.080812,
+            "render_ms": 91.87445,
+            "redraw_ms": 678.19517,
+            "import_attach_ms": 19.70858,
+            "commit_result_ms": 0.21503,
+            "frame_done_ms": 405.20993,
+            "retire_ms": 163.53855,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 39
+          },
+          "max_input_q": 39
+        },
+        "long": {
+          "trials": [
+            {
+              "wall_ms": 825.082802,
+              "accepted": 24,
+              "render_ms": 487.22819,
+              "redraw_ms": 710.02455,
+              "import_attach_ms": 62.29878,
+              "commit_result_ms": 0.23158,
+              "frame_done_ms": 2.79038,
+              "retire_ms": 150.45248,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 41
+            },
+            {
+              "wall_ms": 883.187144,
+              "accepted": 24,
+              "render_ms": 559.49022,
+              "redraw_ms": 786.33068,
+              "import_attach_ms": 67.63197,
+              "commit_result_ms": 0.24624,
+              "frame_done_ms": 2.16703,
+              "retire_ms": 150.47343,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 39
+            },
+            {
+              "wall_ms": 844.119315,
+              "accepted": 24,
+              "render_ms": 508.04674,
+              "redraw_ms": 746.74297,
+              "import_attach_ms": 63.04848,
+              "commit_result_ms": 4.13357,
+              "frame_done_ms": 1.68751,
+              "retire_ms": 163.02706,
+              "redraws": 24,
+              "commits": 24,
+              "input_qmax": 41
+            }
+          ],
+          "median": {
+            "wall_ms": 844.119315,
+            "render_ms": 508.04674,
+            "redraw_ms": 746.74297,
+            "import_attach_ms": 63.04848,
+            "commit_result_ms": 0.24624,
+            "frame_done_ms": 2.16703,
+            "retire_ms": 150.47343,
+            "redraws": 24,
+            "commits": 24,
+            "input_qmax": 41
+          },
+          "max_input_q": 41
+        },
+        "drag": {
+          "trials": [
+            {
+              "wall_ms": 260.231715,
+              "accepted": 0,
+              "render_ms": 16.17396,
+              "redraw_ms": 227.18968,
+              "import_attach_ms": 66.4296,
+              "commit_result_ms": 0.03276,
+              "frame_done_ms": 74.82002,
+              "retire_ms": 69.34325,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            },
+            {
+              "wall_ms": 253.618504,
+              "accepted": 0,
+              "render_ms": 15.47725,
+              "redraw_ms": 202.40191,
+              "import_attach_ms": 38.28394,
+              "commit_result_ms": 0.03195,
+              "frame_done_ms": 90.4296,
+              "retire_ms": 57.84314,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            },
+            {
+              "wall_ms": 270.726445,
+              "accepted": 0,
+              "render_ms": 16.00583,
+              "redraw_ms": 211.42618,
+              "import_attach_ms": 48.02706,
+              "commit_result_ms": 0.03297,
+              "frame_done_ms": 81.72537,
+              "retire_ms": 65.23927,
+              "redraws": 5,
+              "commits": 4,
+              "input_qmax": 4
+            }
+          ],
+          "median": {
+            "wall_ms": 260.231715,
+            "render_ms": 16.00583,
+            "redraw_ms": 211.42618,
+            "import_attach_ms": 48.02706,
+            "commit_result_ms": 0.03276,
+            "frame_done_ms": 81.72537,
+            "retire_ms": 65.23927,
+            "redraws": 5,
+            "commits": 4,
+            "input_qmax": 4
+          },
+          "max_input_q": 4
+        },
+        "wheel_burst": {
+          "trials": [
+            {
+              "wall_ms": 26.600043,
+              "accepted": 24,
+              "render_ms": 2.26096,
+              "redraw_ms": 11.55374,
+              "import_attach_ms": 3.04261,
+              "commit_result_ms": 0.00824,
+              "frame_done_ms": 0.01662,
+              "retire_ms": 5.88711,
+              "redraws": 1,
+              "commits": 1,
+              "input_qmax": 1
+            }
+          ],
+          "median": {
+            "wall_ms": 26.600043,
+            "render_ms": 2.26096,
+            "redraw_ms": 11.55374,
+            "import_attach_ms": 3.04261,
+            "commit_result_ms": 0.00824,
+            "frame_done_ms": 0.01662,
+            "retire_ms": 5.88711,
+            "redraws": 1,
+            "commits": 1,
+            "input_qmax": 1
+          },
+          "max_input_q": 1
+        }
+      }
+    }
+  },
+  "interpretation": [
+    "Selection extends by 24 graphemes across existing text in a 400-line field. The final selected string is checked in the benchmark.",
+    "The patched selection median is lower. Timing ranges overlap, and total host wall time includes component input processing.",
+    "The native checks use the existing short-field drag and autoscroll workloads. They verify behavior and report QEMU stream times. They do not measure the same long-selection scenario or physical input-to-display latency.",
+    "Text edits still replace the prepared map. Earlier benchmark and native runs do not establish a typing or general end-to-end latency improvement from the retained map."
+  ]
+}

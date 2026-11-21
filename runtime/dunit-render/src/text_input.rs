@@ -260,15 +260,36 @@ impl TextInput {
         }
         width
     }
+    fn wrap_width(&self, style: &Style, rect: Rect) -> f32 {
+        let content = self.content_rect(style, rect);
+        (content.w - style.number("caret-width").unwrap_or(0.).max(0.)).max(0.)
+    }
+    /// Whether a prepared map can be shared, given the same font in both snapshots.
+    pub fn has_same_line_layout(
+        &self,
+        style: &Style,
+        rect: Rect,
+        previous: &Self,
+        previous_style: &Style,
+        previous_rect: Rect,
+    ) -> bool {
+        self.value == previous.value
+            && (!self.value.is_empty() || self.placeholder == previous.placeholder)
+            && self.password == previous.password
+            && self.multiline == previous.multiline
+            && self.soft_wrap == previous.soft_wrap
+            && style.number("font-size").unwrap_or(0.)
+                == previous_style.number("font-size").unwrap_or(0.)
+            && (!(self.multiline && self.soft_wrap)
+                || self.wrap_width(style, rect) == previous.wrap_width(previous_style, previous_rect))
+    }
     /// The same grapheme-aware line map drives all geometry consumers.
     pub fn visual_lines(&self, font: &Font, style: &Style, rect: Rect) -> VisualLines {
-        let content = self.content_rect(style, rect);
-        let width = (content.w - style.number("caret-width").unwrap_or(0.).max(0.)).max(0.);
         VisualLines::new(
             &self.value,
             font,
             style.number("font-size").unwrap_or(0.),
-            width,
+            self.wrap_width(style, rect),
             self.multiline,
             self.soft_wrap,
             self.password,
@@ -279,12 +300,11 @@ impl TextInput {
     pub fn prepare(&self, font: &Font, style: &Style, rect: Rect) -> PreparedInput {
         let value = self.visual_lines(font, style, rect);
         let placeholder = (self.value.is_empty() && !self.placeholder.is_empty()).then(|| {
-            let content = self.content_rect(style, rect);
             VisualLines::new(
                 &self.placeholder,
                 font,
                 style.number("font-size").unwrap_or(0.),
-                (content.w - style.number("caret-width").unwrap_or(0.).max(0.)).max(0.),
+                self.wrap_width(style, rect),
                 self.multiline,
                 self.soft_wrap,
                 false,

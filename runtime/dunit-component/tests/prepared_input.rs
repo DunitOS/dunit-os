@@ -48,6 +48,38 @@ fn renderer(px: u32) -> Renderer {
     )
 }
 #[test]
+fn selection_over_unchanged_wrapped_text_matches_a_full_render() {
+    let mut app = Application::new(Document("é a\u{301} beta gamma delta ".repeat(60))).unwrap();
+    let mut retained = renderer(14);
+    app.key(Key::plain('\t')).unwrap();
+    app.edit(EditCommand::DocumentHome { extend: false }).unwrap();
+    retained.render_application(&app, 160, 140).unwrap();
+    for _ in 0..8 {
+        app.edit(EditCommand::Right {
+            extend: true,
+            word: false,
+        })
+        .unwrap();
+        assert!(retained
+            .render_application(&app, 160, 140)
+            .unwrap()
+            .damage
+            .is_some());
+    }
+    assert_eq!(
+        app.input_context().unwrap().export_text(),
+        Some("é a\u{301} beta")
+    );
+    let mut fresh = renderer(14);
+    fresh.render_application(&app, 160, 140).unwrap();
+    assert!(retained.pixels() == fresh.pixels(), "selection pixels differ");
+    let rect = retained.widget_rect("field").unwrap();
+    assert_eq!(
+        retained.input_position_at("field", rect.x + 30., rect.y + 18.),
+        fresh.input_position_at("field", rect.x + 30., rect.y + 18.)
+    );
+}
+#[test]
 fn edits_history_resize_and_style_rebuild_shared_geometry_without_stale_hits_or_pixels() {
     let value = "alpha e\u{301} beta gamma delta\n".repeat(20);
     let mut app = Application::new(Document(value.clone())).unwrap();

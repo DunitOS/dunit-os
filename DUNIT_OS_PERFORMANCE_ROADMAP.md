@@ -322,6 +322,9 @@ Public protocol changes require an approved contract first.
 - [x] Reuse ASCII glyph advances inside text layout and build unwrapped caret
   stops without a temporary cluster list. Verify Unicode and password geometry
   and retain [render and TCG measurements](docs/performance/visual-lines-2026-11-21.json).
+- [x] Retain prepared input geometry across caret, selection and scroll frames
+  with unchanged line layout. Verify exact pixels and hit positions, and track
+  [long-selection rendering and native input checks](docs/performance/prepared-input-2026-11-21.json).
 - [ ] Profile damage/occlusion, layout/diff, glyph/text caches, SVG/icons,
   ARGB/blur and memory bandwidth.
 - [ ] Remove repeated layout/allocations/repaints with proven pixels and bounded caches.

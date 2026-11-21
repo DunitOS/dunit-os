@@ -64,11 +64,18 @@ before and after ranges. [Raw trials and wake counts](idle-commit-wake-2026-11-2
 
 ## Render cost
 
-PreparedInput shares one immutable VisualLines map within rendering/hit-testing,
-replacing repeated full/offscreen layout. Renderer caches glyph coverage by exact
-font/size identity, including negative entries, with LRU limits of 512 entries
-and 1 MiB payload. Font remains Send+Sync. Long-field editing still rebuilds its
-full value map once per render; clients still redraw synchronously per event.
+PreparedInput shares one immutable VisualLines map across rendering and hit
+testing. The renderer also retains it across consecutive snapshots when the
+field's text, font metrics, masking and wrapping geometry allow reuse. Caret,
+selection and viewport changes can reuse the same map. In the host benchmark,
+24 selection steps over a 400-line field took 31.66 ms median render time
+after this change, down from 38.57 ms across 15 trials per build.
+[Selection and native input results](prepared-input-2026-11-21.json)
+
+Renderer caches glyph coverage by exact font/size identity, including negative
+entries, with LRU limits of 512 entries and 1 MiB payload. Font remains Send+Sync.
+An edit that changes the value rebuilds the full map. Clients still redraw
+synchronously per event.
 
 The quiet-host release benchmark isolates render work from IPC/QEMU/scheduling:
 24 events, warmup and five measured trials. [Raw render samples](input-render-results.json)
