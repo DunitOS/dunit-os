@@ -40,6 +40,50 @@ fn input(value: &str) -> TextInput {
 }
 
 #[test]
+fn retained_prefix_matches_a_full_map_after_multiline_edits() {
+    use std::sync::Arc;
+
+    let font = font();
+    let style = style();
+    let rect = Rect { w: 82., h: 100., ..Rect::default() };
+    let prefix = "wrap é e\u{301} long words\n\n🇷🇺🇷🇺\r\n";
+    let values = [
+        format!("{prefix}👩\u{200d}💻a"),
+        format!("{prefix}👩\u{200d}💻a\u{301}\n"),
+        format!("{prefix}👨\u{200d}💻a\u{301}\nmore"),
+        format!("{prefix}"),
+        "wrap changed\n\n🇷🇺🇷🇺\r\nlast".into(),
+        "joined without a hard break".into(),
+        String::new(),
+    ];
+    for wrap in [false, true] {
+        for password in [false, true] {
+            let snapshot = |value| {
+                let mut text = input(value);
+                text.soft_wrap = wrap;
+                text.password = password;
+                text.placeholder = "placeholder\nsecond line".into();
+                text
+            };
+            let mut previous = snapshot(&values[0]);
+            let mut prepared = Arc::new(previous.prepare(&font, &style, rect));
+            for (step, value) in values[1..].iter().enumerate() {
+                let current = snapshot(value);
+                let next = current.prepare_retained(
+                    &font,
+                    &style,
+                    rect,
+                    Some((&previous, &style, rect, &prepared)),
+                );
+                assert_eq!(*next, current.prepare(&font, &style, rect), "step {step}");
+                previous = current;
+                prepared = next;
+            }
+        }
+    }
+}
+
+#[test]
 fn unwrapped_caret_positions_match_uncached_metrics_at_every_byte() {
     let font = font();
     let value = "a aé e\u{301} 👩\u{200d}💻 a\n\nЖ Ж\n";

@@ -325,6 +325,9 @@ Public protocol changes require an approved contract first.
 - [x] Retain prepared input geometry across caret, selection and scroll frames
   with unchanged line layout. Verify exact pixels and hit positions, and track
   [long-selection rendering and native input checks](docs/performance/prepared-input-2026-11-21.json).
+- [x] Share caret stops for unchanged logical lines before a multiline edit.
+  Verify wrapped, Unicode and masked geometry against full layout, and retain
+  [host and TCG typing measurements](docs/performance/line-prefix-2026-11-21.json).
 - [ ] Profile damage/occlusion, layout/diff, glyph/text caches, SVG/icons,
   ARGB/blur and memory bandwidth.
 - [ ] Remove repeated layout/allocations/repaints with proven pixels and bounded caches.

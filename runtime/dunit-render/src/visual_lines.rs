@@ -1,5 +1,5 @@
 //! One byte-preserving visual-line map for text painting and navigation.
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use dunit_text::Font;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -23,7 +23,7 @@ pub struct VisualLine {
     pub soft_break: bool,
     // Byte boundaries and their exact unkerned glyph advances. This is the
     // same advance model used by TextInput painting, including password masks.
-    stops: Vec<(usize, f32)>,
+    stops: Arc<Vec<(usize, f32)>>,
 }
 impl VisualLine {
     pub fn x(&self, index: usize) -> f32 {
@@ -69,6 +69,44 @@ impl VisualLines {
         wrap: bool,
         password: bool,
     ) -> Self {
+        Self::build(value, font, px, width, multiline, wrap, password, &[])
+    }
+    /// Retain complete logical lines whose bytes and following newline match.
+    /// The caller has already checked the font and line layout parameters.
+    pub(crate) fn with_previous(
+        value: &str,
+        font: &Font,
+        px: f32,
+        width: f32,
+        wrap: bool,
+        password: bool,
+        previous_value: &str,
+        previous: &Self,
+    ) -> Self {
+        let common = value
+            .bytes()
+            .zip(previous_value.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let prefix = value.as_bytes()[..common]
+            .iter()
+            .rposition(|&byte| byte == b'\n')
+            .map_or(&[][..], |newline| {
+                let rows = previous.lines.partition_point(|line| line.end <= newline);
+                &previous.lines[..rows]
+            });
+        Self::build(value, font, px, width, true, wrap, password, prefix)
+    }
+    fn build(
+        value: &str,
+        font: &Font,
+        px: f32,
+        width: f32,
+        multiline: bool,
+        wrap: bool,
+        password: bool,
+        prefix: &[VisualLine],
+    ) -> Self {
         let width = if width.is_finite() { width.max(0.) } else { 0. };
         let scale = font.scale_for_px(px);
         let measure = |ch| font.glyph_metrics(font.glyph_index(ch)).advance as f32 * scale;
@@ -87,11 +125,12 @@ impl VisualLines {
                 }
             }).sum::<f32>()
         };
-        let mut lines = Vec::new();
+        let mut lines = Vec::with_capacity(prefix.len() + 1);
+        lines.extend_from_slice(prefix);
         let mut clusters = Vec::new();
-        let mut logical_start = 0;
+        let mut logical_start = prefix.last().map_or(0, |line| line.end + 1);
         let wrap = wrap && multiline;
-        for logical in value.split(|ch| multiline && ch == '\n') {
+        for logical in value[logical_start..].split(|ch| multiline && ch == '\n') {
             if !wrap {
                 let mut stops = alloc::vec![(logical_start, 0.)];
                 let mut x = 0.;
@@ -104,7 +143,7 @@ impl VisualLines {
                     end: logical_start + logical.len(),
                     width: x,
                     soft_break: false,
-                    stops,
+                    stops: Arc::new(stops),
                 });
                 logical_start += logical.len() + 1;
                 continue;
@@ -125,7 +164,7 @@ impl VisualLines {
                     end: logical_start,
                     width: 0.,
                     soft_break: false,
-                    stops: alloc::vec![(logical_start, 0.)],
+                    stops: Arc::new(alloc::vec![(logical_start, 0.)]),
                 });
             }
             let mut start = 0;
@@ -160,7 +199,7 @@ impl VisualLines {
                     end: clusters[end - 1].end,
                     width: x,
                     soft_break: end < clusters.len(),
-                    stops,
+                    stops: Arc::new(stops),
                 });
                 start = end;
             }

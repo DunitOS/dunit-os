@@ -1,6 +1,6 @@
 //! Input geometry and painting. Editing remains in the widget layer.
 use crate::{CaretAffinity, PreparedInput, ScrollArea, Surface, TextPosition, VisualLines};
-use alloc::string::String;
+use alloc::{string::String, sync::Arc};
 use dunit_style::Style;
 use dunit_text::Font;
 use dunit_ui::Rect;
@@ -273,9 +273,22 @@ impl TextInput {
         previous_style: &Style,
         previous_rect: Rect,
     ) -> bool {
+        self.has_same_line_text(previous)
+            && self.has_same_line_geometry(style, rect, previous, previous_style, previous_rect)
+    }
+    fn has_same_line_text(&self, previous: &Self) -> bool {
         self.value == previous.value
             && (!self.value.is_empty() || self.placeholder == previous.placeholder)
-            && self.password == previous.password
+    }
+    fn has_same_line_geometry(
+        &self,
+        style: &Style,
+        rect: Rect,
+        previous: &Self,
+        previous_style: &Style,
+        previous_rect: Rect,
+    ) -> bool {
+        self.password == previous.password
             && self.multiline == previous.multiline
             && self.soft_wrap == previous.soft_wrap
             && style.number("font-size").unwrap_or(0.)
@@ -311,6 +324,37 @@ impl TextInput {
             )
         });
         PreparedInput { value, placeholder }
+    }
+    /// Prepare using the prior snapshot of this field when it used the same font.
+    /// Complete logical lines before an edit keep their original byte offsets.
+    pub fn prepare_retained(
+        &self,
+        font: &Font,
+        style: &Style,
+        rect: Rect,
+        previous: Option<(&Self, &Style, Rect, &Arc<PreparedInput>)>,
+    ) -> Arc<PreparedInput> {
+        if let Some((input, old_style, old_rect, map)) = previous {
+            if self.has_same_line_geometry(style, rect, input, old_style, old_rect) {
+                if self.has_same_line_text(input) {
+                    return Arc::clone(map);
+                }
+                if self.multiline && !self.value.is_empty() {
+                    let value = VisualLines::with_previous(
+                        &self.value,
+                        font,
+                        style.number("font-size").unwrap_or(0.),
+                        self.wrap_width(style, rect),
+                        self.soft_wrap,
+                        self.password,
+                        &input.value,
+                        map.lines(),
+                    );
+                    return Arc::new(PreparedInput { value, placeholder: None });
+                }
+            }
+        }
+        Arc::new(self.prepare(font, style, rect))
     }
     fn vertical_limit(&self, font: &Font, style: &Style, rect: Rect) -> f32 {
         if !self.multiline {

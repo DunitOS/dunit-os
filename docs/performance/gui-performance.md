@@ -74,8 +74,14 @@ after this change, down from 38.57 ms across 15 trials per build.
 
 Renderer caches glyph coverage by exact font/size identity, including negative
 entries, with LRU limits of 512 entries and 1 MiB payload. Font remains Send+Sync.
-An edit that changes the value rebuilds the full map. Clients still redraw
-synchronously per event.
+Multiline edits retain complete leading lines when the font, masking and
+wrapping geometry match. Layout rebuilds from the first changed logical line
+through the end of the document. The host median render time for 24 keystrokes
+in the 400-line field fell from 39.00 ms to 32.14 ms across 15 trials per build.
+On one-vCPU TCG the median client render time fell from 508.0 ms to 429.1 ms
+and median stream completion from 844.1 ms to 775.9 ms. Completion time ranges
+overlap. Clients still redraw synchronously per event.
+[Typing measurements](line-prefix-2026-11-21.json)
 
 The quiet-host release benchmark isolates render work from IPC/QEMU/scheduling:
 24 events, warmup and five measured trials. [Raw render samples](input-render-results.json)

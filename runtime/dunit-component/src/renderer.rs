@@ -507,19 +507,19 @@ impl Renderer {
                             || (!p.focused && paint.focused)
                     });
                     // The previous snapshot is cleared whenever the font changes.
-                    let prepared = prior
-                        .zip(previous)
-                        .filter(|((p, id), previous)| {
-                            paint.has_same_line_layout(
-                                style,
-                                rect,
-                                previous,
+                    let prepared = paint.prepare_retained(
+                        &self.font,
+                        style,
+                        rect,
+                        prior.zip(previous).and_then(|((p, id), input)| {
+                            Some((
+                                input,
                                 &p.styles[id.0 as usize],
-                                p.layout.rect(*id),
-                            )
-                        })
-                        .and_then(|((p, id), _)| p.input_layouts[id.0 as usize].clone())
-                        .unwrap_or_else(|| Arc::new(paint.prepare(&self.font, style, rect)));
+                                p.layout.rect(id),
+                                p.input_layouts[id.0 as usize].as_ref()?,
+                            ))
+                        }),
+                    );
                     if geometry_changed || caret_changed || activity_changed || !paint.multiline {
                         paint.fit_scroll_with_lines(&self.font, style, rect, prepared.lines());
                     }
