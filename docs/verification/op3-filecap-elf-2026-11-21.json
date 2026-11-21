@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-21",
+  "base_commit": "c18438d7a7fbdc52bf885cd1f1f2ea5da499842c",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "02ffd4d9cff2ff38cfcf9f0d8bb8d0630ee45a3a43bfb2e639c5eaa3f0a4b2b4",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "afdc06ea95332a99095057f70f08964a60f1355df33ac489f8d7c9c5e4cb961a",
+    "kernel/src/elf/mod.rs": "51644a5cb8e2145211117ed91c535a378c50b349477ae3cc6c1820da45e380f5",
+    "kernel/src/elf/parser.rs": "d603f3996c78e9b3d45a432a5a4248dda5933d59e584d4c8ce9475c6dfd2e2e6",
+    "kernel/src/fs/file_cap.rs": "5bc2276b46c5b4139b8c7cdcf0ae0e88350d9c27ac353bf4b48fff91a36bd780",
+    "kernel/src/fs/vfs.rs": "15b648bcb38cf112f86cf0b0ae6e206b747c6261eee9b66842d72c5383635056",
+    "kernel/src/syscall/file_cap.rs": "ccb48e057dbcc32c272a4074fdc5127da2f0469c3e41f1c64f9ced206370f960"
+  },
+  "host_checks": {
+    "file_cap_tests": 5,
+    "irq_progress_tests": 1,
+    "memory_and_elf_tests": 12,
+    "kernel_host_log_sha256": "228bd70ba07a0c92b2631c66ada8cdfdd97decde0c5346a1be33594ff9614d45",
+    "elf_host_log_sha256": "224c40cda502ce542547432e8b318fbbf92c4662be6326180756e131cfd8fa6c"
+  },
+  "qemu": {
+    "version": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "host_cpu": "AMD EPYC 9V74 80-Core Processor",
+    "machine": "q35,accel=tcg",
+    "guest_online_cpus": 4,
+    "dispatch_cpus": 1,
+    "runs": {
+      "irq": {
+        "contract": "tools/irq_progress_markers.json",
+        "image_sha256": "e096a8b15400f685068c2f606206fce0cd46f65632bad5612be8cdf0b12df555",
+        "serial_sha256": "d894a9988bf7362bb70aa69bfae4460dc4b8bdd955a91ad90503050b15a5a3a6",
+        "qemu_log_sha256": "5b77f83533b411cfc0f7ab7bcb996f4a238c156ce56e26ea6bed9439c59cc9f4",
+        "result": "completed",
+        "observed": [
+          "[VFS-OWNERSHIP] namespace drop, unlink, pinned I/O and final close OK",
+          "[IRQ-PROGRESS] PIT and AP IPI inside syscall; lock masks IRQ; HAL return ACK OK",
+          "[IRQ-PROGRESS-USER] syscall result GPR SIMD TLS preserved OK"
+        ]
+      },
+      "handles": {
+        "contract": "tools/m6_handle_markers.json",
+        "image_sha256": "e096a8b15400f685068c2f606206fce0cd46f65632bad5612be8cdf0b12df555",
+        "serial_sha256": "af62d1f7d8ea4dc63a5571d5151ed840735592eb23a415f9f70bbf3c040d3e87",
+        "qemu_log_sha256": "c42e1810fa0a54727530b67a709f537acac88707eb0a80b1046f602e7a78f1d3",
+        "result": "completed",
+        "observed": [
+          "[FILE-CAPS] rights/confinement/atomic-rollback ok",
+          "[FILE-CAPS] cross-process/identity/move/readdir ok",
+          "[FILE-CAPS] recursive-copy/no-overwrite/self-copy/fsync ok",
+          "[FILE-CAPS] bounded-copy/cancel/cleanup ok"
+        ]
+      },
+      "musl": {
+        "contract": "tools/m6_musl_hello_markers.json + tools/m6_musl_thread_markers.json",
+        "image_sha256": "e096a8b15400f685068c2f606206fce0cd46f65632bad5612be8cdf0b12df555",
+        "serial_sha256": "faadc96828b108af782a5cf4cb4b974c7c0624290d236d6cc22c87feb781d12d",
+        "qemu_log_sha256": "cbf074a03f99d0638853f371f7f4d097e3789a0b6e8896f53ad699c2f06763d2",
+        "result": "completed",
+        "observed": [
+          "[MUSL-THREAD] counter=10000 r1=5000 r2=5000",
+          "[MUSL-THREAD] OK"
+        ]
+      }
+    }
+  },
+  "limits": [
+    "The capability change narrows outer guard scopes. Backend and destination mapping scopes still use their existing locks. No end-to-end IRQ-off duration was measured.",
+    "The native IRQ progress probe uses the existing DebugLog boundary. It establishes hardware progress and register preservation in that probe.",
+    "The ELF parser rejects interpreter-dependent images. Shared library execution is pending the interpreter and DSO mapping contract."
+  ]
+}

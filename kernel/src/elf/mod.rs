@@ -67,6 +67,7 @@ fn prepare_process_elf_env_impl(
     publish: bool,
 ) -> Result<(), ElfError> {
     let parser = ElfParser::new(data)?;
+    let program_headers = parser.aux_program_headers()?;
     let env = extra_env;
     let prepared = crate::process::with_process_mut(pid, |process| {
         if load_into_process_address_space(&parser, process).is_err() {
@@ -79,13 +80,14 @@ fn prepare_process_elf_env_impl(
             return Err(crate::process::ProcessError::InvalidUserContext);
         }
 
-        let initial_stack = match prepare_initial_stack(process, &parser, argv, &env) {
-            Ok(stack) => stack,
-            Err(_) => {
-                crate::memory::serial_write("[ELF-TEST] argv stack setup failed\r\n");
-                return Err(crate::process::ProcessError::InvalidUserContext);
-            }
-        };
+        let initial_stack =
+            match prepare_initial_stack(process, &parser, program_headers, argv, &env) {
+                Ok(stack) => stack,
+                Err(_) => {
+                    crate::memory::serial_write("[ELF-TEST] argv stack setup failed\r\n");
+                    return Err(crate::process::ProcessError::InvalidUserContext);
+                }
+            };
 
         process.context.rip = parser.entry_point();
         process.context.rsp = initial_stack.rsp as u64;
@@ -151,6 +153,7 @@ struct InitialStack {
 fn prepare_initial_stack(
     process: &mut Process,
     parser: &ElfParser,
+    program_headers: AuxProgramHeaders<'_>,
     argv: &[String],
     env: &[&str],
 ) -> Result<InitialStack, ElfError> {
@@ -183,42 +186,14 @@ fn prepare_initial_stack(
 
     // Use the actual mapped table when a LOAD contains it. musl derives its
     // static TLS template from these records, rather than the kernel's TCB.
-    let table_start = parser.header.phoff;
-    let table_size = parser.header.phnum as u64 * parser.header.phentsize as u64;
-    let table_end = table_start
-        .checked_add(table_size)
-        .ok_or(ElfError::InvalidProgramHeader)?;
-    let mut phdr_address = None;
-    let mut has_phdr_segment = false;
-    for ph in parser.program_headers()? {
-        has_phdr_segment |= ph.p_type == 6; // PT_PHDR
-        if ph.p_type == PT_LOAD
-            && ph.p_offset <= table_start
-            && ph
-                .p_offset
-                .checked_add(ph.p_filesz)
-                .is_some_and(|end| end >= table_end)
-        {
-            phdr_address = Some(
-                ph.p_vaddr
-                    .checked_add(table_start - ph.p_offset)
-                    .ok_or(ElfError::InvalidProgramHeader)?,
-            );
-        }
-    }
-    let phdr_address = match phdr_address {
+    let phdr_address = match program_headers.mapped_address {
         Some(address) => address,
-        None if !has_phdr_segment => {
+        None => {
             // Header-less LOAD layouts are valid static ET_EXECs. With no
             // PT_PHDR load-bias record, absolute vaddrs remain valid when the
             // exact header table is copied into the bounded initial stack.
-            write_stack_bytes(
-                process,
-                &mut sp,
-                &parser.data[table_start as usize..table_end as usize],
-            )? as u64
+            write_stack_bytes(process, &mut sp, program_headers.bytes)? as u64
         }
-        None => return Err(ElfError::InvalidProgramHeader),
     };
     let auxv: [(u64, u64); 7] = [
         (AT_PHDR, phdr_address),

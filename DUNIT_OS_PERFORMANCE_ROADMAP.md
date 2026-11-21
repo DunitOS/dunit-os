@@ -235,6 +235,12 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   wait generation checks and preflighted reply writes. See
   [wait and IPC scope verification](docs/performance/wait-ipc-scopes.md).
 
+- [x] Remove the syscall-wide IRQ guard from file capability open/operations.
+  Release the VFS namespace before opening on the pinned backend and check
+  child grants with the parent pin in one task scope. Backend and mapping
+  critical sections still need their own bounds.
+  [Native and host checks](docs/verification/op3-filecap-elf-2026-11-21.json)
+
 Remaining gates, in order:
 
 - [ ] Bound end-to-end IRQ-off syscall/frame-present work and complete remaining

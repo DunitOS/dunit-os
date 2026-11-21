@@ -279,6 +279,10 @@ Profiles and remaining gates:
   rwlock/once/barrier and heavy-resource reclamation.
 - [ ] Define owner-death, cancellation/interruption and broader thread-primitives policy.
 - [x] Profile F: enforce the official static-only build policy.
+- [x] Validate mapped `AT_PHDR` before loading static ELF segments. Reject
+  `PT_INTERP` and `PT_DYNAMIC` until an interpreter handoff exists. Retain the
+  static stack-table fallback for images without a mapped program header table.
+  [Loader verification](docs/verification/op3-filecap-elf-2026-11-21.json)
 - [ ] Add signals/timers/interruption, sockets after netd, dynamic loader/TLS and
   demand-driven fork/COW as independently gated work.
 
@@ -288,6 +292,14 @@ masks, restart/interruption, alternate stacks and thread targeting before enabli
 cancellation points. Dynamic tier needs PT_INTERP, DSO mappings/relocations/symbol
 lookup, RELRO, TLS modules/DTV and dlopen/dlsym/dlclose. Fork requires COW,
 multithreaded semantics and atfork only when justified by software demand.
+
+The proposed first dynamic milestone is a native executable calling a function
+from one shared library. Define the interpreter path and mapping contract first.
+The kernel would map the main image and interpreter before publication, set the
+interpreter entry PC, and supply `AT_BASE`, `AT_ENTRY` and `AT_PHDR`. Musl would
+resolve libraries and relocations in userspace. The current private file mapping
+does not accept musl's fixed-address DSO segment requests. Specify how the loader
+reserves a span and places segments before enabling the dynamic toolchain profile.
 
 Acceptance: host-independent static ELF hello/args/env/files/malloc/spawn/pthread
 suites on Dunit, 1,000 join and detached cycles, contention/timeouts/TLS/preemption

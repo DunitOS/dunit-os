@@ -298,11 +298,11 @@ struct MountPoint {
 }
 
 impl VirtualFileSystem {
+    #[cfg(any(test, feature = "boot-smoke-tests"))]
     pub fn open_capability(&mut self, cwd: &str, path: &str, flags: OpenFlags) -> Result<alloc::sync::Arc<super::file_cap::FileCapability>> {
         let mut path_buffer = [0; 256];
         let (fs, relative) = self.resolve_path(path, cwd, &mut path_buffer)?;
-        let handle = fs.lock().cap_open(relative, flags)?;
-        Ok(alloc::sync::Arc::new(super::file_cap::FileCapability::new(fs, handle)))
+        super::file_cap::FileCapability::open(fs, relative, flags)
     }
     pub fn new() -> Self {
         Self {
@@ -693,6 +693,21 @@ pub fn init() -> Result<()> {
 pub fn get_vfs() -> Option<VfsGuard> {
     let guard = VFS_INSTANCE.lock();
     if guard.is_some() { Some(VfsGuard(guard)) } else { None }
+}
+
+pub fn open_capability(
+    cwd: &str,
+    path: &str,
+    flags: OpenFlags,
+) -> Result<Arc<super::file_cap::FileCapability>> {
+    let mut path_buffer = [0; 256];
+    let (backend, relative) = {
+        let namespace = get_vfs().ok_or(VfsError::IoError)?;
+        namespace.resolve_path(path, cwd, &mut path_buffer)?
+    };
+    // The resolved path lives in caller scratch and the backend Arc pins the
+    // mount selected by this lookup. Backend I/O needs no namespace lock.
+    super::file_cap::FileCapability::open(backend, relative, flags)
 }
 
 pub fn static_file(path: &str) -> Option<&'static [u8]> {

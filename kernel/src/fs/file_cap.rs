@@ -8,8 +8,12 @@ pub struct FileCapability {
     handle: FileHandle,
 }
 impl FileCapability {
-    pub(super) fn new(fs: Backend, handle: FileHandle) -> Self {
+    fn new(fs: Backend, handle: FileHandle) -> Self {
         Self { fs, handle }
+    }
+    pub(super) fn open(fs: Backend, path: &str, flags: OpenFlags) -> Result<Arc<Self>> {
+        let handle = fs.lock().cap_open(path, flags)?;
+        Ok(Arc::new(Self::new(fs, handle)))
     }
     pub fn relation(&self, destination: &Self) -> Result<dunit_file_cap_abi::Relation> {
         if !Arc::ptr_eq(&self.fs, &destination.fs) {

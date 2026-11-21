@@ -43,6 +43,9 @@ pub const ELF_DATA_LSB: u8 = 1;
 pub const ELF_MACHINE_X86_64: u16 = 0x3E;
 pub const ELF_TYPE_EXEC: u16 = 2;
 pub const PT_LOAD: u32 = 1;
+const PT_DYNAMIC: u32 = 2;
+const PT_INTERP: u32 = 3;
+const PT_PHDR: u32 = 6;
 pub const PT_TLS: u32 = 7;
 pub const PT_GNU_STACK: u32 = 0x6474_e551;
 pub const PF_X: u32 = 0x1;
@@ -55,6 +58,7 @@ pub enum ElfError {
     InvalidClass,
     InvalidArchitecture,
     InvalidType,
+    UnsupportedDynamicLinking,
     InvalidProgramHeader,
     TooManyProgramHeaders,
 }
@@ -62,6 +66,11 @@ pub enum ElfError {
 pub struct ElfParser<'a> {
     pub(super) data: &'a [u8],
     pub(super) header: ElfHeader,
+}
+
+pub(super) struct AuxProgramHeaders<'a> {
+    pub mapped_address: Option<u64>,
+    pub bytes: &'a [u8],
 }
 
 impl<'a> ElfParser<'a> {
@@ -97,7 +106,14 @@ impl<'a> ElfParser<'a> {
         }
 
         let parser = Self { data, header };
-        parser.program_headers()?;
+        // This loader enters the main image directly. Refuse images that
+        // need a linker before mapping any bytes or preparing an entry point.
+        if parser
+            .program_headers()?
+            .any(|ph| matches!(ph.p_type, PT_INTERP | PT_DYNAMIC))
+        {
+            return Err(ElfError::UnsupportedDynamicLinking);
+        }
         Ok(parser)
     }
 
@@ -109,8 +125,9 @@ impl<'a> ElfParser<'a> {
         self.header.entry
     }
 
-    pub fn program_headers(&self) -> Result<ProgramHeaderIterator<'a>, ElfError> {
-        let phoff = self.header.phoff as usize;
+    fn program_header_bytes(&self) -> Result<&'a [u8], ElfError> {
+        let phoff =
+            usize::try_from(self.header.phoff).map_err(|_| ElfError::InvalidProgramHeader)?;
         let phnum = self.header.phnum as usize;
         let phentsize = self.header.phentsize as usize;
 
@@ -121,20 +138,75 @@ impl<'a> ElfParser<'a> {
             .checked_mul(phentsize)
             .and_then(|size| phoff.checked_add(size))
             .ok_or(ElfError::InvalidProgramHeader)?;
-        if end > self.data.len() {
-            return Err(ElfError::InvalidProgramHeader);
-        }
-
+        let bytes = self
+            .data
+            .get(phoff..end)
+            .ok_or(ElfError::InvalidProgramHeader)?;
         if phnum > 256 {
             return Err(ElfError::TooManyProgramHeaders);
         }
+        Ok(bytes)
+    }
 
+    pub fn program_headers(&self) -> Result<ProgramHeaderIterator<'a>, ElfError> {
         Ok(ProgramHeaderIterator {
-            data: self.data,
-            offset: phoff,
-            count: phnum,
-            index: 0,
-            entsize: phentsize,
+            entries: self
+                .program_header_bytes()?
+                .chunks_exact(core::mem::size_of::<ProgramHeader>()),
+        })
+    }
+
+    /// Locate the complete header table in a file-backed LOAD. A declared PHDR
+    /// must describe the same mapped bytes. The static stack can copy the table
+    /// when the image has no mapped or declared table.
+    pub(super) fn aux_program_headers(&self) -> Result<AuxProgramHeaders<'a>, ElfError> {
+        let bytes = self.program_header_bytes()?;
+        let table_start = self.header.phoff;
+        let table_end = table_start
+            .checked_add(bytes.len() as u64)
+            .ok_or(ElfError::InvalidProgramHeader)?;
+        let mut mapped = None;
+        let mut declared = None;
+        for ph in self.program_headers()? {
+            if ph.p_type == PT_PHDR {
+                if declared.replace(ph.p_vaddr).is_some()
+                    || ph.p_offset != table_start
+                    || ph.p_filesz != bytes.len() as u64
+                    || ph.p_memsz != ph.p_filesz
+                {
+                    return Err(ElfError::InvalidProgramHeader);
+                }
+            }
+            if ph.p_type != PT_LOAD || ph.p_offset > table_start {
+                continue;
+            }
+            let file_end = ph
+                .p_offset
+                .checked_add(ph.p_filesz)
+                .ok_or(ElfError::InvalidProgramHeader)?;
+            if file_end < table_end {
+                continue;
+            }
+            let address = ph
+                .p_vaddr
+                .checked_add(table_start - ph.p_offset)
+                .ok_or(ElfError::InvalidProgramHeader)?;
+            address
+                .checked_add(bytes.len() as u64)
+                .ok_or(ElfError::InvalidProgramHeader)?;
+            if mapped
+                .replace(address)
+                .is_some_and(|previous| previous != address)
+            {
+                return Err(ElfError::InvalidProgramHeader);
+            }
+        }
+        if declared.is_some() && declared != mapped {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        Ok(AuxProgramHeaders {
+            mapped_address: mapped,
+            bytes,
         })
     }
 }
@@ -164,6 +236,84 @@ mod tests {
                 .copy_from_slice(&(0x400000 + i as u64 * 4096).to_le_bytes());
         }
         bytes
+    }
+
+    fn set_segment(bytes: &mut [u8], slot: usize, kind: u32, offset: u64, address: u64, size: u64) {
+        let start = 64 + slot * 56;
+        bytes[start..start + 4].copy_from_slice(&kind.to_le_bytes());
+        for (field, value) in [(8, offset), (16, address), (32, size), (40, size)] {
+            bytes[start + field..start + field + 8].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+
+    #[test]
+    fn dynamic_segments_are_rejected_even_in_et_exec() {
+        for kind in [PT_INTERP, PT_DYNAMIC] {
+            for slot in [0, 1] {
+                let mut bytes = image(2);
+                set_segment(&mut bytes, slot, kind, 0, 0, 0);
+                assert!(matches!(
+                    ElfParser::new(&bytes),
+                    Err(ElfError::UnsupportedDynamicLinking)
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn aux_headers_locate_file_backing_and_preserve_the_static_stack_fallback() {
+        let mut bytes = image(2);
+        let headers = ElfParser::new(&bytes)
+            .unwrap()
+            .aux_program_headers()
+            .unwrap();
+        assert_eq!(headers.mapped_address, None);
+        assert_eq!(headers.bytes, &bytes[64..]);
+
+        let table_size = 2 * 56;
+        set_segment(&mut bytes, 0, PT_LOAD, 0, 0x400000, 64 + table_size);
+        set_segment(&mut bytes, 1, PT_PHDR, 64, 0x400040, table_size);
+        let headers = ElfParser::new(&bytes)
+            .unwrap()
+            .aux_program_headers()
+            .unwrap();
+        assert_eq!(headers.mapped_address, Some(0x400040));
+        assert_eq!(headers.bytes, &bytes[64..]);
+
+        set_segment(&mut bytes, 1, PT_TLS, 0, 0, 0);
+        let headers = ElfParser::new(&bytes)
+            .unwrap()
+            .aux_program_headers()
+            .unwrap();
+        assert_eq!(headers.mapped_address, Some(0x400040));
+    }
+
+    #[test]
+    fn aux_headers_reject_inconsistent_declarations_and_ambiguous_or_wrapping_addresses() {
+        let table_size = 2 * 56;
+        let total = 64 + table_size;
+        for (kind, offset, address, size) in [
+            (PT_PHDR, 64, 0x401040, table_size),
+            (PT_PHDR, 65, 0x400040, table_size),
+            (PT_PHDR, 64, 0x400040, table_size - 1),
+            (PT_LOAD, 0, 0x401000, total),
+            (PT_LOAD, 0, u64::MAX - 64, total),
+        ] {
+            let mut bytes = image(2);
+            set_segment(&mut bytes, 0, PT_LOAD, 0, 0x400000, total);
+            set_segment(&mut bytes, 1, kind, offset, address, size);
+            assert!(matches!(
+                ElfParser::new(&bytes).unwrap().aux_program_headers(),
+                Err(ElfError::InvalidProgramHeader)
+            ));
+        }
+        let mut bytes = image(2);
+        set_segment(&mut bytes, 0, PT_LOAD, 0, 0x400000, total - 1);
+        set_segment(&mut bytes, 1, PT_PHDR, 64, 0x400040, table_size);
+        assert!(matches!(
+            ElfParser::new(&bytes).unwrap().aux_program_headers(),
+            Err(ElfError::InvalidProgramHeader)
+        ));
     }
 
     #[test]
@@ -248,31 +398,15 @@ mod tests {
 }
 
 pub struct ProgramHeaderIterator<'a> {
-    data: &'a [u8],
-    offset: usize,
-    count: usize,
-    index: usize,
-    entsize: usize,
+    entries: core::slice::ChunksExact<'a, u8>,
 }
 
 impl<'a> Iterator for ProgramHeaderIterator<'a> {
     type Item = ProgramHeader;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.count {
-            return None;
-        }
-
-        let ph_offset = self.offset + (self.index * self.entsize);
-        if ph_offset + core::mem::size_of::<ProgramHeader>() > self.data.len() {
-            return None;
-        }
-
-        let ph = unsafe {
-            core::ptr::read_unaligned(self.data.as_ptr().add(ph_offset) as *const ProgramHeader)
-        };
-
-        self.index += 1;
-        Some(ph)
+        let bytes = self.entries.next()?;
+        // Each entry has exactly the size of ProgramHeader and may be unaligned.
+        Some(unsafe { core::ptr::read_unaligned(bytes.as_ptr().cast::<ProgramHeader>()) })
     }
 }

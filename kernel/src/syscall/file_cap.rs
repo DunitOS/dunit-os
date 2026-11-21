@@ -1,5 +1,6 @@
 //! Typed filesystem capability operations; authority is never recovered from paths.
 use super::*;
+use crate::fs::file_cap::FileCapability;
 use crate::handle::{RIGHT_READ, RIGHT_TRANSFER, RIGHT_WRITE};
 use dunit_file_cap_abi::Operation;
 const RIGHTS: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_TRANSFER;
@@ -14,19 +15,31 @@ fn flags(rights: u64) -> Result<crate::fs::vfs::OpenFlags, i64> {
         rights as u32 & (RIGHT_READ | RIGHT_WRITE),
     ))
 }
-fn owned(
+fn owned(handle: u64, rights: u32) -> Result<alloc::sync::Arc<FileCapability>, i64> {
+    owned_with_grant(handle, rights, 0)
+}
+fn owned_with_grant(
     handle: u64,
-    rights: u32,
-) -> Result<alloc::sync::Arc<crate::fs::file_cap::FileCapability>, i64> {
+    required: u32,
+    grant: u32,
+) -> Result<alloc::sync::Arc<FileCapability>, i64> {
     if handle > u32::MAX as u64 {
         return Err(EBADF);
     }
-    crate::process::with_current_process(|process| process.handle_file(handle as u32, rights))
-        .ok_or(EINVAL)?
-        .map_err(handle_error_to_errno)
+    let handle = handle as u32;
+    crate::process::with_current_process(|process| {
+        let file = process
+            .handle_file(handle, required)
+            .map_err(handle_error_to_errno)?;
+        // Verify derivation rights in the same table scope as the object pin.
+        if grant != 0 && grant & !process.handle_rights(handle).map_err(handle_error_to_errno)? != 0 {
+            return Err(EACCES);
+        }
+        Ok(file)
+    })
+    .ok_or(EINVAL)?
 }
 pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
-    let _irq = crate::sync::InterruptGuard::new();
     let flags = match flags(rights) {
         Ok(f) => f,
         Err(e) => return e,
@@ -39,18 +52,14 @@ pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
         Some(value) => value,
         None => return EINVAL,
     };
-    let file = match crate::fs::vfs::get_vfs().ok_or(EIO).and_then(|mut v| {
-        v.open_capability(&cwd, &path, flags)
-            .map_err(vfs_error_to_errno)
-    }) {
+    let file = match crate::fs::vfs::open_capability(&cwd, &path, flags) {
         Ok(f) => f,
-        Err(e) => return e,
+        Err(e) => return vfs_error_to_errno(e),
     };
     crate::process::with_current_process_mut(|p| p.handle_create_file(file, rights as u32) as i64)
         .unwrap_or(EINVAL)
 }
 pub(super) fn operation(handle: u64, op: u64, ptr: u64, len: u64, offset: u64, rights: u64) -> i64 {
-    let _irq = crate::sync::InterruptGuard::new();
     let Some(op) = Operation::from_raw(op) else {
         return EINVAL;
     };
@@ -178,20 +187,15 @@ fn child(
     if !create && kind != 0 {
         return Err(EINVAL);
     }
-    let parent = owned(
+    let parent = owned_with_grant(
         handle,
         if create {
             RIGHT_WRITE
         } else {
             rights as u32 & (RIGHT_READ | RIGHT_WRITE)
         },
+        rights as u32,
     )?;
-    let held = crate::process::with_current_process(|process| process.handle_rights(handle as u32))
-        .ok_or(EINVAL)?
-        .map_err(handle_error_to_errno)?;
-    if rights as u32 & !held != 0 {
-        return Err(EACCES);
-    }
     let name = copy_string_from_user_len(ptr as *const u8, len as usize, MAX_USER_PATH)?;
     let file = if create {
         let kind = match kind {
