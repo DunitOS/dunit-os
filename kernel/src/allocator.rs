@@ -7,6 +7,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::ptr;
 
+use crate::memory::pmm::PhysicalAddress;
 use crate::sync::IrqSafeSpinLock;
 
 const PAGE_SIZE: usize = 4096;
@@ -144,37 +145,6 @@ impl HeapInner {
         self.add_free_region(block_start, size);
     }
 
-    /// Acquire contiguous frames and publish their HHDM region to the free list.
-    unsafe fn grow(&mut self, min_bytes: usize) -> bool {
-        let want = match align_up_checked(min_bytes.max(HEAP_GROW_CHUNK), PAGE_SIZE) {
-            Some(value) => value,
-            None => return false,
-        };
-        let frames = want / PAGE_SIZE;
-
-        let pmm = match crate::memory::pmm::get_pmm() {
-            Some(pmm) => pmm,
-            None => return false,
-        };
-        let phys = match pmm.alloc_contiguous(frames) {
-            Some(phys) => phys,
-            None => return false,
-        };
-        let virt = crate::memory::vmm::phys_to_virt(phys.as_usize());
-        if virt == 0 {
-            for page in 0..frames {
-                pmm.free_frame(crate::memory::pmm::PhysicalAddress::from_usize(
-                    phys.as_usize() + page * PAGE_SIZE,
-                ));
-            }
-            return false;
-        }
-
-        self.add_free_region(virt, want);
-        self.total_bytes += want;
-        true
-    }
-
     fn stats(&self) -> KernelHeapStats {
         let total = self.total_bytes;
         let mut free = 0usize;
@@ -196,8 +166,37 @@ impl HeapInner {
     }
 }
 
+/// Acquired PMM backing that has not been published to the heap.
+struct HeapRegion {
+    physical: PhysicalAddress,
+    virtual_start: usize,
+    size: usize,
+}
+
+impl HeapRegion {
+    fn acquire(min_bytes: usize) -> Option<Self> {
+        let size = align_up_checked(min_bytes.max(HEAP_GROW_CHUNK), PAGE_SIZE)?;
+        let physical = crate::memory::pmm::get_pmm()?.alloc_contiguous(size / PAGE_SIZE)?;
+        let virtual_start = crate::memory::vmm::phys_to_virt(physical.as_usize());
+        let region = Self { physical, virtual_start, size };
+        if virtual_start == 0 {
+            region.release();
+            return None;
+        }
+        Some(region)
+    }
+
+    fn release(self) {
+        let pmm = crate::memory::pmm::get_pmm().expect("unpublished heap backing owns PMM frames");
+        for offset in (0..self.size).step_by(PAGE_SIZE) {
+            pmm.free_frame(PhysicalAddress::from_usize(self.physical.as_usize() + offset));
+        }
+    }
+}
+
 pub struct KernelAllocator {
     inner: IrqSafeSpinLock<HeapInner>,
+    growth: IrqSafeSpinLock<()>,
 }
 
 #[repr(C)]
@@ -213,6 +212,7 @@ impl KernelAllocator {
     pub const fn new() -> Self {
         Self {
             inner: IrqSafeSpinLock::new(HeapInner::new()),
+            growth: IrqSafeSpinLock::new(()),
         }
     }
 
@@ -227,20 +227,42 @@ impl KernelAllocator {
 
 unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut inner = self.inner.lock();
-        let mut result = inner.alloc_from_free_list(layout);
-        if result.is_null() {
-            // Include the header, alignment padding and a possible free-list tail.
-            let required = layout
-                .size()
-                .saturating_add(layout.align())
-                .saturating_add(core::mem::size_of::<AllocationHeader>())
-                .saturating_add(core::mem::size_of::<FreeBlock>());
-            if inner.grow(required) {
-                result = inner.alloc_from_free_list(layout);
-            }
+        let result = self.inner.lock().alloc_from_free_list(layout);
+        if !result.is_null() {
+            return result;
         }
-        result
+
+        // Coordinate only callers that exhaust the free list. They recheck
+        // after any earlier growth publishes its frames, before asking the PMM.
+        let _growth = self.growth.lock();
+        let result = self.inner.lock().alloc_from_free_list(layout);
+        if !result.is_null() {
+            return result;
+        }
+
+        // A contiguous PMM search must not hold the heap lock. A free can
+        // satisfy this allocation while the search runs.
+        let required = layout
+            .size()
+            .saturating_add(layout.align())
+            .saturating_add(core::mem::size_of::<AllocationHeader>())
+            .saturating_add(core::mem::size_of::<FreeBlock>());
+        let growth = HeapRegion::acquire(required);
+        let mut inner = self.inner.lock();
+        let result = inner.alloc_from_free_list(layout);
+        if !result.is_null() {
+            drop(inner);
+            if let Some(region) = growth {
+                region.release();
+            }
+            return result;
+        }
+        let Some(region) = growth else {
+            return ptr::null_mut();
+        };
+        inner.add_free_region(region.virtual_start, region.size);
+        inner.total_bytes += region.size;
+        inner.alloc_from_free_list(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {

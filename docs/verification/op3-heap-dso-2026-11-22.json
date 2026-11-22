@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-22",
+  "base_commit": "598dd21c0f6f471a2107b615c19470dc05a027df",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "85b24f65c5b1e85a70d590383f2f8fb76c7d84e7fdbae754ba38abad0426f03e",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "3fcbf011ffde61408cd0a7650164c518f9fda33b419e9c1114437a774f9c77ec",
+    "kernel/src/allocator.rs": "e8aead2b2558e94dc3504d87e9eebe55297699bc403ecc8cfeaa5552192cad29",
+    "tools/elf_handoff_dso_markers.json": "b88b2a2106c409d904e9d67075def041f914a26cb785fdaef8503f71fd969a29",
+    "tools/fixtures/build_elf_handoff.py": "f88c2284d492d40066222ccc185e3245b87c45992cbe82e73c61008beca720b3",
+    "tools/fixtures/elf_handoff_dso.c": "aeee66c34113029a2a0c1339e089ae8787da283edd204167976f147f6bf82342",
+    "tools/test_memory_host.rs": "4ff8dd7c578474dd809f964aa768dd481c271775d8c99d9c94b3ccf3ae3315cf"
+  },
+  "host_checks": {
+    "command": "rustc --edition=2021 --test tools/test_memory_host.rs",
+    "passed": 17,
+    "log_sha256": "44922070a70765083129fdb95f05f00636bce9996a477d5ca7109bc3d77cfa65",
+    "old_allocator_negative_control_exit_status": 101,
+    "old_allocator_log_sha256": "5313b957fa964c503576343fbd0c1930ff1e300a9dfde45b7d37ee92d3432d2e"
+  },
+  "qemu": {
+    "overlay_command": "python3 tools/fixtures/build_elf_handoff.py --with-dso OVERLAY",
+    "command": "python3 tools/qemu_test.py --build --initrd-overlay OVERLAY --markers-file COMBINED_MARKERS --cpus 4 --accel tcg",
+    "marker_contracts": [
+      "tools/elf_handoff_dso_markers.json",
+      "tools/irq_progress_markers.json",
+      "tools/m6_musl_malloc_markers.json",
+      "tools/m6_musl_thread_markers.json"
+    ],
+    "fixture_sha256": {
+      "main": "c9ae5063e5acc6799f2bf78e4f345aa666a273de8b8b2e7d174a128a98c2a4c3",
+      "interpreter": "9c7a9c4693530fcc7fb56cf01dc0e5c693edd40b41982753b5e15c0044ad42ae",
+      "libhandoff.so": "742c7cece2ec64cf282ed84a2d94a30cf14a601026542328c8968b73dfd34e68"
+    },
+    "qemu_version": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "image_sha256": "608fa3c0d99249dd30a936a743486684b5f412851f38d5284329dedbc0fb93f8",
+    "serial_sha256": "2e9a2979c5c9741d4d765600bab721c02956067bc5782d1254dff42d31ee488f",
+    "harness_log_sha256": "36964bff0c94c460720d2242c113f7149999e6c5a1ffd3e26094e4c31973bafc",
+    "result": "completed",
+    "guest_online_cpus": 4,
+    "user_dispatch_cpus": 1,
+    "observed": [
+      "[TERM-007] Starting main loop",
+      "[HEAP] OK (PMM-backed, growable)",
+      "[ELF-HANDOFF] DT_NEEDED and relocations OK",
+      "[ELF-HANDOFF] interpreter auxv and main entry OK",
+      "[IRQ-PROGRESS] PIT and AP IPI inside syscall; lock masks IRQ; HAL return ACK OK",
+      "[IRQ-PROGRESS-USER] syscall result GPR SIMD TLS preserved OK",
+      "[MUSL-MALLOC] OK",
+      "[MUSL-THREAD] counter=10000 r1=5000 r2=5000",
+      "[MUSL-THREAD] OK"
+    ]
+  },
+  "limits": [
+    "The heap free-list lock no longer spans contiguous PMM search or rollback. Growth is serialized by a separate IRQ-safe coordinator. This is a lock-scope result without an IRQ-off duration measurement.",
+    "The test interpreter loads one generated DSO, applies one RELATIVE relocation, and binds one JUMP_SLOT. The boot-smoke feature gates this path. Musl ldso, general dependency resolution, RELRO and dynamic TLS remain open."
+  ]
+}

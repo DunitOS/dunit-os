@@ -293,6 +293,11 @@ Profiles and remaining gates:
   interpreter in ring 3, verify `AT_BASE`, `AT_ENTRY`, and `AT_PHDR`, and
   reach the main entry with the expected exit status.
   [Native handoff verification](docs/verification/op3-pipe-handoff-2026-11-22.json)
+- [x] Extend the test overlay to load one `DT_NEEDED` dependency using native
+  file and memory syscalls. The test interpreter applies `R_X86_64_RELATIVE`
+  to the dependency and binds `R_X86_64_JUMP_SLOT` in the main image. The main
+  verifies the imported call and relocated data.
+  [Native dependency verification](docs/verification/op3-heap-dso-2026-11-22.json)
 - [ ] Add signals/timers/interruption, sockets after netd, dynamic loader/TLS and
   demand-driven fork/COW as independently gated work.
 

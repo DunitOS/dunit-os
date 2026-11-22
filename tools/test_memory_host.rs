@@ -4,7 +4,47 @@
 #[path = "../kernel/src/sync.rs"]
 mod actual_sync;
 mod sync {
-    pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
+    use crate::actual_sync::{SpinLock, SpinLockGuard};
+    use std::ops::{Deref, DerefMut};
+
+    std::thread_local! {
+        pub static HEAP_HELD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    pub struct IrqSafeSpinLock<T>(SpinLock<T>);
+    pub struct Guard<'a, T>(SpinLockGuard<'a, T>);
+
+    impl<T> IrqSafeSpinLock<T> {
+        pub const fn new(value: T) -> Self {
+            Self(SpinLock::new(value))
+        }
+        pub fn lock(&self) -> Guard<'_, T> {
+            let guard = self.0.lock();
+            // The heap's free-list lock contains state. Its separate growth
+            // coordinator has a zero-sized payload.
+            if std::mem::size_of::<T>() != 0 {
+                HEAP_HELD.with(|depth| depth.set(depth.get() + 1));
+            }
+            Guard(guard)
+        }
+    }
+    impl<T> Deref for Guard<'_, T> {
+        type Target = T;
+        fn deref(&self) -> &T {
+            &self.0
+        }
+    }
+    impl<T> DerefMut for Guard<'_, T> {
+        fn deref_mut(&mut self) -> &mut T {
+            &mut self.0
+        }
+    }
+    impl<T> Drop for Guard<'_, T> {
+        fn drop(&mut self) {
+            if std::mem::size_of::<T>() != 0 {
+                HEAP_HELD.with(|depth| depth.set(depth.get() - 1));
+            }
+        }
+    }
 }
 #[allow(dead_code)]
 #[path = "../kernel/src/allocator.rs"]
@@ -33,6 +73,7 @@ impl Drop for Backing {
 }
 thread_local! {
     static BACKING: RefCell<Backing> = RefCell::new(Backing::default());
+    static ON_GROW: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
 }
 mod memory {
     pub mod pmm {
@@ -52,6 +93,10 @@ mod memory {
         }
         impl Pmm {
             pub fn alloc_contiguous(&self, pages: usize) -> Option<PhysicalAddress> {
+                assert_eq!(crate::sync::HEAP_HELD.with(std::cell::Cell::get), 0);
+                if let Some(hook) = crate::ON_GROW.with(|hook| hook.borrow_mut().take()) {
+                    hook();
+                }
                 crate::BACKING.with(|pool| {
                     let mut pool = pool.borrow_mut();
                     if pages > pool.available {
@@ -69,6 +114,7 @@ mod memory {
                 })
             }
             pub fn free_frame(&self, frame: PhysicalAddress) {
+                assert_eq!(crate::sync::HEAP_HELD.with(std::cell::Cell::get), 0);
                 crate::BACKING.with(|pool| {
                     let mut pool = pool.borrow_mut();
                     assert!(
@@ -212,6 +258,36 @@ fn growth_and_reuse_keep_the_same_physical_backing() {
         assert_eq!(pool.live.len(), 256);
         assert_eq!(pool.available, 0);
     });
+}
+
+#[test]
+fn growth_retries_a_concurrent_free_and_returns_unpublished_backing() {
+    use std::sync::Arc;
+
+    let heap = Arc::new(Heap::new(4096));
+    let layout = Layout::from_size_align(4096 - 24, 8).unwrap();
+    let first = unsafe { heap.allocator.alloc(layout) };
+    assert!(!first.is_null());
+    assert_eq!(heap.allocator.stats().free_bytes, 0);
+    let address = first as usize;
+    let hook_heap = Arc::clone(&heap);
+    ON_GROW.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || unsafe {
+            hook_heap.allocator.dealloc(address as *mut u8, layout);
+        }));
+    });
+    BACKING.with(|pool| pool.borrow_mut().available = 256);
+    let next = unsafe { heap.allocator.alloc(layout) };
+    assert_eq!(next, first);
+    assert_eq!(heap.allocator.stats().total_bytes, 4096);
+    BACKING.with(|pool| {
+        let pool = pool.borrow();
+        assert_eq!(pool.regions.len(), 1);
+        assert_eq!(pool.available, 256);
+        assert!(pool.live.is_empty());
+    });
+    unsafe { heap.allocator.dealloc(next, layout) };
+    heap.assert_reclaimed();
 }
 
 #[test]

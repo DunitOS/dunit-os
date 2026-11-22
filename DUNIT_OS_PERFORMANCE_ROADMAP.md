@@ -248,6 +248,11 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   outside the registry guard, recheck readers and capacity before publishing,
   and retire the final buffer after unlocking. Preserve pipe restart and EOF.
   [Pipe and interpreter checks](docs/verification/op3-pipe-handoff-2026-11-22.json)
+- [x] Move contiguous PMM allocation and rollback out of the heap free-list
+  guard. Serialize growth attempts separately and reuse a newly freed block
+  before publishing new backing. PMM search and growth coordination still
+  need IRQ-off latency measurements.
+  [Heap and DSO verification](docs/verification/op3-heap-dso-2026-11-22.json)
 
 Remaining gates, in order:
 

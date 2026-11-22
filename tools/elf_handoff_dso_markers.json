@@ -1,0 +1,28 @@
+{
+  "description": "Native ET_EXEC to interpreter handoff plus a single dynamically loaded dependency. Generate the overlay with tools/fixtures/build_elf_handoff.py --with-dso and pass it via --initrd-overlay in a full developer build.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": []
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "Boot proceeds to the terminal after the handoff test",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[ELF-HANDOFF] interpreter auxv and main entry OK",
+      "claim": "The loader enters the interpreter and the main program exits with the expected status",
+      "source": "kernel/src/elf/handoff_smoke.rs"
+    },
+    {
+      "marker": "[ELF-HANDOFF] DT_NEEDED and relocations OK",
+      "claim": "The main program calls its PLT import and reads the value through the dependency's relocated pointer",
+      "source": "tools/fixtures/build_elf_handoff.py"
+    }
+  ],
+  "forbidden": [
+    "[ELF-HANDOFF] FAIL",
+    "[PANIC]"
+  ]
+}
