@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-22",
+  "base_commit": "ef06e05f3a075ef85acf8101e4957eb4e3e26b4f",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "448e1122c53f697ee8c3118d871583fb7f9306e8fb39f05753b10c5dd9787f13",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "6e6451bf3ef896a5b411feaedc8b36d1126d8c5b103e6ded7ab2a7acd1aa798e",
+    "kernel/src/elf/mod.rs": "177094153ac070f5191d3bcb0b42ba6191558c874394e778bd8dfb9cc0227997",
+    "kernel/src/elf/parser.rs": "01774b514c83c059276d41879da115b15ae24c968a082c6c05c8610ade9ab4a4",
+    "kernel/src/pty/mod.rs": "81945abb34e22d57ce4f6cb0e6cc950c777f6a992700abcc4f9ef11145d166b9",
+    "kernel/src/syscall/mod.rs": "28031328889ac7cdab34241ee33bd35806ad8c2d75c51cf77c0c7a45cb239b20",
+    "tools/test_pty_host.rs": "7eb52b1911d9a6e99b58fb001c44b5b39523a2b2455b4b78daddf814e0477563"
+  },
+  "host": {
+    "pty_command": "python3 tools/test_pty.py",
+    "pty_passed": 6,
+    "pty_reentry_stress_iterations_per_direction": 100000,
+    "pty_allocator_negative_control_exit_status": 134,
+    "pty_log_sha256": "91adcd3c68aa9d73f1a5666f5107a8b4bbfaf28b699274a625047768bfdaf3bd",
+    "pty_negative_control_log_sha256": "15f2703a47ec357197abd26b7168710553dca35a4e3abc8b415aea85abe729f6",
+    "memory_elf_command": "rustc --edition=2021 --test tools/test_memory_host.rs",
+    "memory_elf_passed": 15,
+    "memory_elf_log_sha256": "07f8e215df5a639623c52545b385bf7a2f38f2bbca495abcc25ac674a3f3811c"
+  },
+  "qemu": {
+    "command": "python3 tools/qemu_test.py --build --cpus 4 --accel tcg --markers-file COMBINED_MARKERS",
+    "marker_contracts": [
+      "tools/pty_args_markers.json",
+      "tools/irq_progress_markers.json",
+      "tools/m6_musl_hello_markers.json",
+      "tools/m6_musl_thread_markers.json"
+    ],
+    "extra_command_and_marker": [
+      "exec /app/pty_test",
+      "[EXEC] /app/pty_test returned code=0"
+    ],
+    "image_sha256": "7c3076b55d44c2c40485bcd8625c0e1739a8d9e1671702af6e2729d2521727de",
+    "serial_sha256": "1b6110a60256374a5948b3e962fb650afc2e3057eb7a9a05dc982244ad422d59",
+    "harness_sha256": "46b7d410509493ddd9f9578d8d09a07082c90a399c3a11ddf36a3d914fce8689",
+    "result": "completed",
+    "online_cpus": 4,
+    "dispatch_cpus": 1,
+    "observed": [
+      "[TERM-007] Starting main loop",
+      "[EXEC] /app/pty_test returned code=0",
+      "[PTY-ARGS] dsh quoted executable and arguments OK",
+      "[PTY-ARGS] DONE",
+      "[IRQ-PROGRESS] PIT and AP IPI inside syscall; lock masks IRQ; HAL return ACK OK",
+      "[IRQ-PROGRESS-USER] syscall result GPR SIMD TLS preserved OK",
+      "[MUSL-HELLO] OK",
+      "[MUSL-THREAD] counter=10000 r1=5000 r2=5000",
+      "[MUSL-THREAD] OK"
+    ]
+  },
+  "limits": [
+    "PTY growth releases the table while allocating and while retiring the replaced storage. Byte copies under the table remain bounded by the 8192-byte direction capacity. IRQ-off wall duration was not measured.",
+    "The ELF parser runs the placement planner in the static load path. ET_DYN rebasing is checked on the host. Interpreter startup, relocations and shared-library loading are not enabled.",
+    "Four CPUs were online. User dispatch remained on the BSP."
+  ]
+}

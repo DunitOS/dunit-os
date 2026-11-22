@@ -2,8 +2,61 @@
 extern crate alloc;
 #[allow(dead_code)] #[path = "../kernel/src/sync.rs"] mod actual_sync;
 mod sync {
-    pub use crate::actual_sync::SpinLock as IrqSafeSpinLock;
-    pub type IrqSafeSpinLockGuard<'a,T> = crate::actual_sync::SpinLockGuard<'a,T>;
+    use crate::actual_sync::{SpinLock, SpinLockGuard};
+    use std::ops::{Deref, DerefMut};
+
+    pub struct IrqSafeSpinLock<T>(SpinLock<T>);
+    pub struct IrqSafeSpinLockGuard<'a, T>(SpinLockGuard<'a, T>);
+
+    impl<T> IrqSafeSpinLock<T> {
+        pub const fn new(value: T) -> Self { Self(SpinLock::new(value)) }
+        pub fn lock(&self) -> IrqSafeSpinLockGuard<'_, T> {
+            let guard = self.0.lock();
+            super::GUARD_DEPTH.with(|depth| depth.set(depth.get() + 1));
+            IrqSafeSpinLockGuard(guard)
+        }
+    }
+    impl<T> Deref for IrqSafeSpinLockGuard<'_, T> {
+        type Target = T;
+        fn deref(&self) -> &T { &self.0 }
+    }
+    impl<T> DerefMut for IrqSafeSpinLockGuard<'_, T> {
+        fn deref_mut(&mut self) -> &mut T { &mut self.0 }
+    }
+    impl<T> Drop for IrqSafeSpinLockGuard<'_, T> {
+        fn drop(&mut self) {
+            super::GUARD_DEPTH.with(|depth| depth.set(depth.get() - 1));
+        }
+    }
+}
+use std::{alloc::{GlobalAlloc, Layout, System}, cell::Cell};
+thread_local! {
+    static GUARD_DEPTH: Cell<usize> = const { Cell::new(0) };
+    static CHECK_ALLOC: Cell<bool> = const { Cell::new(false) };
+}
+fn check_alloc_scope() {
+    if CHECK_ALLOC.try_with(Cell::get).unwrap_or(false)
+        && GUARD_DEPTH.try_with(Cell::get).unwrap_or(0) != 0
+    {
+        std::process::abort();
+    }
+}
+struct CheckingAllocator;
+#[global_allocator]
+static ALLOCATOR: CheckingAllocator = CheckingAllocator;
+unsafe impl GlobalAlloc for CheckingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        check_alloc_scope();
+        System.alloc(layout)
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        check_alloc_scope();
+        System.dealloc(ptr, layout);
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, len: usize) -> *mut u8 {
+        check_alloc_scope();
+        System.realloc(ptr, layout, len)
+    }
 }
 mod process {
     pub type ProcessId = u64;
@@ -22,6 +75,23 @@ mod process {
     }
 }
 #[path = "../kernel/src/pty/mod.rs"] mod pty;
+
+#[test]
+fn wrapped_ring_grows_and_retires_storage_outside_the_guard() {
+    let id = pty::create(7);
+    let endpoint = pty::attach_slave(id, 7).unwrap();
+    let mut output = [0; 64];
+    CHECK_ALLOC.with(|check| check.set(true));
+    assert_eq!(pty::master_write(id, 7, b"0123456789abcdef"), Some(16));
+    assert!(matches!(pty::slave_read_stdin(&endpoint, &mut output[..12]), Some(pty::SlaveRead::Data(12))));
+    assert_eq!(pty::master_write(id, 7, b"ABCDEFGHIJKL"), Some(12));
+    assert_eq!(pty::master_write(id, 7, &[255; 20]), Some(20));
+    assert!(matches!(pty::slave_read_stdin(&endpoint, &mut output), Some(pty::SlaveRead::Data(36))));
+    CHECK_ALLOC.with(|check| check.set(false));
+    assert_eq!(&output[..16], b"cdefABCDEFGHIJKL");
+    assert_eq!(&output[16..36], &[255; 20]);
+    assert!(pty::close(id, 7));
+}
 
 #[test]
 fn endpoint_geometry_ownership_readiness_and_close_eof() {

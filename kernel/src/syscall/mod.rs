@@ -864,8 +864,7 @@ fn sys_read(fd: u32, buf: *mut u8, count: usize) -> i64 {
         crate::process::FdTarget::Stdin => {
             // PTY slave? Drain the master→slave ring before the legacy path.
             if let Some(endpoint) = entry.terminal.as_ref() {
-                let mut pty_buf = Vec::new();
-                pty_buf.resize(count, 0);
+                let mut pty_buf = alloc::vec![0; count.min(crate::pty::PTY_RING_CAP)];
                 match crate::pty::slave_read_stdin(endpoint, &mut pty_buf) {
                     Some(crate::pty::SlaveRead::Data(read)) => {
                         if let Err(error) = copy_buffer_to_user(buf, &pty_buf[..read]) {
@@ -2212,8 +2211,7 @@ fn sys_pty_read(id: u32, buf: *mut u8, count: usize) -> i64 {
         Some(value) => value,
         None => return EINVAL,
     };
-    let mut kernel_buf = Vec::new();
-    kernel_buf.resize(count, 0);
+    let mut kernel_buf = alloc::vec![0; count.min(crate::pty::PTY_RING_CAP)];
     match crate::pty::master_read(id, master, &mut kernel_buf) {
         Some((0, true)) => EPIPE,
         Some((n, _)) => {

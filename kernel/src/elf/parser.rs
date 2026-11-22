@@ -1,4 +1,8 @@
-//! Static x86-64 ELF records and bounded program-header traversal.
+//! x86-64 ELF records, bounded program-header traversal and image placement.
+extern crate alloc;
+
+use self::alloc::vec::Vec;
+use core::ops::Range;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ElfHeader {
@@ -42,6 +46,7 @@ pub const ELF_CLASS_64: u8 = 2;
 pub const ELF_DATA_LSB: u8 = 1;
 pub const ELF_MACHINE_X86_64: u16 = 0x3E;
 pub const ELF_TYPE_EXEC: u16 = 2;
+const ELF_TYPE_DYN: u16 = 3;
 pub const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
@@ -51,6 +56,7 @@ pub const PT_GNU_STACK: u32 = 0x6474_e551;
 pub const PF_X: u32 = 0x1;
 pub const PF_W: u32 = 0x2;
 pub const PF_R: u32 = 0x4;
+pub(super) const PAGE_SIZE: usize = 4096;
 
 #[derive(Debug)]
 pub enum ElfError {
@@ -73,8 +79,32 @@ pub(super) struct AuxProgramHeaders<'a> {
     pub bytes: &'a [u8],
 }
 
+pub(super) struct ImageLoadPlan<'a> {
+    pub entry: usize,
+    pub program_headers: AuxProgramHeaders<'a>,
+    pub segments: Vec<LoadSegment<'a>>,
+    pub executable_stack: bool,
+}
+
+pub(super) struct LoadSegment<'a> {
+    pub start: usize,
+    pub pages: Range<usize>,
+    pub bytes: &'a [u8],
+    pub flags: u32,
+}
+
 impl<'a> ElfParser<'a> {
     pub fn new(data: &'a [u8]) -> Result<Self, ElfError> {
+        let parser = Self::parse_image(data)?;
+        // This loader enters the main image directly. Refuse images that
+        // need a linker before mapping any bytes or preparing an entry point.
+        if parser.needs_linker()? {
+            return Err(ElfError::UnsupportedDynamicLinking);
+        }
+        Ok(parser)
+    }
+
+    fn parse_image(data: &'a [u8]) -> Result<Self, ElfError> {
         if data.len() < core::mem::size_of::<ElfHeader>() {
             return Err(ElfError::InvalidMagic);
         }
@@ -93,7 +123,7 @@ impl<'a> ElfParser<'a> {
             return Err(ElfError::InvalidArchitecture);
         }
 
-        if header.elf_type != ELF_TYPE_EXEC {
+        if !matches!(header.elf_type, ELF_TYPE_EXEC | ELF_TYPE_DYN) {
             return Err(ElfError::InvalidType);
         }
 
@@ -106,15 +136,37 @@ impl<'a> ElfParser<'a> {
         }
 
         let parser = Self { data, header };
-        // This loader enters the main image directly. Refuse images that
-        // need a linker before mapping any bytes or preparing an entry point.
-        if parser
-            .program_headers()?
-            .any(|ph| matches!(ph.p_type, PT_INTERP | PT_DYNAMIC))
-        {
-            return Err(ElfError::UnsupportedDynamicLinking);
-        }
+        parser.program_header_bytes()?;
         Ok(parser)
+    }
+
+    fn needs_linker(&self) -> Result<bool, ElfError> {
+        let mut dynamic = self.header.elf_type == ELF_TYPE_DYN;
+        let mut interpreter = false;
+        for ph in self.program_headers()? {
+            match ph.p_type {
+                PT_DYNAMIC => dynamic = true,
+                PT_INTERP => {
+                    if interpreter {
+                        return Err(ElfError::InvalidProgramHeader);
+                    }
+                    let bytes = self.file_bytes(&ph)?;
+                    let path = bytes
+                        .strip_suffix(&[0])
+                        .ok_or(ElfError::InvalidProgramHeader)?;
+                    if !path.starts_with(b"/")
+                        || path.len() <= 1
+                        || path.contains(&0)
+                        || core::str::from_utf8(path).is_err()
+                    {
+                        return Err(ElfError::InvalidProgramHeader);
+                    }
+                    interpreter = true;
+                }
+                _ => {}
+            }
+        }
+        Ok(dynamic || interpreter)
     }
 
     pub fn header(&self) -> &ElfHeader {
@@ -154,6 +206,92 @@ impl<'a> ElfParser<'a> {
                 .program_header_bytes()?
                 .chunks_exact(core::mem::size_of::<ProgramHeader>()),
         })
+    }
+
+    fn file_bytes(&self, ph: &ProgramHeader) -> Result<&'a [u8], ElfError> {
+        let start = usize::try_from(ph.p_offset).map_err(|_| ElfError::InvalidProgramHeader)?;
+        let size = usize::try_from(ph.p_filesz).map_err(|_| ElfError::InvalidProgramHeader)?;
+        let end = start.checked_add(size).ok_or(ElfError::InvalidProgramHeader)?;
+        self.data.get(start..end).ok_or(ElfError::InvalidProgramHeader)
+    }
+
+    /// Check the complete image before mapping anything. The caller supplies
+    /// the image's allowed page range, excluding reserved regions such as the
+    /// initial stack. A fixed ET_EXEC uses a zero load bias.
+    pub(super) fn load_plan(
+        &self,
+        load_bias: usize,
+        allowed: Range<usize>,
+    ) -> Result<ImageLoadPlan<'a>, ElfError> {
+        if load_bias % PAGE_SIZE != 0 || (self.header.elf_type == ELF_TYPE_EXEC && load_bias != 0) {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        let rebase = |address| {
+            usize::try_from(address)
+                .ok()
+                .and_then(|address| load_bias.checked_add(address))
+                .ok_or(ElfError::InvalidProgramHeader)
+        };
+        let entry = rebase(self.entry_point())?;
+        let entry_page = entry & !(PAGE_SIZE - 1);
+        let mut segments = Vec::new();
+        let mut executable_stack = false;
+        for ph in self.program_headers()? {
+            if ph.p_type == PT_GNU_STACK {
+                executable_stack |= ph.p_flags & PF_X != 0;
+            }
+            if ph.p_type != PT_LOAD {
+                continue;
+            }
+            if ph.p_filesz > ph.p_memsz
+                || ph.p_flags & (PF_W | PF_X) == (PF_W | PF_X)
+                || (ph.p_align > 1
+                    && (!ph.p_align.is_power_of_two()
+                        || ph.p_vaddr % ph.p_align != ph.p_offset % ph.p_align
+                        || load_bias as u64 % ph.p_align != 0))
+            {
+                return Err(ElfError::InvalidProgramHeader);
+            }
+            let bytes = self.file_bytes(&ph)?;
+            if ph.p_memsz == 0 {
+                continue;
+            }
+            let start = rebase(ph.p_vaddr)?;
+            let size = usize::try_from(ph.p_memsz).map_err(|_| ElfError::InvalidProgramHeader)?;
+            let end = start
+                .checked_add(size)
+                .and_then(|end| end.checked_add(PAGE_SIZE - 1))
+                .ok_or(ElfError::InvalidProgramHeader)?;
+            let pages = (start & !(PAGE_SIZE - 1))..(end & !(PAGE_SIZE - 1));
+            if pages.start < allowed.start || pages.end > allowed.end {
+                return Err(ElfError::InvalidProgramHeader);
+            }
+            segments.push(LoadSegment {
+                start,
+                pages,
+                bytes,
+                flags: ph.p_flags,
+            });
+        }
+        // Preserve legacy ET_EXEC page sharing. A position-independent image
+        // has no such compatibility constraint and needs an executable
+        // entry after the mapper's writable-wins W^X merge.
+        if !segments.iter().any(|segment| {
+            segment.flags & PF_X != 0
+                && (segment.start..segment.start + segment.bytes.len()).contains(&entry)
+        }) || (self.header.elf_type == ELF_TYPE_DYN
+            && segments.iter().any(|segment| {
+                segment.flags & PF_W != 0 && segment.pages.contains(&entry_page)
+            }))
+        {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+
+        let mut program_headers = self.aux_program_headers()?;
+        if let Some(address) = program_headers.mapped_address {
+            program_headers.mapped_address = Some(rebase(address)? as u64);
+        }
+        Ok(ImageLoadPlan { entry, program_headers, segments, executable_stack })
     }
 
     /// Locate the complete header table in a file-backed LOAD. A declared PHDR
@@ -251,13 +389,106 @@ mod tests {
         for kind in [PT_INTERP, PT_DYNAMIC] {
             for slot in [0, 1] {
                 let mut bytes = image(2);
-                set_segment(&mut bytes, slot, kind, 0, 0, 0);
+                let offset = bytes.len() as u64;
+                let payload = b"/lib/ld-dunit.so\0";
+                bytes.extend_from_slice(payload);
+                set_segment(&mut bytes, slot, kind, offset, 0, payload.len() as u64);
                 assert!(matches!(
                     ElfParser::new(&bytes),
                     Err(ElfError::UnsupportedDynamicLinking)
                 ));
             }
         }
+    }
+
+    #[test]
+    fn interpreter_path_is_bounded_unique_absolute_and_nul_terminated() {
+        for path in [
+            b"/lib/ld-dunit.so".as_slice(),
+            b"lib/ld-dunit.so\0",
+            b"/lib/\0ld.so\0",
+            b"/\xff\0",
+        ] {
+            let mut bytes = image(2);
+            let offset = bytes.len() as u64;
+            bytes.extend_from_slice(path);
+            set_segment(&mut bytes, 0, PT_INTERP, offset, 0, path.len() as u64);
+            assert!(matches!(
+                ElfParser::new(&bytes),
+                Err(ElfError::InvalidProgramHeader)
+            ));
+        }
+        let mut bytes = image(2);
+        let offset = bytes.len() as u64;
+        let path = b"/lib/ld-dunit.so\0";
+        bytes.extend_from_slice(path);
+        set_segment(&mut bytes, 0, PT_INTERP, u64::MAX, 0, path.len() as u64);
+        assert!(matches!(ElfParser::new(&bytes), Err(ElfError::InvalidProgramHeader)));
+        for slot in [0, 1] {
+            set_segment(&mut bytes, slot, PT_INTERP, offset, 0, path.len() as u64);
+        }
+        assert!(matches!(ElfParser::new(&bytes), Err(ElfError::InvalidProgramHeader)));
+    }
+
+    #[test]
+    fn position_independent_plan_rebases_entry_headers_and_segment_pages() {
+        let mut bytes = image(2);
+        bytes[16..18].copy_from_slice(&ELF_TYPE_DYN.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0xb0_u64.to_le_bytes());
+        bytes.resize(PAGE_SIZE * 2, 0);
+        set_segment(&mut bytes, 0, PT_LOAD, 0, 0, PAGE_SIZE as u64);
+        bytes[68..72].copy_from_slice(&(PF_R | PF_X).to_le_bytes());
+        set_segment(&mut bytes, 1, PT_LOAD, PAGE_SIZE as u64, 0x3000, PAGE_SIZE as u64);
+        bytes[124..128].copy_from_slice(&(PF_R | PF_W).to_le_bytes());
+        let bias = 0x200000;
+        let parser = ElfParser::parse_image(&bytes).unwrap();
+        let plan = parser.load_plan(bias, bias..bias + 0x4000).unwrap();
+        assert_eq!(plan.entry, bias + 0xb0);
+        assert_eq!(plan.program_headers.mapped_address, Some(bias as u64 + 64));
+        assert_eq!(plan.segments[0].pages, bias..bias + 0x1000);
+        assert_eq!(plan.segments[1].pages, bias + 0x3000..bias + 0x4000);
+        assert!(parser.load_plan(bias + 1, bias..bias + 0x5000).is_err());
+        assert!(parser.load_plan(bias, bias + PAGE_SIZE..bias + 0x4000).is_err());
+        assert!(parser.load_plan(bias, bias..bias + 0x3000).is_err());
+        assert!(matches!(ElfParser::new(&bytes), Err(ElfError::UnsupportedDynamicLinking)));
+        set_segment(&mut bytes, 1, PT_LOAD, PAGE_SIZE as u64, 0x800, PAGE_SIZE as u64);
+        let parser = ElfParser::parse_image(&bytes).unwrap();
+        assert!(parser.load_plan(bias, bias..bias + 0x4000).is_err());
+    }
+
+    #[test]
+    fn preflight_rejects_invalid_static_segment_placement_and_entry() {
+        let mut bytes = image(2);
+        bytes.resize(PAGE_SIZE * 2, 0);
+        set_segment(&mut bytes, 0, PT_LOAD, 0, 0x400000, PAGE_SIZE as u64);
+        bytes[68..72].copy_from_slice(&(PF_R | PF_X).to_le_bytes());
+        let check = |image: &[u8]| {
+            ElfParser::new(image)
+                .unwrap()
+                .load_plan(0, PAGE_SIZE..0x402000)
+                .is_ok()
+        };
+        assert!(check(&bytes));
+        for (offset, address, size, flags) in [
+            (0x2000, 0x401000, 1, PF_R),
+            (0, 0, 1, PF_R),
+            (0, 0x402000, 1, PF_R),
+            (0, u64::MAX, 1, PF_R),
+            (0, 0x401000, 1, PF_W | PF_X),
+        ] {
+            set_segment(&mut bytes, 1, PT_LOAD, offset, address, size);
+            bytes[124..128].copy_from_slice(&flags.to_le_bytes());
+            assert!(!check(&bytes), "invalid PT_LOAD {offset:x}/{address:x}/{size:x}/{flags:x}");
+        }
+        // The loader keeps its existing writable-wins merge for old static
+        // images with several sections on the same page.
+        set_segment(&mut bytes, 1, PT_LOAD, 0, 0x400800, 1);
+        bytes[124..128].copy_from_slice(&(PF_R | PF_W).to_le_bytes());
+        assert!(check(&bytes));
+        set_segment(&mut bytes, 1, PT_LOAD, 0, 0x401000, 1);
+        bytes[124..128].copy_from_slice(&PF_R.to_le_bytes());
+        bytes[24..32].copy_from_slice(&0x401000_u64.to_le_bytes());
+        assert!(!check(&bytes));
     }
 
     #[test]

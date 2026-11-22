@@ -1,6 +1,6 @@
 # Dunit OS technical roadmap
 
-Updated 17 November 2026. This is the canonical architecture, dependency and
+Updated 22 November 2026. This is the canonical architecture, dependency and
 acceptance plan. Implemented foundations do not close an entire milestone:
 M4 persistence, M5 installed root, M6 release gates and M7 SDK completion remain
 open. [Current state](docs/architecture/current-state.md) describes the implementation;
@@ -283,6 +283,11 @@ Profiles and remaining gates:
   `PT_INTERP` and `PT_DYNAMIC` until an interpreter handoff exists. Retain the
   static stack-table fallback for images without a mapped program header table.
   [Loader verification](docs/verification/op3-filecap-elf-2026-11-21.json)
+- [x] Construct a load plan before mapping ELF segments. Check segment
+  placement, file ranges, permissions and entry point. Exercise rebasing for
+  `ET_DYN` in host tests and validate the `PT_INTERP` record before rejecting
+  interpreter-dependent execution.
+  [Load plan verification](docs/verification/op3-pty-elf-2026-11-22.json)
 - [ ] Add signals/timers/interruption, sockets after netd, dynamic loader/TLS and
   demand-driven fork/COW as independently gated work.
 

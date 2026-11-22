@@ -1,7 +1,7 @@
 # Dunit OS performance and SMP roadmap
 
-Updated 17 November 2026. OP0–OP3 are partial; the next stage is to finish OP3
-safety gates before OP4 application dispatch. This track complements the
+Updated 22 November 2026. OP0–OP3 are partial. Finish the OP3 safety gates
+before OP4 application dispatch. This track complements the
 [technical roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md); it does not close M7.
 Implementation details and evidence are in [SMP](docs/performance/smp.md),
 [measurements](docs/performance/measurements.md) and
@@ -240,6 +240,10 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
   child grants with the parent pin in one task scope. Backend and mapping
   critical sections still need their own bounds.
   [Native and host checks](docs/verification/op3-filecap-elf-2026-11-21.json)
+
+- [x] Allocate and retire PTY ring storage outside the IRQ-safe table guard.
+  Copy wrapped reads in two spans and limit PTY read scratch to the ring
+  capacity. [Host and native checks](docs/verification/op3-pty-elf-2026-11-22.json)
 
 Remaining gates, in order:
 

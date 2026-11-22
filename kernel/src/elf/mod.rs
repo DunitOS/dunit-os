@@ -22,14 +22,8 @@ const AT_ENTRY: u64 = 9;
 const AT_SECURE: u64 = 23;
 const AT_RANDOM: u64 = 25;
 
-const PAGE_SIZE: usize = 4096;
-
 fn align_down(value: usize, align: usize) -> usize {
     value & !(align - 1)
-}
-
-fn align_up(value: usize, align: usize) -> Option<usize> {
-    value.checked_add(align - 1).map(|v| v & !(align - 1))
 }
 
 pub fn prepare_process_elf(pid: ProcessId, data: &[u8], argv: &[String]) -> Result<(), ElfError> {
@@ -67,10 +61,10 @@ fn prepare_process_elf_env_impl(
     publish: bool,
 ) -> Result<(), ElfError> {
     let parser = ElfParser::new(data)?;
-    let program_headers = parser.aux_program_headers()?;
+    let plan = parser.load_plan(0, PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE)?;
     let env = extra_env;
     let prepared = crate::process::with_process_mut(pid, |process| {
-        if load_into_process_address_space(&parser, process).is_err() {
+        if load_into_process_address_space(&plan, process).is_err() {
             crate::memory::serial_write("[ELF-TEST] process load failed\r\n");
             return Err(crate::process::ProcessError::InvalidUserContext);
         }
@@ -81,7 +75,7 @@ fn prepare_process_elf_env_impl(
         }
 
         let initial_stack =
-            match prepare_initial_stack(process, &parser, program_headers, argv, &env) {
+            match prepare_initial_stack(process, &parser, &plan, argv, &env) {
                 Ok(stack) => stack,
                 Err(_) => {
                     crate::memory::serial_write("[ELF-TEST] argv stack setup failed\r\n");
@@ -89,7 +83,7 @@ fn prepare_process_elf_env_impl(
                 }
             };
 
-        process.context.rip = parser.entry_point();
+        process.context.rip = plan.entry as u64;
         process.context.rsp = initial_stack.rsp as u64;
         process.context.rflags = 0x202;
         process.context.rdi = initial_stack.argc as u64;
@@ -153,7 +147,7 @@ struct InitialStack {
 fn prepare_initial_stack(
     process: &mut Process,
     parser: &ElfParser,
-    program_headers: AuxProgramHeaders<'_>,
+    plan: &ImageLoadPlan<'_>,
     argv: &[String],
     env: &[&str],
 ) -> Result<InitialStack, ElfError> {
@@ -186,20 +180,20 @@ fn prepare_initial_stack(
 
     // Use the actual mapped table when a LOAD contains it. musl derives its
     // static TLS template from these records, rather than the kernel's TCB.
-    let phdr_address = match program_headers.mapped_address {
+    let phdr_address = match plan.program_headers.mapped_address {
         Some(address) => address,
         None => {
             // Header-less LOAD layouts are valid static ET_EXECs. With no
             // PT_PHDR load-bias record, absolute vaddrs remain valid when the
             // exact header table is copied into the bounded initial stack.
-            write_stack_bytes(process, &mut sp, program_headers.bytes)? as u64
+            write_stack_bytes(process, &mut sp, plan.program_headers.bytes)? as u64
         }
     };
     let auxv: [(u64, u64); 7] = [
         (AT_PHDR, phdr_address),
         (AT_PHENT, parser.header.phentsize as u64),
         (AT_PHNUM, parser.header.phnum as u64),
-        (AT_ENTRY, parser.entry_point()),
+        (AT_ENTRY, plan.entry as u64),
         (AT_PAGESZ, PAGE_SIZE as u64),
         (AT_SECURE, 0),
         (AT_RANDOM, random_ptr as u64),
@@ -332,18 +326,15 @@ fn write_user_bytes(process: &mut Process, addr: usize, bytes: &[u8]) -> Result<
 }
 
 fn load_into_process_address_space(
-    parser: &ElfParser,
+    plan: &ImageLoadPlan<'_>,
     process: &mut Process,
 ) -> Result<(), ElfError> {
     let mut address_space = process
         .address_space_mut()
         .ok_or(ElfError::InvalidProgramHeader)?;
 
-    for ph in parser.program_headers()? {
-        if ph.p_type != PT_LOAD {
-            continue;
-        }
-        load_segment_process(parser.data, &mut address_space, &ph)?;
+    for segment in &plan.segments {
+        load_segment_process(&mut address_space, segment)?;
     }
 
     // Stack: writable and non-executable (W^X). A classic missing-NX hole was
@@ -351,10 +342,8 @@ fn load_into_process_address_space(
     // stack executable if the ELF explicitly asks for it (a static musl binary
     // never does), otherwise map it NX.
     let mut stack_flags = PageFlags::WRITABLE | PageFlags::NO_EXECUTE;
-    for ph in parser.program_headers()? {
-        if ph.p_type == PT_GNU_STACK && (ph.p_flags & PF_X) != 0 {
-            stack_flags.remove(PageFlags::NO_EXECUTE);
-        }
+    if plan.executable_stack {
+        stack_flags.remove(PageFlags::NO_EXECUTE);
     }
     for page in 1..=(USER_STACK_SIZE / PAGE_SIZE) {
         let virt = VirtualAddress::from_usize(USER_STACK_TOP - (page * PAGE_SIZE));
@@ -395,61 +384,31 @@ fn install_initial_tls(parser: &ElfParser, process: &mut Process) -> Result<(), 
 }
 
 fn load_segment_process(
-    data: &[u8],
     address_space: &mut AddressSpace,
-    ph: &ProgramHeader,
+    segment: &LoadSegment<'_>,
 ) -> Result<(), ElfError> {
-    if ph.p_memsz < ph.p_filesz {
-        return Err(ElfError::InvalidProgramHeader);
-    }
-
-    let virt_start = ph.p_vaddr as usize;
-    let mem_size = ph.p_memsz as usize;
-    let file_size = ph.p_filesz as usize;
-    let file_start = ph.p_offset as usize;
-    let virt_end = virt_start
-        .checked_add(mem_size)
-        .ok_or(ElfError::InvalidProgramHeader)?;
-    let file_end = file_start
-        .checked_add(file_size)
-        .ok_or(ElfError::InvalidProgramHeader)?;
-
-    if file_end > data.len() {
-        return Err(ElfError::InvalidProgramHeader);
-    }
-
-    let page_start = align_down(virt_start, PAGE_SIZE);
-    let page_end = align_up(virt_end, PAGE_SIZE).ok_or(ElfError::InvalidProgramHeader)?;
-
-    // W^X: a single PT_LOAD segment must never be both writable and
-    // executable. Static binaries never emit RWX; reject it rather than map a
-    // writable+executable page (matches the mmap/mprotect W^X policy).
-    if (ph.p_flags & PF_W) != 0 && (ph.p_flags & PF_X) != 0 {
-        return Err(ElfError::InvalidProgramHeader);
-    }
-
     let mut flags = PageFlags::USER;
-    if ph.p_flags & PF_W != 0 {
+    if segment.flags & PF_W != 0 {
         flags |= PageFlags::WRITABLE;
     }
-    if ph.p_flags & PF_X == 0 {
+    if segment.flags & PF_X == 0 {
         flags |= PageFlags::NO_EXECUTE;
     }
 
-    for page_addr in (page_start..page_end).step_by(PAGE_SIZE) {
+    for page_addr in segment.pages.clone().step_by(PAGE_SIZE) {
         let virt = VirtualAddress::from_usize(page_addr);
         let phys = ensure_process_page(address_space, virt, flags)?;
         let dst_page = crate::memory::vmm::phys_to_virt(phys.as_usize()) as *mut u8;
 
-        let copy_start = page_addr.max(virt_start);
-        let copy_end = (page_addr + PAGE_SIZE).min(virt_start + file_size);
+        let copy_start = page_addr.max(segment.start);
+        let copy_end = (page_addr + PAGE_SIZE).min(segment.start + segment.bytes.len());
         if copy_start < copy_end {
-            let src_offset = file_start + (copy_start - virt_start);
+            let src_offset = copy_start - segment.start;
             let dst_offset = copy_start - page_addr;
             let copy_len = copy_end - copy_start;
             unsafe {
                 core::ptr::copy_nonoverlapping(
-                    data.as_ptr().add(src_offset),
+                    segment.bytes.as_ptr().add(src_offset),
                     dst_page.add(dst_offset),
                     copy_len,
                 );

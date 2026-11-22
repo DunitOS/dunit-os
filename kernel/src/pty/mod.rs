@@ -27,14 +27,46 @@ fn table() -> IrqSafeSpinLockGuard<'static, BTreeMap<u32, Pty>> { PTY_TABLE.lock
 pub(crate) fn channel_count() -> usize { table().len() }
 #[cfg(test)]
 pub(crate) fn channel_exists(id: u32) -> bool { table().contains_key(&id) }
-fn ring_push(ring: &mut VecDeque<u8>, data: &[u8]) -> usize {
-    let n = PTY_RING_CAP.saturating_sub(ring.len()).min(data.len());
-    ring.extend(data[..n].iter().copied());
-    n
+fn write_ring<E>(
+    data: &[u8],
+    mut lookup: impl for<'a> FnMut(&'a mut BTreeMap<u32, Pty>) -> Result<&'a mut VecDeque<u8>, E>,
+) -> Result<usize, E> {
+    let mut spare = VecDeque::new();
+    let written = loop {
+        let capacity = {
+            let mut table = table();
+            let ring = lookup(&mut table)?;
+            let n = (PTY_RING_CAP - ring.len()).min(data.len());
+            let required = ring.len() + n;
+            if required <= ring.capacity() || required <= spare.capacity() {
+                if required > ring.capacity() {
+                    let (head, tail) = ring.as_slices();
+                    spare.extend(head);
+                    spare.extend(tail);
+                    core::mem::swap(ring, &mut spare);
+                }
+                ring.extend(&data[..n]);
+                break n;
+            }
+            (ring.capacity() * 2).max(required).min(PTY_RING_CAP)
+        };
+        // Allocate before reentering the table and checking the channel again.
+        // A close or a competing write can change the result during this gap.
+        spare = VecDeque::with_capacity(capacity);
+    };
+    drop(spare);
+    if written > 0 {
+        crate::process::wake_poll_waiters();
+    }
+    Ok(written)
 }
 fn ring_pop(ring: &mut VecDeque<u8>, out: &mut [u8]) -> usize {
     let n = ring.len().min(out.len());
-    for slot in out.iter_mut().take(n) { *slot = ring.pop_front().unwrap(); }
+    let (head, tail) = ring.as_slices();
+    let head_len = head.len().min(n);
+    out[..head_len].copy_from_slice(&head[..head_len]);
+    out[head_len..n].copy_from_slice(&tail[..n - head_len]);
+    drop(ring.drain(..n));
     n
 }
 /// Shared by fd entries and in-flight I/O/ioctl; final drop signals slave hangup.
@@ -85,14 +117,11 @@ pub fn attach_slave(id: u32, master: ProcessId) -> Option<Arc<Endpoint>> {
     Some(endpoint)
 }
 pub fn master_write(id: u32, master: ProcessId, data: &[u8]) -> Option<usize> {
-    let written = {
-        let mut table = table();
-        let pty = table.get_mut(&id)?;
-        if pty.master != master || pty.master_closed { return None; }
-        ring_push(&mut pty.to_slave, data)
-    };
-    if written > 0 { crate::process::wake_poll_waiters(); }
-    Some(written)
+    write_ring(data, |table| {
+        let pty = table.get_mut(&id).ok_or(())?;
+        if pty.master != master || pty.master_closed { return Err(()); }
+        Ok(&mut pty.to_slave)
+    }).ok()
 }
 /// Hangup is readable once the last slave owner is gone and output is drained.
 pub fn master_read(id: u32, master: ProcessId, out: &mut [u8]) -> Option<(usize, bool)> {
@@ -134,14 +163,14 @@ pub fn slave_read_stdin(endpoint: &Endpoint, out: &mut [u8]) -> Option<SlaveRead
 }
 pub fn slave_write_stdout(endpoint: &Endpoint, data: &[u8]) -> Option<Result<usize, ()>> {
     let master_alive = master_alive(endpoint)?;
-    let written = {
-        let mut table = table();
-        let pty = table.get_mut(&endpoint.id)?;
-        if pty.master_closed || !master_alive { return Some(Err(())); }
-        ring_push(&mut pty.to_master, data)
-    };
-    if written > 0 { crate::process::wake_poll_waiters(); }
-    Some(Ok(written))
+    match write_ring(data, |table| {
+        let pty = table.get_mut(&endpoint.id).ok_or(None)?;
+        if pty.master_closed || !master_alive { return Err(Some(())); }
+        Ok(&mut pty.to_master)
+    }) {
+        Ok(n) => Some(Ok(n)),
+        Err(closed) => closed.map(Err),
+    }
 }
 pub fn slave_output_readiness(endpoint: &Endpoint) -> Option<(bool, bool)> {
     let master_alive = master_alive(endpoint)?;
