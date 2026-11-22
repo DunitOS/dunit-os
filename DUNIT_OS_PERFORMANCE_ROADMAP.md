@@ -244,6 +244,10 @@ with clock/event limits stated. This stage does not establish an SMP scheduler.
 - [x] Allocate and retire PTY ring storage outside the IRQ-safe table guard.
   Copy wrapped reads in two spans and limit PTY read scratch to the ring
   capacity. [Host and native checks](docs/verification/op3-pty-elf-2026-11-22.json)
+- [x] Reuse the prepared ring operations for anonymous pipes. Allocate backing
+  outside the registry guard, recheck readers and capacity before publishing,
+  and retire the final buffer after unlocking. Preserve pipe restart and EOF.
+  [Pipe and interpreter checks](docs/verification/op3-pipe-handoff-2026-11-22.json)
 
 Remaining gates, in order:
 

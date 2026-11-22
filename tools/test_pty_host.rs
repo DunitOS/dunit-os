@@ -1,4 +1,4 @@
-//! Compile with rustc --test; exercises the actual PTY table against process hooks.
+//! Exercises the actual PTY and pipe tables with interrupt and process hooks.
 extern crate alloc;
 #[allow(dead_code)] #[path = "../kernel/src/sync.rs"] mod actual_sync;
 mod sync {
@@ -32,10 +32,11 @@ mod sync {
 use std::{alloc::{GlobalAlloc, Layout, System}, cell::Cell};
 thread_local! {
     static GUARD_DEPTH: Cell<usize> = const { Cell::new(0) };
-    static CHECK_ALLOC: Cell<bool> = const { Cell::new(false) };
+    static CHECK_ALLOC_AT_LEAST: Cell<Option<usize>> = const { Cell::new(None) };
+    static CLOSE_READER_ON_ALLOC: Cell<Option<u64>> = const { Cell::new(None) };
 }
-fn check_alloc_scope() {
-    if CHECK_ALLOC.try_with(Cell::get).unwrap_or(false)
+fn check_alloc_scope(size: usize) {
+    if CHECK_ALLOC_AT_LEAST.try_with(Cell::get).ok().flatten().is_some_and(|min| size >= min)
         && GUARD_DEPTH.try_with(Cell::get).unwrap_or(0) != 0
     {
         std::process::abort();
@@ -46,15 +47,20 @@ struct CheckingAllocator;
 static ALLOCATOR: CheckingAllocator = CheckingAllocator;
 unsafe impl GlobalAlloc for CheckingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        check_alloc_scope();
+        check_alloc_scope(layout.size());
+        if let Some(id) = CLOSE_READER_ON_ALLOC.try_with(Cell::take).ok().flatten() {
+            if !pipe::release(id, false) {
+                std::process::abort();
+            }
+        }
         System.alloc(layout)
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        check_alloc_scope();
+        check_alloc_scope(layout.size());
         System.dealloc(ptr, layout);
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, len: usize) -> *mut u8 {
-        check_alloc_scope();
+        check_alloc_scope(layout.size().max(len));
         System.realloc(ptr, layout, len)
     }
 }
@@ -75,22 +81,68 @@ mod process {
     }
 }
 #[path = "../kernel/src/pty/mod.rs"] mod pty;
+#[path = "../kernel/src/byte_ring.rs"] mod byte_ring;
+#[path = "../kernel/src/pipe.rs"] mod pipe;
 
 #[test]
 fn wrapped_ring_grows_and_retires_storage_outside_the_guard() {
     let id = pty::create(7);
     let endpoint = pty::attach_slave(id, 7).unwrap();
     let mut output = [0; 64];
-    CHECK_ALLOC.with(|check| check.set(true));
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(Some(0)));
     assert_eq!(pty::master_write(id, 7, b"0123456789abcdef"), Some(16));
     assert!(matches!(pty::slave_read_stdin(&endpoint, &mut output[..12]), Some(pty::SlaveRead::Data(12))));
     assert_eq!(pty::master_write(id, 7, b"ABCDEFGHIJKL"), Some(12));
     assert_eq!(pty::master_write(id, 7, &[255; 20]), Some(20));
     assert!(matches!(pty::slave_read_stdin(&endpoint, &mut output), Some(pty::SlaveRead::Data(36))));
-    CHECK_ALLOC.with(|check| check.set(false));
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(None));
     assert_eq!(&output[..16], b"cdefABCDEFGHIJKL");
     assert_eq!(&output[16..36], &[255; 20]);
     assert!(pty::close(id, 7));
+}
+
+#[test]
+fn pipe_growth_wrap_and_final_backing_drop_leave_the_guard() {
+    const CAP: usize = 64 * 1024;
+    let id = pipe::create();
+    pipe::retain(id, true);
+    let mut output = vec![0; CAP];
+    let fill = vec![255; CAP];
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(Some(0)));
+    assert!(matches!(pipe::read(id, &mut output), pipe::PipeRead::WouldBlock));
+    assert!(matches!(pipe::write(id, b"0123456789abcdef"), pipe::PipeWrite::Wrote(16)));
+    assert!(matches!(pipe::read(id, &mut output[..12]), pipe::PipeRead::Data(12)));
+    assert!(matches!(pipe::write(id, b"ABCDEFGHIJKL"), pipe::PipeWrite::Wrote(12)));
+    assert!(matches!(pipe::write(id, &fill), pipe::PipeWrite::Wrote(n) if n == CAP - 16));
+    assert!(matches!(pipe::write(id, b"full"), pipe::PipeWrite::WouldBlock));
+    assert_eq!(pipe::readiness(id, true), (false, false));
+    assert!(matches!(pipe::read(id, &mut output), pipe::PipeRead::Data(CAP)));
+    assert_eq!(&output[..16], b"cdefABCDEFGHIJKL");
+    assert!(output[16..].iter().all(|&byte| byte == 255));
+    assert!(matches!(pipe::write(id, b"end"), pipe::PipeWrite::Wrote(3)));
+    assert!(!pipe::release(id, true));
+    assert!(pipe::release(id, true));
+    assert!(matches!(pipe::read(id, &mut output), pipe::PipeRead::Data(3)));
+    assert_eq!(&output[..3], b"end");
+    assert!(matches!(pipe::read(id, &mut output), pipe::PipeRead::Eof));
+    // Table node retirement is separate. Check the pipe's large allocation.
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(Some(CAP)));
+    assert!(pipe::release(id, false));
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(None));
+    assert!(matches!(pipe::write(id, b"gone"), pipe::PipeWrite::Broken));
+}
+
+#[test]
+fn pipe_reader_close_during_allocation_prevents_publication() {
+    let id = pipe::create();
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(Some(0)));
+    CLOSE_READER_ON_ALLOC.with(|close| close.set(Some(id)));
+    assert!(matches!(pipe::write(id, b"racing close"), pipe::PipeWrite::Broken));
+    CHECK_ALLOC_AT_LEAST.with(|check| check.set(None));
+    assert_eq!(CLOSE_READER_ON_ALLOC.with(Cell::take), None);
+    assert_eq!(pipe::readiness(id, true), (false, true));
+    assert!(matches!(pipe::read(id, &mut [0; 1]), pipe::PipeRead::WouldBlock));
+    assert!(pipe::release(id, true));
 }
 
 #[test]

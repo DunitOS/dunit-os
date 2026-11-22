@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual locked PTY streams: concurrent bytes, reentry and endpoint handover."""
+"""Actual PTY and pipe streams, including table guard checks and PTY reentry."""
 import os
 from pathlib import Path
 import subprocess

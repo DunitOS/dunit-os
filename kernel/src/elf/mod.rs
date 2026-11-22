@@ -18,6 +18,7 @@ const AT_PHDR: u64 = 3;
 const AT_PHENT: u64 = 4;
 const AT_PHNUM: u64 = 5;
 const AT_PAGESZ: u64 = 6;
+const AT_BASE: u64 = 7;
 const AT_ENTRY: u64 = 9;
 const AT_SECURE: u64 = 23;
 const AT_RANDOM: u64 = 25;
@@ -62,20 +63,31 @@ fn prepare_process_elf_env_impl(
 ) -> Result<(), ElfError> {
     let parser = ElfParser::new(data)?;
     let plan = parser.load_plan(0, PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE)?;
-    let env = extra_env;
+    prepare_process_image(pid, &parser, &plan, None, argv, extra_env, publish)
+}
+
+fn prepare_process_image(
+    pid: ProcessId,
+    parser: &ElfParser<'_>,
+    main: &ImageLoadPlan<'_>,
+    interpreter: Option<&InterpreterLoadPlan<'_>>,
+    argv: &[String],
+    env: &[&str],
+    publish: bool,
+) -> Result<(), ElfError> {
     let prepared = crate::process::with_process_mut(pid, |process| {
-        if load_into_process_address_space(&plan, process).is_err() {
+        if load_into_process_address_space(main, interpreter, process).is_err() {
             crate::memory::serial_write("[ELF-TEST] process load failed\r\n");
             return Err(crate::process::ProcessError::InvalidUserContext);
         }
 
-        if install_initial_tls(&parser, process).is_err() {
+        if interpreter.is_none() && install_initial_tls(parser, process).is_err() {
             crate::memory::serial_write("[ELF-TEST] TLS image setup failed\r\n");
             return Err(crate::process::ProcessError::InvalidUserContext);
         }
 
         let initial_stack =
-            match prepare_initial_stack(process, &parser, &plan, argv, &env) {
+            match prepare_initial_stack(process, parser, main, interpreter, argv, env) {
                 Ok(stack) => stack,
                 Err(_) => {
                     crate::memory::serial_write("[ELF-TEST] argv stack setup failed\r\n");
@@ -83,7 +95,7 @@ fn prepare_process_elf_env_impl(
                 }
             };
 
-        process.context.rip = plan.entry as u64;
+        process.context.rip = interpreter.map_or(main.entry, |plan| plan.image.entry) as u64;
         process.context.rsp = initial_stack.rsp as u64;
         process.context.rflags = 0x202;
         process.context.rdi = initial_stack.argc as u64;
@@ -108,6 +120,11 @@ fn prepare_process_elf_env_impl(
 pub const fn initial_user_stack() -> usize {
     USER_STACK_TOP & !0xF
 }
+
+#[cfg(feature = "boot-smoke-tests")]
+mod handoff_smoke;
+#[cfg(feature = "boot-smoke-tests")]
+pub(crate) use handoff_smoke::run_handoff_smoke;
 
 struct InitialStack {
     rsp: usize,
@@ -148,6 +165,7 @@ fn prepare_initial_stack(
     process: &mut Process,
     parser: &ElfParser,
     plan: &ImageLoadPlan<'_>,
+    interpreter: Option<&InterpreterLoadPlan<'_>>,
     argv: &[String],
     env: &[&str],
 ) -> Result<InitialStack, ElfError> {
@@ -212,6 +230,10 @@ fn prepare_initial_stack(
     // lower address of each pair). Order among non-NULL entries is irrelevant.
     push_user_u64(process, &mut sp, 0)?;
     push_user_u64(process, &mut sp, 0)?;
+    if let Some(interpreter) = interpreter {
+        push_user_u64(process, &mut sp, interpreter.base as u64)?;
+        push_user_u64(process, &mut sp, AT_BASE)?;
+    }
     for (a_type, a_val) in auxv.iter().rev() {
         push_user_u64(process, &mut sp, *a_val)?;
         push_user_u64(process, &mut sp, *a_type)?;
@@ -327,6 +349,7 @@ fn write_user_bytes(process: &mut Process, addr: usize, bytes: &[u8]) -> Result<
 
 fn load_into_process_address_space(
     plan: &ImageLoadPlan<'_>,
+    interpreter: Option<&InterpreterLoadPlan<'_>>,
     process: &mut Process,
 ) -> Result<(), ElfError> {
     let mut address_space = process
@@ -335,6 +358,11 @@ fn load_into_process_address_space(
 
     for segment in &plan.segments {
         load_segment_process(&mut address_space, segment)?;
+    }
+    if let Some(interpreter) = interpreter {
+        for segment in &interpreter.image.segments {
+            load_segment_process(&mut address_space, segment)?;
+        }
     }
 
     // Stack: writable and non-executable (W^X). A classic missing-NX hole was

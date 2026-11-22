@@ -1,0 +1,23 @@
+{
+  "description": "Native ELF interpreter handoff through the real image mapper. Generate an overlay with tools/fixtures/build_elf_handoff.py and use a full developer build with --initrd-overlay.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "cmd": []
+  },
+  "required": [
+    {
+      "marker": "[TERM-007] Starting main loop",
+      "claim": "Boot proceeds to the terminal after the handoff test",
+      "source": "kernel/src/lib.rs"
+    },
+    {
+      "marker": "[ELF-HANDOFF] interpreter auxv and main entry OK",
+      "claim": "A ring-3 ET_DYN interpreter checks AT_BASE, AT_ENTRY and AT_PHDR, then transfers control to the ET_EXEC main entry",
+      "source": "kernel/src/elf/handoff_smoke.rs"
+    }
+  ],
+  "forbidden": [
+    "[ELF-HANDOFF] FAIL",
+    "[PANIC]"
+  ]
+}

@@ -21,6 +21,7 @@ pub mod input;
 pub mod interrupts;
 pub mod ipc;
 pub mod memory;
+mod byte_ring;
 pub mod pipe;
 pub mod power;
 pub mod process;
@@ -916,6 +917,7 @@ pub extern "C" fn kernel_main(
         } else {
             screen_log("[FAIL] TLS ABI smoke failed", true);
         }
+        elf::run_handoff_smoke();
         screen_log("[ .. ] Running PTY endpoint smoke test", false);
         if command::run_pty_smoke() {
             screen_log("[ OK ] PTY endpoint smoke passed", false);

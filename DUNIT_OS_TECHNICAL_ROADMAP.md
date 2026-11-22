@@ -288,6 +288,11 @@ Profiles and remaining gates:
   `ET_DYN` in host tests and validate the `PT_INTERP` record before rejecting
   interpreter-dependent execution.
   [Load plan verification](docs/verification/op3-pty-elf-2026-11-22.json)
+- [x] Run an opt-in native interpreter handoff in the boot-smoke image. Map
+  the main image and interpreter with nonoverlapping ranges, enter the
+  interpreter in ring 3, verify `AT_BASE`, `AT_ENTRY`, and `AT_PHDR`, and
+  reach the main entry with the expected exit status.
+  [Native handoff verification](docs/verification/op3-pipe-handoff-2026-11-22.json)
 - [ ] Add signals/timers/interruption, sockets after netd, dynamic loader/TLS and
   demand-driven fork/COW as independently gated work.
 

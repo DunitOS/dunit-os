@@ -36,19 +36,10 @@ fn write_ring<E>(
         let capacity = {
             let mut table = table();
             let ring = lookup(&mut table)?;
-            let n = (PTY_RING_CAP - ring.len()).min(data.len());
-            let required = ring.len() + n;
-            if required <= ring.capacity() || required <= spare.capacity() {
-                if required > ring.capacity() {
-                    let (head, tail) = ring.as_slices();
-                    spare.extend(head);
-                    spare.extend(tail);
-                    core::mem::swap(ring, &mut spare);
-                }
-                ring.extend(&data[..n]);
-                break n;
+            match crate::byte_ring::push(ring, data, PTY_RING_CAP, &mut spare) {
+                Ok(n) => break n,
+                Err(capacity) => capacity,
             }
-            (ring.capacity() * 2).max(required).min(PTY_RING_CAP)
         };
         // Allocate before reentering the table and checking the channel again.
         // A close or a competing write can change the result during this gap.
@@ -59,15 +50,6 @@ fn write_ring<E>(
         crate::process::wake_poll_waiters();
     }
     Ok(written)
-}
-fn ring_pop(ring: &mut VecDeque<u8>, out: &mut [u8]) -> usize {
-    let n = ring.len().min(out.len());
-    let (head, tail) = ring.as_slices();
-    let head_len = head.len().min(n);
-    out[..head_len].copy_from_slice(&head[..head_len]);
-    out[head_len..n].copy_from_slice(&tail[..n - head_len]);
-    drop(ring.drain(..n));
-    n
 }
 /// Shared by fd entries and in-flight I/O/ioctl; final drop signals slave hangup.
 #[derive(Debug)]
@@ -129,7 +111,7 @@ pub fn master_read(id: u32, master: ProcessId, out: &mut [u8]) -> Option<(usize,
         let mut table = table();
         let pty = table.get_mut(&id)?;
         if pty.master != master || pty.master_closed { return None; }
-        let n = ring_pop(&mut pty.to_master, out);
+        let n = crate::byte_ring::pop(&mut pty.to_master, out);
         let slave_gone = pty.slave.is_some() && !slave_alive(pty);
         (n, slave_gone && pty.to_master.is_empty())
     };
@@ -153,7 +135,7 @@ pub fn slave_read_stdin(endpoint: &Endpoint, out: &mut [u8]) -> Option<SlaveRead
     let result = {
         let mut table = table();
         let pty = table.get_mut(&endpoint.id)?;
-        let n = ring_pop(&mut pty.to_slave, out);
+        let n = crate::byte_ring::pop(&mut pty.to_slave, out);
         if n > 0 { SlaveRead::Data(n) }
         else if pty.master_closed || !master_alive { SlaveRead::Eof }
         else { SlaveRead::WouldBlock }

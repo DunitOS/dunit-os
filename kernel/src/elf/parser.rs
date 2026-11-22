@@ -93,18 +93,24 @@ pub(super) struct LoadSegment<'a> {
     pub flags: u32,
 }
 
+pub(super) struct InterpreterLoadPlan<'a> {
+    pub image: ImageLoadPlan<'a>,
+    pub base: usize,
+}
+
 impl<'a> ElfParser<'a> {
     pub fn new(data: &'a [u8]) -> Result<Self, ElfError> {
         let parser = Self::parse_image(data)?;
         // This loader enters the main image directly. Refuse images that
         // need a linker before mapping any bytes or preparing an entry point.
-        if parser.needs_linker()? {
+        let (dynamic, path) = parser.linker_requirement()?;
+        if dynamic || path.is_some() {
             return Err(ElfError::UnsupportedDynamicLinking);
         }
         Ok(parser)
     }
 
-    fn parse_image(data: &'a [u8]) -> Result<Self, ElfError> {
+    pub(super) fn parse_image(data: &'a [u8]) -> Result<Self, ElfError> {
         if data.len() < core::mem::size_of::<ElfHeader>() {
             return Err(ElfError::InvalidMagic);
         }
@@ -140,14 +146,14 @@ impl<'a> ElfParser<'a> {
         Ok(parser)
     }
 
-    fn needs_linker(&self) -> Result<bool, ElfError> {
+    pub(super) fn linker_requirement(&self) -> Result<(bool, Option<&'a str>), ElfError> {
         let mut dynamic = self.header.elf_type == ELF_TYPE_DYN;
-        let mut interpreter = false;
+        let mut interpreter = None;
         for ph in self.program_headers()? {
             match ph.p_type {
                 PT_DYNAMIC => dynamic = true,
                 PT_INTERP => {
-                    if interpreter {
+                    if interpreter.is_some() {
                         return Err(ElfError::InvalidProgramHeader);
                     }
                     let bytes = self.file_bytes(&ph)?;
@@ -157,16 +163,54 @@ impl<'a> ElfParser<'a> {
                     if !path.starts_with(b"/")
                         || path.len() <= 1
                         || path.contains(&0)
-                        || core::str::from_utf8(path).is_err()
                     {
                         return Err(ElfError::InvalidProgramHeader);
                     }
-                    interpreter = true;
+                    interpreter = Some(core::str::from_utf8(path)
+                        .map_err(|_| ElfError::InvalidProgramHeader)?);
                 }
                 _ => {}
             }
         }
-        Ok(dynamic || interpreter)
+        Ok((dynamic, interpreter))
+    }
+
+    #[cfg(any(test, feature = "boot-smoke-tests"))]
+    pub(super) fn interpreted_load_plan(
+        &self,
+        resolved_path: &str,
+        interpreter_data: &'a [u8],
+        main_bias: usize,
+        interpreter_bias: usize,
+        allowed: Range<usize>,
+    ) -> Result<(ImageLoadPlan<'a>, InterpreterLoadPlan<'a>), ElfError> {
+        if self.linker_requirement()?.1 != Some(resolved_path) {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        let interpreter = Self::parse_image(interpreter_data)?;
+        if interpreter.header.elf_type != ELF_TYPE_DYN
+            || interpreter.linker_requirement()?.1.is_some()
+            || interpreter_bias == 0
+        {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        let main = self.load_plan(main_bias, allowed.clone())?;
+        let image = interpreter.load_plan(interpreter_bias, allowed)?;
+        if main.program_headers.mapped_address.is_none()
+            || main.executable_stack
+            || image.executable_stack
+            || main.segments.iter().any(|segment| {
+                segment.flags & PF_W != 0 && segment.pages.contains(&main.entry)
+            })
+            || main.segments.iter().any(|a| {
+                image.segments.iter().any(|b| {
+                    a.pages.start < b.pages.end && b.pages.start < a.pages.end
+                })
+            })
+        {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        Ok((main, InterpreterLoadPlan { image, base: interpreter_bias }))
     }
 
     pub fn header(&self) -> &ElfHeader {
@@ -454,6 +498,57 @@ mod tests {
         set_segment(&mut bytes, 1, PT_LOAD, PAGE_SIZE as u64, 0x800, PAGE_SIZE as u64);
         let parser = ElfParser::parse_image(&bytes).unwrap();
         assert!(parser.load_plan(bias, bias..bias + 0x4000).is_err());
+    }
+
+    #[test]
+    fn interpreter_pair_binds_path_and_keeps_main_aux_addresses() {
+        let path = b"/tests/ld-dunit\0";
+        let mut main = image(2);
+        main.extend_from_slice(path);
+        let file_len = main.len() as u64;
+        let interp_off = file_len - path.len() as u64;
+        set_segment(&mut main, 0, PT_LOAD, 0, 0x400000, file_len);
+        set_segment(&mut main, 1, PT_INTERP, interp_off, 0x4000b0, path.len() as u64);
+        main[68..72].copy_from_slice(&(PF_R | PF_X).to_le_bytes());
+        main[24..32].copy_from_slice(&0x4000a0_u64.to_le_bytes());
+
+        let mut interp = image(1);
+        interp[16..18].copy_from_slice(&ELF_TYPE_DYN.to_le_bytes());
+        interp[24..32].copy_from_slice(&0x40_u64.to_le_bytes());
+        let interp_len = interp.len() as u64;
+        set_segment(&mut interp, 0, PT_LOAD, 0, 0, interp_len);
+        interp[68..72].copy_from_slice(&(PF_R | PF_X).to_le_bytes());
+
+        let allowed = PAGE_SIZE..0x500000;
+        let parser = ElfParser::parse_image(&main).unwrap();
+        let (program, interpreter) = parser.interpreted_load_plan(
+            "/tests/ld-dunit", &interp, 0, 0x200000, allowed.clone(),
+        ).unwrap();
+        assert_eq!(program.entry, 0x4000a0);
+        assert_eq!(program.program_headers.mapped_address, Some(0x400040));
+        assert_eq!(interpreter.base, 0x200000);
+        assert_eq!(interpreter.image.entry, 0x200040);
+
+        assert!(parser.interpreted_load_plan(
+            "/tests/another", &interp, 0, 0x200000, allowed.clone(),
+        ).is_err());
+        assert!(parser.interpreted_load_plan(
+            "/tests/ld-dunit", &interp, 0, 0x400000, allowed.clone(),
+        ).is_err());
+        assert!(parser.interpreted_load_plan(
+            "/tests/ld-dunit", &main, 0, 0x200000, allowed.clone(),
+        ).is_err());
+        assert!(matches!(ElfParser::new(&main), Err(ElfError::UnsupportedDynamicLinking)));
+
+        main[16..18].copy_from_slice(&ELF_TYPE_DYN.to_le_bytes());
+        main[24..32].copy_from_slice(&0xa0_u64.to_le_bytes());
+        set_segment(&mut main, 0, PT_LOAD, 0, 0, file_len);
+        let parser = ElfParser::parse_image(&main).unwrap();
+        let (program, _) = parser.interpreted_load_plan(
+            "/tests/ld-dunit", &interp, 0x300000, 0x200000, allowed,
+        ).unwrap();
+        assert_eq!(program.entry, 0x3000a0);
+        assert_eq!(program.program_headers.mapped_address, Some(0x300040));
     }
 
     #[test]

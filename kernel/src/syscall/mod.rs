@@ -978,12 +978,10 @@ fn sys_pipe_read(id: u64, buf: *mut u8, count: usize, nonblocking: bool) -> i64 
     let checkpoint = crate::process::wait_checkpoint();
     match crate::pipe::read(id, &mut kbuf) {
         crate::pipe::PipeRead::Data(n) => {
-            if let Err(error) = copy_buffer_to_user(buf, &kbuf[..n]) {
-                return error;
-            }
-            // Freed buffer space — wake any writer blocked on a full pipe.
+            let copied = copy_buffer_to_user(buf, &kbuf[..n]);
+            // Data was already drained, including when copyout fails.
             crate::process::wake_pipe_waiters(id);
-            n as i64
+            copied.map_or_else(|error| error, |()| n as i64)
         }
         crate::pipe::PipeRead::Eof => 0,
         crate::pipe::PipeRead::WouldBlock if nonblocking => EAGAIN,

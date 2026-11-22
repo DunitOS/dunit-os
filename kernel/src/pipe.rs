@@ -3,8 +3,7 @@
 //! layer. Each end is a process fd (`FdTarget::Pipe`), ref-counted so a dup of an
 //! end counts and the buffer is freed only when both ends are fully closed.
 //!
-//! Blocking is cooperative on this UP, non-preemptible-in-kernel design: a read
-//! on an empty pipe with writers still open reports `WouldBlock`, and the
+//! A read on an empty pipe with writers still open reports `WouldBlock`, and the
 //! syscall parks the caller on `WaitKey::Pipe(id)` with a syscall-restart so the
 //! read re-runs on wake. EOF (all writers gone) yields 0; a write with no
 //! readers yields `Broken` (EPIPE).
@@ -78,23 +77,23 @@ pub fn retain(id: u64, write_end: bool) {
 /// writers (they get EPIPE). The pipe object is freed once both ends hit zero.
 pub fn release(id: u64, write_end: bool) -> bool {
     let mut reg = REGISTRY.lock();
-    let drop_pipe;
-    let wake;
-    if let Some(pipe) = reg.pipes.get_mut(&id) {
-        if write_end {
-            pipe.write_refs = pipe.write_refs.saturating_sub(1);
-            wake = pipe.write_refs == 0; // readers should see EOF
-        } else {
-            pipe.read_refs = pipe.read_refs.saturating_sub(1);
-            wake = pipe.read_refs == 0; // writers should see EPIPE
-        }
-        drop_pipe = pipe.read_refs == 0 && pipe.write_refs == 0;
-    } else {
+    let Some(pipe) = reg.pipes.get_mut(&id) else {
         return false;
-    }
-    if drop_pipe {
-        reg.pipes.remove(&id);
-    }
+    };
+    let refs = if write_end {
+        &mut pipe.write_refs
+    } else {
+        &mut pipe.read_refs
+    };
+    *refs = refs.saturating_sub(1);
+    let wake = *refs == 0;
+    let retired = if pipe.read_refs == 0 && pipe.write_refs == 0 {
+        reg.pipes.remove(&id)
+    } else {
+        None
+    };
+    drop(reg);
+    drop(retired);
     wake
 }
 
@@ -112,30 +111,33 @@ pub fn read(id: u64, out: &mut [u8]) -> PipeRead {
             PipeRead::WouldBlock
         };
     }
-    let n = core::cmp::min(out.len(), pipe.buf.len());
-    for slot in out.iter_mut().take(n) {
-        *slot = pipe.buf.pop_front().unwrap();
-    }
-    PipeRead::Data(n)
+    PipeRead::Data(crate::byte_ring::pop(&mut pipe.buf, out))
 }
 
 /// Append `data`. No readers => Broken (EPIPE). Full => WouldBlock. Otherwise
 /// writes as much as fits (at least one byte) and reports the count.
 pub fn write(id: u64, data: &[u8]) -> PipeWrite {
-    let mut reg = REGISTRY.lock();
-    let Some(pipe) = reg.pipes.get_mut(&id) else {
-        return PipeWrite::Broken;
-    };
-    if pipe.read_refs == 0 {
-        return PipeWrite::Broken;
+    let mut spare = VecDeque::new();
+    loop {
+        let capacity = {
+            let mut reg = REGISTRY.lock();
+            let Some(pipe) = reg.pipes.get_mut(&id) else {
+                return PipeWrite::Broken;
+            };
+            if pipe.read_refs == 0 {
+                return PipeWrite::Broken;
+            }
+            if pipe.buf.len() == PIPE_CAPACITY {
+                return PipeWrite::WouldBlock;
+            }
+            match crate::byte_ring::push(&mut pipe.buf, data, PIPE_CAPACITY, &mut spare) {
+                Ok(n) => return PipeWrite::Wrote(n),
+                Err(capacity) => capacity,
+            }
+        };
+        // Recheck endpoint state and free space after allocating.
+        spare = VecDeque::with_capacity(capacity);
     }
-    let space = PIPE_CAPACITY.saturating_sub(pipe.buf.len());
-    if space == 0 {
-        return PipeWrite::WouldBlock;
-    }
-    let n = core::cmp::min(space, data.len());
-    pipe.buf.extend(data.iter().take(n).copied());
-    PipeWrite::Wrote(n)
 }
 
 /// Non-consuming readiness under the same registry lock as I/O.

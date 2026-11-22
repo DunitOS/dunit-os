@@ -1,0 +1,77 @@
+{
+  "date": "2026-11-22",
+  "base_commit": "9e550e931f35551a4a4e862a0dd6eca3a0b47f8f",
+  "source_sha256": {
+    "DUNIT_OS_PERFORMANCE_ROADMAP.md": "c9ff5dccf1a9635121710dbbebe0fce9152a203c11f9f968de87676277e636e3",
+    "DUNIT_OS_TECHNICAL_ROADMAP.md": "27293614eef0307adab0c4298c4bf4d555cf8168ca5c15ce278da3f82f191b43",
+    "kernel/src/byte_ring.rs": "419b192780a2e9a77bc49dca052fdfa3aa3ad7392a77a5644fa4d10160f58dd1",
+    "kernel/src/elf/handoff_smoke.rs": "1b5421ce9c9a5666e38d2b96a8bbfd62dcee9cddfdfcfe35ed17e9ab998881a2",
+    "kernel/src/elf/mod.rs": "4e829b8cf22240676a5936b780dfc8609e87c9976ea41d711b3370c0211a6a22",
+    "kernel/src/elf/parser.rs": "0e9a193ee88e61a22fd8d15b67e48c9e2fc523658dcaa9f8ccfea773245a4b86",
+    "kernel/src/lib.rs": "ec224cf178a85a123d875654df4e746fab8459ef9b21e28e664b41d5f2ac7e33",
+    "kernel/src/pipe.rs": "ab5508426b8a0cf7c4882b204389363f735badab3f8b994117d3a982a417de63",
+    "kernel/src/pty/mod.rs": "6defbec0d08d2395501c5743fbbca7bc3e69e331e6d0d6a4a8050f415e81b65f",
+    "kernel/src/syscall/mod.rs": "d3be2a208dd93c4a3aff5cf3f160afd8aec0f597aa84cd094fb1b1fb4f6bf185",
+    "tools/elf_handoff_markers.json": "781bcee45034f4a47a6d2a45edd0832aff5beb57d70e45f0472091c98f8e30db",
+    "tools/fixtures/build_elf_handoff.py": "b29ad05aa2ca6e82ba2a3924ddbc8d7d1b4b5d5aa956b1f3094a0f5b1f0d8496",
+    "tools/test_pty.py": "b1ff9ed13646e435b1f61bd34f753f4cf00486446f1e50e196046c9bfd03af80",
+    "tools/test_pty_host.rs": "fe7950149777cd2695bdbed2b4cd4b42ac39650764ef942183353a8b33fc8344"
+  },
+  "host": {
+    "pty_pipe_command": "python3 tools/test_pty.py",
+    "pty_pipe_passed": 8,
+    "pipe_allocator_negative_control_exit_status": 134,
+    "pty_pipe_log_sha256": "8d8d14939950c0719a42e1249371eb9d3c29b3829ed22ce702df6f8db8cba363",
+    "pipe_negative_control_log_sha256": "dcab33e263c3d461f002f4ef51ac390fe224182898e74c12ccd6f44fd165dab1",
+    "memory_elf_command": "rustc --edition=2021 --test tools/test_memory_host.rs",
+    "memory_elf_passed": 16,
+    "memory_elf_log_sha256": "8bcc9cbea704f7f49009e601be16f7927f8dd2f7d5d2248c2e5af20f0ab24776"
+  },
+  "qemu": {
+    "overlay_command": "python3 tools/fixtures/build_elf_handoff.py OVERLAY",
+    "command": "python3 tools/qemu_test.py --build --initrd-overlay OVERLAY --cpus 4 --accel tcg --markers-file COMBINED_MARKERS",
+    "marker_contracts": [
+      "tools/elf_handoff_markers.json",
+      "tools/m6_pipe_markers.json",
+      "tools/pty_args_markers.json",
+      "tools/irq_progress_markers.json",
+      "tools/m6_musl_hello_markers.json",
+      "tools/m6_musl_thread_markers.json"
+    ],
+    "extra_command_and_marker": [
+      "exec /app/pty_test",
+      "[EXEC] /app/pty_test returned code=0"
+    ],
+    "fixtures_sha256": {
+      "main": "13705c77e69f674d8682997e290eaecd1e6d3c95fa736bacd1deff4832502a80",
+      "interpreter": "5f4b414103925b6c534f9db01a3a77a37f235bdd0a3441d2b33aa5802d8cf982"
+    },
+    "version": "QEMU emulator version 10.0.13 (Debian 1:10.0.13+ds-0+deb13u1)",
+    "machine": "q35,accel=tcg",
+    "image_sha256": "c16921b7222a0f12f9e73cbee27dc01f7f89839ef6e071a0d84390f480e98602",
+    "serial_sha256": "23243f537f64700138f5df3b31ba6b9358e594b6e4d0125c9da89d13d0692692",
+    "harness_sha256": "158a011424947ce2f7725ac92b721b3bcea8e3e058b3daf44a7d7790f549ce66",
+    "result": "completed",
+    "online_cpus": 4,
+    "dispatch_cpus": 1,
+    "observed": [
+      "[TERM-007] Starting main loop",
+      "[ELF-HANDOFF] interpreter auxv and main entry OK",
+      "[EXEC] /app/pty_test returned code=0",
+      "[PTY-ARGS] DONE",
+      "[PIPE] reader got hello OK",
+      "[PIPE] reader eof OK",
+      "[PIPE] DONE",
+      "[IRQ-PROGRESS] PIT and AP IPI inside syscall; lock masks IRQ; HAL return ACK OK",
+      "[IRQ-PROGRESS-USER] syscall result GPR SIMD TLS preserved OK",
+      "[MUSL-HELLO] OK",
+      "[MUSL-THREAD] counter=10000 r1=5000 r2=5000",
+      "[MUSL-THREAD] OK"
+    ]
+  },
+  "limits": [
+    "The pipe backing allocation and final buffer drop leave the registry guard. Table metadata and bounded byte movement still hold their guard. IRQ-off wall duration was not measured.",
+    "The explicit test overlay enables interpreter execution only inside a boot-smoke build. Regular launch remains static. DSO loading, relocation and dynamic TLS are separate work.",
+    "Four CPUs were online. User dispatch remained on the BSP."
+  ]
+}
