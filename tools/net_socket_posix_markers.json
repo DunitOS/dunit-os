@@ -30,6 +30,10 @@
       "source": "userspace/ctests/net_socket_posix.c"
     },
     {
+      "marker": "[POSIX-SOCKET] blocking socket options and SO_RCVTIMEO passed",
+      "source": "userspace/ctests/net_socket_posix.c"
+    },
+    {
       "marker": "[POSIX-SOCKET] UDP sendto/recvfrom truncation and poll passed",
       "source": "userspace/ctests/net_socket_posix.c"
     },

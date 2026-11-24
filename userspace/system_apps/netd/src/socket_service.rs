@@ -377,8 +377,8 @@ impl SocketService {
                 (BRIDGE_CONNECT | BRIDGE_SEND | BRIDGE_SHUTDOWN, Some(index)) => {
                     let socket = self.sockets[index].as_mut().unwrap();
                     if socket.failed {
-                        self.bridge
-                            .complete(header, header.kind, errno::EPIPE, Endpoint::NONE)?;
+                        // Fail path already emitted BRIDGE_ERROR/complete and cleared
+                        // kernel socket.request; ignore any stray queued request.
                     } else if socket.request.is_some() {
                         return Err(Error(errno::EIO));
                     } else {

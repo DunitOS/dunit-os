@@ -1,4 +1,4 @@
-/* Opt-in nonblocking IPv4 socket translation for Dunit's musl sysroot. */
+/* Opt-in IPv4 socket translation (blocking and nonblocking) for Dunit musl. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -12,11 +12,40 @@
 #include <limits.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <stdint.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
+enum {
+    OPEN_TIMEOUT_MS = 5000,
+    MAX_TRACKED_FDS = 1024,
+};
+
+struct sock_state {
+    uint8_t active;
+    uint8_t nonblocking;
+    int sock_type;
+    int protocol;
+    uint64_t rcv_timeout_ms;
+    uint64_t snd_timeout_ms;
+};
+
 static uint32_t selected_grant;
-enum { OPEN_TIMEOUT_MS = 5000 };
+static volatile int state_lock;
+static struct sock_state fd_states[MAX_TRACKED_FDS];
+
+static void lock_states(void)
+{
+    while (__atomic_exchange_n(&state_lock, 1, __ATOMIC_ACQUIRE) != 0)
+        __asm__ volatile("pause" ::: "memory");
+}
+
+static void unlock_states(void)
+{
+    __atomic_store_n(&state_lock, 0, __ATOMIC_RELEASE);
+}
 
 static long native_call(long number, uintptr_t first, uintptr_t second, uintptr_t third,
                         uintptr_t fourth, uintptr_t fifth, uintptr_t sixth)
@@ -67,6 +96,83 @@ static long query_endpoints(int fd, struct dunit_socket_endpoints *endpoints)
     return value;
 }
 
+static struct sock_state get_state(int fd)
+{
+    struct sock_state copy = {
+        .active = 0,
+        .nonblocking = 1,
+        .sock_type = 0,
+        .protocol = 0,
+        .rcv_timeout_ms = 0,
+        .snd_timeout_ms = 0,
+    };
+    if (fd < 0 || fd >= MAX_TRACKED_FDS)
+        return copy;
+    lock_states();
+    if (fd_states[fd].active)
+        copy = fd_states[fd];
+    unlock_states();
+    return copy;
+}
+
+static void set_state(int fd, int nonblocking, int sock_type, int protocol)
+{
+    if (fd < 0 || fd >= MAX_TRACKED_FDS)
+        return;
+    lock_states();
+    fd_states[fd].active = 1;
+    fd_states[fd].nonblocking = nonblocking ? 1 : 0;
+    fd_states[fd].sock_type = sock_type;
+    fd_states[fd].protocol = protocol;
+    fd_states[fd].rcv_timeout_ms = 0;
+    fd_states[fd].snd_timeout_ms = 0;
+    unlock_states();
+}
+
+static void clear_state(int fd)
+{
+    if (fd < 0 || fd >= MAX_TRACKED_FDS)
+        return;
+    lock_states();
+    memset(&fd_states[fd], 0, sizeof fd_states[fd]);
+    unlock_states();
+}
+
+static uint64_t monotonic_ms_now(void)
+{
+    uint64_t t[2] = {0, 0};
+    if (native_call(SYS_CLOCK_GET_TIME, 1, (uintptr_t)t, 0, 0, 0, 0) < 0)
+        return 0;
+    return t[0] * 1000ULL + t[1] / 1000000ULL;
+}
+
+static int poll_wait(int fd, short events, uint64_t timeout_ms, uint64_t *deadline_out)
+{
+    int wait_ms = -1;
+    if (timeout_ms > 0) {
+        uint64_t now = monotonic_ms_now();
+        if (*deadline_out == 0) {
+            uint64_t cap = UINT64_MAX - now;
+            *deadline_out = now + (timeout_ms > cap ? cap : timeout_ms);
+        }
+        if (now >= *deadline_out)
+            return 0;
+        uint64_t rem = *deadline_out - now;
+        wait_ms = rem > (uint64_t)INT_MAX ? INT_MAX : (int)rem;
+    }
+    struct pollfd pfd = { .fd = fd, .events = events };
+    int ready = poll(&pfd, 1, wait_ms);
+    if (ready < 0)
+        return -1;
+    if (ready == 0)
+        return 0;
+    if (pfd.revents & POLLNVAL) {
+        errno = EBADF;
+        return -1;
+    }
+    return 1;
+}
+
 static int endpoint_error(const struct sockaddr *address, socklen_t length,
                           struct dunit_socket_endpoint *endpoint)
 {
@@ -109,11 +215,25 @@ int dunit_socket_use_grant(uint32_t grant)
     return 0;
 }
 
+int dunit_socket_set_nonblocking(int fd, int nonblocking)
+{
+    struct dunit_socket_endpoints endpoints;
+    long value = query_endpoints(fd, &endpoints);
+    if (value < 0)
+        return (int)result(value);
+    if (fd < 0 || fd >= MAX_TRACKED_FDS)
+        return (int)fail(EBADF);
+    lock_states();
+    fd_states[fd].active = 1;
+    fd_states[fd].nonblocking = nonblocking ? 1 : 0;
+    unlock_states();
+    return 0;
+}
+
 static int await_open(int fd)
 {
     /* The proxy's OPEN completion must precede connect(). Otherwise its
-     * POLLOUT could be mistaken for completion of a connect still unqueued.
-     * The bound applies only to creation. Socket I/O stays nonblocking. */
+     * POLLOUT could be mistaken for completion of a connect still unqueued. */
     struct pollfd interest = { .fd = fd, .events = POLLOUT };
     int ready = poll(&interest, 1, OPEN_TIMEOUT_MS);
     if (ready < 0)
@@ -138,23 +258,25 @@ int socket(int domain, int type, int protocol)
 {
     if (domain != AF_INET)
         return (int)fail(EAFNOSUPPORT);
+    int base_type = type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
     unsigned native_protocol;
-    switch (type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC)) {
+    int resolved_proto;
+    switch (base_type) {
     case SOCK_STREAM:
         if (protocol && protocol != IPPROTO_TCP)
             return (int)fail(EPROTONOSUPPORT);
         native_protocol = DUNIT_SOCKET_PROTO_TCP;
+        resolved_proto = IPPROTO_TCP;
         break;
     case SOCK_DGRAM:
         if (protocol && protocol != IPPROTO_UDP)
             return (int)fail(EPROTONOSUPPORT);
         native_protocol = DUNIT_SOCKET_PROTO_UDP;
+        resolved_proto = IPPROTO_UDP;
         break;
     default:
         return (int)fail(EPROTONOSUPPORT);
     }
-    if (!(type & SOCK_NONBLOCK))
-        return (int)fail(EOPNOTSUPP);
     uint32_t grant = __atomic_load_n(&selected_grant, __ATOMIC_ACQUIRE);
     if (!grant)
         return (int)fail(EACCES);
@@ -165,9 +287,12 @@ int socket(int domain, int type, int protocol)
         return (int)result(value);
     int fd = (int)value;
     if (await_open(fd) == 0 &&
-        ((type & SOCK_CLOEXEC) || fcntl(fd, F_SETFD, 0) == 0))
+        ((type & SOCK_CLOEXEC) || fcntl(fd, F_SETFD, 0) == 0)) {
+        set_state(fd, (type & SOCK_NONBLOCK) != 0, base_type, resolved_proto);
         return fd;
+    }
     int error = errno;
+    clear_state(fd);
     close(fd);
     return (int)fail(error);
 }
@@ -178,8 +303,35 @@ int connect(int fd, const struct sockaddr *address, socklen_t length)
     int error = endpoint_error(address, length, &endpoint);
     if (error)
         return (int)fail(error);
+    struct sock_state st = get_state(fd);
     long value = socket_op(fd, DUNIT_SOCKET_OP_CONNECT, &endpoint, sizeof endpoint, NULL, 0);
-    return (int)result(value == -EAGAIN ? -EINPROGRESS : value);
+    if (value != -EAGAIN)
+        return (int)result(value);
+    if (st.nonblocking)
+        return (int)fail(EINPROGRESS);
+
+    uint64_t deadline = 0;
+    for (;;) {
+        int waited = poll_wait(fd, POLLOUT, st.snd_timeout_ms, &deadline);
+        if (waited < 0)
+            return -1;
+        if (waited == 0)
+            return (int)fail(ETIMEDOUT);
+        int32_t sock_err = 0;
+        long err_res = socket_op(fd, DUNIT_SOCKET_OP_ERROR, NULL, 0, &sock_err, sizeof sock_err);
+        if (err_res < 0)
+            return (int)result(err_res);
+        if (err_res != sizeof sock_err || sock_err > 0)
+            return (int)fail(EIO);
+        if (sock_err < 0)
+            return (int)result(sock_err);
+        struct dunit_socket_endpoints eps;
+        long ep_res = query_endpoints(fd, &eps);
+        if (ep_res < 0)
+            return (int)result(ep_res);
+        if (eps.remote.port != 0)
+            return 0;
+    }
 }
 
 ssize_t send(int fd, const void *buffer, size_t length, int flags)
@@ -201,7 +353,35 @@ ssize_t send(int fd, const void *buffer, size_t length, int flags)
                           sizeof endpoints.remote, NULL, 0);
         return result(value == -EOPNOTSUPP ? 0 : value);
     }
-    return result(native_call(SYS_WRITE, fd, (uintptr_t)buffer, length, 0, 0, 0));
+
+    struct sock_state st = get_state(fd);
+    if (st.nonblocking || (flags & MSG_DONTWAIT))
+        return result(native_call(SYS_WRITE, fd, (uintptr_t)buffer, length, 0, 0, 0));
+
+    size_t sent = 0;
+    uint64_t deadline = 0;
+    const unsigned char *src = (const unsigned char *)buffer;
+    while (sent < length) {
+        value = native_call(SYS_WRITE, fd, (uintptr_t)(src + sent), length - sent, 0, 0, 0);
+        if (value > 0) {
+            sent += (size_t)value;
+            if (st.sock_type == SOCK_DGRAM)
+                break;
+            continue;
+        }
+        if (value == -EAGAIN) {
+            int waited = poll_wait(fd, POLLOUT, st.snd_timeout_ms, &deadline);
+            if (waited > 0)
+                continue;
+            if (sent > 0)
+                return (ssize_t)sent;
+            return waited == 0 ? fail(EAGAIN) : -1;
+        }
+        if (sent > 0)
+            return (ssize_t)sent;
+        return result(value);
+    }
+    return (ssize_t)sent;
 }
 
 ssize_t sendto(int fd, const void *buffer, size_t length, int flags,
@@ -224,8 +404,21 @@ ssize_t sendto(int fd, const void *buffer, size_t length, int flags,
         return fail(error);
     if (length)
         memcpy(record.payload, buffer, length);
-    return result(socket_op(fd, DUNIT_SOCKET_OP_SEND_TO, &record,
-                            sizeof record.endpoint + length, NULL, 0));
+
+    struct sock_state st = get_state(fd);
+    int nonblocking = st.nonblocking || (flags & MSG_DONTWAIT);
+    uint64_t deadline = 0;
+    for (;;) {
+        long value = socket_op(fd, DUNIT_SOCKET_OP_SEND_TO, &record,
+                               sizeof record.endpoint + length, NULL, 0);
+        if (value != -EAGAIN || nonblocking)
+            return result(value);
+        int waited = poll_wait(fd, POLLOUT, st.snd_timeout_ms, &deadline);
+        if (waited < 0)
+            return -1;
+        if (waited == 0)
+            return fail(EAGAIN);
+    }
 }
 
 ssize_t recvfrom(int fd, void *buffer, size_t length, int flags,
@@ -240,39 +433,63 @@ ssize_t recvfrom(int fd, void *buffer, size_t length, int flags,
         struct dunit_socket_receive header;
         unsigned char payload[DUNIT_SOCKET_MAX_PAYLOAD];
     } record;
-    long value = socket_op(fd, DUNIT_SOCKET_OP_RECV_FROM, NULL, 0, &record,
-                           sizeof record.header + capacity);
-    if (value == -EOPNOTSUPP) {
-        /* Native RECV_FROM is datagram-only. It has already type-checked
-         * the FD, so the stream fallback cannot read an unrelated file. */
-        if (flags & MSG_TRUNC)
-            return fail(EOPNOTSUPP);
-        struct dunit_socket_endpoints endpoints;
-        if (address) {
-            value = query_endpoints(fd, &endpoints);
-            if (value < 0)
-                return result(value);
-            if (!endpoints.remote.port)
-                return fail(ENOTCONN);
+
+    struct sock_state st = get_state(fd);
+    int nonblocking = st.nonblocking || (flags & MSG_DONTWAIT);
+    uint64_t deadline = 0;
+
+    for (;;) {
+        long value = socket_op(fd, DUNIT_SOCKET_OP_RECV_FROM, NULL, 0, &record,
+                               sizeof record.header + capacity);
+        if (value == -EOPNOTSUPP) {
+            /* Native RECV_FROM is datagram-only. It has already type-checked
+             * the FD, so the stream fallback cannot read an unrelated file. */
+            if (flags & MSG_TRUNC)
+                return fail(EOPNOTSUPP);
+            struct dunit_socket_endpoints endpoints;
+            if (address) {
+                value = query_endpoints(fd, &endpoints);
+                if (value < 0)
+                    return result(value);
+                if (!endpoints.remote.port)
+                    return fail(ENOTCONN);
+            }
+            for (;;) {
+                value = native_call(SYS_READ, fd, (uintptr_t)buffer, capacity, 0, 0, 0);
+                if (value != -EAGAIN || nonblocking) {
+                    if (value >= 0 && address)
+                        put_address(&endpoints.remote, address, address_length);
+                    return result(value);
+                }
+                int waited = poll_wait(fd, POLLIN, st.rcv_timeout_ms, &deadline);
+                if (waited < 0)
+                    return -1;
+                if (waited == 0)
+                    return fail(EAGAIN);
+            }
         }
-        value = native_call(SYS_READ, fd, (uintptr_t)buffer, capacity, 0, 0, 0);
-        if (value >= 0 && address)
-            put_address(&endpoints.remote, address, address_length);
-        return result(value);
+        if (value == -EAGAIN && !nonblocking) {
+            int waited = poll_wait(fd, POLLIN, st.rcv_timeout_ms, &deadline);
+            if (waited < 0)
+                return -1;
+            if (waited == 0)
+                return fail(EAGAIN);
+            continue;
+        }
+        if (value < 0)
+            return result(value);
+        if ((size_t)value < sizeof record.header ||
+            (size_t)value > sizeof record.header + capacity)
+            return fail(EIO);
+        size_t copied = (size_t)value - sizeof record.header;
+        if (copied > record.header.full_len || record.header.full_len > DUNIT_SOCKET_MAX_PAYLOAD)
+            return fail(EIO);
+        if (copied)
+            memcpy(buffer, record.payload, copied);
+        if (address)
+            put_address(&record.header.source, address, address_length);
+        return flags & MSG_TRUNC ? (ssize_t)record.header.full_len : (ssize_t)copied;
     }
-    if (value < 0)
-        return result(value);
-    if ((size_t)value < sizeof record.header ||
-        (size_t)value > sizeof record.header + capacity)
-        return fail(EIO);
-    size_t copied = (size_t)value - sizeof record.header;
-    if (copied > record.header.full_len || record.header.full_len > DUNIT_SOCKET_MAX_PAYLOAD)
-        return fail(EIO);
-    if (copied)
-        memcpy(buffer, record.payload, copied);
-    if (address)
-        put_address(&record.header.source, address, address_length);
-    return flags & MSG_TRUNC ? (ssize_t)record.header.full_len : (ssize_t)copied;
 }
 
 ssize_t recv(int fd, void *buffer, size_t length, int flags)
@@ -287,7 +504,18 @@ int shutdown(int fd, int how)
             return (int)fail(EINVAL);
         return (int)fail(EOPNOTSUPP);
     }
-    return (int)result(socket_op(fd, DUNIT_SOCKET_OP_SHUTDOWN_WRITE, NULL, 0, NULL, 0));
+    struct sock_state st = get_state(fd);
+    uint64_t deadline = 0;
+    for (;;) {
+        long value = socket_op(fd, DUNIT_SOCKET_OP_SHUTDOWN_WRITE, NULL, 0, NULL, 0);
+        if (value != -EAGAIN || st.nonblocking)
+            return (int)result(value);
+        int waited = poll_wait(fd, POLLOUT, st.snd_timeout_ms, &deadline);
+        if (waited < 0)
+            return -1;
+        if (waited == 0)
+            return (int)fail(ETIMEDOUT);
+    }
 }
 
 static int socket_name(int fd, struct sockaddr *address, socklen_t *length, int remote)
@@ -314,33 +542,124 @@ int getpeername(int fd, struct sockaddr *address, socklen_t *length)
     return socket_name(fd, address, length, 1);
 }
 
+static int parse_timeval_ms(const void *data, socklen_t length, uint64_t *out_ms)
+{
+    if (!data)
+        return EFAULT;
+    if (length < sizeof(struct timeval))
+        return EINVAL;
+    struct timeval tv;
+    memcpy(&tv, data, sizeof tv);
+    if (tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= 1000000)
+        return EDOM;
+    if (tv.tv_sec == 0 && tv.tv_usec == 0) {
+        *out_ms = 0;
+        return 0;
+    }
+    uint64_t sec_ms = (uint64_t)tv.tv_sec > (UINT64_MAX - 1000ULL) / 1000ULL
+                          ? UINT64_MAX - 1000ULL
+                          : (uint64_t)tv.tv_sec * 1000ULL;
+    uint64_t usec_ms = ((uint64_t)tv.tv_usec + 999ULL) / 1000ULL;
+    *out_ms = sec_ms + usec_ms;
+    return 0;
+}
+
+static int write_timeval_ms(uint64_t ms, void *data, socklen_t *length)
+{
+    if (!data || !length)
+        return EFAULT;
+    if (*length < sizeof(struct timeval))
+        return EINVAL;
+    struct timeval tv = {
+        .tv_sec = (time_t)(ms / 1000ULL),
+        .tv_usec = (suseconds_t)((ms % 1000ULL) * 1000ULL),
+    };
+    memcpy(data, &tv, sizeof tv);
+    *length = sizeof tv;
+    return 0;
+}
+
+static int write_int_opt(int val, void *data, socklen_t *length)
+{
+    if (!data || !length)
+        return EFAULT;
+    if (*length < sizeof(int))
+        return EINVAL;
+    memcpy(data, &val, sizeof val);
+    *length = sizeof val;
+    return 0;
+}
+
 int getsockopt(int fd, int level, int option, void *data, socklen_t *length)
 {
-    if (level != SOL_SOCKET || option != SO_ERROR)
+    struct dunit_socket_endpoints endpoints;
+    long ep_res = query_endpoints(fd, &endpoints);
+    if (ep_res < 0)
+        return (int)result(ep_res);
+    if (level != SOL_SOCKET)
         return (int)fail(ENOPROTOOPT);
-    if (!data || !length)
-        return (int)fail(EFAULT);
-    if (*length < sizeof(int))
-        return (int)fail(EINVAL);
-    int32_t native_error = 0;
-    long value = socket_op(fd, DUNIT_SOCKET_OP_ERROR, NULL, 0, &native_error, sizeof native_error);
-    if (value < 0)
-        return (int)result(value);
-    if (value != sizeof native_error || native_error > 0 || native_error == INT32_MIN)
-        return (int)fail(EIO);
-    int error = -native_error;
-    memcpy(data, &error, sizeof error);
-    *length = sizeof error;
-    return 0;
+    if (option == SO_ERROR) {
+        if (!data || !length)
+            return (int)fail(EFAULT);
+        if (*length < sizeof(int))
+            return (int)fail(EINVAL);
+        int32_t native_error = 0;
+        long value = socket_op(fd, DUNIT_SOCKET_OP_ERROR, NULL, 0, &native_error, sizeof native_error);
+        if (value < 0)
+            return (int)result(value);
+        if (value != sizeof native_error || native_error > 0 || native_error == INT32_MIN)
+            return (int)fail(EIO);
+        int error = -native_error;
+        memcpy(data, &error, sizeof error);
+        *length = sizeof error;
+        return 0;
+    }
+
+    struct sock_state st = get_state(fd);
+
+    if (option == SO_RCVTIMEO || option == SO_SNDTIMEO) {
+        uint64_t ms = option == SO_RCVTIMEO ? st.rcv_timeout_ms : st.snd_timeout_ms;
+        int err = write_timeval_ms(ms, data, length);
+        return err ? (int)fail(err) : 0;
+    }
+    if (option == SO_DOMAIN) {
+        int err = write_int_opt(AF_INET, data, length);
+        return err ? (int)fail(err) : 0;
+    }
+    if (option == SO_TYPE && st.active && st.sock_type) {
+        int err = write_int_opt(st.sock_type, data, length);
+        return err ? (int)fail(err) : 0;
+    }
+    if (option == SO_PROTOCOL && st.active && st.protocol) {
+        int err = write_int_opt(st.protocol, data, length);
+        return err ? (int)fail(err) : 0;
+    }
+    return (int)fail(ENOPROTOOPT);
 }
 
 int setsockopt(int fd, int level, int option, const void *data, socklen_t length)
 {
-    (void)level;
-    (void)option;
-    (void)data;
-    (void)length;
     struct dunit_socket_endpoints endpoints;
     long value = query_endpoints(fd, &endpoints);
-    return (int)result(value < 0 ? value : -ENOPROTOOPT);
+    if (value < 0)
+        return (int)result(value);
+    if (level != SOL_SOCKET || (option != SO_RCVTIMEO && option != SO_SNDTIMEO))
+        return (int)fail(ENOPROTOOPT);
+    uint64_t ms = 0;
+    int err = parse_timeval_ms(data, length, &ms);
+    if (err)
+        return (int)fail(err);
+    if (fd < 0 || fd >= MAX_TRACKED_FDS)
+        return (int)fail(EBADF);
+    lock_states();
+    if (!fd_states[fd].active) {
+        fd_states[fd].active = 1;
+        fd_states[fd].nonblocking = 1;
+    }
+    if (option == SO_RCVTIMEO)
+        fd_states[fd].rcv_timeout_ms = ms;
+    else
+        fd_states[fd].snd_timeout_ms = ms;
+    unlock_states();
+    return 0;
 }

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -194,14 +195,68 @@ static int exercise_udp(uint32_t grant)
     return fd;
 }
 
+static void check_blocking_options(void)
+{
+    uint64_t deadline = monotonic_ms() + DEADLINE_MS;
+    int fd;
+    for (;;) {
+        fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+        if (fd >= 0)
+            break;
+        check(errno == EPIPE || errno == EAGAIN || errno == ENOENT, "blocking UDP open");
+        pause_briefly(deadline);
+    }
+
+    int opt = 0;
+    socklen_t opt_len = sizeof opt;
+    check(getsockopt(fd, SOL_SOCKET, SO_TYPE, &opt, &opt_len) == 0 && opt == SOCK_DGRAM, "SO_TYPE");
+    opt_len = sizeof opt;
+    check(getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &opt, &opt_len) == 0 && opt == AF_INET, "SO_DOMAIN");
+    opt_len = sizeof opt;
+    check(getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &opt, &opt_len) == 0 && opt == IPPROTO_UDP,
+          "SO_PROTOCOL");
+
+    struct timeval bad_tv = { .tv_sec = -1, .tv_usec = 0 };
+    check(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &bad_tv, sizeof bad_tv) == -1 && errno == EDOM,
+          "reject negative SO_RCVTIMEO");
+
+    struct timeval tv = { .tv_sec = 0, .tv_usec = 40000 };
+    check(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv) == 0, "set SO_RCVTIMEO");
+    struct timeval got = {0};
+    socklen_t got_len = sizeof got;
+    check(getsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &got, &got_len) == 0 &&
+          got_len == sizeof got && got.tv_sec == 0 && got.tv_usec == 40000, "get SO_RCVTIMEO");
+
+    char byte;
+    uint64_t t0 = monotonic_ms();
+    check(recvfrom(fd, &byte, 1, 0, NULL, NULL) == -1 && errno == EAGAIN,
+          "blocking recvfrom timed out with EAGAIN");
+    check(monotonic_ms() - t0 >= 25, "SO_RCVTIMEO elapsed");
+    check(recvfrom(fd, &byte, 1, MSG_DONTWAIT, NULL, NULL) == -1 && errno == EAGAIN,
+          "MSG_DONTWAIT on blocking socket");
+    check(close(fd) == 0, "close blocking timeout probe socket");
+    puts("[POSIX-SOCKET] blocking socket options and SO_RCVTIMEO passed");
+}
+
 static void exercise_tcp(void)
 {
     uint64_t deadline = monotonic_ms() + DEADLINE_MS;
-    int fd = open_socket(SOCK_STREAM, IPPROTO_TCP, deadline);
+    int fd;
+    for (;;) {
+        fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+        if (fd >= 0)
+            break;
+        check(errno == EPIPE || errno == EAGAIN || errno == ENOENT, "blocking TCP open");
+        pause_briefly(deadline);
+    }
+    struct timeval snd_tv = { .tv_sec = 20, .tv_usec = 0 };
+    struct timeval rcv_tv = { .tv_sec = 20, .tv_usec = 0 };
+    check(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &snd_tv, sizeof snd_tv) == 0, "set SO_SNDTIMEO");
+    check(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rcv_tv, sizeof rcv_tv) == 0, "set SO_RCVTIMEO");
+
     struct sockaddr_in peer = endpoint("192.0.2.1", TCP_PORT);
-    check(connect(fd, (const struct sockaddr *)&peer, sizeof peer) == -1 &&
-          errno == EINPROGRESS, "TCP nonblocking connect reports EINPROGRESS");
-    check(wait_socket(fd, POLLOUT, deadline) & POLLOUT, "TCP writable after connect");
+    check(connect(fd, (const struct sockaddr *)&peer, sizeof peer) == 0,
+          "TCP blocking connect");
     int error;
     socklen_t length = sizeof error;
     check(getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0 &&
@@ -222,45 +277,27 @@ static void exercise_tcp(void)
     unsigned char request[5000];
     for (size_t i = 0; i < sizeof request; i++)
         request[i] = i % 251;
-    size_t sent = 0;
-    int partial = 0;
-    while (sent < sizeof request) {
-        size_t remaining = sizeof request - sent;
-        ssize_t count = send(fd, request + sent, remaining, MSG_NOSIGNAL);
-        if (count < 0) {
-            check(errno == EAGAIN, "TCP send retry");
-            check(wait_socket(fd, POLLOUT, deadline) & POLLOUT, "TCP send readiness");
-            continue;
-        }
-        check(count > 0 && (size_t)count <= remaining, "TCP send count");
-        partial |= (size_t)count < remaining;
-        sent += (size_t)count;
-    }
-    check(partial, "TCP partial send");
+    check(dunit_socket_set_nonblocking(fd, 1) == 0, "switch TCP socket nonblocking");
+    ssize_t first = send(fd, request, sizeof request, MSG_NOSIGNAL);
+    check(first > 0 && (size_t)first < sizeof request, "TCP partial send");
+    check(dunit_socket_set_nonblocking(fd, 0) == 0, "switch TCP socket blocking");
+    check(send(fd, request + first, sizeof request - (size_t)first, MSG_NOSIGNAL) ==
+          (ssize_t)(sizeof request - (size_t)first), "TCP blocking send full remainder");
 
     size_t received = 0, chunks = 0;
     for (;;) {
         char data[7];
-        ssize_t count = recv(fd, data, sizeof data, MSG_DONTWAIT);
-        if (count < 0) {
-            check(errno == EAGAIN, "TCP receive retry");
-            check(wait_socket(fd, POLLIN, deadline) & (POLLIN | POLLHUP),
-                  "TCP receive readiness");
-            continue;
-        }
+        ssize_t count = recv(fd, data, sizeof data, 0);
         if (count == 0)
             break;
-        check((size_t)count <= sizeof data && received + (size_t)count < sizeof tcp_reply,
-              "TCP receive length");
+        check(count > 0 && (size_t)count <= sizeof data &&
+              received + (size_t)count < sizeof tcp_reply, "TCP blocking read");
         check(memcmp(data, tcp_reply + received, (size_t)count) == 0, "TCP stream data");
         received += (size_t)count;
         chunks++;
     }
     check(received == sizeof tcp_reply - 1 && chunks > 1, "TCP partial reads and EOF");
-    while (shutdown(fd, SHUT_WR) != 0) {
-        check(errno == EAGAIN, "TCP shutdown retry");
-        check(wait_socket(fd, POLLOUT, deadline) & POLLOUT, "TCP shutdown readiness");
-    }
+    check(shutdown(fd, SHUT_WR) == 0, "TCP blocking shutdown");
     check(close(fd) == 0, "close TCP descriptor");
     puts("[POSIX-SOCKET] TCP connect, partial I/O, endpoints and EOF passed");
 }
@@ -299,8 +336,7 @@ int main(int argc, char **argv)
     }
     uint32_t grant = receive_grant();
     check(dunit_socket_use_grant(grant) == 0, "install connect grant");
-    check(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) == -1 && errno == EOPNOTSUPP,
-          "unsupported blocking socket");
+    check_blocking_options();
     int idle = exercise_udp(grant);
     int reset = exercise_tcp_reset();
     exercise_tcp();

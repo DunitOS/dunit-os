@@ -7,14 +7,15 @@ extern crate alloc;
 use alloc::{format, vec};
 use dunit::{
     errno,
+    io::{Read, Write},
+    net::{Ipv4Addr, NetGrant, SocketAddrV4, TcpStream},
     process::{self, Child},
     time::{self, Duration, Instant},
     Error, Result,
 };
 use dunit_socket_abi::{
-    Endpoint, Endpoints, Options, RecvHeader, ENDPOINTS_LEN, ENDPOINT_LEN, OP_CONNECT,
-    OP_ENDPOINTS, OP_ERROR, OP_RECV_FROM, OP_SEND_TO, OP_SHUTDOWN_WRITE, PROTO_TCP, PROTO_UDP,
-    RECV_HEADER_LEN, SCOPE_TCP, SCOPE_UDP,
+    Endpoint, Options, RecvHeader, ENDPOINTS_LEN, ENDPOINT_LEN, OP_CONNECT, OP_ENDPOINTS, OP_ERROR,
+    OP_RECV_FROM, OP_SEND_TO, PROTO_TCP, PROTO_UDP, RECV_HEADER_LEN, SCOPE_TCP, SCOPE_UDP,
 };
 use libdunit::{self as sys, wait_set};
 
@@ -302,76 +303,79 @@ fn connect_tcp(grant: &Grant, ip: [u8; 4], started: Instant) -> Result<Socket> {
 fn tcp_reset(grant: &Grant) -> Result<Socket> {
     let started = Instant::now()?;
     let socket = connect_tcp(grant, DELAYED_HOST, started)?;
-    require(checked(sys::write(socket.0, b"r"), "TCP reset synchronization")? == 1,
-            "TCP reset synchronization byte")?;
+    require(
+        checked(sys::write(socket.0, b"r"), "TCP reset synchronization")? == 1,
+        "TCP reset synchronization byte",
+    )?;
     let mut events = [wait_set::Event::default()];
     let count = wait_set::wait(
-        &[wait_set::Interest::descriptor(socket.0 as u32, wait_set::READ, 0)],
+        &[wait_set::Interest::descriptor(
+            socket.0 as u32,
+            wait_set::READ,
+            0,
+        )],
         &mut events,
         left(started)?.as_nanos() as u64,
-    ).map_err(Error)?;
+    )
+    .map_err(Error)?;
     let terminal = wait_set::HANGUP | wait_set::ERROR;
-    require(count == 1 && events[0].events & terminal == terminal, "TCP reset wait-set")?;
+    require(
+        count == 1 && events[0].events & terminal == terminal,
+        "TCP reset wait-set",
+    )?;
     let mut error = [0; 4];
-    require(socket.operation(OP_ERROR, &[], &mut error) == 4
-        && i32::from_le_bytes(error) as isize == errno::EPIPE
-        && sys::read(socket.0, &mut [0; 1]) == errno::EPIPE, "TCP reset error")?;
+    require(
+        socket.operation(OP_ERROR, &[], &mut error) == 4
+            && i32::from_le_bytes(error) as isize == errno::EPIPE
+            && sys::read(socket.0, &mut [0; 1]) == errno::EPIPE,
+        "TCP reset error",
+    )?;
     dunit::println!("[NET-SOCKET] TCP reset woke wait-set and returned EPIPE")?;
     Ok(socket)
 }
 
-fn tcp(grant: &Grant) -> Result<()> {
-    let socket = connect_tcp(grant, HOST, Instant::now()?)?;
-    let started = Instant::now()?;
-    let endpoint = Endpoint { ip: HOST, port: TCP_PORT };
-    let mut addresses = [0; ENDPOINTS_LEN];
+fn tcp(grant_handle: u32) -> Result<()> {
+    let grant = NetGrant::from_raw_handle(grant_handle)?;
+    let remote = SocketAddrV4::new(Ipv4Addr::from(HOST), TCP_PORT);
+    let mut stream = loop {
+        match TcpStream::connect_timeout(&grant, remote, TIMEOUT) {
+            Ok(stream) => break stream,
+            Err(Error(err)) if matches!(err, errno::ENOENT | errno::EAGAIN | errno::EPIPE) => {
+                time::sleep(Duration::from_millis(20))?;
+            }
+            Err(error) => {
+                let _ = grant.into_raw_handle();
+                return Err(error);
+            }
+        }
+    };
+    let _ = grant.into_raw_handle();
+    require(stream.take_error()?.is_none(), "TCP connect error")?;
+    let peer = stream.peer_addr()?;
+    let local = stream.local_addr()?;
     require(
-        checked(
-            socket.operation(OP_ENDPOINTS, &[], &mut addresses),
-            "TCP endpoints",
-        )? == ENDPOINTS_LEN,
-        "TCP endpoint query length",
-    )?;
-    let endpoints = Endpoints::decode(&addresses).map_err(|_| Error(errno::EIO))?;
-    require(
-        endpoints.remote == endpoint
-            && endpoints.local.ip == GUEST
-            && endpoints.local.port >= 49152,
+        peer == remote && local.ip() == Ipv4Addr::from(GUEST) && local.port() >= 49152,
         "TCP endpoint identity",
     )?;
+
+    stream.set_read_timeout(Some(TIMEOUT))?;
+    stream.set_write_timeout(Some(TIMEOUT))?;
 
     let mut request = vec![0u8; TCP_REQUEST_LEN];
     for (index, byte) in request.iter_mut().enumerate() {
         *byte = (index % 251) as u8;
     }
-    let mut sent = 0;
-    let mut partial_write = false;
-    while sent < request.len() {
-        let result = sys::write(socket.0, &request[sent..]);
-        if result == errno::EAGAIN {
-            socket.wait(wait_set::WRITE, started, "TCP writable")?;
-            continue;
-        }
-        let count = checked(result, "TCP stream write")?;
-        require(
-            count != 0 && count <= request.len() - sent,
-            "TCP write count",
-        )?;
-        partial_write |= count < request.len() - sent;
-        sent += count;
-    }
-    require(partial_write, "TCP never returned a partial write")?;
+    stream.set_nonblocking(true);
+    let first = stream.write(&request)?;
+    require(first != 0 && first < request.len(), "TCP never returned a partial write")?;
+    stream.set_nonblocking(false);
+    stream.write_all(&request[first..])?;
 
     let mut received = 0;
     let mut reads = 0;
     let mut chunk = [0; 7];
     loop {
-        let result = sys::read(socket.0, &mut chunk);
-        if result == errno::EAGAIN {
-            socket.wait(wait_set::READ, started, "TCP readable or EOF")?;
-            continue;
-        }
-        let count = checked(result, "TCP stream read")?;
+        let count = stream.read(&mut chunk)?;
         if count == 0 {
             break;
         }
@@ -390,17 +394,7 @@ fn tcp(grant: &Grant) -> Result<()> {
         received == TCP_REPLY.len() && reads > 1,
         "TCP partial data before EOF",
     )?;
-    loop {
-        let result = socket.operation(OP_SHUTDOWN_WRITE, &[], &mut []);
-        if result != errno::EAGAIN {
-            require(
-                checked(result, "TCP shutdown write")? == 0,
-                "TCP shutdown count",
-            )?;
-            break;
-        }
-        socket.wait(wait_set::WRITE, started, "TCP shutdown readiness")?;
-    }
+    stream.shutdown_write()?;
     dunit::println!("[NET-SOCKET] TCP validated partial I/O and EOF")
 }
 
@@ -454,7 +448,7 @@ fn main() -> Result<()> {
     let grant = receive_grant(Instant::now()?)?;
     let idle_udp = udp(&grant)?;
     let reset = tcp_reset(&grant)?;
-    tcp(&grant)?;
+    tcp(grant.0)?;
     drop(reset);
     revoked(&idle_udp)?;
     dunit::println!("[NET-SOCKET] complete")

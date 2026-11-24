@@ -12,6 +12,7 @@ pub mod event;
 pub mod fs;
 pub mod fsck;
 pub mod io;
+pub mod net;
 pub mod process;
 pub mod pty;
 pub mod system;

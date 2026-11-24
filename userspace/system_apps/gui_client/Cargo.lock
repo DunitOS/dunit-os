@@ -9,6 +9,7 @@ dependencies = [
  "dunit_component",
  "dunit_macros",
  "dunit_render",
+ "dunit_socket_abi",
  "dunit_text",
  "dunit_transfer",
  "dwm_settings",
@@ -62,6 +63,10 @@ dependencies = [
  "dunit_widgets",
  "unicode-segmentation",
 ]
+
+[[package]]
+name = "dunit_socket_abi"
+version = "0.1.0"
 
 [[package]]
 name = "dunit_style"
