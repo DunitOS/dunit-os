@@ -9,6 +9,9 @@ pub const PROTO_DNS: u16 = 3;
 pub const MAX_DNS_NAME: usize = 253;
 pub const SCOPE_UDP: u32 = 1;
 pub const SCOPE_TCP: u32 = 2;
+pub const SCOPE_UDP_BIND: u32 = 4;
+pub const SCOPE_TCP_LISTEN: u32 = 8;
+pub const SCOPE_LOW_PORT: u32 = 16;
 
 pub const OP_CONNECT: u16 = 1;
 pub const OP_SEND_TO: u16 = 2;
@@ -16,6 +19,9 @@ pub const OP_RECV_FROM: u16 = 3;
 pub const OP_SHUTDOWN_WRITE: u16 = 4;
 pub const OP_ERROR: u16 = 5;
 pub const OP_ENDPOINTS: u16 = 6;
+pub const OP_BIND: u16 = 7;
+pub const OP_LISTEN: u16 = 8;
+pub const OP_ACCEPT: u16 = 9;
 
 pub const BRIDGE_OPEN: u16 = 1;
 pub const BRIDGE_CONNECT: u16 = 2;
@@ -27,6 +33,10 @@ pub const BRIDGE_DATA: u16 = 7;
 pub const BRIDGE_EOF: u16 = 8;
 pub const BRIDGE_ERROR: u16 = 9;
 pub const BRIDGE_CREDIT: u16 = 10;
+pub const BRIDGE_BIND: u16 = 11;
+pub const BRIDGE_LISTEN: u16 = 12;
+pub const BRIDGE_ACCEPT: u16 = 13;
+pub const BRIDGE_LISTENER_READY: u16 = 14;
 
 pub const OPTIONS_LEN: usize = 8;
 pub const ENDPOINT_LEN: usize = 8;
@@ -82,7 +92,15 @@ impl Endpoint {
 
     /// An IPv4 unicast endpoint with a nonzero port.
     pub fn is_unicast(self) -> bool {
-        self.port != 0 && self.ip[0] > 0 && self.ip[0] < 224 && self.ip[0] != 127
+        self.port != 0 && self.is_unicast_ip()
+    }
+
+    pub fn is_unicast_ip(self) -> bool {
+        self.ip[0] > 0 && self.ip[0] < 224 && self.ip[0] != 127
+    }
+
+    pub fn is_bind_address(self) -> bool {
+        self.ip == [0; 4] || self.is_unicast_ip()
     }
 
     pub fn encode(self) -> [u8; ENDPOINT_LEN] {
@@ -177,8 +195,12 @@ pub struct BridgeHeader {
 impl BridgeHeader {
     fn validate(self) -> Result<(), WireError> {
         let flags_valid = match self.kind {
-            BRIDGE_COMPLETE => matches!(self.flags, BRIDGE_OPEN..=BRIDGE_SHUTDOWN),
-            BRIDGE_OPEN..=BRIDGE_CREDIT => self.flags == 0,
+            BRIDGE_COMPLETE => matches!(
+                self.flags,
+                BRIDGE_OPEN..=BRIDGE_SHUTDOWN | BRIDGE_BIND..=BRIDGE_ACCEPT
+            ),
+            BRIDGE_LISTENER_READY => self.flags <= 1,
+            BRIDGE_OPEN..=BRIDGE_CREDIT | BRIDGE_BIND..=BRIDGE_ACCEPT => self.flags == 0,
             _ => false,
         };
         if !flags_valid

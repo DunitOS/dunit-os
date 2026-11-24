@@ -219,7 +219,7 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
                     return None;
                 }
                 let scope = parse_u32(val)?;
-                if !(1..=3).contains(&scope) {
+                if scope == 0 || scope & !0x1f != 0 {
                     return None;
                 }
                 net_connect = Some(scope);

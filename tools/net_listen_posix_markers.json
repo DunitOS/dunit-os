@@ -1,0 +1,33 @@
+{
+  "description": "Static musl bind/listen/accept/accept4/getsockname exercises netd listener authority over E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-listen-posix",
+    "net_listen_posix": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "[POSIX-LISTEN] complete", "timeout": 90},
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[NETD] IPv4 static bound 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[POSIX-LISTEN] bind, listen and scope checks passed", "source": "userspace/ctests/net_listen_posix.c"},
+    {"marker": "[POSIX-LISTEN] TCP accept and echo passed", "source": "userspace/ctests/net_listen_posix.c"},
+    {"marker": "[POSIX-LISTEN] UDP bound echo passed", "source": "userspace/ctests/net_listen_posix.c"},
+    {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[POSIX-LISTEN] revocation rejected listener with EPIPE", "source": "userspace/ctests/net_listen_posix.c"},
+    {"marker": "[POSIX-LISTEN] complete", "source": "userspace/ctests/net_listen_posix.c"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[POSIX-LISTEN] FAIL",
+    "[NETD-FIXTURE]",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager"}
+  ]
+}
+

@@ -61,7 +61,7 @@ def generate(sysroot, output):
                     if path.is_file(): digest.update(item + b"\0" + path.read_bytes())
             metadata["sources"][name] = {"commit": revision, "dirty": bool(status), "tree_sha256": digest.hexdigest()}
     metadata["unsupported"] = {
-        "M8": ["transparent libc sockets", "IPv6", "listener authority"],
+        "M8": ["transparent libc sockets", "IPv6"],
         "separate_contracts": ["signals/interruption", "dynamic loader/TLS", "canonical termios", "secure entropy source"],
         "explicit_refusal": ["async/deferred pthread cancellation", "unsupported spawn attributes", "unsupported open/ioctl flags"],
     }
@@ -72,7 +72,7 @@ def generate(sysroot, output):
         "pthread create/join/mutex/cond/barrier subset", "typed PTY geometry/input-count ioctl",
     ]
     if (sysroot / "lib/libdunit_posix_sockets.a").is_file():
-        metadata["supported"].append("opt-in POSIX outbound blocking and nonblocking IPv4 TCP/UDP sockets and getaddrinfo DNS")
+        metadata["supported"].append("opt-in POSIX outbound and listener IPv4 TCP/UDP sockets and getaddrinfo DNS")
     portable = {key: value for key, value in metadata.items() if key != "sysroot" and key != "generated"}
     (output / "profile.json").write_text(json.dumps(portable, indent=2) + "\n")
     (output / "musl-COPYRIGHT").write_bytes(((repository / "licenses/musl-COPYRIGHT") if standalone else

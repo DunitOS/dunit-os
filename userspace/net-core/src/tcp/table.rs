@@ -548,7 +548,7 @@ impl Table {
             .ok_or(Error::Capacity.into())
     }
 
-    fn port_in_use(&self, port: u16) -> bool {
+    pub fn port_in_use(&self, port: u16) -> bool {
         self.listeners
             .iter()
             .flatten()
@@ -560,7 +560,7 @@ impl Table {
                 .any(|stream| stream.connection.endpoints().0.port == port)
     }
 
-    fn ephemeral_port(&mut self) -> Result<u16> {
+    pub fn ephemeral_port(&mut self) -> Result<u16> {
         // There are far more ephemeral ports than represented local bindings.
         for _ in 0..=MAX_STREAMS + MAX_LISTENERS {
             let port = self.next_port;

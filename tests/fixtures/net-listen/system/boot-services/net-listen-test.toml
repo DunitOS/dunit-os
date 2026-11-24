@@ -1,0 +1,6 @@
+name = "net-listen-test"
+exec = "/system/libexec/net_listen_test"
+net_connect = 12
+restart = "never"
+critical = false
+

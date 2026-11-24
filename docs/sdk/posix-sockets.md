@@ -37,8 +37,11 @@ datagrams it packs locally. Native operations retain their separately
 verified copyout retry contract. `getaddrinfo`, `freeaddrinfo` and
 `gai_strerror` resolve numeric IPv4 literals and `AF_INET`/`AF_UNSPEC`
 hostnames using the selected `NET_CONNECT` grant (respecting `AI_NUMERICHOST`
-and returning standard `EAI_*` errors on failure or revocation). Listener
-operations, IPv6 and additional socket options remain open.
+and returning standard `EAI_*` errors on failure or revocation). `bind`, `listen`,
+`accept` and `accept4` support authorized `AF_INET` TCP listeners and bound UDP
+sockets (denying ungranted listener scopes with `EPERM` and ports `< 1024`
+without low-port scope with `EACCES`). IPv6 and additional socket options
+remain open.
 
 The C fixture uses the existing E1000 wire peer and the stock netd service.
 It checks ungranted creation, process isolation, a mixed pipe/socket poll,

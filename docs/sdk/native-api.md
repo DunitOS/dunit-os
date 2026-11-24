@@ -43,7 +43,7 @@ Use one generated entry per binary. A dependency must be named `dunit`.
 | Module | Current interface |
 |---|---|
 | `io` | `Read`, `Write`, `BufReader`, stdin/stdout/stderr, formatted output |
-| `net` | `Ipv4Addr`, `SocketAddrV4`, `NetGrant`, `TcpStream` (`Read`/`Write`, `connect_host`), `UdpSocket`, `resolve_ipv4` with blocking/nonblocking modes and timeouts |
+| `net` | `Ipv4Addr`, `SocketAddrV4`, `NetGrant`, `TcpStream` (`Read`/`Write`, `connect_host`), `TcpListener` (`bind`, `accept`, `try_accept`), `UdpSocket` (`open`, `bind`), `resolve_ipv4` with blocking/nonblocking modes and timeouts |
 | `fs` | Owned `File`, `OpenOptions`, read/write helpers, metadata, seek, sync, rename/remove, directories and cwd |
 | `fsck` | Checked read-only native DunitFS recovery report; absent partition remains an error |
 | `args` | Owned UTF-8 argument strings from the initialized loader stack |

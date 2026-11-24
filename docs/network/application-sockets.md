@@ -1,8 +1,10 @@
 # Owner-bound application sockets
 
 The first N4 slice implements outbound IPv4 TCP and UDP with native
-descriptors. The trusted boot catalog selects the grant recipients. A
-`net_connect = 1` entry allows UDP, `2` allows TCP, and `3` allows both.
+descriptors, followed by DNS (`PROTO_DNS`) and listener authority. The trusted
+boot catalog selects the grant recipients using `net_connect` scope bits (`1`
+UDP outbound, `2` TCP outbound, `4` UDP bind, `8` TCP listen/accept, `16` low
+ports `< 1024`).
 The catalog marks the stock network service with `net_service = true` on
 its device grant. The kernel checks the actual grant object and process
 identity. The service remains responsible for Ethernet, routes and transport.
@@ -48,9 +50,9 @@ python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json 
 ```
 
 The [opt-in C adapter](../sdk/posix-sockets.md) translates standard nonblocking
-and blocking IPv4 calls and `getaddrinfo` DNS queries for statically linked musl
-applications. Native `dunit::net` also provides `resolve_ipv4` and
-`TcpStream::connect_host` over `PROTO_DNS`. IPv6,
-listen and low-port binding, wider launcher policy and Internet qualification
+and blocking IPv4 calls, `bind`/`listen`/`accept`/`accept4`, and `getaddrinfo`
+DNS queries for statically linked musl applications. Native `dunit::net` also
+provides `TcpListener`, `UdpSocket::bind`, `resolve_ipv4` and
+`TcpStream::connect_host`. IPv6, wider launcher policy and Internet qualification
 remain open.
 See [verification](../verification/native-sockets-2026-11-19.json).

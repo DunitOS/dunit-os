@@ -1,0 +1,33 @@
+{
+  "description": "Production netd serves application TCP listen/accept and UDP bind over isolated E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-listen",
+    "net_listen": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "[NET-LISTEN] complete", "timeout": 90},
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[NETD] IPv4 static bound 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NET-LISTEN] scope and bind checks passed", "source": "userspace/system_apps/net_listen_test/src/main.rs"},
+    {"marker": "[NET-LISTEN] TCP accept and echo passed", "source": "userspace/system_apps/net_listen_test/src/main.rs"},
+    {"marker": "[NET-LISTEN] UDP bound echo passed", "source": "userspace/system_apps/net_listen_test/src/main.rs"},
+    {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NET-LISTEN] revocation rejected listener with EPIPE", "source": "userspace/system_apps/net_listen_test/src/main.rs"},
+    {"marker": "[NET-LISTEN] complete", "source": "userspace/system_apps/net_listen_test/src/main.rs"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NET-LISTEN] FAIL",
+    "[NETD-FIXTURE]",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager"}
+  ]
+}
+

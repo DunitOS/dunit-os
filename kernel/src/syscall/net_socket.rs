@@ -7,7 +7,7 @@ use crate::sync::IrqSafeSpinLock;
 use dunit_socket_abi::*;
 
 mod state;
-use state::{Bridge, ReadPlan, ERROR, HANGUP, MAX_UDP};
+use state::{AcceptStep, Bridge, ReadPlan, ERROR, HANGUP, MAX_UDP};
 
 static BRIDGE: IrqSafeSpinLock<Bridge> = IrqSafeSpinLock::new(Bridge::new());
 
@@ -68,7 +68,8 @@ pub(super) fn grant(root: u64, child: u64, scope: u64) -> i64 {
     report((|| {
         let root = u32::try_from(root).map_err(|_| EBADF)?;
         let scope = u32::try_from(scope).map_err(|_| EINVAL)?;
-        if scope == 0 || scope & !(u32::from(SCOPE_UDP) | u32::from(SCOPE_TCP)) != 0 {
+        let allowed = SCOPE_UDP | SCOPE_TCP | SCOPE_UDP_BIND | SCOPE_TCP_LISTEN | SCOPE_LOW_PORT;
+        if scope == 0 || scope & !allowed != 0 {
             return Err(EINVAL);
         }
         process::grant_net_connect(root, ProcessId(child), scope).map(i64::from)
@@ -80,8 +81,8 @@ pub(super) fn open(handle: u64, protocol: u64, source: *const u8, len: usize) ->
         let handle = u32::try_from(handle).map_err(|_| EBADF)?;
         let protocol = u16::try_from(protocol).map_err(|_| EINVAL)?;
         let expected = match protocol {
-            PROTO_TCP => SCOPE_TCP,
-            PROTO_UDP => SCOPE_UDP,
+            PROTO_TCP => SCOPE_TCP | SCOPE_TCP_LISTEN,
+            PROTO_UDP => SCOPE_UDP | SCOPE_UDP_BIND,
             PROTO_DNS => SCOPE_TCP | SCOPE_UDP,
             _ => return Err(EOPNOTSUPP),
         };
@@ -90,11 +91,11 @@ pub(super) fn open(handle: u64, protocol: u64, source: *const u8, len: usize) ->
         })
         .ok_or(EPERM)?
         .map_err(handle_error_to_errno)?;
-        if scope & u32::from(expected) == 0 {
+        if scope & expected == 0 {
             return Err(EPERM);
         }
         options(source, len)?;
-        let token = BRIDGE.lock().open(owner, protocol)?;
+        let token = BRIDGE.lock().open(owner, protocol, scope)?;
         install(FdTarget::NetSocket { token })
     })())
 }
@@ -240,8 +241,52 @@ pub(super) fn operation(
                 copy_buffer_to_user(output, &endpoints.encode())?;
                 Ok(ENDPOINTS_LEN as i64)
             }
+            OP_BIND if in_len == ENDPOINT_LEN && out_len == 0 => {
+                let bytes = copy_buffer_from_user(input, ENDPOINT_LEN)?;
+                let endpoint = Endpoint::decode(&bytes).map_err(wire_error)?;
+                if !endpoint.is_bind_address() {
+                    return Err(EINVAL);
+                }
+                if BRIDGE.lock().bind(owner, token, endpoint)? {
+                    Ok(0)
+                } else {
+                    process::wake_poll_waiters();
+                    Err(EAGAIN)
+                }
+            }
+            OP_LISTEN if in_len == 4 && out_len == 0 => {
+                let bytes = copy_buffer_from_user(input, 4)?;
+                let backlog = u32::from_le_bytes(bytes.try_into().map_err(|_| EINVAL)?);
+                if BRIDGE.lock().listen(owner, token, backlog)? {
+                    Ok(0)
+                } else {
+                    process::wake_poll_waiters();
+                    Err(EAGAIN)
+                }
+            }
+            OP_ACCEPT if in_len == 0 && (out_len == 0 || out_len == ENDPOINT_LEN) => {
+                match BRIDGE.lock().accept_begin(owner, token)? {
+                    AcceptStep::Ready {
+                        child_token,
+                        remote,
+                    } => {
+                        if out_len == ENDPOINT_LEN {
+                            if let Err(error) = copy_buffer_to_user(output, &remote.encode()) {
+                                close(FdTarget::NetSocket { token: child_token });
+                                return Err(error);
+                            }
+                        }
+                        install(FdTarget::NetSocket { token: child_token })
+                    }
+                    AcceptStep::Pending => {
+                        process::wake_poll_waiters();
+                        Err(EAGAIN)
+                    }
+                    AcceptStep::Empty => Err(EAGAIN),
+                }
+            }
             OP_CONNECT | OP_SEND_TO | OP_RECV_FROM | OP_SHUTDOWN_WRITE | OP_ERROR
-            | OP_ENDPOINTS => Err(EINVAL),
+            | OP_ENDPOINTS | OP_BIND | OP_LISTEN | OP_ACCEPT => Err(EINVAL),
             _ => Err(EOPNOTSUPP),
         }
     })())

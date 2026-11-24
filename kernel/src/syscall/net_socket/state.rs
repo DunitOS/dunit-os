@@ -76,11 +76,26 @@ struct Receive {
     len: usize,
 }
 
+pub(super) enum AcceptStep {
+    Ready { child_token: u64, remote: Endpoint },
+    Pending,
+    Empty,
+}
+
 struct Socket {
     token: u64,
     owner: u64,
     protocol: u16,
+    scope: u32,
     open: bool,
+    bound: bool,
+    bind_target: Option<Endpoint>,
+    listening: bool,
+    listen_reported: bool,
+    accept_ready: bool,
+    pending_accept: Option<u64>,
+    accepted: Option<(u64, Endpoint)>,
+    accepted_pending: bool,
     local: Endpoint,
     remote: Endpoint,
     error: i64,
@@ -94,12 +109,21 @@ struct Socket {
 }
 
 impl Socket {
-    fn new(token: u64, owner: u64, protocol: u16) -> Self {
+    fn new(token: u64, owner: u64, protocol: u16, scope: u32) -> Self {
         Self {
             token,
             owner,
             protocol,
+            scope,
             open: false,
+            bound: false,
+            bind_target: None,
+            listening: false,
+            listen_reported: false,
+            accept_ready: false,
+            pending_accept: None,
+            accepted: None,
+            accepted_pending: false,
             local: NO_ENDPOINT,
             remote: NO_ENDPOINT,
             error: 0,
@@ -110,6 +134,14 @@ impl Socket {
             rx: None,
             rx_reserved: false,
             credit: false,
+        }
+    }
+
+    fn new_accepted(token: u64, owner: u64, scope: u32) -> Self {
+        Self {
+            request: None,
+            accepted_pending: true,
+            ..Self::new(token, owner, PROTO_TCP, scope)
         }
     }
 
@@ -141,6 +173,11 @@ impl Socket {
     fn client_ready(&self) -> u16 {
         if self.error != 0 {
             return ERROR | HANGUP | u16::from(!self.rx_reserved && self.rx.is_some()) * READ;
+        }
+        if self.listening {
+            let read = self.accept_ready || self.accepted.is_some();
+            let write = !self.listen_reported;
+            return u16::from(read) * READ | u16::from(write) * WRITE;
         }
         let read = !self.rx_reserved && (self.rx.is_some() || self.eof);
         let write = self.open && self.request.is_none() && !self.write_closed;
@@ -174,12 +211,17 @@ impl Socket {
         {
             return Err(EINVAL);
         }
+        if pending.kind == BRIDGE_BIND && header.error == 0 && !header.endpoint.is_unicast() {
+            return Err(EINVAL);
+        }
         if header.error != 0 {
             self.error = i64::from(header.error);
         } else {
             match pending.kind {
                 BRIDGE_OPEN => self.open = true,
                 BRIDGE_CONNECT => self.remote = pending.endpoint,
+                BRIDGE_BIND => self.bound = true,
+                BRIDGE_LISTEN => self.listening = true,
                 BRIDGE_SEND | BRIDGE_SHUTDOWN => {}
                 _ => return Err(EINVAL),
             }
@@ -233,7 +275,7 @@ impl Bridge {
         Ok(generation)
     }
 
-    pub(super) fn open(&mut self, owner: u64, protocol: u16) -> Result<u64, i64> {
+    fn reserve_slot(&self, owner: u64) -> Result<usize, i64> {
         if self.service.is_none() {
             return Err(EPIPE);
         }
@@ -247,13 +289,13 @@ impl Bridge {
         {
             return Err(ENFILE);
         }
-        let slot = self
-            .sockets
-            .iter()
-            .position(Option::is_none)
-            .ok_or(ENFILE)?;
+        self.sockets.iter().position(Option::is_none).ok_or(ENFILE)
+    }
+
+    pub(super) fn open(&mut self, owner: u64, protocol: u16, scope: u32) -> Result<u64, i64> {
+        let slot = self.reserve_slot(owner)?;
         let token = self.next_token()?;
-        self.sockets[slot] = Some(Socket::new(token, owner, protocol));
+        self.sockets[slot] = Some(Socket::new(token, owner, protocol, scope));
         Ok(token)
     }
 
@@ -267,7 +309,7 @@ impl Bridge {
         let socket = self.sockets[self.socket_index(token).ok_or(EPIPE)?]
             .as_ref()
             .ok_or(EPIPE)?;
-        if socket.owner != owner || socket.closing {
+        if socket.owner != owner || socket.closing || socket.accepted_pending {
             return Err(EPERM);
         }
         Ok(socket)
@@ -276,7 +318,7 @@ impl Bridge {
     fn client_mut(&mut self, owner: u64, token: u64) -> Result<&mut Socket, i64> {
         let index = self.socket_index(token).ok_or(EPIPE)?;
         let socket = self.sockets[index].as_mut().ok_or(EPIPE)?;
-        if socket.owner != owner || socket.closing {
+        if socket.owner != owner || socket.closing || socket.accepted_pending {
             return Err(EPERM);
         }
         Ok(socket)
@@ -324,14 +366,45 @@ impl Bridge {
                 let Some(index) = self.socket_index(token) else {
                     return false;
                 };
-                let socket = self.sockets[index].as_mut().expect("known socket");
-                if socket.closing {
-                    return false;
+                let (pending, unsent, accepted) = {
+                    let socket = self.sockets[index].as_mut().expect("known socket");
+                    if socket.closing {
+                        return false;
+                    }
+                    let unsent = socket
+                        .request
+                        .as_ref()
+                        .is_some_and(|req| req.kind == BRIDGE_ACCEPT && !req.sent);
+                    socket.closing = true;
+                    socket.request = None;
+                    socket.rx = None;
+                    socket.credit = false;
+                    socket.accept_ready = false;
+                    (socket.pending_accept.take(), unsent, socket.accepted.take())
+                };
+                if let Some(child_token) = pending {
+                    if let Some(child_idx) = self.socket_index(child_token) {
+                        if unsent {
+                            self.sockets[child_idx] = None;
+                        } else if let Some(child) = self.sockets[child_idx].as_mut() {
+                            child.accepted_pending = false;
+                            child.closing = true;
+                            child.rx = None;
+                            child.credit = false;
+                        }
+                    }
                 }
-                socket.closing = true;
-                socket.request = None;
-                socket.rx = None;
-                socket.credit = false;
+                if let Some((child_token, _)) = accepted {
+                    if let Some(child) = self
+                        .socket_index(child_token)
+                        .and_then(|idx| self.sockets[idx].as_mut())
+                    {
+                        child.accepted_pending = false;
+                        child.closing = true;
+                        child.rx = None;
+                        child.credit = false;
+                    }
+                }
                 true
             }
             _ => false,
@@ -385,6 +458,9 @@ impl Bridge {
         from: bool,
     ) -> Result<Option<ReadPlan>, i64> {
         let socket = self.client_mut(owner, token)?;
+        if socket.listening {
+            return Err(EOPNOTSUPP);
+        }
         if from && socket.protocol != PROTO_UDP {
             return Err(EOPNOTSUPP);
         }
@@ -499,7 +575,22 @@ impl Bridge {
                 if header.error != 0 && !header.endpoint.is_none() {
                     return Err(EINVAL);
                 }
+                if header.flags == BRIDGE_ACCEPT {
+                    return self.complete_accept(index, header);
+                }
                 socket.finish(header)
+            }
+            BRIDGE_LISTENER_READY
+                if socket.protocol == PROTO_TCP
+                    && socket.listening
+                    && socket.error == 0
+                    && header.flags <= 1
+                    && header.error == 0
+                    && header.endpoint.is_none()
+                    && data.is_empty() =>
+            {
+                socket.accept_ready = header.flags == 1;
+                Ok(())
             }
             BRIDGE_DATA if header.flags == 0 && header.error == 0 => {
                 if !socket.open || socket.eof || socket.error != 0 {
@@ -556,6 +647,53 @@ impl Bridge {
         }
     }
 
+    fn complete_accept(&mut self, index: usize, header: BridgeHeader) -> Result<(), i64> {
+        let (child_token, local) = {
+            let socket = self.sockets[index].as_mut().expect("known socket");
+            let valid = socket
+                .request
+                .as_ref()
+                .is_some_and(|req| req.kind == BRIDGE_ACCEPT && req.sent);
+            if !valid {
+                return Err(EINVAL);
+            }
+            let Some(child_token) = socket.pending_accept else {
+                return Err(EINVAL);
+            };
+            if header.error == 0 && !header.endpoint.is_unicast() {
+                return Err(EINVAL);
+            }
+            socket.pending_accept = None;
+            socket.request = None;
+            socket.accept_ready = false;
+            if header.error != 0 && i64::from(header.error) != EAGAIN {
+                socket.error = i64::from(header.error);
+            }
+            (child_token, socket.local)
+        };
+        if header.error != 0 {
+            if let Some(child_idx) = self.socket_index(child_token) {
+                if self.sockets[child_idx].as_ref().is_some_and(|c| !c.closing) {
+                    self.sockets[child_idx] = None;
+                }
+            }
+            return Ok(());
+        }
+        let child_alive = self
+            .socket_index(child_token)
+            .and_then(|idx| self.sockets[idx].as_mut())
+            .filter(|child| !child.closing);
+        if let Some(child) = child_alive {
+            child.open = true;
+            child.local = local;
+            child.remote = header.endpoint;
+            if let Some(listener) = self.sockets[index].as_mut() {
+                listener.accepted = Some((child_token, header.endpoint));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn protocol(&self, owner: u64, token: u64) -> Result<u16, i64> {
         Ok(self.client(owner, token)?.protocol)
     }
@@ -568,6 +706,9 @@ impl Bridge {
         payload: &[u8],
     ) -> Result<(), i64> {
         let socket = self.client_mut(owner, token)?;
+        if socket.listening {
+            return Err(EOPNOTSUPP);
+        }
         socket.check_request()?;
         let max = match socket.protocol {
             PROTO_UDP => MAX_UDP,
@@ -612,6 +753,17 @@ impl Bridge {
         if socket.protocol == PROTO_DNS {
             return Err(EOPNOTSUPP);
         }
+        let needed = if socket.protocol == PROTO_TCP {
+            SCOPE_TCP
+        } else {
+            SCOPE_UDP
+        };
+        if socket.scope & needed == 0 {
+            return Err(EPERM);
+        }
+        if socket.listening || (socket.protocol == PROTO_TCP && socket.bound) {
+            return Err(EOPNOTSUPP);
+        }
         if socket.error != 0 {
             return Err(socket.error);
         }
@@ -628,7 +780,7 @@ impl Bridge {
 
     pub(super) fn shutdown(&mut self, owner: u64, token: u64) -> Result<bool, i64> {
         let socket = self.client_mut(owner, token)?;
-        if socket.protocol != PROTO_TCP {
+        if socket.protocol != PROTO_TCP || socket.listening {
             return Err(EOPNOTSUPP);
         }
         if socket.error != 0 {
@@ -644,6 +796,123 @@ impl Bridge {
         socket.write_closed = true;
         socket.request = Some(Request::new(BRIDGE_SHUTDOWN, NO_ENDPOINT, &[]));
         Ok(true)
+    }
+
+    pub(super) fn bind(
+        &mut self,
+        owner: u64,
+        token: u64,
+        endpoint: Endpoint,
+    ) -> Result<bool, i64> {
+        let socket = self.client_mut(owner, token)?;
+        let needed = match socket.protocol {
+            PROTO_UDP => SCOPE_UDP_BIND,
+            PROTO_TCP => SCOPE_TCP_LISTEN,
+            _ => return Err(EOPNOTSUPP),
+        };
+        if socket.scope & needed == 0 {
+            return Err(EPERM);
+        }
+        if (1..1024).contains(&endpoint.port) && socket.scope & SCOPE_LOW_PORT == 0 {
+            return Err(EACCES);
+        }
+        if socket.error != 0 {
+            return Err(socket.error);
+        }
+        if socket.bound && socket.bind_target == Some(endpoint) {
+            return Ok(true);
+        }
+        if socket.bound || socket.listening || !socket.remote.is_none() {
+            return Err(EINVAL);
+        }
+        socket.check_request()?;
+        socket.bind_target = Some(endpoint);
+        socket.request = Some(Request::new(BRIDGE_BIND, endpoint, &[]));
+        Ok(false)
+    }
+
+    pub(super) fn listen(&mut self, owner: u64, token: u64, backlog: u32) -> Result<bool, i64> {
+        let socket = self.client_mut(owner, token)?;
+        if socket.protocol != PROTO_TCP {
+            return Err(EOPNOTSUPP);
+        }
+        if socket.scope & SCOPE_TCP_LISTEN == 0 {
+            return Err(EPERM);
+        }
+        if socket.error != 0 {
+            return Err(socket.error);
+        }
+        if socket.listening {
+            socket.listen_reported = true;
+            return Ok(true);
+        }
+        if !socket.bound || !socket.remote.is_none() {
+            return Err(EINVAL);
+        }
+        socket.check_request()?;
+        let clamped = backlog.clamp(1, 16);
+        socket.request = Some(Request::new(
+            BRIDGE_LISTEN,
+            NO_ENDPOINT,
+            &clamped.to_le_bytes(),
+        ));
+        Ok(false)
+    }
+
+    pub(super) fn accept_begin(&mut self, owner: u64, token: u64) -> Result<AcceptStep, i64> {
+        let index = self.socket_index(token).ok_or(EPIPE)?;
+        {
+            let socket = self.sockets[index].as_mut().ok_or(EPIPE)?;
+            if socket.owner != owner || socket.closing || socket.accepted_pending {
+                return Err(EPERM);
+            }
+            if socket.protocol != PROTO_TCP {
+                return Err(EOPNOTSUPP);
+            }
+            if socket.scope & SCOPE_TCP_LISTEN == 0 {
+                return Err(EPERM);
+            }
+            if !socket.listening {
+                return Err(EINVAL);
+            }
+            if socket.error != 0 {
+                return Err(socket.error);
+            }
+            if let Some((child_token, remote)) = socket.accepted.take() {
+                if let Some(child_idx) = self.socket_index(child_token) {
+                    if let Some(child) = self.sockets[child_idx].as_mut() {
+                        child.accepted_pending = false;
+                    }
+                }
+                return Ok(AcceptStep::Ready {
+                    child_token,
+                    remote,
+                });
+            }
+            if socket
+                .request
+                .as_ref()
+                .is_some_and(|req| req.kind == BRIDGE_ACCEPT)
+            {
+                return Ok(AcceptStep::Pending);
+            }
+            socket.check_request()?;
+            if !socket.accept_ready {
+                return Ok(AcceptStep::Empty);
+            }
+        }
+        let child_slot = self.reserve_slot(owner)?;
+        let child_token = self.next_token()?;
+        let scope = self.sockets[index].as_ref().unwrap().scope;
+        self.sockets[child_slot] = Some(Socket::new_accepted(child_token, owner, scope));
+        let socket = self.sockets[index].as_mut().unwrap();
+        socket.pending_accept = Some(child_token);
+        socket.request = Some(Request::new(
+            BRIDGE_ACCEPT,
+            NO_ENDPOINT,
+            &child_token.to_le_bytes(),
+        ));
+        Ok(AcceptStep::Pending)
     }
 
     pub(super) fn error(&self, owner: u64, token: u64) -> Result<i32, i64> {
@@ -699,15 +968,15 @@ mod tests {
     #[test]
     fn checks_generation_owner_and_per_process_limit() {
         let mut bridge = Bridge::new();
-        assert_eq!(bridge.open(APP, PROTO_TCP), Err(EPIPE));
+        assert_eq!(bridge.open(APP, PROTO_TCP, SCOPE_TCP), Err(EPIPE));
         let generation = bridge.register(SERVICE).unwrap();
         assert_eq!(bridge.register(OTHER), Err(EBUSY));
-        let socket = bridge.open(APP, PROTO_TCP).unwrap();
+        let socket = bridge.open(APP, PROTO_TCP, SCOPE_TCP).unwrap();
         for _ in 1..SOCKETS_PER_OWNER {
-            bridge.open(APP, PROTO_UDP).unwrap();
+            bridge.open(APP, PROTO_UDP, SCOPE_UDP).unwrap();
         }
-        assert_eq!(bridge.open(APP, PROTO_TCP), Err(ENFILE));
-        assert!(bridge.open(OTHER, PROTO_TCP).is_ok());
+        assert_eq!(bridge.open(APP, PROTO_TCP, SCOPE_TCP), Err(ENFILE));
+        assert!(bridge.open(OTHER, PROTO_TCP, SCOPE_TCP).is_ok());
         assert_eq!(bridge.protocol(OTHER, socket), Err(EPERM));
         assert!(matches!(
             bridge.reserve_service(OTHER, generation, MAX_FRAME),
@@ -723,7 +992,7 @@ mod tests {
         assert!(bridge.close(FdTarget::NetService { token: generation }));
         assert_eq!(bridge.protocol(APP, socket), Err(EPIPE));
         let fresh = bridge.register(SERVICE).unwrap();
-        let fresh_socket = bridge.open(APP, PROTO_TCP).unwrap();
+        let fresh_socket = bridge.open(APP, PROTO_TCP, SCOPE_TCP).unwrap();
         assert_ne!(fresh_socket, socket);
         assert_eq!(
             bridge.service_write(SERVICE, generation, completion, &[]),
@@ -739,7 +1008,7 @@ mod tests {
     fn retain_faulted_records_and_reject_conflicting_completion_before_mutating() {
         let mut bridge = Bridge::new();
         let generation = bridge.register(SERVICE).unwrap();
-        let token = bridge.open(APP, PROTO_TCP).unwrap();
+        let token = bridge.open(APP, PROTO_TCP, SCOPE_TCP).unwrap();
         let target = FdTarget::NetSocket { token };
         assert_eq!(bridge.ready(APP, target), 0);
         assert!(matches!(
@@ -839,7 +1108,7 @@ mod tests {
     fn udp_truncation_preserves_source_and_close_retires_slot() {
         let mut bridge = Bridge::new();
         let generation = bridge.register(SERVICE).unwrap();
-        let token = bridge.open(APP, PROTO_UDP).unwrap();
+        let token = bridge.open(APP, PROTO_UDP, SCOPE_UDP).unwrap();
         let (open, _) = request(&mut bridge, generation);
         bridge
             .service_write(
@@ -901,7 +1170,7 @@ mod tests {
     fn dns_sockets_enforce_bounds_and_reject_stream_ops() {
         let mut bridge = Bridge::new();
         let generation = bridge.register(SERVICE).unwrap();
-        let token = bridge.open(APP, PROTO_DNS).unwrap();
+        let token = bridge.open(APP, PROTO_DNS, SCOPE_UDP).unwrap();
         let (open, _) = request(&mut bridge, generation);
         assert_eq!(open.protocol, PROTO_DNS);
         bridge
@@ -943,5 +1212,123 @@ mod tests {
         let plan = bridge.reserve_client(APP, token, 16, false).unwrap().unwrap();
         assert_eq!(plan.bytes(), &[192, 0, 2, 10]);
         bridge.finish_read(&plan, true).unwrap();
+    }
+
+    #[test]
+    fn listener_authority_and_accept_lifecycle() {
+        let mut bridge = Bridge::new();
+        let generation = bridge.register(SERVICE).unwrap();
+        let outbound = bridge.open(APP, PROTO_TCP, SCOPE_TCP).unwrap();
+        let (open_out, _) = request(&mut bridge, generation);
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(open_out, BRIDGE_COMPLETE, NO_ENDPOINT),
+                &[],
+            )
+            .unwrap();
+        let any_8080 = Endpoint {
+            ip: [0; 4],
+            port: 8080,
+        };
+        assert_eq!(bridge.bind(APP, outbound, any_8080), Err(EPERM));
+
+        let listener = bridge.open(APP, PROTO_TCP, SCOPE_TCP_LISTEN).unwrap();
+        let target = FdTarget::NetSocket { token: listener };
+        let (open_listen, _) = request(&mut bridge, generation);
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(open_listen, BRIDGE_COMPLETE, NO_ENDPOINT),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(bridge.connect(APP, listener, REMOTE), Err(EPERM));
+        assert_eq!(
+            bridge.bind(
+                APP,
+                listener,
+                Endpoint {
+                    ip: [0; 4],
+                    port: 80
+                }
+            ),
+            Err(EACCES)
+        );
+        assert_eq!(bridge.bind(APP, listener, any_8080), Ok(false));
+        let (bind_req, _) = request(&mut bridge, generation);
+        assert_eq!((bind_req.kind, bind_req.endpoint), (BRIDGE_BIND, any_8080));
+        let bound_local = Endpoint {
+            ip: LOCAL.ip,
+            port: 8080,
+        };
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(bind_req, BRIDGE_COMPLETE, bound_local),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(bridge.listen(APP, listener, 2), Ok(false));
+        let (listen_req, backlog) = request(&mut bridge, generation);
+        assert_eq!(
+            (listen_req.kind, backlog.as_slice()),
+            (BRIDGE_LISTEN, 2u32.to_le_bytes().as_slice())
+        );
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(listen_req, BRIDGE_COMPLETE, NO_ENDPOINT),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(bridge.ready(APP, target), WRITE);
+        assert_eq!(bridge.listen(APP, listener, 2), Ok(true));
+        assert_eq!(bridge.ready(APP, target), 0);
+        assert!(matches!(
+            bridge.accept_begin(APP, listener),
+            Ok(AcceptStep::Empty)
+        ));
+
+        let ready = BridgeHeader {
+            flags: 1,
+            ..response(listen_req, BRIDGE_LISTENER_READY, NO_ENDPOINT)
+        };
+        bridge.service_write(SERVICE, generation, ready, &[]).unwrap();
+        assert_eq!(bridge.ready(APP, target), READ);
+        assert!(matches!(
+            bridge.accept_begin(APP, listener),
+            Ok(AcceptStep::Pending)
+        ));
+        let (acc_req, acc_payload) = request(&mut bridge, generation);
+        assert_eq!(acc_req.kind, BRIDGE_ACCEPT);
+        let child_token = u64::from_le_bytes(acc_payload.try_into().unwrap());
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(acc_req, BRIDGE_COMPLETE, REMOTE),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(bridge.ready(APP, target), READ);
+        assert!(matches!(
+            bridge.accept_begin(APP, listener),
+            Ok(AcceptStep::Ready {
+                child_token: got,
+                remote
+            }) if got == child_token && remote == REMOTE
+        ));
+        assert_eq!(
+            bridge.endpoints(APP, child_token).unwrap(),
+            Endpoints {
+                local: bound_local,
+                remote: REMOTE
+            }
+        );
     }
 }

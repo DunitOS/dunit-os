@@ -1,0 +1,6 @@
+name = "net-listen-posix"
+exec = "/system/libexec/net_listen_posix"
+net_connect = 12
+restart = "never"
+critical = false
+

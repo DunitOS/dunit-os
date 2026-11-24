@@ -303,9 +303,11 @@ arguments. Grant handles and descriptor numbers are process-local.
 | `NetSocketOpen` (99) | connect handle, protocol, options pointer, options length | Owner-bound nonblocking socket FD |
 | `NetSocketOp` (100) | FD, operation, input pointer, input length, output pointer, output length | Operation-specific result or negative errno |
 
-`NET_CONNECT` is right bit 9 and `NET_SERVICE` is bit 10. Scope bits 0 and 1
-authorize UDP and TCP respectively. Protocol values 1, 2 and 3 select UDP,
-TCP and DNS (authorized when either UDP or TCP scope is granted).
+`NET_CONNECT` is right bit 9 and `NET_SERVICE` is bit 10. Scope bits 0–4
+authorize outbound UDP (`1`), outbound TCP (`2`), UDP bind (`4`), TCP
+listen/accept (`8`), and privileged ports 1–1023 (`16`). Protocol values
+1, 2 and 3 select UDP, TCP and DNS (authorized when either UDP or TCP
+outbound scope is granted; TCP also allows scope `8` and UDP allows scope `4`).
 Both option records are eight bytes containing little-endian version 1 in
 the first two bytes and six reserved zero bytes. The native endpoint record
 contains four IPv4 octets, a little-endian u16 port and a reserved zero u16.
@@ -321,6 +323,9 @@ Operations use these records:
 | 4 | TCP write shutdown | Empty | Empty |
 | 5 | Query error | Empty | Little-endian signed 32-bit errno |
 | 6 | Query endpoints | Empty | Local and remote endpoint records |
+| 7 | Bind | Local IPv4 endpoint (`0.0.0.0` or interface IP, port 0 for ephemeral) | Empty |
+| 8 | Listen | Little-endian `u32` backlog | Empty |
+| 9 | Accept | Empty | Optional remote IPv4 endpoint; returns new owner-bound socket FD |
 
 The UDP receive header contains the source endpoint, a little-endian u32
 length before truncation, and four reserved zero bytes. The successful byte

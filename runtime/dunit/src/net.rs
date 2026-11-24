@@ -9,8 +9,8 @@ use crate::{
 use core::{fmt, str::FromStr};
 use dunit_socket_abi::{
     Endpoint, Endpoints, Options, RecvHeader, ENDPOINTS_LEN, ENDPOINT_LEN, MAX_DNS_NAME,
-    MAX_PAYLOAD, OP_CONNECT, OP_ENDPOINTS, OP_ERROR, OP_RECV_FROM, OP_SEND_TO, OP_SHUTDOWN_WRITE,
-    PROTO_DNS, PROTO_TCP, PROTO_UDP, RECV_HEADER_LEN,
+    MAX_PAYLOAD, OP_ACCEPT, OP_BIND, OP_CONNECT, OP_ENDPOINTS, OP_ERROR, OP_LISTEN, OP_RECV_FROM,
+    OP_SEND_TO, OP_SHUTDOWN_WRITE, PROTO_DNS, PROTO_TCP, PROTO_UDP, RECV_HEADER_LEN,
 };
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -265,6 +265,22 @@ impl SocketFd {
         Endpoints::decode(&raw).map_err(|_| Error(libdunit::EIO))
     }
 
+    fn wait_write_op(&self, op: u16, input: &[u8], deadline: Option<Instant>) -> Result<()> {
+        loop {
+            let res = self.op(op, input, &mut []);
+            if res == 0 {
+                return Ok(());
+            }
+            if res != libdunit::EAGAIN {
+                return Err(Error(res));
+            }
+            self.wait_for(event::WRITE, deadline, libdunit::EAGAIN)?;
+            if let Some(err) = self.take_error()? {
+                return Err(err);
+            }
+        }
+    }
+
     fn set_nonblocking(&mut self, nonblocking: bool) {
         self.nonblocking = nonblocking;
     }
@@ -463,6 +479,124 @@ impl Write for TcpStream {
     }
 }
 
+pub struct TcpListener {
+    inner: SocketFd,
+}
+
+impl TcpListener {
+    pub fn bind(grant: &NetGrant, addr: SocketAddrV4) -> Result<Self> {
+        Self::bind_backlog(grant, addr, 4)
+    }
+
+    pub fn bind_backlog(grant: &NetGrant, addr: SocketAddrV4, backlog: u32) -> Result<Self> {
+        let deadline = deadline_from(Some(OPEN_TIMEOUT))?;
+        let inner = SocketFd::open(grant, PROTO_TCP, OPEN_TIMEOUT)?;
+        inner.wait_write_op(OP_BIND, &addr.to_wire().encode(), deadline)?;
+        inner.wait_write_op(OP_LISTEN, &backlog.max(1).to_le_bytes(), deadline)?;
+        Ok(Self { inner })
+    }
+
+    pub fn accept(&self) -> Result<(TcpStream, SocketAddrV4)> {
+        if self.inner.nonblocking {
+            return self.try_accept();
+        }
+        self.accept_loop(deadline_from(self.inner.read_timeout)?, false)
+    }
+
+    pub fn accept_timeout(&self, timeout: Duration) -> Result<(TcpStream, SocketAddrV4)> {
+        validate_timeout(Some(timeout))?;
+        self.accept_loop(deadline_from(Some(timeout))?, false)
+    }
+
+    pub fn try_accept(&self) -> Result<(TcpStream, SocketAddrV4)> {
+        self.accept_loop(None, true)
+    }
+
+    fn accept_loop(
+        &self,
+        deadline: Option<Instant>,
+        nonblocking: bool,
+    ) -> Result<(TcpStream, SocketAddrV4)> {
+        let pre = nonblocking && self.is_readable();
+        let mut op_deadline = None;
+        loop {
+            let mut raw = [0u8; ENDPOINT_LEN];
+            let res = self.inner.op(OP_ACCEPT, &[], &mut raw);
+            if res >= 0 {
+                let remote = Endpoint::decode(&raw).map_err(|_| Error(libdunit::EIO))?;
+                return Ok((
+                    TcpStream {
+                        inner: SocketFd {
+                            fd: res as usize,
+                            nonblocking: false,
+                            read_timeout: None,
+                            write_timeout: None,
+                        },
+                    },
+                    SocketAddrV4::from_wire(remote),
+                ));
+            }
+            if res != libdunit::EAGAIN {
+                return Err(Error(res));
+            }
+            let wait_until = if nonblocking {
+                if !pre {
+                    return Err(Error(res));
+                }
+                if op_deadline.is_none() {
+                    op_deadline = deadline_from(Some(OPEN_TIMEOUT))?;
+                }
+                op_deadline
+            } else {
+                deadline
+            };
+            self.inner
+                .wait_for(event::READ, wait_until, libdunit::EAGAIN)?;
+            if let Some(err) = self.inner.take_error()? {
+                return Err(err);
+            }
+        }
+    }
+
+    fn is_readable(&self) -> bool {
+        let mut ready = [event::Event::default()];
+        libdunit::wait_set::wait(
+            &[Interest::descriptor(self.inner.fd as u32, event::READ, 0)],
+            &mut ready,
+            0,
+        )
+        .is_ok_and(|n| n > 0 && (ready[0].events & event::READ != 0))
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddrV4> {
+        Ok(SocketAddrV4::from_wire(self.inner.endpoints()?.local))
+    }
+
+    pub fn set_nonblocking(&mut self, nonblocking: bool) {
+        self.inner.set_nonblocking(nonblocking);
+    }
+
+    pub fn is_nonblocking(&self) -> bool {
+        self.inner.nonblocking
+    }
+
+    pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()> {
+        self.inner.set_read_timeout(timeout)
+    }
+
+    pub fn read_timeout(&self) -> Option<Duration> {
+        self.inner.read_timeout
+    }
+
+    pub fn take_error(&self) -> Result<Option<Error>> {
+        self.inner.take_error()
+    }
+
+    pub fn descriptor(&self) -> u32 {
+        self.inner.fd as u32
+    }
+}
+
 pub struct UdpSocket {
     inner: SocketFd,
 }
@@ -472,6 +606,13 @@ impl UdpSocket {
         Ok(Self {
             inner: SocketFd::open(grant, PROTO_UDP, OPEN_TIMEOUT)?,
         })
+    }
+
+    pub fn bind(grant: &NetGrant, addr: SocketAddrV4) -> Result<Self> {
+        let deadline = deadline_from(Some(OPEN_TIMEOUT))?;
+        let inner = SocketFd::open(grant, PROTO_UDP, OPEN_TIMEOUT)?;
+        inner.wait_write_op(OP_BIND, &addr.to_wire().encode(), deadline)?;
+        Ok(Self { inner })
     }
 
     pub fn connect(&self, addr: SocketAddrV4) -> Result<()> {

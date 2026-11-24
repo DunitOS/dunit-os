@@ -301,6 +301,108 @@ int socket(int domain, int type, int protocol)
     return (int)fail(error);
 }
 
+static int await_write_op(int fd, unsigned op, const void *input, size_t input_size)
+{
+    uint64_t deadline = 0;
+    for (;;) {
+        long value = socket_op(fd, op, input, input_size, NULL, 0);
+        if (value == 0)
+            return 0;
+        if (value != -EAGAIN)
+            return (int)value;
+        int waited = poll_wait(fd, POLLOUT, OPEN_TIMEOUT_MS, &deadline);
+        if (waited < 0)
+            return -errno;
+        if (waited == 0)
+            return -ETIMEDOUT;
+        int32_t sock_err = 0;
+        long err_res = socket_op(fd, DUNIT_SOCKET_OP_ERROR, NULL, 0, &sock_err, sizeof sock_err);
+        if (err_res < 0)
+            return (int)err_res;
+        if (err_res != sizeof sock_err || sock_err > 0)
+            return -EIO;
+        if (sock_err < 0)
+            return (int)sock_err;
+    }
+}
+
+int bind(int fd, const struct sockaddr *address, socklen_t length)
+{
+    struct dunit_socket_endpoint endpoint;
+    int error = endpoint_error(address, length, &endpoint);
+    if (error)
+        return (int)fail(error);
+    int res = await_write_op(fd, DUNIT_SOCKET_OP_BIND, &endpoint, sizeof endpoint);
+    if (res == -EBUSY)
+        return (int)fail(EADDRINUSE);
+    return res < 0 ? (int)result(res) : 0;
+}
+
+int listen(int fd, int backlog)
+{
+    uint32_t bl = backlog <= 0 ? 1u : (uint32_t)backlog;
+    int res = await_write_op(fd, DUNIT_SOCKET_OP_LISTEN, &bl, sizeof bl);
+    if (res == -EBUSY)
+        return (int)fail(EADDRINUSE);
+    return res < 0 ? (int)result(res) : 0;
+}
+
+int accept4(int fd, struct sockaddr *address, socklen_t *length, int flags)
+{
+    if (flags & ~(SOCK_NONBLOCK | SOCK_CLOEXEC))
+        return (int)fail(EINVAL);
+    if (address && !length)
+        return (int)fail(EFAULT);
+
+    struct sock_state st = get_state(fd);
+    struct pollfd pre = { .fd = fd, .events = POLLIN };
+    int pre_ready = poll(&pre, 1, 0) > 0 && (pre.revents & POLLIN);
+    uint64_t rcv_deadline = 0;
+    uint64_t op_deadline = 0;
+
+    for (;;) {
+        struct dunit_socket_endpoint remote = {0};
+        long res = socket_op(fd, DUNIT_SOCKET_OP_ACCEPT, NULL, 0,
+                             address ? &remote : NULL, address ? sizeof remote : 0);
+        if (res >= 0) {
+            int new_fd = (int)res;
+            if (!(flags & SOCK_CLOEXEC) && fcntl(new_fd, F_SETFD, 0) != 0) {
+                int err = errno;
+                close(new_fd);
+                return (int)fail(err);
+            }
+            set_state(new_fd, (flags & SOCK_NONBLOCK) != 0, SOCK_STREAM, IPPROTO_TCP);
+            if (address)
+                put_address(&remote, address, length);
+            return new_fd;
+        }
+        if (res != -EAGAIN)
+            return (int)result(res);
+        if (pre_ready) {
+            int waited = poll_wait(fd, POLLIN, OPEN_TIMEOUT_MS, &op_deadline);
+            if (waited <= 0)
+                return waited == 0 ? (int)fail(EAGAIN) : -1;
+        } else {
+            if (st.nonblocking)
+                return (int)fail(EAGAIN);
+            int waited = poll_wait(fd, POLLIN, st.rcv_timeout_ms, &rcv_deadline);
+            if (waited <= 0)
+                return waited == 0 ? (int)fail(EAGAIN) : -1;
+            pre_ready = 1;
+            op_deadline = 0;
+        }
+        int32_t sock_err = 0;
+        long err_res = socket_op(fd, DUNIT_SOCKET_OP_ERROR, NULL, 0, &sock_err, sizeof sock_err);
+        if (err_res == sizeof sock_err && sock_err < 0)
+            return (int)result(sock_err);
+    }
+}
+
+int accept(int fd, struct sockaddr *address, socklen_t *length)
+{
+    return accept4(fd, address, length, 0);
+}
+
 int connect(int fd, const struct sockaddr *address, socklen_t length)
 {
     struct dunit_socket_endpoint endpoint;

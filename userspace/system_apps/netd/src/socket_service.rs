@@ -4,16 +4,17 @@ use dunit::{errno, Error, Result};
 use dunit_net_core::{
     tcp::{
         self,
-        table::{Outbound as TcpPacket, StreamId, Table, MAX_STREAMS},
+        table::{ListenerId, Outbound as TcpPacket, StreamId, Table, MAX_PENDING, MAX_STREAMS},
         State, StreamError,
     },
     udp::Address,
     Egress, Error as NetError, Ip, Peer,
 };
 use dunit_socket_abi::{
-    BridgeHeader, Endpoint, Options, BRIDGE_CLOSE, BRIDGE_COMPLETE, BRIDGE_CONNECT, BRIDGE_CREDIT,
-    BRIDGE_DATA, BRIDGE_EOF, BRIDGE_ERROR, BRIDGE_OPEN, BRIDGE_SEND, BRIDGE_SHUTDOWN, MAX_FRAME,
-    MAX_PAYLOAD, PROTO_DNS, PROTO_TCP, PROTO_UDP,
+    BridgeHeader, Endpoint, Options, BRIDGE_ACCEPT, BRIDGE_BIND, BRIDGE_CLOSE, BRIDGE_COMPLETE,
+    BRIDGE_CONNECT, BRIDGE_CREDIT, BRIDGE_DATA, BRIDGE_EOF, BRIDGE_ERROR, BRIDGE_LISTEN,
+    BRIDGE_LISTENER_READY, BRIDGE_OPEN, BRIDGE_SEND, BRIDGE_SHUTDOWN, MAX_FRAME, MAX_PAYLOAD,
+    PROTO_DNS, PROTO_TCP, PROTO_UDP,
 };
 use netd::{checked, Device};
 
@@ -29,6 +30,8 @@ enum Transport {
     None,
     Udp(u16),
     Tcp(StreamId),
+    TcpBound(u16),
+    Listener(ListenerId),
 }
 
 struct Request {
@@ -47,6 +50,7 @@ struct Socket {
     credit: bool,
     eof: bool,
     failed: bool,
+    listener_notified: bool,
     rx: Option<(Endpoint, Vec<u8>)>,
 }
 
@@ -60,6 +64,7 @@ impl Socket {
             credit: true,
             eof: false,
             failed: false,
+            listener_notified: false,
             rx: None,
         }
     }
@@ -234,73 +239,150 @@ impl SocketService {
         self.read_requests(interface.peer(), now)?;
         let mut peer = interface.peer();
         let mut retry = false;
-        for socket in self.sockets.iter_mut().flatten() {
+        for index in 0..SOCKETS {
+            let Some(mut socket) = self.sockets[index].take() else {
+                continue;
+            };
             if socket.failed {
+                self.sockets[index] = Some(socket);
                 continue;
             }
             if let Some(mut request) = socket.request.take() {
                 if now >= request.deadline {
                     retire(
-                        socket,
+                        &mut socket,
                         peer.as_deref_mut(),
                         self.tcp.as_mut(),
                         self.dns.as_mut(),
                         &mut self.wire,
                     );
-                    fail(&mut self.bridge, socket, errno::EIO)?;
+                    fail(&mut self.bridge, &mut socket, errno::EIO)?;
+                    self.sockets[index] = Some(socket);
                     continue;
                 }
-                let status = match (self.ip, &mut peer, &mut self.tcp) {
-                    (Some(_), Some(peer), Some(tcp)) if socket.open.protocol == PROTO_DNS => {
-                        progress_dns(
-                            &mut self.bridge,
-                            socket,
-                            &request,
-                            &mut self.dns,
-                            self.dns_servers,
+                if request.kind == BRIDGE_ACCEPT {
+                    let result = match self.tcp.as_mut() {
+                        Some(tcp) if self.ip.is_some() => {
+                            progress_accept(index, &socket, &request, &mut self.sockets, tcp)
+                        }
+                        _ => Err(errno::EAGAIN),
+                    };
+                    socket.listener_notified = false;
+                    match result {
+                        Ok((child_slot, remote)) => {
+                            self.bridge
+                                .complete(socket.open, BRIDGE_ACCEPT, 0, remote)?;
+                            if child_slot < index {
+                                if let Some(child) = self.sockets[child_slot].as_mut() {
+                                    receive(
+                                        &mut self.bridge,
+                                        child,
+                                        peer.as_deref_mut(),
+                                        self.tcp.as_mut(),
+                                    )?;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            self.bridge.complete(
+                                socket.open,
+                                BRIDGE_ACCEPT,
+                                err,
+                                Endpoint::NONE,
+                            )?;
+                        }
+                    }
+                } else {
+                    let status = match (self.ip, &mut peer, &mut self.tcp) {
+                        (Some(_), Some(peer), Some(tcp)) if socket.open.protocol == PROTO_DNS => {
+                            progress_dns(
+                                &mut self.bridge,
+                                &mut socket,
+                                &request,
+                                &mut self.dns,
+                                self.dns_servers,
+                                peer,
+                                tcp,
+                                tx,
+                                &mut self.wire,
+                                now,
+                            )?
+                        }
+                        (Some(ip), Some(peer), Some(tcp)) => progress(
+                            &mut socket,
+                            &mut request,
+                            ip,
                             peer,
                             tcp,
                             tx,
-                            &mut self.wire,
+                            &self.sockets,
                             now,
-                        )?
-                    }
-                    (Some(ip), Some(peer), Some(tcp)) => {
-                        progress(socket, &mut request, ip, peer, tcp, tx, now)
-                    }
-                    _ => Ok(false),
-                };
-                match status {
-                    Ok(true) => self
-                        .bridge
-                        .complete(socket.open, request.kind, 0, socket.local)?,
-                    Ok(false) => {
-                        retry |= self.ip.is_some() && socket.open.protocol == PROTO_UDP;
-                        socket.request = Some(request);
-                    }
-                    Err(error) => {
-                        self.bridge
-                            .complete(socket.open, request.kind, error, Endpoint::NONE)?;
-                        retire(
-                            socket,
-                            peer.as_deref_mut(),
-                            self.tcp.as_mut(),
-                            self.dns.as_mut(),
-                            &mut self.wire,
-                        );
-                        socket.failed = true;
+                        ),
+                        _ => Ok(false),
+                    };
+                    match status {
+                        Ok(true) => self.bridge.complete(
+                            socket.open,
+                            request.kind,
+                            0,
+                            socket.local,
+                        )?,
+                        Ok(false) => {
+                            retry |= self.ip.is_some() && socket.open.protocol == PROTO_UDP;
+                            socket.request = Some(request);
+                        }
+                        Err(error) => {
+                            self.bridge.complete(
+                                socket.open,
+                                request.kind,
+                                error,
+                                Endpoint::NONE,
+                            )?;
+                            retire(
+                                &mut socket,
+                                peer.as_deref_mut(),
+                                self.tcp.as_mut(),
+                                self.dns.as_mut(),
+                                &mut self.wire,
+                            );
+                            socket.failed = true;
+                        }
                     }
                 }
             }
             if let Some(tcp) = &mut self.tcp {
-                report_tcp_error(&mut self.bridge, socket, tcp, &mut self.wire)?;
+                report_tcp_error(&mut self.bridge, &mut socket, tcp, &mut self.wire)?;
             }
             receive(
                 &mut self.bridge,
-                socket,
+                &mut socket,
                 peer.as_deref_mut(),
                 self.tcp.as_mut(),
             )?;
+            if !socket.failed {
+                if let (Transport::Listener(id), Some(tcp)) = (socket.transport, self.tcp.as_ref())
+                {
+                    let ready = tcp.listener_ready(id).map_err(|e| Error(tcp_errno(e)))?;
+                    if ready != socket.listener_notified {
+                        match self.bridge.write(
+                            socket.open,
+                            BRIDGE_LISTENER_READY,
+                            u16::from(ready),
+                            0,
+                            Endpoint::NONE,
+                            &[],
+                        ) {
+                            Ok(()) => socket.listener_notified = ready,
+                            Err(Error(errno::EAGAIN)) => retry = true,
+                            Err(err) => {
+                                self.sockets[index] = Some(socket);
+                                return Err(err);
+                            }
+                        }
+                    }
+                }
+            }
+            self.sockets[index] = Some(socket);
         }
 
         if let (Some(peer), Some(tcp)) = (peer, &mut self.tcp) {
@@ -399,7 +481,8 @@ impl SocketService {
                 }
                 (BRIDGE_CREDIT, Some(index)) => self.sockets[index].as_mut().unwrap().credit = true,
                 (BRIDGE_CLOSE | BRIDGE_CREDIT, None) => {}
-                (BRIDGE_CONNECT | BRIDGE_SEND | BRIDGE_SHUTDOWN, Some(index)) => {
+                (BRIDGE_CONNECT | BRIDGE_SEND | BRIDGE_SHUTDOWN | BRIDGE_BIND | BRIDGE_LISTEN
+                | BRIDGE_ACCEPT, Some(index)) => {
                     let socket = self.sockets[index].as_mut().unwrap();
                     if socket.failed {
                         // Fail path already emitted BRIDGE_ERROR/complete and cleared
@@ -428,6 +511,71 @@ impl SocketService {
     }
 }
 
+fn tcp_port_pending(sockets: &[Option<Socket>], port: u16) -> bool {
+    sockets
+        .iter()
+        .flatten()
+        .any(|s| matches!(s.transport, Transport::TcpBound(p) if p == port))
+}
+
+fn progress_accept(
+    listener_index: usize,
+    listener: &Socket,
+    request: &Request,
+    sockets: &mut [Option<Socket>; SOCKETS],
+    tcp: &mut Table,
+) -> core::result::Result<(usize, Endpoint), isize> {
+    if listener.open.protocol != PROTO_TCP {
+        return Err(errno::EOPNOTSUPP);
+    }
+    let Transport::Listener(id) = listener.transport else {
+        return Err(errno::EINVAL);
+    };
+    let raw: [u8; 8] = request
+        .data
+        .as_slice()
+        .try_into()
+        .map_err(|_| errno::EINVAL)?;
+    let child_token = u64::from_le_bytes(raw);
+    let slot = sockets
+        .iter()
+        .enumerate()
+        .position(|(i, s)| i != listener_index && s.is_none())
+        .ok_or(errno::ENOBUFS)?;
+    let stream_id = tcp.accept(id).map_err(tcp_errno)?;
+    let (local, remote) = match tcp.endpoints(stream_id) {
+        Ok(endpoints) => endpoints,
+        Err(err) => {
+            let _ = tcp.close(stream_id);
+            return Err(tcp_errno(err));
+        }
+    };
+    let mut child = Socket::new(BridgeHeader {
+        token: child_token,
+        owner: listener.open.owner,
+        kind: BRIDGE_OPEN,
+        flags: 0,
+        error: 0,
+        endpoint: Endpoint::NONE,
+        protocol: PROTO_TCP,
+        length: 0,
+    });
+    child.transport = Transport::Tcp(stream_id);
+    child.local = Endpoint {
+        ip: local.ip,
+        port: local.port,
+    };
+    sockets[slot] = Some(child);
+    Ok((
+        slot,
+        Endpoint {
+            ip: remote.ip,
+            port: remote.port,
+        },
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn progress(
     socket: &mut Socket,
     request: &mut Request,
@@ -435,10 +583,23 @@ fn progress(
     peer: &mut Peer,
     tcp: &mut Table,
     tx: &mut Outbound,
+    others: &[Option<Socket>],
     now: u64,
 ) -> core::result::Result<bool, isize> {
     let remote = request.destination;
     match (socket.open.protocol, request.kind) {
+        (PROTO_UDP, BRIDGE_BIND) => {
+            if !matches!(socket.transport, Transport::None) {
+                return Err(errno::EINVAL);
+            }
+            if remote.ip != [0; 4] && remote.ip != ip {
+                return Err(errno::EINVAL);
+            }
+            let port = peer.udp_bind(remote.port).map_err(net_errno)?;
+            socket.transport = Transport::Udp(port);
+            socket.local = Endpoint { ip, port };
+            Ok(true)
+        }
         (PROTO_UDP, BRIDGE_CONNECT) => {
             let port = socket.bound_udp(ip, peer)?;
             peer.udp_connect(
@@ -468,6 +629,50 @@ fn progress(
                 }
                 Egress::Waiting => Ok(false),
             }
+        }
+        (PROTO_TCP, BRIDGE_BIND) => {
+            if !matches!(socket.transport, Transport::None) {
+                return Err(errno::EINVAL);
+            }
+            if remote.ip != [0; 4] && remote.ip != ip {
+                return Err(errno::EINVAL);
+            }
+            let port = if remote.port == 0 {
+                let mut chosen = 0;
+                for _ in 0..=SOCKETS {
+                    let candidate = tcp.ephemeral_port().map_err(tcp_errno)?;
+                    if !tcp_port_pending(others, candidate) {
+                        chosen = candidate;
+                        break;
+                    }
+                }
+                if chosen == 0 {
+                    return Err(errno::ENOBUFS);
+                }
+                chosen
+            } else {
+                if tcp.port_in_use(remote.port) || tcp_port_pending(others, remote.port) {
+                    return Err(errno::EBUSY);
+                }
+                remote.port
+            };
+            socket.transport = Transport::TcpBound(port);
+            socket.local = Endpoint { ip, port };
+            Ok(true)
+        }
+        (PROTO_TCP, BRIDGE_LISTEN) => {
+            let Transport::TcpBound(port) = socket.transport else {
+                return Err(errno::EINVAL);
+            };
+            let raw: [u8; 4] = request
+                .data
+                .as_slice()
+                .try_into()
+                .map_err(|_| errno::EINVAL)?;
+            let backlog = (u32::from_le_bytes(raw) as usize).clamp(1, MAX_PENDING);
+            let id = tcp.listen(port, backlog).map_err(tcp_errno)?;
+            socket.transport = Transport::Listener(id);
+            Ok(true)
         }
         (PROTO_TCP, kind) => {
             let id = match socket.transport {
@@ -664,6 +869,9 @@ fn retire(
             }
             let _ = tcp.close(id);
         }
+        (Transport::Listener(id), _, Some(tcp)) => {
+            let _ = tcp.close_listener(id);
+        }
         _ => {}
     }
     socket.transport = Transport::None;
@@ -681,6 +889,7 @@ fn net_errno(error: NetError) -> isize {
     match error {
         NetError::Length => errno::EMSGSIZE,
         NetError::Capacity => errno::ENOBUFS,
+        NetError::PortInUse => errno::EBUSY,
         NetError::WouldBlock => errno::EAGAIN,
         NetError::Unsupported | NetError::Protocol => errno::EOPNOTSUPP,
         NetError::NoRoute | NetError::Timeout => errno::EIO,

@@ -77,7 +77,7 @@ fn bridge_record_kind_flags_authority_and_padding_are_checked() {
     for invalid in [
         BridgeHeader { token: 0, ..SEND },
         BridgeHeader { owner: 0, ..SEND },
-        BridgeHeader { kind: 11, ..SEND },
+        BridgeHeader { kind: 15, ..SEND },
         BridgeHeader { protocol: 0, ..SEND },
         BridgeHeader { flags: BRIDGE_SEND, ..SEND },
         BridgeHeader { flags: 0, ..done },
@@ -98,4 +98,26 @@ fn bridge_record_kind_flags_authority_and_padding_are_checked() {
     );
     bytes[39] = 1;
     assert_eq!(BridgeHeader::decode(&bytes), Err(WireError::Invalid));
+    let bind = BridgeHeader {
+        kind: BRIDGE_BIND,
+        endpoint: Endpoint { ip: [0; 4], port: 8080 },
+        protocol: PROTO_TCP,
+        ..SEND
+    };
+    assert!(bind.endpoint.is_bind_address());
+    assert!(!bind.endpoint.is_unicast());
+    let mut hdr = [0; BRIDGE_HEADER_LEN];
+    assert_eq!(bind.encode(&[], &mut hdr), Ok(BRIDGE_HEADER_LEN));
+    assert_eq!(BridgeHeader::decode(&hdr), Ok((bind, &[][..])));
+    let ready = BridgeHeader {
+        kind: BRIDGE_LISTENER_READY,
+        flags: 1,
+        endpoint: Endpoint::NONE,
+        protocol: PROTO_TCP,
+        ..SEND
+    };
+    assert_eq!(ready.encode(&[], &mut hdr), Ok(BRIDGE_HEADER_LEN));
+    assert_eq!(BridgeHeader::decode(&hdr), Ok((ready, &[][..])));
+    let bad_ready = BridgeHeader { flags: 2, ..ready };
+    assert_eq!(bad_ready.encode(&[], &mut hdr), Err(WireError::Invalid));
 }
