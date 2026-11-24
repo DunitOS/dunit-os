@@ -89,6 +89,13 @@ fn bridge_record_kind_flags_authority_and_padding_are_checked() {
     assert_eq!(SEND.encode(b"a", &mut bytes), Err(WireError::BufferTooSmall));
     assert_eq!(SEND.encode(&[0; MAX_PAYLOAD + 1], &mut bytes), Err(WireError::Invalid));
     assert_eq!(bytes, original);
+    let dns = BridgeHeader { protocol: PROTO_DNS, endpoint: Endpoint::NONE, ..SEND };
+    let mut dns_bytes = [0; BRIDGE_HEADER_LEN + 11];
+    assert_eq!(dns.encode(b"du.net.test", &mut dns_bytes), Ok(BRIDGE_HEADER_LEN + 11));
+    assert_eq!(
+        BridgeHeader::decode(&dns_bytes).unwrap().0,
+        BridgeHeader { length: 11, ..dns }
+    );
     bytes[39] = 1;
     assert_eq!(BridgeHeader::decode(&bytes), Err(WireError::Invalid));
 }

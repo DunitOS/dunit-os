@@ -1,0 +1,6 @@
+name = "net-dns-test"
+exec = "/system/libexec/net_dns_test"
+net_connect = 3
+restart = "never"
+critical = false
+

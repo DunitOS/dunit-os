@@ -5,6 +5,7 @@ extern crate alloc;
 
 mod address_probe;
 mod dhcp_runtime;
+mod dns_runtime;
 mod interface;
 mod lease_hint;
 mod outbound;

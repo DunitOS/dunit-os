@@ -1,0 +1,33 @@
+{
+  "description": "Static musl getaddrinfo/freeaddrinfo/gai_strerror exercises netd application DNS over E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-dns-posix",
+    "net_dns_posix": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "[POSIX-DNS] complete", "timeout": 90},
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[NETD] IPv4 static bound 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[POSIX-DNS] getaddrinfo resolution and cache passed", "source": "userspace/ctests/net_dns_posix.c"},
+    {"marker": "[POSIX-DNS] NXDOMAIN and gai_strerror passed", "source": "userspace/ctests/net_dns_posix.c"},
+    {"marker": "[POSIX-DNS] connect and TCP exchange passed", "source": "userspace/ctests/net_dns_posix.c"},
+    {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[POSIX-DNS] revocation rejected getaddrinfo", "source": "userspace/ctests/net_dns_posix.c"},
+    {"marker": "[POSIX-DNS] complete", "source": "userspace/ctests/net_dns_posix.c"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[POSIX-DNS] FAIL",
+    "[NETD-FIXTURE]",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager"}
+  ]
+}
+

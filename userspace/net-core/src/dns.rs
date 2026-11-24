@@ -459,6 +459,10 @@ impl Resolver {
     pub fn close(self, peer: &mut Peer) -> Result<(), Error> {
         peer.udp_close(self.port)
     }
+
+    pub fn abort(&mut self) {
+        self.pending = None;
+    }
     fn advance(&mut self, now: u64) -> Result<(), Error> {
         if now < self.last {
             return Err(Error::Header);

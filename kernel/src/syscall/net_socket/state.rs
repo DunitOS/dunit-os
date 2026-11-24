@@ -505,10 +505,12 @@ impl Bridge {
                 if !socket.open || socket.eof || socket.error != 0 {
                     return Err(EPIPE);
                 }
-                let valid = if socket.protocol == PROTO_UDP {
-                    header.endpoint.is_unicast() && data.len() <= MAX_UDP
-                } else {
-                    header.endpoint.is_none() && !socket.remote.is_none() && !data.is_empty()
+                let valid = match socket.protocol {
+                    PROTO_UDP => header.endpoint.is_unicast() && data.len() <= MAX_UDP,
+                    PROTO_DNS => header.endpoint.is_none() && data.len() == 4,
+                    _ => {
+                        header.endpoint.is_none() && !socket.remote.is_none() && !data.is_empty()
+                    }
                 };
                 if !valid {
                     return Err(EINVAL);
@@ -567,10 +569,10 @@ impl Bridge {
     ) -> Result<(), i64> {
         let socket = self.client_mut(owner, token)?;
         socket.check_request()?;
-        let max = if socket.protocol == PROTO_UDP {
-            MAX_UDP
-        } else {
-            MAX_PAYLOAD
+        let max = match socket.protocol {
+            PROTO_UDP => MAX_UDP,
+            PROTO_DNS => MAX_DNS_NAME,
+            _ => MAX_PAYLOAD,
         };
         if payload.len() > max {
             return Err(EMSGSIZE);
@@ -578,7 +580,14 @@ impl Bridge {
         if socket.write_closed {
             return Err(EPIPE);
         }
-        if endpoint.is_none() && socket.remote.is_none() {
+        if socket.protocol == PROTO_DNS {
+            if !endpoint.is_none() {
+                return Err(EOPNOTSUPP);
+            }
+            if payload.is_empty() {
+                return Err(EINVAL);
+            }
+        } else if endpoint.is_none() && socket.remote.is_none() {
             return Err(EINVAL);
         }
         if !endpoint.is_none() {
@@ -600,6 +609,9 @@ impl Bridge {
         endpoint: Endpoint,
     ) -> Result<bool, i64> {
         let socket = self.client_mut(owner, token)?;
+        if socket.protocol == PROTO_DNS {
+            return Err(EOPNOTSUPP);
+        }
         if socket.error != 0 {
             return Err(socket.error);
         }
@@ -883,5 +895,53 @@ mod tests {
         assert!(bridge.close(FdTarget::NetSocket { token }));
         assert_eq!(request(&mut bridge, generation).0.kind, BRIDGE_CLOSE);
         assert_eq!(bridge.protocol(APP, token), Err(EPIPE));
+    }
+
+    #[test]
+    fn dns_sockets_enforce_bounds_and_reject_stream_ops() {
+        let mut bridge = Bridge::new();
+        let generation = bridge.register(SERVICE).unwrap();
+        let token = bridge.open(APP, PROTO_DNS).unwrap();
+        let (open, _) = request(&mut bridge, generation);
+        assert_eq!(open.protocol, PROTO_DNS);
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(open, BRIDGE_COMPLETE, NO_ENDPOINT),
+                &[],
+            )
+            .unwrap();
+        assert_eq!(bridge.connect(APP, token, REMOTE), Err(EOPNOTSUPP));
+        assert_eq!(bridge.shutdown(APP, token), Err(EOPNOTSUPP));
+        assert_eq!(bridge.send(APP, token, REMOTE, b"a"), Err(EOPNOTSUPP));
+        assert_eq!(bridge.send(APP, token, NO_ENDPOINT, b""), Err(EINVAL));
+        assert_eq!(
+            bridge.send(APP, token, NO_ENDPOINT, &[b'a'; MAX_DNS_NAME + 1]),
+            Err(EMSGSIZE)
+        );
+        bridge.send(APP, token, NO_ENDPOINT, b"du.net.test").unwrap();
+        let (query, name) = request(&mut bridge, generation);
+        assert_eq!(name.as_slice(), b"du.net.test");
+        let mut bad_reply = response(query, BRIDGE_DATA, NO_ENDPOINT);
+        bad_reply.protocol = PROTO_DNS;
+        assert_eq!(
+            bridge.service_write(SERVICE, generation, bad_reply, &[1, 2, 3]),
+            Err(EINVAL)
+        );
+        bridge
+            .service_write(SERVICE, generation, bad_reply, &[192, 0, 2, 10])
+            .unwrap();
+        bridge
+            .service_write(
+                SERVICE,
+                generation,
+                response(query, BRIDGE_COMPLETE, NO_ENDPOINT),
+                &[],
+            )
+            .unwrap();
+        let plan = bridge.reserve_client(APP, token, 16, false).unwrap().unwrap();
+        assert_eq!(plan.bytes(), &[192, 0, 2, 10]);
+        bridge.finish_read(&plan, true).unwrap();
     }
 }

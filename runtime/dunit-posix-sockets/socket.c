@@ -7,12 +7,15 @@
 #include <dunit/socket.h>
 #include <dunit/syscall.h>
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -20,6 +23,7 @@
 
 enum {
     OPEN_TIMEOUT_MS = 5000,
+    DNS_TIMEOUT_MS = 15000,
     MAX_TRACKED_FDS = 1024,
 };
 
@@ -662,4 +666,269 @@ int setsockopt(int fd, int level, int option, const void *data, socklen_t length
         fd_states[fd].snd_timeout_ms = ms;
     unlock_states();
     return 0;
+}
+
+static int parse_service_port(const char *service, int flags, uint16_t *port_out)
+{
+    if (!service || !*service) {
+        *port_out = 0;
+        return 0;
+    }
+    unsigned long val = 0;
+    const char *p = service;
+    int numeric = 1;
+    while (*p) {
+        if (*p < '0' || *p > '9') {
+            numeric = 0;
+            break;
+        }
+        val = val * 10 + (unsigned long)(*p - '0');
+        if (val > 65535)
+            return EAI_SERVICE;
+        p++;
+    }
+    if (numeric) {
+        *port_out = (uint16_t)val;
+        return 0;
+    }
+    if (flags & AI_NUMERICSERV)
+        return EAI_NONAME;
+    if (strcmp(service, "http") == 0)
+        *port_out = 80;
+    else if (strcmp(service, "https") == 0)
+        *port_out = 443;
+    else if (strcmp(service, "domain") == 0)
+        *port_out = 53;
+    else
+        return EAI_SERVICE;
+    return 0;
+}
+
+static int resolve_dns_ipv4(const char *name, uint8_t ip_out[4])
+{
+    size_t len = strlen(name);
+    if (len == 0 || len > DUNIT_SOCKET_MAX_DNS_NAME)
+        return EAI_NONAME;
+    uint32_t grant = __atomic_load_n(&selected_grant, __ATOMIC_ACQUIRE);
+    if (!grant)
+        return EAI_FAIL;
+    const struct dunit_socket_options options = { .version = DUNIT_SOCKET_VERSION };
+    long fd_res = native_call(SYS_NET_SOCKET_OPEN, grant, DUNIT_SOCKET_PROTO_DNS,
+                              (uintptr_t)&options, sizeof options, 0, 0);
+    if (fd_res < 0)
+        return fd_res == -EAGAIN ? EAI_AGAIN : EAI_FAIL;
+    int fd = (int)fd_res;
+    if (await_open(fd) != 0) {
+        int err = errno;
+        close(fd);
+        return err == ETIMEDOUT || err == EAGAIN ? EAI_AGAIN : EAI_FAIL;
+    }
+
+    uint64_t deadline = 0;
+    size_t written = 0;
+    while (written < len) {
+        long n = native_call(SYS_WRITE, fd, (uintptr_t)(name + written), len - written, 0, 0, 0);
+        if (n > 0) {
+            written += (size_t)n;
+            continue;
+        }
+        if (n == -EAGAIN) {
+            int waited = poll_wait(fd, POLLOUT, DNS_TIMEOUT_MS, &deadline);
+            if (waited > 0)
+                continue;
+            close(fd);
+            return waited == 0 ? EAI_AGAIN : EAI_FAIL;
+        }
+        close(fd);
+        return n == -EINVAL ? EAI_NONAME : EAI_FAIL;
+    }
+
+    for (;;) {
+        long n = native_call(SYS_READ, fd, (uintptr_t)ip_out, 4, 0, 0, 0);
+        if (n == 4) {
+            close(fd);
+            return 0;
+        }
+        if (n >= 0) {
+            close(fd);
+            return EAI_FAIL;
+        }
+        if (n != -EAGAIN) {
+            close(fd);
+            if (n == -ENOENT || n == -EINVAL)
+                return EAI_NONAME;
+            return EAI_FAIL;
+        }
+        int waited = poll_wait(fd, POLLIN, DNS_TIMEOUT_MS, &deadline);
+        if (waited <= 0) {
+            close(fd);
+            return waited == 0 ? EAI_AGAIN : EAI_FAIL;
+        }
+        int32_t sock_err = 0;
+        long err_res = socket_op(fd, DUNIT_SOCKET_OP_ERROR, NULL, 0, &sock_err, sizeof sock_err);
+        if (err_res == sizeof sock_err && sock_err < 0) {
+            close(fd);
+            if (sock_err == -ENOENT || sock_err == -EINVAL)
+                return EAI_NONAME;
+            if (sock_err == -EAGAIN)
+                return EAI_AGAIN;
+            return EAI_FAIL;
+        }
+    }
+}
+
+static struct addrinfo *alloc_ai_node(const uint8_t ip[4], uint16_t port, int socktype, int protocol,
+                                      const char *canon)
+{
+    struct addrinfo *ai = calloc(1, sizeof *ai);
+    struct sockaddr_in *sa = calloc(1, sizeof *sa);
+    char *cname = canon ? strdup(canon) : NULL;
+    if (!ai || !sa || (canon && !cname)) {
+        free(cname);
+        free(sa);
+        free(ai);
+        return NULL;
+    }
+    sa->sin_family = AF_INET;
+    sa->sin_port = htons(port);
+    memcpy(&sa->sin_addr.s_addr, ip, 4);
+    ai->ai_family = AF_INET;
+    ai->ai_socktype = socktype;
+    ai->ai_protocol = protocol;
+    ai->ai_addrlen = sizeof *sa;
+    ai->ai_addr = (struct sockaddr *)sa;
+    ai->ai_canonname = cname;
+    return ai;
+}
+
+int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
+                struct addrinfo **res)
+{
+    if (!res)
+        return EAI_NONAME;
+    *res = NULL;
+    if (!node && !service)
+        return EAI_NONAME;
+
+    int flags = hints ? hints->ai_flags : 0;
+    int family = hints ? hints->ai_family : AF_UNSPEC;
+    int socktype = hints ? hints->ai_socktype : 0;
+    int protocol = hints ? hints->ai_protocol : 0;
+
+    int allowed_flags = AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_V4MAPPED | AI_ALL |
+                        AI_ADDRCONFIG | AI_NUMERICSERV;
+    if (flags & ~allowed_flags)
+        return EAI_BADFLAGS;
+    if (family != AF_UNSPEC && family != AF_INET)
+        return EAI_FAMILY;
+
+    int emit_stream = 0;
+    int emit_dgram = 0;
+    if (socktype == 0 && protocol == 0) {
+        emit_stream = 1;
+        emit_dgram = 1;
+    } else if ((socktype == 0 || socktype == SOCK_STREAM) &&
+               (protocol == 0 || protocol == IPPROTO_TCP)) {
+        emit_stream = 1;
+    } else if ((socktype == 0 || socktype == SOCK_DGRAM) &&
+               (protocol == 0 || protocol == IPPROTO_UDP)) {
+        emit_dgram = 1;
+    } else {
+        return EAI_SOCKTYPE;
+    }
+
+    uint16_t port = 0;
+    int srv_err = parse_service_port(service, flags, &port);
+    if (srv_err)
+        return srv_err;
+
+    uint8_t ip[4] = {0};
+    const char *canon = NULL;
+    if (!node) {
+        if (!(flags & AI_PASSIVE)) {
+            ip[0] = 127;
+            ip[3] = 1;
+        }
+    } else {
+        struct in_addr addr;
+        if (inet_pton(AF_INET, node, &addr) == 1) {
+            memcpy(ip, &addr.s_addr, 4);
+            if (flags & AI_CANONNAME)
+                canon = node;
+        } else if (flags & AI_NUMERICHOST) {
+            return EAI_NONAME;
+        } else {
+            int dns_err = resolve_dns_ipv4(node, ip);
+            if (dns_err)
+                return dns_err;
+            if (flags & AI_CANONNAME)
+                canon = node;
+        }
+    }
+
+    struct addrinfo *head = NULL;
+    struct addrinfo *tail = NULL;
+    if (emit_stream) {
+        head = alloc_ai_node(ip, port, SOCK_STREAM, IPPROTO_TCP, canon);
+        if (!head)
+            return EAI_MEMORY;
+        tail = head;
+        canon = NULL;
+    }
+    if (emit_dgram) {
+        struct addrinfo *node_dgram = alloc_ai_node(ip, port, SOCK_DGRAM, IPPROTO_UDP, canon);
+        if (!node_dgram) {
+            freeaddrinfo(head);
+            return EAI_MEMORY;
+        }
+        if (!head)
+            head = node_dgram;
+        else
+            tail->ai_next = node_dgram;
+    }
+    *res = head;
+    return 0;
+}
+
+void freeaddrinfo(struct addrinfo *res)
+{
+    while (res) {
+        struct addrinfo *next = res->ai_next;
+        free(res->ai_addr);
+        free(res->ai_canonname);
+        free(res);
+        res = next;
+    }
+}
+
+const char *gai_strerror(int ecode)
+{
+    switch (ecode) {
+    case 0:
+        return "Success";
+    case EAI_BADFLAGS:
+        return "Invalid value for ai_flags";
+    case EAI_NONAME:
+        return "Name or service not known";
+    case EAI_AGAIN:
+        return "Temporary failure in name resolution";
+    case EAI_FAIL:
+        return "Non-recoverable failure in name resolution";
+    case EAI_NODATA:
+        return "No address associated with hostname";
+    case EAI_FAMILY:
+        return "ai_family not supported";
+    case EAI_SOCKTYPE:
+        return "ai_socktype not supported";
+    case EAI_SERVICE:
+        return "Servname not supported for ai_socktype";
+    case EAI_MEMORY:
+        return "Memory allocation failure";
+    case EAI_SYSTEM:
+        return "System error";
+    case EAI_OVERFLOW:
+        return "Argument buffer overflow";
+    default:
+        return "Unknown error";
+    }
 }

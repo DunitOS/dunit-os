@@ -48,7 +48,9 @@ python3 tools/qemu_test.py --build --markers-file tools/net_socket_markers.json 
 ```
 
 The [opt-in C adapter](../sdk/posix-sockets.md) translates standard nonblocking
-IPv4 calls for statically linked musl applications. Application DNS, IPv6,
+and blocking IPv4 calls and `getaddrinfo` DNS queries for statically linked musl
+applications. Native `dunit::net` also provides `resolve_ipv4` and
+`TcpStream::connect_host` over `PROTO_DNS`. IPv6,
 listen and low-port binding, wider launcher policy and Internet qualification
 remain open.
 See [verification](../verification/native-sockets-2026-11-19.json).

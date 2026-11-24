@@ -612,7 +612,9 @@ def run(args: argparse.Namespace) -> RunResult:
     net_dhcp = bool(getattr(args, "net_dhcp", False) or run_defaults.get("net_dhcp"))
     net_static = bool(getattr(args, "net_static", False) or run_defaults.get("net_static"))
     net_socket = bool(getattr(args, "net_socket", False) or run_defaults.get("net_socket"))
-    peers = sum((net_test, net_live, net_dhcp, net_static, net_socket))
+    net_dns = bool(getattr(args, "net_dns", False) or run_defaults.get("net_dns"))
+    net_dns_posix = bool(getattr(args, "net_dns_posix", False) or run_defaults.get("net_dns_posix"))
+    peers = sum((net_test, net_live, net_dhcp, net_static, net_socket, net_dns, net_dns_posix))
     if peers > 1:
         raise ValueError("choose one network test peer")
     if peers and (args.interactive or args.variant or args.disk or args.build_disk):
@@ -697,7 +699,10 @@ def run(args: argparse.Namespace) -> RunResult:
                arg.startswith(("-nic=", "-netdev=", "-net=")) or
                arg.startswith("e1000,") for arg in extra_args):
             raise ValueError("network peer owns its reference NIC and backend")
-        if net_socket:
+        if net_dns or net_dns_posix:
+            from net_dns_transport import NetDnsPeer
+            peer = NetDnsPeer(workdir, posix=net_dns_posix)
+        elif net_socket:
             from net_socket_transport import NetSocketPeer
             peer = NetSocketPeer(workdir)
         elif net_static:
@@ -838,7 +843,7 @@ def run(args: argparse.Namespace) -> RunResult:
         # Boot-scene waits can refer to this VM's startup output. Command waits
         # above remain scoped to their own launch.
         # The per-command budget applies only to command_actions above.
-        if (net_dhcp or net_static or net_socket) and not peer.wait_complete(remaining()):
+        if (net_dhcp or net_static or net_socket or net_dns or net_dns_posix) and not peer.wait_complete(remaining()):
             raise RuntimeError("IPv4 peer did not complete the wire exchange")
         run_command_actions(qmp, serial, run_defaults.get("actions", []),
                             0, hard_deadline)
@@ -1022,6 +1027,10 @@ def main() -> int:
                         help="verify static IPv4, gateway routing and conflict withdrawal over E1000")
     parser.add_argument("--net-socket", action="store_true",
                         help="verify outbound application UDP and TCP over isolated E1000")
+    parser.add_argument("--net-dns", action="store_true",
+                        help="verify outbound application DNS resolution over isolated E1000")
+    parser.add_argument("--net-dns-posix", action="store_true",
+                        help="verify C POSIX getaddrinfo DNS resolution over isolated E1000")
     parser.add_argument("--qmp-transport", choices=("unix", "stdio"), default="unix",
                         help="QMP control channel; stdio uses local pipes without sockets")
     parser.add_argument(

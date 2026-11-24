@@ -304,7 +304,8 @@ arguments. Grant handles and descriptor numbers are process-local.
 | `NetSocketOp` (100) | FD, operation, input pointer, input length, output pointer, output length | Operation-specific result or negative errno |
 
 `NET_CONNECT` is right bit 9 and `NET_SERVICE` is bit 10. Scope bits 0 and 1
-authorize UDP and TCP respectively. Protocol values 1 and 2 select UDP and TCP.
+authorize UDP and TCP respectively. Protocol values 1, 2 and 3 select UDP,
+TCP and DNS (authorized when either UDP or TCP scope is granted).
 Both option records are eight bytes containing little-endian version 1 in
 the first two bytes and six reserved zero bytes. The native endpoint record
 contains four IPv4 octets, a little-endian u16 port and a reserved zero u16.
@@ -332,7 +333,9 @@ u16 kind and flags, i32 error, four IPv4 octets, u16 port, u16 protocol,
 u32 payload length and four reserved zero bytes. `COMPLETE` records identify
 the request kind in the flags field. All other records use zero flags.
 The kernel attaches the owner and token to requests. A `CREDIT` record
-reports that the application has consumed the preceding data record.
+reports that the application has consumed the preceding data record. DNS
+sockets exchange hostname queries (up to 253 bytes) via `SEND_DATA` and
+receive 4-byte IPv4 addresses via `BRIDGE_DATA` followed by `BRIDGE_COMPLETE`.
 
 C layouts are in [`include/dunit/socket.h`](include/dunit/socket.h).
 The equivalent checked codecs live in [`abi/socket`](socket).

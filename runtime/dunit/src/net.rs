@@ -8,12 +8,13 @@ use crate::{
 };
 use core::{fmt, str::FromStr};
 use dunit_socket_abi::{
-    Endpoint, Endpoints, Options, RecvHeader, ENDPOINTS_LEN, ENDPOINT_LEN, MAX_PAYLOAD,
-    OP_CONNECT, OP_ENDPOINTS, OP_ERROR, OP_RECV_FROM, OP_SEND_TO, OP_SHUTDOWN_WRITE, PROTO_TCP,
-    PROTO_UDP, RECV_HEADER_LEN,
+    Endpoint, Endpoints, Options, RecvHeader, ENDPOINTS_LEN, ENDPOINT_LEN, MAX_DNS_NAME,
+    MAX_PAYLOAD, OP_CONNECT, OP_ENDPOINTS, OP_ERROR, OP_RECV_FROM, OP_SEND_TO, OP_SHUTDOWN_WRITE,
+    PROTO_DNS, PROTO_TCP, PROTO_UDP, RECV_HEADER_LEN,
 };
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
+const DNS_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_UDP_PAYLOAD: usize = 1472;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -298,16 +299,41 @@ impl TcpStream {
 
     pub fn connect_timeout(grant: &NetGrant, addr: SocketAddrV4, timeout: Duration) -> Result<Self> {
         validate_timeout(Some(timeout))?;
-        Self::connect_inner(grant, addr, Some(timeout))
+        Self::connect_inner(grant, addr, deadline_from(Some(timeout))?)
+    }
+
+    pub fn connect_host(grant: &NetGrant, host: &str, port: u16) -> Result<Self> {
+        let ip = resolve_ipv4(grant, host)?;
+        Self::connect(grant, SocketAddrV4::new(ip, port))
+    }
+
+    pub fn connect_host_timeout(
+        grant: &NetGrant,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<Self> {
+        validate_timeout(Some(timeout))?;
+        let deadline = deadline_from(Some(timeout))?;
+        let ip = resolve_ipv4_timeout(grant, host, timeout)?;
+        Self::connect_inner(grant, SocketAddrV4::new(ip, port), deadline)
     }
 
     fn connect_inner(
         grant: &NetGrant,
         addr: SocketAddrV4,
-        timeout: Option<Duration>,
+        deadline: Option<Instant>,
     ) -> Result<Self> {
-        let open_limit = timeout.map_or(OPEN_TIMEOUT, |t| t.min(OPEN_TIMEOUT));
-        let deadline = deadline_from(timeout)?;
+        let open_limit = match deadline {
+            None => OPEN_TIMEOUT,
+            Some(end) => {
+                let now = Instant::now()?;
+                if now >= end {
+                    return Err(Error(libdunit::EAGAIN));
+                }
+                OPEN_TIMEOUT
+            }
+        };
         let inner = SocketFd::open(grant, PROTO_TCP, open_limit)?;
         let res = inner.op(OP_CONNECT, &addr.to_wire().encode(), &mut []);
         if res == 0 {
@@ -616,5 +642,50 @@ impl UdpSocket {
 
     pub fn descriptor(&self) -> u32 {
         self.inner.fd as u32
+    }
+}
+
+pub fn resolve_ipv4(grant: &NetGrant, host: &str) -> Result<Ipv4Addr> {
+    resolve_ipv4_timeout(grant, host, DNS_TIMEOUT)
+}
+
+pub fn resolve_ipv4_timeout(grant: &NetGrant, host: &str, timeout: Duration) -> Result<Ipv4Addr> {
+    if let Ok(ip) = host.parse::<Ipv4Addr>() {
+        return Ok(ip);
+    }
+    if host.is_empty() || host.len() > MAX_DNS_NAME {
+        return Err(Error(libdunit::EINVAL));
+    }
+    validate_timeout(Some(timeout))?;
+    let deadline = deadline_from(Some(timeout))?;
+    let sock = SocketFd::open(grant, PROTO_DNS, timeout.min(OPEN_TIMEOUT))?;
+    let query = host.as_bytes();
+    let mut written = 0;
+    while written < query.len() {
+        let res = libdunit::write(sock.fd, &query[written..]);
+        if res > 0 {
+            written += res as usize;
+        } else if res == libdunit::EAGAIN {
+            sock.wait_for(event::WRITE, deadline, libdunit::EAGAIN)?;
+        } else {
+            return Err(Error(res));
+        }
+    }
+    let mut ip = [0u8; 4];
+    loop {
+        let res = libdunit::read(sock.fd, &mut ip);
+        if res == 4 {
+            return Ok(Ipv4Addr(ip));
+        }
+        if res >= 0 {
+            return Err(Error(libdunit::EIO));
+        }
+        if res != libdunit::EAGAIN {
+            return Err(Error(res));
+        }
+        sock.wait_for(event::READ, deadline, libdunit::EAGAIN)?;
+        if let Some(err) = sock.take_error()? {
+            return Err(err);
+        }
     }
 }

@@ -5,6 +5,8 @@ pub const VERSION: u16 = 1;
 
 pub const PROTO_UDP: u16 = 1;
 pub const PROTO_TCP: u16 = 2;
+pub const PROTO_DNS: u16 = 3;
+pub const MAX_DNS_NAME: usize = 253;
 pub const SCOPE_UDP: u32 = 1;
 pub const SCOPE_TCP: u32 = 2;
 
@@ -180,7 +182,7 @@ impl BridgeHeader {
             _ => false,
         };
         if !flags_valid
-            || !matches!(self.protocol, PROTO_UDP | PROTO_TCP)
+            || !matches!(self.protocol, PROTO_UDP | PROTO_TCP | PROTO_DNS)
             || self.token == 0
             || self.owner == 0
             || self.error > 0

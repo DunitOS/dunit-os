@@ -82,6 +82,7 @@ pub(super) fn open(handle: u64, protocol: u64, source: *const u8, len: usize) ->
         let expected = match protocol {
             PROTO_TCP => SCOPE_TCP,
             PROTO_UDP => SCOPE_UDP,
+            PROTO_DNS => SCOPE_TCP | SCOPE_UDP,
             _ => return Err(EOPNOTSUPP),
         };
         let (scope, owner) = process::with_current_process(|task| {
@@ -146,7 +147,9 @@ pub(super) fn write(target: FdTarget, source: *const u8, len: usize) -> i64 {
         match target {
             FdTarget::NetSocket { token } => {
                 let protocol = BRIDGE.lock().protocol(owner, token)?;
-                if protocol == PROTO_UDP && len > MAX_UDP {
+                if (protocol == PROTO_UDP && len > MAX_UDP)
+                    || (protocol == PROTO_DNS && len > MAX_DNS_NAME)
+                {
                     return Err(EMSGSIZE);
                 }
                 let payload = copy_buffer_from_user(source, len.min(MAX_PAYLOAD))?;

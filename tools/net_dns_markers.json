@@ -1,0 +1,35 @@
+{
+  "description": "Production netd serves application DNS over UDP, cache, NXDOMAIN, TCP fallback, secondary failover and revocation.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-dns",
+    "net_dns": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "[NET-DNS] complete", "timeout": 90},
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[NETD] IPv4 static bound 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NET-DNS] UDP and cache passed", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    {"marker": "[NET-DNS] NXDOMAIN and negative cache passed", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    {"marker": "[NET-DNS] TCP fallback passed", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    {"marker": "[NET-DNS] secondary failover passed", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    {"marker": "[NET-DNS] connect_host passed", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NET-DNS] revocation rejected resolver with EPIPE", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    {"marker": "[NET-DNS] complete", "source": "userspace/system_apps/net_dns_test/src/main.rs"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NET-DNS] FAIL",
+    "[NETD-FIXTURE]",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager"}
+  ]
+}
+

@@ -13,14 +13,15 @@ use dunit_net_core::{
 use dunit_socket_abi::{
     BridgeHeader, Endpoint, Options, BRIDGE_CLOSE, BRIDGE_COMPLETE, BRIDGE_CONNECT, BRIDGE_CREDIT,
     BRIDGE_DATA, BRIDGE_EOF, BRIDGE_ERROR, BRIDGE_OPEN, BRIDGE_SEND, BRIDGE_SHUTDOWN, MAX_FRAME,
-    MAX_PAYLOAD, PROTO_TCP, PROTO_UDP,
+    MAX_PAYLOAD, PROTO_DNS, PROTO_TCP, PROTO_UDP,
 };
 use netd::{checked, Device};
 
-use crate::{interface::Interface, outbound::Outbound};
+use crate::{dns_runtime::DnsRuntime, interface::Interface, outbound::Outbound};
 
 const SOCKETS: usize = 8;
 const REQUEST_TIMEOUT_MS: u64 = 10_000;
+const DNS_REQUEST_TIMEOUT_MS: u64 = 15_000;
 const RETRY_MS: u64 = 20;
 
 #[derive(Clone, Copy)]
@@ -137,6 +138,8 @@ pub struct SocketService {
     sockets: [Option<Socket>; SOCKETS],
     revision: u64,
     ip: Option<Ip>,
+    dns_servers: [Option<Ip>; 2],
+    dns: Option<DnsRuntime>,
     tcp: Option<Table>,
     wire: VecDeque<TcpPacket>,
     mtu: usize,
@@ -164,6 +167,8 @@ impl SocketService {
             sockets: core::array::from_fn(|_| None),
             revision: 0,
             ip: None,
+            dns_servers: [None; 2],
+            dns: None,
             tcp: None,
             wire: VecDeque::with_capacity(MAX_STREAMS * 2),
             mtu,
@@ -180,6 +185,7 @@ impl SocketService {
         self.retry_at
             .into_iter()
             .chain(self.tcp.as_ref().and_then(Table::deadline))
+            .chain(self.dns.as_ref().and_then(DnsRuntime::deadline))
             .chain(
                 self.sockets
                     .iter()
@@ -199,6 +205,8 @@ impl SocketService {
         }
         self.revision = interface.revision();
         self.ip = interface.config().map(|config| config.address);
+        self.dns_servers = interface.config().map_or([None; 2], |config| config.dns);
+        self.dns = None;
         self.seed = self.seed.wrapping_add(0x9e3779b9);
         self.tcp = self
             .ip
@@ -236,12 +244,27 @@ impl SocketService {
                         socket,
                         peer.as_deref_mut(),
                         self.tcp.as_mut(),
+                        self.dns.as_mut(),
                         &mut self.wire,
                     );
                     fail(&mut self.bridge, socket, errno::EIO)?;
                     continue;
                 }
                 let status = match (self.ip, &mut peer, &mut self.tcp) {
+                    (Some(_), Some(peer), Some(tcp)) if socket.open.protocol == PROTO_DNS => {
+                        progress_dns(
+                            &mut self.bridge,
+                            socket,
+                            &request,
+                            &mut self.dns,
+                            self.dns_servers,
+                            peer,
+                            tcp,
+                            tx,
+                            &mut self.wire,
+                            now,
+                        )?
+                    }
                     (Some(ip), Some(peer), Some(tcp)) => {
                         progress(socket, &mut request, ip, peer, tcp, tx, now)
                     }
@@ -262,6 +285,7 @@ impl SocketService {
                             socket,
                             peer.as_deref_mut(),
                             self.tcp.as_mut(),
+                            self.dns.as_mut(),
                             &mut self.wire,
                         );
                         socket.failed = true;
@@ -369,6 +393,7 @@ impl SocketService {
                         &mut socket,
                         peer.as_deref_mut(),
                         self.tcp.as_mut(),
+                        self.dns.as_mut(),
                         &mut self.wire,
                     );
                 }
@@ -382,12 +407,17 @@ impl SocketService {
                     } else if socket.request.is_some() {
                         return Err(Error(errno::EIO));
                     } else {
+                        let timeout = if socket.open.protocol == PROTO_DNS {
+                            DNS_REQUEST_TIMEOUT_MS
+                        } else {
+                            REQUEST_TIMEOUT_MS
+                        };
                         socket.request = Some(Request {
                             kind: header.kind,
                             destination: header.endpoint,
                             data: payload.to_vec(),
                             offset: 0,
-                            deadline: now.saturating_add(REQUEST_TIMEOUT_MS),
+                            deadline: now.saturating_add(timeout),
                         });
                     }
                 }
@@ -496,7 +526,7 @@ fn report_tcp_error(
     };
     if let Some(error) = tcp.failure(id).map_err(|error| Error(tcp_errno(error)))? {
         fail(bridge, socket, tcp_errno(error))?;
-        retire(socket, None, Some(tcp), wire);
+        retire(socket, None, Some(tcp), None, wire);
     }
     Ok(())
 }
@@ -560,12 +590,70 @@ fn receive(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn progress_dns(
+    bridge: &mut Bridge,
+    socket: &mut Socket,
+    request: &Request,
+    dns: &mut Option<DnsRuntime>,
+    servers: [Option<Ip>; 2],
+    peer: &mut Peer,
+    tcp: &mut Table,
+    tx: &mut Outbound,
+    wire: &mut VecDeque<TcpPacket>,
+    now: u64,
+) -> Result<core::result::Result<bool, isize>> {
+    if request.kind != BRIDGE_SEND {
+        return Ok(Err(errno::EOPNOTSUPP));
+    }
+    if dns.is_none() {
+        match DnsRuntime::open(peer, servers) {
+            Ok(Some(runtime)) => *dns = Some(runtime),
+            Ok(None) => return Ok(Err(errno::ENOENT)),
+            Err(err) => return Ok(Err(err)),
+        }
+    }
+    let runtime = dns.as_mut().unwrap();
+    let token = socket.open.token;
+    if runtime.is_busy_for(token) {
+        return Ok(Ok(false));
+    }
+    let answer = if !runtime.is_active_for(token) {
+        match runtime.start(token, &request.data, now) {
+            Ok(ans) => ans,
+            Err(err) => return Ok(Err(err)),
+        }
+    } else {
+        None
+    };
+    let answer = match answer {
+        Some(ip) => Some(ip),
+        None => match runtime.drive(token, peer, tcp, tx, wire, now) {
+            Ok(ans) => ans,
+            Err(err) => return Ok(Err(err)),
+        },
+    };
+    let Some(ip) = answer else {
+        return Ok(Ok(false));
+    };
+    socket.rx = Some((Endpoint::NONE, ip.to_vec()));
+    receive(bridge, socket, None, None)?;
+    Ok(Ok(true))
+}
+
 fn retire(
     socket: &mut Socket,
     peer: Option<&mut Peer>,
     tcp: Option<&mut Table>,
+    dns: Option<&mut DnsRuntime>,
     wire: &mut VecDeque<TcpPacket>,
 ) {
+    if socket.open.protocol == PROTO_DNS {
+        if let Some(dns) = dns {
+            dns.cancel(socket.open.token, tcp, wire);
+        }
+        return;
+    }
     match (socket.transport, peer, tcp) {
         (Transport::Udp(port), Some(peer), _) => {
             let _ = peer.udp_close(port);

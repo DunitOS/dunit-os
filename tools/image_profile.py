@@ -19,7 +19,7 @@ def load_profile(name: str = "full") -> dict:
     if name == "full":
         return {"name": name, "boot_config": "limine.conf", "apps": None, "assets": ["**/*"],
                 "desktop": True, "toolchain": True, "services": None,
-                "boot_services": ["netd.toml"], "libexec": ["netd", "netd_fixture", "net_socket_test", "net_socket_posix"]}
+                "boot_services": ["netd.toml"], "libexec": ["netd", "netd_fixture", "net_socket_test", "net_socket_posix", "net_dns_test", "net_dns_posix"]}
     data = json.loads((ROOT / "images" / name / "profile.json").read_text())
     if data.get("name") != name:
         raise ValueError(f"profile name mismatch: {name}")

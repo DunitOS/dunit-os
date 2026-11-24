@@ -1,0 +1,6 @@
+name = "net-dns-posix"
+exec = "/system/libexec/net_dns_posix"
+net_connect = 3
+restart = "never"
+critical = false
+
