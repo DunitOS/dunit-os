@@ -61,8 +61,15 @@ pub fn init() {
             supported += 1;
         }
 
-        if index == 0 {
-            registry::register("net0", DeviceClass::Network, driver_name(kind));
+        let reg_name = match index {
+            0 => Some("net0"),
+            1 => Some("net1"),
+            2 => Some("net2"),
+            3 => Some("net3"),
+            _ => None,
+        };
+        if let Some(name) = reg_name {
+            registry::register(name, DeviceClass::Network, driver_name(kind));
         }
 
         serial_write("[NET] pci nic ");
@@ -77,8 +84,8 @@ pub fn init() {
 
         match probe_nic(dev, kind) {
             Ok(probe) => {
-                if index == 0 && dev.device_id == 0x100e && probe.mac_valid {
-                    packet::discover(dev, probe.mac, probe.link_up);
+                if dev.vendor_id == VENDOR_INTEL && dev.device_id == 0x100e && probe.mac_valid {
+                    packet::discover(index, dev, probe.mac, probe.link_up);
                 }
                 if probe.mmio_ready {
                     mmio_ready += 1;
@@ -404,32 +411,66 @@ pub fn handle_irq(line: u8) -> bool {
     packet::handle_irq(line)
 }
 
-/// PIC routing lifetime for reference PCI lines 10/11.
-struct LegacyRoute { line: u8, master: u8, slave: u8, elcr: u8 }
+/// Refcounted PIC routing lifetime for shared PCI lines 10/11 across multiple NICs.
+struct SavedLine {
+    refs: u32,
+    master: u8,
+    slave: u8,
+    elcr: u8,
+}
+
+static IRQ_ROUTES: SpinLock<[Option<SavedLine>; 2]> = SpinLock::new([None, None]);
+
+struct LegacyRoute {
+    line: u8,
+}
+
 impl LegacyRoute {
     fn open(line: u8) -> Self {
+        let slot = usize::from(line == 11);
+        let mut routes = IRQ_ROUTES.lock();
         let _irq = crate::sync::InterruptGuard::new();
-        unsafe {
-            let route = Self { line, master: crate::hal::hal_inb(0x21),
-                slave: crate::hal::hal_inb(0xa1), elcr: crate::hal::hal_inb(0x4d1) };
-            crate::hal::hal_outb(0x4d1, route.elcr | (1 << (line - 8)));
-            crate::hal::hal_outb(0xa1, route.slave & !(1 << (line - 8)));
-            crate::hal::hal_outb(0x21, route.master & !(1 << 2));
-            route
+        if let Some(saved) = &mut routes[slot] {
+            saved.refs += 1;
+            return Self { line };
         }
+        unsafe {
+            let saved = SavedLine {
+                refs: 1,
+                master: crate::hal::hal_inb(0x21),
+                slave: crate::hal::hal_inb(0xa1),
+                elcr: crate::hal::hal_inb(0x4d1),
+            };
+            crate::hal::hal_outb(0x4d1, saved.elcr | (1 << (line - 8)));
+            crate::hal::hal_outb(0xa1, saved.slave & !(1 << (line - 8)));
+            crate::hal::hal_outb(0x21, saved.master & !(1 << 2));
+            routes[slot] = Some(saved);
+        }
+        Self { line }
     }
 }
+
 impl Drop for LegacyRoute {
     fn drop(&mut self) {
+        let slot = usize::from(self.line == 11);
+        let mut routes = IRQ_ROUTES.lock();
         let _irq = crate::sync::InterruptGuard::new();
+        let Some(saved) = routes[slot].as_mut() else {
+            return;
+        };
+        if saved.refs > 1 {
+            saved.refs -= 1;
+            return;
+        }
+        let saved = routes[slot].take().unwrap();
         unsafe {
             let bit = 1 << (self.line - 8);
             let slave = crate::hal::hal_inb(0xa1);
             let master = crate::hal::hal_inb(0x21);
             let elcr = crate::hal::hal_inb(0x4d1);
-            crate::hal::hal_outb(0xa1, (slave & !bit) | (self.slave & bit));
-            crate::hal::hal_outb(0x21, (master & !4) | (self.master & 4));
-            crate::hal::hal_outb(0x4d1, (elcr & !bit) | (self.elcr & bit));
+            crate::hal::hal_outb(0xa1, (slave & !bit) | (saved.slave & bit));
+            crate::hal::hal_outb(0x21, (master & !4) | (saved.master & 4));
+            crate::hal::hal_outb(0x4d1, (elcr & !bit) | (saved.elcr & bit));
         }
     }
 }

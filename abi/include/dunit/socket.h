@@ -1,14 +1,18 @@
-/* Native Dunit IPv4 socket and service bridge ABI v1 (little-endian x86_64). */
+/* Native Dunit dual-stack socket and service bridge ABI v1/v2 (little-endian x86_64). */
 #ifndef DUNIT_SOCKET_H
 #define DUNIT_SOCKET_H
 
 #include <stdint.h>
 
 #define DUNIT_SOCKET_VERSION 1u
+#define DUNIT_SOCKET_VERSION_V2 2u
 #define DUNIT_SOCKET_PROTO_UDP 1u
 #define DUNIT_SOCKET_PROTO_TCP 2u
 #define DUNIT_SOCKET_PROTO_DNS 3u
 #define DUNIT_SOCKET_MAX_DNS_NAME 253u
+#define DUNIT_SOCKET_FAMILY_NONE 0u
+#define DUNIT_SOCKET_FAMILY_IPV4 4u
+#define DUNIT_SOCKET_FAMILY_IPV6 6u
 #define DUNIT_SOCKET_SCOPE_UDP 1u
 #define DUNIT_SOCKET_SCOPE_TCP 2u
 #define DUNIT_SOCKET_SCOPE_UDP_BIND 4u
@@ -16,6 +20,7 @@
 #define DUNIT_SOCKET_SCOPE_LOW_PORT 16u
 #define DUNIT_SOCKET_MAX_PAYLOAD 4096u
 #define DUNIT_SOCKET_MAX_FRAME 4136u
+#define DUNIT_SOCKET_MAX_FRAME_V2 4152u
 
 #define DUNIT_SOCKET_OP_CONNECT 1u
 #define DUNIT_SOCKET_OP_SEND_TO 2u
@@ -66,6 +71,32 @@ struct dunit_socket_endpoints {
     struct dunit_socket_endpoint remote;
 };
 
+struct dunit_socket_endpoint6 {
+    uint8_t family;
+    uint8_t flags;
+    uint16_t port;
+    uint32_t scope_id;
+    uint8_t addr[16];
+};
+
+struct dunit_socket_receive6 {
+    struct dunit_socket_endpoint6 source;
+    uint32_t full_len;
+    uint32_t reserved;
+};
+
+struct dunit_socket_endpoints6 {
+    struct dunit_socket_endpoint6 local;
+    struct dunit_socket_endpoint6 remote;
+};
+
+struct dunit_socket_dns_record {
+    uint8_t family;
+    uint8_t reserved;
+    uint32_t scope_id;
+    uint8_t addr[16];
+};
+
 /* One record per service bridge read/write, followed by exactly length bytes.
  * COMPLETE uses flags to identify the completed request; other records use 0. */
 struct dunit_socket_bridge {
@@ -79,6 +110,18 @@ struct dunit_socket_bridge {
     uint16_t protocol;
     uint32_t length;
     uint32_t reserved;
+};
+
+struct dunit_socket_bridge6 {
+    uint64_t token;
+    uint64_t owner;
+    uint16_t kind;
+    uint16_t flags;
+    int32_t error;
+    struct dunit_socket_endpoint6 endpoint;
+    uint16_t protocol;
+    uint16_t reserved;
+    uint32_t length;
 };
 
 #endif /* DUNIT_SOCKET_H */

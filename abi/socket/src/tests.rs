@@ -121,3 +121,52 @@ fn bridge_record_kind_flags_authority_and_padding_are_checked() {
     let bad_ready = BridgeHeader { flags: 2, ..ready };
     assert_eq!(bad_ready.encode(&[], &mut hdr), Err(WireError::Invalid));
 }
+
+#[test]
+fn v2_endpoints_bridge_and_dns_records_roundtrip() {
+    let v2_opts = Options::encode_version(VERSION_V2);
+    assert_eq!(Options::decode_version(&v2_opts), Ok(VERSION_V2));
+    assert_eq!(Options::decode_version(&Options.encode()), Ok(VERSION));
+
+    let ip6 = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    let ep6 = Endpoint6::ipv6(ip6, 443, 0);
+    assert!(ep6.is_unicast());
+    assert_eq!(Endpoint6::decode(&ep6.encode()), Ok(ep6));
+
+    let ll6 = Endpoint6::ipv6([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2], 5353, 1);
+    assert!(ll6.is_unicast());
+    assert_eq!(Endpoint6::decode(&ll6.encode()), Ok(ll6));
+
+    let ep4 = Endpoint6::from_v4(REMOTE);
+    assert!(ep4.is_unicast());
+    assert_eq!(ep4.to_v4(), Some(REMOTE));
+    assert_eq!(Endpoint6::decode(&ep4.encode()), Ok(ep4));
+
+    assert!(!Endpoint6::ipv6([0; 16], 443, 0).is_unicast());
+    assert!(Endpoint6::ipv6([0; 16], 443, 0).is_bind_address());
+    assert!(!Endpoint6::ipv6([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 443, 0).is_unicast());
+
+    let hdr6 = BridgeHeader6 {
+        token: 7,
+        owner: 11,
+        kind: BRIDGE_SEND,
+        flags: 0,
+        error: 0,
+        endpoint: ep6,
+        protocol: PROTO_UDP,
+        length: 0,
+    };
+    let mut frame = [0; MAX_FRAME_V2];
+    let n = hdr6.encode(b"hello6", &mut frame).unwrap();
+    assert_eq!(n, BRIDGE_HEADER6_LEN + 6);
+    let (decoded, data) = BridgeHeader6::decode(&frame[..n]).unwrap();
+    assert_eq!(decoded, BridgeHeader6 { length: 6, ..hdr6 });
+    assert_eq!(data, b"hello6");
+
+    let mut dns_buf = [0; 64];
+    let recs = [DnsRecord::ipv6(ip6, 0), DnsRecord::ipv4([192, 0, 2, 10])];
+    let dns_len = encode_dns_records(&recs, &mut dns_buf).unwrap();
+    let mut out = [DnsRecord::default(); 4];
+    assert_eq!(decode_dns_records(&dns_buf[..dns_len], &mut out), Ok(2));
+    assert_eq!(out[..2], recs);
+}

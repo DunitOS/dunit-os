@@ -18,8 +18,8 @@ import zlib
 
 SECTOR_SIZE = 512
 ESP_START_MIB = 1
-ESP_END_MIB = 129
-MIN_DISK_MIB = 128
+ESP_END_MIB = 145
+MIN_DISK_MIB = 160
 ESP_SIZE_MIB = ESP_END_MIB - ESP_START_MIB
 # DunitFS v2 on-disk format — single source of truth is kernel/src/fs/dunitfs.rs.
 # These constants and the empty-image geometry below MUST stay byte-identical to

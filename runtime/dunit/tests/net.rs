@@ -1,4 +1,4 @@
-use dunit::net::{Ipv4Addr, SocketAddrV4};
+use dunit::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 #[test]
 fn parses_and_formats_ipv4_and_socket_addrs() {
@@ -16,5 +16,17 @@ fn parses_and_formats_ipv4_and_socket_addrs() {
     for bad in ["1.2.3.4:", ":80", "1.2.3.4:65536", "1.2.3.4:-1"] {
         assert!(bad.parse::<SocketAddrV4>().is_err(), "{bad}");
     }
+}
+
+#[test]
+fn parses_and_formats_ipv6_and_dual_socket_addrs() {
+    let ip6: Ipv6Addr = "2001:db8:1::10".parse().unwrap();
+    assert_eq!(ip6, Ipv6Addr::new(0x2001, 0x0db8, 1, 0, 0, 0, 0, 0x0010));
+    let s6: SocketAddr = "[2001:db8:1::10]:443".parse().unwrap();
+    assert_eq!(s6, SocketAddr::V6(SocketAddrV6::new(ip6, 443, 0)));
+    let scoped: SocketAddr = "[fe80::1%2]:8080".parse().unwrap();
+    assert_eq!(scoped.port(), 8080);
+    let ip: IpAddr = "2001:db8::1".parse().unwrap();
+    assert!(matches!(ip, IpAddr::V6(_)));
 }
 

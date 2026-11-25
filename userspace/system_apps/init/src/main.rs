@@ -74,7 +74,7 @@ struct Service {
     critical: bool,
     max_restarts: u32,
     fallback: Option<String>,
-    net_device: Option<u32>,
+    net_devices: Vec<u32>,
     net_service: bool,
     net_connect: Option<u32>,
     state: RunState,
@@ -166,7 +166,7 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
     let mut critical = false;
     let mut max_restarts = DEFAULT_MAX_RESTARTS;
     let mut fallback: Option<String> = None;
-    let mut net_device: Option<u32> = None;
+    let mut net_devices: Vec<u32> = Vec::new();
     let mut net_service = false;
     let mut net_connect = None;
 
@@ -203,10 +203,21 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
                 }
             }
             "net_device" => {
-                if !boot_catalog || net_device.is_some() {
+                if !boot_catalog || !net_devices.is_empty() {
                     return None;
                 }
-                net_device = Some(parse_u32(val)?);
+                net_devices.push(parse_u32(val)?);
+            }
+            "net_devices" => {
+                if !boot_catalog || !net_devices.is_empty() {
+                    return None;
+                }
+                for part in val.split(',') {
+                    net_devices.push(parse_u32(part.trim())?);
+                }
+                if net_devices.is_empty() || net_devices.len() > 4 {
+                    return None;
+                }
             }
             "net_service" => {
                 if !boot_catalog || net_service || val != "true" {
@@ -239,8 +250,8 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
             || !executable
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
-            || (net_device.is_some() == net_connect.is_some())
-            || (net_service && net_device.is_none())
+            || (!net_devices.is_empty() == net_connect.is_some())
+            || (net_service && net_devices.is_empty())
             || fallback.is_some()
         {
             return None;
@@ -256,7 +267,7 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
         critical,
         max_restarts,
         fallback,
-        net_device,
+        net_devices,
         net_service,
         net_connect,
         state: RunState::Idle,
@@ -338,7 +349,7 @@ fn provision() {
 // ---- supervision -----------------------------------------------------------
 
 fn spawn_service(svc: &Service) -> dunit::Result<Child> {
-    if svc.net_device.is_none() && svc.net_connect.is_none() {
+    if svc.net_devices.is_empty() && svc.net_connect.is_none() {
         return Child::spawn(&svc.exec);
     }
     let root = dunit::env::var("DUNIT_NET_ROOT")?
@@ -348,36 +359,54 @@ fn spawn_service(svc: &Service) -> dunit::Result<Child> {
         .ok_or(dunit::Error(dunit::errno::EACCES))?;
     let mut sender = String::from("DUNIT_NET_SUPERVISOR=");
     push_u32(&mut sender, dunit::process::id());
-    let mut child = Child::spawn_with_env(&svc.exec, &[&svc.exec], &[&sender, "DUNIT_NET_ROOT="])?;
+    let mut count_env = String::from("DUNIT_NET_COUNT=");
+    let expected = if svc.net_devices.is_empty() { 1 } else { svc.net_devices.len() as u32 };
+    push_u32(&mut count_env, expected);
+    let mut child = Child::spawn_with_env(
+        &svc.exec,
+        &[&svc.exec],
+        &[&sender, &count_env, "DUNIT_NET_ROOT="],
+    )?;
     let grant = (|| {
-        let handle = if let Some(interface) = svc.net_device {
+        if !svc.net_devices.is_empty() {
             let mut rights = libdunit::RIGHT_READ | libdunit::RIGHT_WRITE | libdunit::RIGHT_NET_RAW;
             if svc.net_service {
                 rights |= libdunit::RIGHT_NET_SERVICE;
             }
-            libdunit::net_device_grant(root, interface, child.id(), rights)
-        } else if let Some(scope) = svc.net_connect {
-            libdunit::net_connect_grant(root, child.id(), scope)
-        } else {
-            return Err(dunit::Error(dunit::errno::EACCES));
-        };
-        if handle < 0 {
-            return Err(dunit::Error(handle));
-        }
-        let handle = u32::try_from(handle)
-            .ok()
-            .filter(|&handle| handle != 0)
-            .ok_or(dunit::Error(dunit::errno::EIO))?;
-        let message = handle.to_le_bytes();
-        let sent = libdunit::ipc_send(child.id(), &message);
-        if sent == message.len() as isize {
+            for &interface in &svc.net_devices {
+                let handle = libdunit::net_device_grant(root, interface, child.id(), rights);
+                if handle < 0 {
+                    return Err(dunit::Error(handle));
+                }
+                let handle = u32::try_from(handle)
+                    .ok()
+                    .filter(|&handle| handle != 0)
+                    .ok_or(dunit::Error(dunit::errno::EIO))?;
+                let message = handle.to_le_bytes();
+                let sent = libdunit::ipc_send(child.id(), &message);
+                if sent != message.len() as isize {
+                    return Err(dunit::Error(if sent < 0 { sent } else { dunit::errno::EIO }));
+                }
+            }
             Ok(())
-        } else {
-            Err(dunit::Error(if sent < 0 {
-                sent
+        } else if let Some(scope) = svc.net_connect {
+            let handle = libdunit::net_connect_grant(root, child.id(), scope);
+            if handle < 0 {
+                return Err(dunit::Error(handle));
+            }
+            let handle = u32::try_from(handle)
+                .ok()
+                .filter(|&handle| handle != 0)
+                .ok_or(dunit::Error(dunit::errno::EIO))?;
+            let message = handle.to_le_bytes();
+            let sent = libdunit::ipc_send(child.id(), &message);
+            if sent == message.len() as isize {
+                Ok(())
             } else {
-                dunit::errno::EIO
-            }))
+                Err(dunit::Error(if sent < 0 { sent } else { dunit::errno::EIO }))
+            }
+        } else {
+            Err(dunit::Error(dunit::errno::EACCES))
         }
     })();
     if let Err(error) = grant {

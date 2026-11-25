@@ -1,0 +1,6 @@
+name = "net-ipv6-posix"
+exec = "/system/libexec/net_ipv6_posix"
+net_connect = 3
+restart = "never"
+critical = false
+

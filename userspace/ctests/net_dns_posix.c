@@ -78,8 +78,8 @@ int main(void)
     check(ntohs(sa->sin_port) == 5432 && sa->sin_addr.s_addr == inet_addr("192.0.2.10"), "numeric sockaddr");
     freeaddrinfo(res);
 
-    struct addrinfo bad_hints = { .ai_family = AF_INET6 };
-    check(getaddrinfo("du.net.test", "80", &bad_hints, &res) == EAI_FAMILY, "reject AF_INET6");
+    struct addrinfo bad_hints = { .ai_family = AF_UNIX };
+    check(getaddrinfo("du.net.test", "80", &bad_hints, &res) == EAI_FAMILY, "reject AF_UNIX");
 
     uint64_t deadline = monotonic_ms() + DEADLINE_MS;
     struct addrinfo tcp_hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM, .ai_flags = AI_CANONNAME };

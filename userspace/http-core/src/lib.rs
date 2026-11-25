@@ -158,7 +158,29 @@ impl Url {
         if authority.is_empty() || authority.contains('@') {
             return Err(HttpError::InvalidUrl);
         }
-        let (host, port) = if let Some((h, p)) = authority.split_once(':') {
+        let (host, port) = if let Some(after_open) = authority.strip_prefix('[') {
+            let close = after_open.find(']').ok_or(HttpError::InvalidUrl)?;
+            let literal = &after_open[..close];
+            let tail = &after_open[close + 1..];
+            if !valid_ipv6_literal(literal) {
+                return Err(HttpError::InvalidUrl);
+            }
+            let port = if tail.is_empty() {
+                scheme.default_port()
+            } else if let Some(p) = tail.strip_prefix(':') {
+                if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(HttpError::InvalidUrl);
+                }
+                let port: u16 = p.parse().map_err(|_| HttpError::InvalidUrl)?;
+                if port == 0 {
+                    return Err(HttpError::InvalidUrl);
+                }
+                port
+            } else {
+                return Err(HttpError::InvalidUrl);
+            };
+            (literal, port)
+        } else if let Some((h, p)) = authority.split_once(':') {
             if h.is_empty() || p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(HttpError::InvalidUrl);
             }
@@ -192,10 +214,15 @@ impl Url {
     }
 
     pub fn host_header(&self) -> String {
-        if self.port == self.scheme.default_port() {
-            self.host.clone()
+        let host_fmt = if self.host.contains(':') {
+            format!("[{}]", self.host)
         } else {
-            format!("{}:{}", self.host, self.port)
+            self.host.clone()
+        };
+        if self.port == self.scheme.default_port() {
+            host_fmt
+        } else {
+            format!("{host_fmt}:{}", self.port)
         }
     }
 
@@ -252,7 +279,42 @@ fn has_ctl(s: &str) -> bool {
     s.bytes().any(|b| b < 0x20 || b == 0x7f)
 }
 
+fn valid_ipv6_literal(host: &str) -> bool {
+    if host.is_empty() || host.len() > 45 {
+        return false;
+    }
+    let (h, t, comp) = match host.split_once("::") {
+        Some((h, t)) => {
+            if t.contains("::") {
+                return false;
+            }
+            (h, t, true)
+        }
+        None => (host, "", false),
+    };
+    let count_groups = |part: &str| -> Option<usize> {
+        if part.is_empty() {
+            return Some(0);
+        }
+        let mut n = 0;
+        for g in part.split(':') {
+            if g.is_empty() || g.len() > 4 || !g.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
+            n += 1;
+        }
+        Some(n)
+    };
+    let (Some(hc), Some(tc)) = (count_groups(h), count_groups(t)) else {
+        return false;
+    };
+    if comp { hc + tc < 8 } else { hc == 8 }
+}
+
 fn valid_host(host: &str) -> bool {
+    if valid_ipv6_literal(host) {
+        return true;
+    }
     !host.is_empty()
         && host.len() <= 253
         && host

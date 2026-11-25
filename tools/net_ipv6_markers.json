@@ -1,0 +1,64 @@
+{
+  "description": "Dual-NIC IPv6 SLAAC/RA/RDNSS/DAD, OpenSSL TLS 1.3 HTTPS, RFC 8305 Happy Eyeballs, AF_INET6 POSIX, and live link failover over E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-ipv6",
+    "net_ipv6": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {
+        "wait_marker": "[NET-IPV6] phase1 ready-for-failover",
+        "timeout": 90
+      },
+      {
+        "wait_marker": "[NET-IPV6-POSIX] complete",
+        "timeout": 90
+      },
+      {
+        "execute": "set_link",
+        "arguments": {
+          "name": "dunit-nic0",
+          "up": false
+        }
+      },
+      {
+        "wait_marker": "[NETD] nic0 link down",
+        "timeout": 30
+      },
+      {
+        "wait_marker": "[NET-IPV6] complete",
+        "timeout": 90
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "timeout": 60
+      }
+    ]
+  },
+  "required": [
+    "[NETD] dual-stack v2 socket bridge ready (2 nic)",
+    "[NET-IPV6] IPv6 SLAAC/RDNSS + OpenSSL TLS 1.3 HTTPS passed",
+    "[NET-IPV6] bracketed IPv6 URL HTTP passed",
+    "[NET-IPV6] IPv6 UDP + TCP listener accept passed",
+    "[NET-IPV6] RFC 8305 Happy Eyeballs fallback passed",
+    "[NET-IPV6-POSIX] AF_INET6 getaddrinfo, TCP and UDP passed",
+    "[NET-IPV6-POSIX] complete",
+    "[NETD] nic0 link down",
+    "[NET-IPV6] multi-NIC link failover passed",
+    "[NET-IPV6] complete",
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NET-IPV6] FAIL",
+    "[NET-IPV6-POSIX] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[INIT] start: PID 1 userspace service manager"
+    }
+  ]
+}
+

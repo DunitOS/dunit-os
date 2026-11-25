@@ -1,9 +1,10 @@
-//! Bounded TCPv4 admission, demultiplexing and stream ownership for one
-//! interface. A service still owns route selection and listener policy.
+//! Bounded TCP (IPv4 & IPv6) admission, demultiplexing and stream ownership.
+//! A service still owns route selection and listener policy.
 use super::{
-    Connection, Endpoint, Result, Segment, State, StreamError, ACK, FIN, QUEUE_BYTES, RST, SYN,
+    Connection, DualEndpoint, Endpoint, Result, Segment, State, StreamError, ACK, FIN, QUEUE_BYTES,
+    RST, SYN,
 };
-use crate::{valid_ip, Error, Ip, MTU};
+use crate::{valid_ip, Error, Ip, IpAddr, MTU};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -45,17 +46,63 @@ pub struct Outbound {
     pub bytes: Vec<u8>,
 }
 
-impl Outbound {
+#[derive(Debug, PartialEq, Eq)]
+pub struct DualOutbound {
+    pub source: DualEndpoint,
+    pub destination: DualEndpoint,
+    pub bytes: Vec<u8>,
+}
+
+impl DualOutbound {
     fn ack_only(&self) -> bool {
         self.bytes.len() == super::wire::HEADER && self.bytes[13] == ACK
     }
 
-    /// A newer packet replaces an unsent packet of the same class (and exact
-    /// sequence number for data/SYN flights) for its four-tuple.
     pub fn same_pending_slot(&self, other: &Self) -> bool {
         (self.source, self.destination) == (other.source, other.destination)
             && self.ack_only() == other.ack_only()
             && (self.ack_only() || self.bytes.get(4..8) == other.bytes.get(4..8))
+    }
+
+    pub fn to_v4(self) -> Option<Outbound> {
+        Some(Outbound {
+            source: self.source.to_v4()?,
+            destination: self.destination.to_v4()?,
+            bytes: self.bytes,
+        })
+    }
+}
+
+impl From<Outbound> for DualOutbound {
+    fn from(o: Outbound) -> Self {
+        Self {
+            source: o.source.into(),
+            destination: o.destination.into(),
+            bytes: o.bytes,
+        }
+    }
+}
+
+impl Outbound {
+    /// A newer packet replaces an unsent packet of the same class (and exact
+    /// sequence number for data/SYN flights) for its four-tuple.
+    pub fn same_pending_slot(&self, other: &Self) -> bool {
+        let a = DualOutbound {
+            source: self.source.into(),
+            destination: self.destination.into(),
+            bytes: Vec::new(),
+        };
+        let b = DualOutbound {
+            source: other.source.into(),
+            destination: other.destination.into(),
+            bytes: Vec::new(),
+        };
+        let _ = (a, b);
+        let ack_a = self.bytes.len() == super::wire::HEADER && self.bytes[13] == ACK;
+        let ack_b = other.bytes.len() == super::wire::HEADER && other.bytes[13] == ACK;
+        (self.source, self.destination) == (other.source, other.destination)
+            && ack_a == ack_b
+            && (ack_a || self.bytes.get(4..8) == other.bytes.get(4..8))
     }
 }
 
@@ -70,6 +117,7 @@ pub enum Ingress {
 struct Listener {
     generation: u64,
     port: u16,
+    family: Option<u8>,
     backlog: usize,
 }
 
@@ -99,7 +147,7 @@ impl Stream {
 }
 
 pub struct Table {
-    local_ip: Ip,
+    local_ip: Option<Ip>,
     mtu: usize,
     sequence_seed: u32,
     next_port: u16,
@@ -120,7 +168,23 @@ impl Table {
             return Err(Error::Length.into());
         }
         Ok(Self {
-            local_ip,
+            local_ip: Some(local_ip),
+            mtu,
+            sequence_seed: seed.max(1),
+            next_port: FIRST_EPHEMERAL,
+            now: 0,
+            next_poll: 0,
+            listeners: core::array::from_fn(|_| None),
+            streams: core::array::from_fn(|_| None),
+        })
+    }
+
+    pub fn new_dual(mtu: usize, seed: u32) -> Result<Self> {
+        if !(64..=MTU).contains(&mtu) {
+            return Err(Error::Length.into());
+        }
+        Ok(Self {
+            local_ip: None,
             mtu,
             sequence_seed: seed.max(1),
             next_port: FIRST_EPHEMERAL,
@@ -132,6 +196,15 @@ impl Table {
     }
 
     pub fn listen(&mut self, port: u16, backlog: usize) -> Result<ListenerId> {
+        self.listen_family(port, None, backlog)
+    }
+
+    pub fn listen_family(
+        &mut self,
+        port: u16,
+        family: Option<u8>,
+        backlog: usize,
+    ) -> Result<ListenerId> {
         if port == 0 || backlog == 0 {
             return Err(Error::Address.into());
         }
@@ -150,6 +223,7 @@ impl Table {
         self.listeners[slot] = Some(Listener {
             generation,
             port,
+            family,
             backlog,
         });
         Ok(ListenerId { slot, generation })
@@ -188,17 +262,24 @@ impl Table {
     }
 
     pub fn connect(&mut self, remote: Endpoint, now: u64) -> Result<StreamId> {
+        let local_ip = self.local_ip.ok_or(Error::Address)?;
+        self.connect_ip(local_ip.into(), remote.into(), now)
+    }
+
+    pub fn connect_ip(
+        &mut self,
+        local_ip: IpAddr,
+        remote: DualEndpoint,
+        now: u64,
+    ) -> Result<StreamId> {
         remote.validate()?;
         self.advance(now)?;
         let slot = self.free_stream()?;
         let port = self.ephemeral_port()?;
         let generation = Self::generation()?;
-        let local = Endpoint {
-            ip: self.local_ip,
-            port,
-        };
+        let local = DualEndpoint { ip: local_ip, port };
         let sequence = self.sequence();
-        let connection = Connection::connect(local, remote, sequence, self.mtu, now)?;
+        let connection = Connection::connect_ip(local, remote, sequence, self.mtu, now)?;
         self.streams[slot] = Some(Stream {
             generation,
             owner: Owner::Held,
@@ -213,6 +294,10 @@ impl Table {
 
     pub fn endpoints(&self, id: StreamId) -> Result<(Endpoint, Endpoint)> {
         Ok(self.stream(id)?.endpoints())
+    }
+
+    pub fn endpoints_ip(&self, id: StreamId) -> Result<(DualEndpoint, DualEndpoint)> {
+        Ok(self.stream(id)?.endpoints_ip())
     }
 
     pub fn failure(&self, id: StreamId) -> Result<Option<StreamError>> {
@@ -275,34 +360,63 @@ impl Table {
         bytes: &[u8],
         now: u64,
     ) -> Result<Ingress> {
-        self.advance(now)?;
-        if destination != self.local_ip {
-            return Err(Error::Address.into());
+        if let Some(local) = self.local_ip {
+            if destination != local {
+                return Err(Error::Address.into());
+            }
         }
-        if bytes.len() > self.mtu - 20 {
+        self.receive_ip(IpAddr::V4(source), IpAddr::V4(destination), bytes, now)
+    }
+
+    /// Demultiplex a complete TCP segment from validated IPv4 or IPv6 ingress.
+    pub fn receive_ip(
+        &mut self,
+        source: IpAddr,
+        destination: IpAddr,
+        bytes: &[u8],
+        now: u64,
+    ) -> Result<Ingress> {
+        self.advance(now)?;
+        let ip_hdr = match (source, destination) {
+            (IpAddr::V4(_), IpAddr::V4(dst)) => {
+                if let Some(local) = self.local_ip {
+                    if dst != local {
+                        return Err(Error::Address.into());
+                    }
+                }
+                20
+            }
+            (IpAddr::V6(_), IpAddr::V6(_)) => 40,
+            _ => return Err(Error::Address.into()),
+        };
+        if bytes.len() > self.mtu - ip_hdr {
             return Err(Error::Length.into());
         }
         let (source_port, destination_port) = Segment::ports(bytes)?;
-        let remote = Endpoint {
+        let remote = DualEndpoint {
             ip: source,
             port: source_port,
         };
-        let local = Endpoint {
+        let local = DualEndpoint {
             ip: destination,
             port: destination_port,
         };
         if let Some(slot) = self.streams.iter_mut().flatten().find(|stream| {
             stream.connection.state() != State::Closed
-                && stream.connection.endpoints() == (local, remote)
+                && stream.connection.endpoints_ip() == (local, remote)
         }) {
-            slot.connection.receive(source, destination, bytes, now)?;
+            slot.connection.receive_ip(source, destination, bytes, now)?;
             return Ok(Ingress::Delivered);
         }
 
-        let segment = Segment::parse(remote, local, bytes)?;
+        let segment = Segment::parse_ip(remote, local, bytes)?;
         if !segment.has(SYN) || segment.has(ACK | RST | FIN) {
             return Ok(Ingress::Unmatched);
         }
+        let ingress_family = match destination {
+            IpAddr::V4(_) => 4u8,
+            IpAddr::V6(_) => 6u8,
+        };
         let Some((slot, listener)) =
             self.listeners
                 .iter()
@@ -310,7 +424,10 @@ impl Table {
                 .find_map(|(slot, listener)| {
                     listener
                         .as_ref()
-                        .filter(|entry| entry.port == local.port)
+                        .filter(|entry| {
+                            entry.port == local.port
+                                && entry.family.is_none_or(|f| f == ingress_family)
+                        })
                         .map(|entry| (slot, entry))
                 })
         else {
@@ -336,7 +453,7 @@ impl Table {
         };
 
         let sequence = self.sequence();
-        let connection = Connection::accept(local, remote, sequence, self.mtu, now, bytes)?;
+        let connection = Connection::accept_ip(local, remote, sequence, self.mtu, now, bytes)?;
         let generation = Self::generation()?;
         self.streams[slot] = Some(Stream {
             generation,
@@ -353,16 +470,25 @@ impl Table {
     /// packets rotate across the fixed-size table. A timed-out connection
     /// becomes visible as an error to its owner without stalling its peers.
     pub fn poll(&mut self, now: u64) -> Result<Option<Outbound>> {
-        self.poll_egress(now, false)
+        self.poll_ip(now).map(|opt| opt.and_then(DualOutbound::to_v4))
+    }
+
+    pub fn poll_ip(&mut self, now: u64) -> Result<Option<DualOutbound>> {
+        self.poll_egress_ip(now, false)
     }
 
     /// Reserve a segment for queued egress. Report the handoff with
     /// `complete_egress` before the flight's retransmit timer starts.
     pub fn poll_deferred(&mut self, now: u64) -> Result<Option<Outbound>> {
-        self.poll_egress(now, true)
+        self.poll_deferred_ip(now)
+            .map(|opt| opt.and_then(DualOutbound::to_v4))
     }
 
-    fn poll_egress(&mut self, now: u64, deferred: bool) -> Result<Option<Outbound>> {
+    pub fn poll_deferred_ip(&mut self, now: u64) -> Result<Option<DualOutbound>> {
+        self.poll_egress_ip(now, true)
+    }
+
+    fn poll_egress_ip(&mut self, now: u64, deferred: bool) -> Result<Option<DualOutbound>> {
         self.advance(now)?;
         for offset in 0..MAX_STREAMS {
             let index = (self.next_poll + offset) % MAX_STREAMS;
@@ -371,9 +497,9 @@ impl Table {
             };
             match stream.connection.poll(now) {
                 Ok(Some(bytes)) => {
-                    let (source, destination) = stream.connection.endpoints();
+                    let (source, destination) = stream.connection.endpoints_ip();
                     self.next_poll = (index + 1) % MAX_STREAMS;
-                    let outgoing = Outbound {
+                    let outgoing = DualOutbound {
                         source,
                         destination,
                         bytes,
@@ -413,9 +539,17 @@ impl Table {
 
     /// Delayed egress may outlive an acknowledgement or a closed stream.
     pub fn outbound_current(&self, packet: &Outbound) -> bool {
+        self.outbound_current_ip(&DualOutbound {
+            source: packet.source.into(),
+            destination: packet.destination.into(),
+            bytes: packet.bytes.clone(),
+        })
+    }
+
+    pub fn outbound_current_ip(&self, packet: &DualOutbound) -> bool {
         self.streams.iter().flatten().any(|stream| {
             let connection = &stream.connection;
-            connection.endpoints() == (packet.source, packet.destination)
+            connection.endpoints_ip() == (packet.source, packet.destination)
                 && connection.outbound_current(&packet.bytes, packet.ack_only())
         })
     }
@@ -428,8 +562,22 @@ impl Table {
         now: u64,
         handoff: core::result::Result<(), Error>,
     ) -> Result<()> {
+        let dual = DualOutbound {
+            source: packet.source.into(),
+            destination: packet.destination.into(),
+            bytes: packet.bytes.clone(),
+        };
+        self.complete_egress_ip(&dual, now, handoff)
+    }
+
+    pub fn complete_egress_ip(
+        &mut self,
+        packet: &DualOutbound,
+        now: u64,
+        handoff: core::result::Result<(), Error>,
+    ) -> Result<()> {
         self.advance(now)?;
-        if packet.ack_only() || !self.outbound_current(packet) {
+        if packet.ack_only() || !self.outbound_current_ip(packet) {
             return Ok(());
         }
         let Some(connection) = self
@@ -437,7 +585,7 @@ impl Table {
             .iter_mut()
             .flatten()
             .map(|stream| &mut stream.connection)
-            .find(|connection| connection.endpoints() == (packet.source, packet.destination))
+            .find(|connection| connection.endpoints_ip() == (packet.source, packet.destination))
         else {
             return Ok(());
         };
@@ -547,7 +695,7 @@ impl Table {
                 .streams
                 .iter()
                 .flatten()
-                .any(|stream| stream.connection.endpoints().0.port == port)
+                .any(|stream| stream.connection.endpoints_ip().0.port == port)
     }
 
     pub fn ephemeral_port(&mut self) -> Result<u16> {

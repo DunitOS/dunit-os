@@ -5,8 +5,50 @@ use alloc::vec::Vec;
 
 pub type Mac = [u8; 6];
 pub type Ip = [u8; 4];
+pub type Ip6 = [u8; 16];
 pub const BROADCAST: Mac = [255; 6];
 pub const MTU: usize = 1500;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum IpAddr {
+    V4(Ip),
+    V6(Ip6),
+}
+
+impl From<Ip> for IpAddr {
+    fn from(ip: Ip) -> Self {
+        Self::V4(ip)
+    }
+}
+
+impl From<Ip6> for IpAddr {
+    fn from(ip: Ip6) -> Self {
+        Self::V6(ip)
+    }
+}
+
+impl IpAddr {
+    pub fn header_len(self) -> usize {
+        match self {
+            Self::V4(_) => 20,
+            Self::V6(_) => 40,
+        }
+    }
+
+    pub fn is_unicast(self) -> bool {
+        match self {
+            Self::V4(v4) => valid_ip(v4),
+            Self::V6(v6) => ipv6::valid_unicast(v6),
+        }
+    }
+
+    pub fn is_link_local(self) -> bool {
+        match self {
+            Self::V4(v4) => v4[0] == 169 && v4[1] == 254,
+            Self::V6(v6) => ipv6::is_link_local(v6),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Length,
@@ -45,6 +87,25 @@ pub fn checksum(bytes: &[u8]) -> u16 {
     }
     !(sum as u16)
 }
+
+pub(crate) fn checksum_pseudo(src: &[u8], dst: &[u8], proto: u8, payload: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    for chunk in [src, dst] {
+        for pair in chunk.chunks_exact(2) {
+            sum += (u32::from(pair[0]) << 8) | u32::from(pair[1]);
+        }
+    }
+    let len = payload.len() as u32;
+    sum += (len >> 16) + (len & 0xffff);
+    sum += u32::from(proto);
+    for pair in payload.chunks(2) {
+        sum += (u32::from(pair[0]) << 8) | u32::from(pair.get(1).copied().unwrap_or(0));
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
+}
 fn valid_mac(m: Mac) -> bool {
     m != [0; 6] && m[0] & 1 == 0
 }
@@ -70,7 +131,7 @@ impl<'a> Ethernet<'a> {
             return Err(Error::Address);
         }
         let kind = word(b, 12);
-        if kind != 0x0800 && kind != 0x0806 {
+        if kind != 0x0800 && kind != 0x0806 && kind != ipv6::ETHERTYPE_IPV6 {
             return Err(Error::EtherType);
         }
         Ok(Self {
@@ -92,7 +153,7 @@ impl<'a> Ethernet<'a> {
         if !valid_mac(source) {
             return Err(Error::Address);
         }
-        if kind != 0x0800 && kind != 0x0806 {
+        if kind != 0x0800 && kind != 0x0806 && kind != ipv6::ETHERTYPE_IPV6 {
             return Err(Error::EtherType);
         }
         let mut b = alloc::vec![0; (14 + payload.len()).max(60)];
@@ -622,6 +683,29 @@ impl Peer {
     pub fn remove_route(&mut self, network: Ip, mask: Ip) -> Result<(), Error> {
         self.routes.remove(network, mask)
     }
+    pub fn local_ip(&self) -> Ip {
+        self.ip
+    }
+    pub fn route_egress(
+        &mut self,
+        destination: Ip,
+        protocol: u8,
+        payload: &[u8],
+        now: u64,
+    ) -> Result<Egress, Error> {
+        self.route_payload(destination, protocol, payload, now)
+    }
+    pub fn ipv4_frame<'a>(&self, bytes: &'a [u8]) -> Result<Option<Ipv4<'a>>, Error> {
+        let frame = Ethernet::parse(bytes)?;
+        if frame.kind != 0x0800 || frame.destination != self.mac {
+            return Ok(None);
+        }
+        let ip = Ipv4::parse(frame.payload)?;
+        if ip.destination != self.ip || ip.payload.len() + 20 > self.routes.mtu {
+            return Ok(None);
+        }
+        Ok(Some(ip))
+    }
     /// Returns an ARP request, an echo request, or None while ARP is pending.
     pub fn echo(
         &mut self,
@@ -778,6 +862,12 @@ pub mod acd;
 pub mod dhcp;
 pub mod diagnostic;
 pub mod dns;
+pub mod ipv6;
+pub mod ipv6_peer;
+pub mod ndp;
+pub mod router;
+#[cfg(test)]
+mod ipv6_tests;
 #[cfg(test)]
 mod tests;
 pub mod transport_diagnostic;

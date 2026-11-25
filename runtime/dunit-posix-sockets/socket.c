@@ -1,4 +1,4 @@
-/* Opt-in IPv4 socket translation (blocking and nonblocking) for Dunit musl. */
+/* Opt-in dual-stack (IPv4 + IPv6) socket translation for Dunit musl. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -26,11 +26,13 @@ enum {
     OPEN_TIMEOUT_MS = 5000,
     DNS_TIMEOUT_MS = 15000,
     MAX_TRACKED_FDS = 1024,
+    MAX_DNS_WIRE_LEN = 2 + 16 * 22,
 };
 
 struct sock_state {
     uint8_t active;
     uint8_t nonblocking;
+    int domain;
     int sock_type;
     int protocol;
     uint64_t rcv_timeout_ms;
@@ -92,7 +94,7 @@ static long socket_op(int fd, unsigned operation, const void *input, size_t inpu
     return value;
 }
 
-static long query_endpoints(int fd, struct dunit_socket_endpoints *endpoints)
+static long query_endpoints(int fd, struct dunit_socket_endpoints6 *endpoints)
 {
     long value = socket_op(fd, DUNIT_SOCKET_OP_ENDPOINTS, NULL, 0,
                            endpoints, sizeof *endpoints);
@@ -106,6 +108,7 @@ static struct sock_state get_state(int fd)
     struct sock_state copy = {
         .active = 0,
         .nonblocking = 1,
+        .domain = AF_INET,
         .sock_type = 0,
         .protocol = 0,
         .rcv_timeout_ms = 0,
@@ -120,13 +123,14 @@ static struct sock_state get_state(int fd)
     return copy;
 }
 
-static void set_state(int fd, int nonblocking, int sock_type, int protocol)
+static void set_state(int fd, int nonblocking, int domain, int sock_type, int protocol)
 {
     if (fd < 0 || fd >= MAX_TRACKED_FDS)
         return;
     lock_states();
     fd_states[fd].active = 1;
     fd_states[fd].nonblocking = nonblocking ? 1 : 0;
+    fd_states[fd].domain = domain;
     fd_states[fd].sock_type = sock_type;
     fd_states[fd].protocol = protocol;
     fd_states[fd].rcv_timeout_ms = 0;
@@ -179,29 +183,57 @@ static int poll_wait(int fd, short events, uint64_t timeout_ms, uint64_t *deadli
 }
 
 static int endpoint_error(const struct sockaddr *address, socklen_t length,
-                          struct dunit_socket_endpoint *endpoint)
+                          struct dunit_socket_endpoint6 *endpoint)
 {
     if (!address)
         return EFAULT;
-    if (length < sizeof(struct sockaddr_in))
+    if (length < sizeof(sa_family_t))
         return EINVAL;
-    struct sockaddr_in ipv4;
-    memcpy(&ipv4, address, sizeof ipv4);
-    if (ipv4.sin_family != AF_INET)
-        return EAFNOSUPPORT;
-    memcpy(endpoint->ipv4, &ipv4.sin_addr.s_addr, sizeof endpoint->ipv4);
-    endpoint->port = ntohs(ipv4.sin_port);
-    endpoint->reserved = 0;
-    return 0;
+    memset(endpoint, 0, sizeof *endpoint);
+    sa_family_t fam = 0;
+    memcpy(&fam, address, sizeof fam);
+    if (fam == AF_INET) {
+        if (length < sizeof(struct sockaddr_in))
+            return EINVAL;
+        struct sockaddr_in ipv4;
+        memcpy(&ipv4, address, sizeof ipv4);
+        endpoint->family = DUNIT_SOCKET_FAMILY_IPV4;
+        endpoint->port = ntohs(ipv4.sin_port);
+        memcpy(endpoint->addr, &ipv4.sin_addr.s_addr, 4);
+        return 0;
+    }
+    if (fam == AF_INET6) {
+        if (length < sizeof(struct sockaddr_in6))
+            return EINVAL;
+        struct sockaddr_in6 ipv6;
+        memcpy(&ipv6, address, sizeof ipv6);
+        endpoint->family = DUNIT_SOCKET_FAMILY_IPV6;
+        endpoint->port = ntohs(ipv6.sin6_port);
+        endpoint->scope_id = ipv6.sin6_scope_id;
+        memcpy(endpoint->addr, &ipv6.sin6_addr.s6_addr, 16);
+        return 0;
+    }
+    return EAFNOSUPPORT;
 }
 
-static void put_address(const struct dunit_socket_endpoint *endpoint,
+static void put_address(const struct dunit_socket_endpoint6 *endpoint,
                         struct sockaddr *address, socklen_t *length)
 {
+    if (endpoint->family == DUNIT_SOCKET_FAMILY_IPV6) {
+        struct sockaddr_in6 ipv6 = {0};
+        ipv6.sin6_family = AF_INET6;
+        ipv6.sin6_port = htons(endpoint->port);
+        ipv6.sin6_scope_id = endpoint->scope_id;
+        memcpy(&ipv6.sin6_addr.s6_addr, endpoint->addr, 16);
+        size_t copied = *length < sizeof ipv6 ? *length : sizeof ipv6;
+        memcpy(address, &ipv6, copied);
+        *length = sizeof ipv6;
+        return;
+    }
     struct sockaddr_in ipv4 = {0};
     ipv4.sin_family = AF_INET;
     ipv4.sin_port = htons(endpoint->port);
-    memcpy(&ipv4.sin_addr.s_addr, endpoint->ipv4, sizeof endpoint->ipv4);
+    memcpy(&ipv4.sin_addr.s_addr, endpoint->addr, 4);
     size_t copied = *length < sizeof ipv4 ? *length : sizeof ipv4;
     memcpy(address, &ipv4, copied);
     *length = sizeof ipv4;
@@ -222,14 +254,16 @@ int dunit_socket_use_grant(uint32_t grant)
 
 int dunit_socket_set_nonblocking(int fd, int nonblocking)
 {
-    struct dunit_socket_endpoints endpoints;
+    struct dunit_socket_endpoints6 endpoints;
     long value = query_endpoints(fd, &endpoints);
     if (value < 0)
         return (int)result(value);
     if (fd < 0 || fd >= MAX_TRACKED_FDS)
         return (int)fail(EBADF);
+    int dom = endpoints.local.family == DUNIT_SOCKET_FAMILY_IPV6 ? AF_INET6 : AF_INET;
     lock_states();
     fd_states[fd].active = 1;
+    fd_states[fd].domain = dom;
     fd_states[fd].nonblocking = nonblocking ? 1 : 0;
     unlock_states();
     return 0;
@@ -237,8 +271,6 @@ int dunit_socket_set_nonblocking(int fd, int nonblocking)
 
 static int await_open(int fd)
 {
-    /* The proxy's OPEN completion must precede connect(). Otherwise its
-     * POLLOUT could be mistaken for completion of a connect still unqueued. */
     struct pollfd interest = { .fd = fd, .events = POLLOUT };
     int ready = poll(&interest, 1, OPEN_TIMEOUT_MS);
     if (ready < 0)
@@ -261,7 +293,7 @@ static int await_open(int fd)
 
 int socket(int domain, int type, int protocol)
 {
-    if (domain != AF_INET)
+    if (domain != AF_INET && domain != AF_INET6)
         return (int)fail(EAFNOSUPPORT);
     int base_type = type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
     unsigned native_protocol;
@@ -285,7 +317,7 @@ int socket(int domain, int type, int protocol)
     uint32_t grant = __atomic_load_n(&selected_grant, __ATOMIC_ACQUIRE);
     if (!grant)
         return (int)fail(EACCES);
-    const struct dunit_socket_options options = { .version = DUNIT_SOCKET_VERSION };
+    const struct dunit_socket_options options = { .version = DUNIT_SOCKET_VERSION_V2 };
     long value = native_call(SYS_NET_SOCKET_OPEN, grant, native_protocol, (uintptr_t)&options,
                              sizeof options, 0, 0);
     if (value < 0)
@@ -293,7 +325,7 @@ int socket(int domain, int type, int protocol)
     int fd = (int)value;
     if (await_open(fd) == 0 &&
         ((type & SOCK_CLOEXEC) || fcntl(fd, F_SETFD, 0) == 0)) {
-        set_state(fd, (type & SOCK_NONBLOCK) != 0, base_type, resolved_proto);
+        set_state(fd, (type & SOCK_NONBLOCK) != 0, domain, base_type, resolved_proto);
         return fd;
     }
     int error = errno;
@@ -329,7 +361,7 @@ static int await_write_op(int fd, unsigned op, const void *input, size_t input_s
 
 int bind(int fd, const struct sockaddr *address, socklen_t length)
 {
-    struct dunit_socket_endpoint endpoint;
+    struct dunit_socket_endpoint6 endpoint;
     int error = endpoint_error(address, length, &endpoint);
     if (error)
         return (int)fail(error);
@@ -362,7 +394,7 @@ int accept4(int fd, struct sockaddr *address, socklen_t *length, int flags)
     uint64_t op_deadline = 0;
 
     for (;;) {
-        struct dunit_socket_endpoint remote = {0};
+        struct dunit_socket_endpoint6 remote = {0};
         long res = socket_op(fd, DUNIT_SOCKET_OP_ACCEPT, NULL, 0,
                              address ? &remote : NULL, address ? sizeof remote : 0);
         if (res >= 0) {
@@ -372,7 +404,8 @@ int accept4(int fd, struct sockaddr *address, socklen_t *length, int flags)
                 close(new_fd);
                 return (int)fail(err);
             }
-            set_state(new_fd, (flags & SOCK_NONBLOCK) != 0, SOCK_STREAM, IPPROTO_TCP);
+            int child_dom = remote.family == DUNIT_SOCKET_FAMILY_IPV6 ? AF_INET6 : st.domain;
+            set_state(new_fd, (flags & SOCK_NONBLOCK) != 0, child_dom, SOCK_STREAM, IPPROTO_TCP);
             if (address)
                 put_address(&remote, address, length);
             return new_fd;
@@ -406,7 +439,7 @@ int accept(int fd, struct sockaddr *address, socklen_t *length)
 
 int connect(int fd, const struct sockaddr *address, socklen_t length)
 {
-    struct dunit_socket_endpoint endpoint;
+    struct dunit_socket_endpoint6 endpoint;
     int error = endpoint_error(address, length, &endpoint);
     if (error)
         return (int)fail(error);
@@ -432,7 +465,7 @@ int connect(int fd, const struct sockaddr *address, socklen_t length)
             return (int)fail(EIO);
         if (sock_err < 0)
             return (int)result(sock_err);
-        struct dunit_socket_endpoints eps;
+        struct dunit_socket_endpoints6 eps;
         long ep_res = query_endpoints(fd, &eps);
         if (ep_res < 0)
             return (int)result(ep_res);
@@ -447,15 +480,13 @@ ssize_t send(int fd, const void *buffer, size_t length, int flags)
         return fail(EOPNOTSUPP);
     if (length && !buffer)
         return fail(EFAULT);
-    struct dunit_socket_endpoints endpoints;
+    struct dunit_socket_endpoints6 endpoints;
     long value = query_endpoints(fd, &endpoints);
     if (value < 0)
         return result(value);
     if (!endpoints.remote.port)
         return fail(ENOTCONN);
     if (!length) {
-        /* Native write of zero bytes is a no-op. Use SEND_TO to publish
-         * an empty UDP datagram. A stream has no empty record to publish. */
         value = socket_op(fd, DUNIT_SOCKET_OP_SEND_TO, &endpoints.remote,
                           sizeof endpoints.remote, NULL, 0);
         return result(value == -EOPNOTSUPP ? 0 : value);
@@ -503,7 +534,7 @@ ssize_t sendto(int fd, const void *buffer, size_t length, int flags,
     if (length && !buffer)
         return fail(EFAULT);
     struct {
-        struct dunit_socket_endpoint endpoint;
+        struct dunit_socket_endpoint6 endpoint;
         unsigned char payload[DUNIT_SOCKET_MAX_PAYLOAD];
     } record;
     int error = endpoint_error(address, address_length, &record.endpoint);
@@ -537,7 +568,7 @@ ssize_t recvfrom(int fd, void *buffer, size_t length, int flags,
         return fail(EFAULT);
     size_t capacity = length < DUNIT_SOCKET_MAX_PAYLOAD ? length : DUNIT_SOCKET_MAX_PAYLOAD;
     struct {
-        struct dunit_socket_receive header;
+        struct dunit_socket_receive6 header;
         unsigned char payload[DUNIT_SOCKET_MAX_PAYLOAD];
     } record;
 
@@ -549,11 +580,9 @@ ssize_t recvfrom(int fd, void *buffer, size_t length, int flags,
         long value = socket_op(fd, DUNIT_SOCKET_OP_RECV_FROM, NULL, 0, &record,
                                sizeof record.header + capacity);
         if (value == -EOPNOTSUPP) {
-            /* Native RECV_FROM is datagram-only. It has already type-checked
-             * the FD, so the stream fallback cannot read an unrelated file. */
             if (flags & MSG_TRUNC)
                 return fail(EOPNOTSUPP);
-            struct dunit_socket_endpoints endpoints;
+            struct dunit_socket_endpoints6 endpoints;
             if (address) {
                 value = query_endpoints(fd, &endpoints);
                 if (value < 0)
@@ -629,7 +658,7 @@ static int socket_name(int fd, struct sockaddr *address, socklen_t *length, int 
 {
     if (!address || !length)
         return (int)fail(EFAULT);
-    struct dunit_socket_endpoints endpoints;
+    struct dunit_socket_endpoints6 endpoints;
     long value = query_endpoints(fd, &endpoints);
     if (value < 0)
         return (int)result(value);
@@ -699,7 +728,7 @@ static int write_int_opt(int val, void *data, socklen_t *length)
 
 int getsockopt(int fd, int level, int option, void *data, socklen_t *length)
 {
-    struct dunit_socket_endpoints endpoints;
+    struct dunit_socket_endpoints6 endpoints;
     long ep_res = query_endpoints(fd, &endpoints);
     if (ep_res < 0)
         return (int)result(ep_res);
@@ -735,7 +764,9 @@ int getsockopt(int fd, int level, int option, void *data, socklen_t *length)
         return err ? (int)fail(err) : 0;
     }
     if (option == SO_DOMAIN) {
-        int err = write_int_opt(AF_INET, data, length);
+        int dom = endpoints.local.family == DUNIT_SOCKET_FAMILY_IPV6 ? AF_INET6
+                : st.active ? st.domain : AF_INET;
+        int err = write_int_opt(dom, data, length);
         return err ? (int)fail(err) : 0;
     }
     if (option == SO_TYPE && st.active && st.sock_type) {
@@ -751,7 +782,7 @@ int getsockopt(int fd, int level, int option, void *data, socklen_t *length)
 
 int setsockopt(int fd, int level, int option, const void *data, socklen_t length)
 {
-    struct dunit_socket_endpoints endpoints;
+    struct dunit_socket_endpoints6 endpoints;
     long value = query_endpoints(fd, &endpoints);
     if (value < 0)
         return (int)result(value);
@@ -767,6 +798,13 @@ int setsockopt(int fd, int level, int option, const void *data, socklen_t length
         memcpy(&enabled, data, sizeof enabled);
         return enabled ? 0 : (int)fail(ENOPROTOOPT);
     }
+    if (level == IPPROTO_IPV6 && option == IPV6_V6ONLY) {
+        if (!data)
+            return (int)fail(EFAULT);
+        if (length < sizeof(int))
+            return (int)fail(EINVAL);
+        return 0;
+    }
     if (level != SOL_SOCKET || (option != SO_RCVTIMEO && option != SO_SNDTIMEO))
         return (int)fail(ENOPROTOOPT);
     uint64_t ms = 0;
@@ -778,6 +816,7 @@ int setsockopt(int fd, int level, int option, const void *data, socklen_t length
     lock_states();
     if (!fd_states[fd].active) {
         fd_states[fd].active = 1;
+        fd_states[fd].domain = endpoints.local.family == DUNIT_SOCKET_FAMILY_IPV6 ? AF_INET6 : AF_INET;
         fd_states[fd].nonblocking = 1;
     }
     if (option == SO_RCVTIMEO)
@@ -824,7 +863,13 @@ static int parse_service_port(const char *service, int flags, uint16_t *port_out
     return 0;
 }
 
-static int resolve_dns_ipv4(const char *name, uint8_t ip_out[4])
+struct resolved_addr {
+    int family;
+    uint32_t scope_id;
+    uint8_t addr[16];
+};
+
+static int resolve_dns_dual(const char *name, struct resolved_addr *out, size_t max_out, size_t *out_count)
 {
     size_t len = strlen(name);
     if (len == 0 || len > DUNIT_SOCKET_MAX_DNS_NAME)
@@ -832,7 +877,7 @@ static int resolve_dns_ipv4(const char *name, uint8_t ip_out[4])
     uint32_t grant = __atomic_load_n(&selected_grant, __ATOMIC_ACQUIRE);
     if (!grant)
         return EAI_FAIL;
-    const struct dunit_socket_options options = { .version = DUNIT_SOCKET_VERSION };
+    const struct dunit_socket_options options = { .version = DUNIT_SOCKET_VERSION_V2 };
     long fd_res = native_call(SYS_NET_SOCKET_OPEN, grant, DUNIT_SOCKET_PROTO_DNS,
                               (uintptr_t)&options, sizeof options, 0, 0);
     if (fd_res < 0)
@@ -863,10 +908,34 @@ static int resolve_dns_ipv4(const char *name, uint8_t ip_out[4])
         return n == -EINVAL ? EAI_NONAME : EAI_FAIL;
     }
 
+    uint8_t buf[MAX_DNS_WIRE_LEN];
     for (;;) {
-        long n = native_call(SYS_READ, fd, (uintptr_t)ip_out, 4, 0, 0, 0);
+        long n = native_call(SYS_READ, fd, (uintptr_t)buf, sizeof buf, 0, 0, 0);
         if (n == 4) {
             close(fd);
+            out[0].family = AF_INET;
+            out[0].scope_id = 0;
+            memset(out[0].addr, 0, 16);
+            memcpy(out[0].addr, buf, 4);
+            *out_count = 1;
+            return 0;
+        }
+        if (n > 2) {
+            close(fd);
+            uint8_t cnt = buf[0];
+            size_t expected = 2 + (size_t)cnt * 22;
+            if (cnt == 0 || cnt > 16 || buf[1] != 0 || (size_t)n != expected)
+                return EAI_FAIL;
+            size_t total = (size_t)cnt < max_out ? (size_t)cnt : max_out;
+            for (size_t i = 0; i < total; i++) {
+                const uint8_t *rec = buf + 2 + i * 22;
+                out[i].family = rec[0] == DUNIT_SOCKET_FAMILY_IPV6 ? AF_INET6 : AF_INET;
+                uint32_t sc = 0;
+                memcpy(&sc, rec + 2, 4);
+                out[i].scope_id = sc;
+                memcpy(out[i].addr, rec + 6, 16);
+            }
+            *out_count = total;
             return 0;
         }
         if (n >= 0) {
@@ -897,26 +966,46 @@ static int resolve_dns_ipv4(const char *name, uint8_t ip_out[4])
     }
 }
 
-static struct addrinfo *alloc_ai_node(const uint8_t ip[4], uint16_t port, int socktype, int protocol,
-                                      const char *canon)
+static struct addrinfo *alloc_ai_node(const struct resolved_addr *addr, uint16_t port,
+                                      int socktype, int protocol, const char *canon)
 {
     struct addrinfo *ai = calloc(1, sizeof *ai);
-    struct sockaddr_in *sa = calloc(1, sizeof *sa);
     char *cname = canon ? strdup(canon) : NULL;
-    if (!ai || !sa || (canon && !cname)) {
+    if (!ai || (canon && !cname)) {
         free(cname);
-        free(sa);
         free(ai);
         return NULL;
     }
-    sa->sin_family = AF_INET;
-    sa->sin_port = htons(port);
-    memcpy(&sa->sin_addr.s_addr, ip, 4);
-    ai->ai_family = AF_INET;
+    if (addr->family == AF_INET6) {
+        struct sockaddr_in6 *sa6 = calloc(1, sizeof *sa6);
+        if (!sa6) {
+            free(cname);
+            free(ai);
+            return NULL;
+        }
+        sa6->sin6_family = AF_INET6;
+        sa6->sin6_port = htons(port);
+        sa6->sin6_scope_id = addr->scope_id;
+        memcpy(&sa6->sin6_addr.s6_addr, addr->addr, 16);
+        ai->ai_family = AF_INET6;
+        ai->ai_addrlen = sizeof *sa6;
+        ai->ai_addr = (struct sockaddr *)sa6;
+    } else {
+        struct sockaddr_in *sa4 = calloc(1, sizeof *sa4);
+        if (!sa4) {
+            free(cname);
+            free(ai);
+            return NULL;
+        }
+        sa4->sin_family = AF_INET;
+        sa4->sin_port = htons(port);
+        memcpy(&sa4->sin_addr.s_addr, addr->addr, 4);
+        ai->ai_family = AF_INET;
+        ai->ai_addrlen = sizeof *sa4;
+        ai->ai_addr = (struct sockaddr *)sa4;
+    }
     ai->ai_socktype = socktype;
     ai->ai_protocol = protocol;
-    ai->ai_addrlen = sizeof *sa;
-    ai->ai_addr = (struct sockaddr *)sa;
     ai->ai_canonname = cname;
     return ai;
 }
@@ -939,7 +1028,7 @@ int getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
                         AI_ADDRCONFIG | AI_NUMERICSERV;
     if (flags & ~allowed_flags)
         return EAI_BADFLAGS;
-    if (family != AF_UNSPEC && family != AF_INET)
+    if (family != AF_UNSPEC && family != AF_INET && family != AF_INET6)
         return EAI_FAMILY;
 
     int emit_stream = 0;
@@ -962,25 +1051,56 @@ int getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
     if (srv_err)
         return srv_err;
 
-    uint8_t ip[4] = {0};
+    struct resolved_addr addrs[16];
+    size_t addr_count = 0;
     const char *canon = NULL;
+
     if (!node) {
+        int out_fam = family == AF_INET6 ? AF_INET6 : AF_INET;
+        addrs[0].family = out_fam;
+        addrs[0].scope_id = 0;
+        memset(addrs[0].addr, 0, 16);
         if (!(flags & AI_PASSIVE)) {
-            ip[0] = 127;
-            ip[3] = 1;
+            if (out_fam == AF_INET6) {
+                addrs[0].addr[15] = 1;
+            } else {
+                addrs[0].addr[0] = 127;
+                addrs[0].addr[3] = 1;
+            }
         }
+        addr_count = 1;
     } else {
-        struct in_addr addr;
-        if (inet_pton(AF_INET, node, &addr) == 1) {
-            memcpy(ip, &addr.s_addr, 4);
+        struct in_addr addr4;
+        struct in6_addr addr6;
+        if (family != AF_INET6 && inet_pton(AF_INET, node, &addr4) == 1) {
+            addrs[0].family = AF_INET;
+            addrs[0].scope_id = 0;
+            memset(addrs[0].addr, 0, 16);
+            memcpy(addrs[0].addr, &addr4.s_addr, 4);
+            addr_count = 1;
+            if (flags & AI_CANONNAME)
+                canon = node;
+        } else if (family != AF_INET && inet_pton(AF_INET6, node, &addr6) == 1) {
+            addrs[0].family = AF_INET6;
+            addrs[0].scope_id = 0;
+            memcpy(addrs[0].addr, &addr6.s6_addr, 16);
+            addr_count = 1;
             if (flags & AI_CANONNAME)
                 canon = node;
         } else if (flags & AI_NUMERICHOST) {
             return EAI_NONAME;
         } else {
-            int dns_err = resolve_dns_ipv4(node, ip);
+            struct resolved_addr raw[16];
+            size_t raw_count = 0;
+            int dns_err = resolve_dns_dual(node, raw, 16, &raw_count);
             if (dns_err)
                 return dns_err;
+            for (size_t i = 0; i < raw_count; i++) {
+                if (family == AF_UNSPEC || family == raw[i].family)
+                    addrs[addr_count++] = raw[i];
+            }
+            if (addr_count == 0)
+                return EAI_NODATA;
             if (flags & AI_CANONNAME)
                 canon = node;
         }
@@ -988,23 +1108,33 @@ int getaddrinfo(const char *node, const char *service, const struct addrinfo *hi
 
     struct addrinfo *head = NULL;
     struct addrinfo *tail = NULL;
-    if (emit_stream) {
-        head = alloc_ai_node(ip, port, SOCK_STREAM, IPPROTO_TCP, canon);
-        if (!head)
-            return EAI_MEMORY;
-        tail = head;
-        canon = NULL;
-    }
-    if (emit_dgram) {
-        struct addrinfo *node_dgram = alloc_ai_node(ip, port, SOCK_DGRAM, IPPROTO_UDP, canon);
-        if (!node_dgram) {
-            freeaddrinfo(head);
-            return EAI_MEMORY;
+    for (size_t i = 0; i < addr_count; i++) {
+        if (emit_stream) {
+            struct addrinfo *n = alloc_ai_node(&addrs[i], port, SOCK_STREAM, IPPROTO_TCP, canon);
+            if (!n) {
+                freeaddrinfo(head);
+                return EAI_MEMORY;
+            }
+            canon = NULL;
+            if (!head)
+                head = n;
+            else
+                tail->ai_next = n;
+            tail = n;
         }
-        if (!head)
-            head = node_dgram;
-        else
-            tail->ai_next = node_dgram;
+        if (emit_dgram) {
+            struct addrinfo *n = alloc_ai_node(&addrs[i], port, SOCK_DGRAM, IPPROTO_UDP, canon);
+            if (!n) {
+                freeaddrinfo(head);
+                return EAI_MEMORY;
+            }
+            canon = NULL;
+            if (!head)
+                head = n;
+            else
+                tail->ai_next = n;
+            tail = n;
+        }
     }
     *res = head;
     return 0;

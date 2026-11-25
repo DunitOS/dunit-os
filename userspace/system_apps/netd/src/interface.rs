@@ -91,6 +91,7 @@ impl Interface {
         }
     }
 
+    #[cfg(test)]
     pub fn revision(&self) -> u64 {
         self.revision
     }

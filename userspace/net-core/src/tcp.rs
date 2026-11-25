@@ -1,12 +1,12 @@
-//! Bounded TCPv4 state for a single four-tuple. The caller owns admission,
-//! address configuration and delivery of each complete outbound segment.
-//! Multiple segments may be in flight under Reno congestion control.
-use crate::{Error, Ip, MTU};
+//! Bounded TCP (IPv4 & IPv6) state for a single four-tuple. The caller owns
+//! admission, address configuration and delivery of each complete outbound
+//! segment. Multiple segments may be in flight under Reno congestion control.
+use crate::{Error, Ip, IpAddr, MTU};
 use alloc::{collections::VecDeque, vec::Vec};
 
 mod link;
 mod wire;
-pub use wire::{Endpoint, Segment, ACK, FIN, MAX_DATA, PSH, RST, SYN};
+pub use wire::{DualEndpoint, Endpoint, Segment, ACK, FIN, MAX_DATA, PSH, RST, SYN};
 
 pub const QUEUE_BYTES: usize = 16384;
 const _: () = assert!(QUEUE_BYTES.is_power_of_two());
@@ -145,8 +145,8 @@ impl Retransmission {
 }
 
 pub struct Connection {
-    local: Endpoint,
-    remote: Endpoint,
+    local: DualEndpoint,
+    remote: DualEndpoint,
     state: State,
     error: Option<StreamError>,
     now: u64,
@@ -183,7 +183,17 @@ impl Connection {
         mtu: usize,
         now: u64,
     ) -> Result<Self> {
-        Self::new(local, remote, initial_sequence, mtu, now, State::SynSent)
+        Self::connect_ip(local.into(), remote.into(), initial_sequence, mtu, now)
+    }
+
+    pub fn connect_ip(
+        local: DualEndpoint,
+        remote: DualEndpoint,
+        initial_sequence: u32,
+        mtu: usize,
+        now: u64,
+    ) -> Result<Self> {
+        Self::new_ip(local, remote, initial_sequence, mtu, now, State::SynSent)
     }
 
     /// Validate the first SYN before admitting the remote to a connection.
@@ -196,11 +206,22 @@ impl Connection {
         now: u64,
         syn: &[u8],
     ) -> Result<Self> {
-        let segment = Segment::parse(remote, local, syn)?;
+        Self::accept_ip(local.into(), remote.into(), initial_sequence, mtu, now, syn)
+    }
+
+    pub fn accept_ip(
+        local: DualEndpoint,
+        remote: DualEndpoint,
+        initial_sequence: u32,
+        mtu: usize,
+        now: u64,
+        syn: &[u8],
+    ) -> Result<Self> {
+        let segment = Segment::parse_ip(remote, local, syn)?;
         if !segment.has(SYN) || segment.has(ACK | RST | FIN) {
             return Err(Error::Unsolicited.into());
         }
-        let mut connection = Self::new(
+        let mut connection = Self::new_ip(
             local,
             remote,
             initial_sequence,
@@ -212,9 +233,9 @@ impl Connection {
         Ok(connection)
     }
 
-    fn new(
-        local: Endpoint,
-        remote: Endpoint,
+    fn new_ip(
+        local: DualEndpoint,
+        remote: DualEndpoint,
         initial_sequence: u32,
         mtu: usize,
         now: u64,
@@ -222,14 +243,19 @@ impl Connection {
     ) -> Result<Self> {
         local.validate()?;
         remote.validate()?;
+        let ip_header = match (local.ip, remote.ip) {
+            (IpAddr::V4(_), IpAddr::V4(_)) => 20,
+            (IpAddr::V6(_), IpAddr::V6(_)) => 40,
+            _ => return Err(Error::Address.into()),
+        };
         if local == remote {
             return Err(Error::Address.into());
         }
         // SYN carries an MSS option. Its header still has to fit the path.
-        if !(44..=MTU).contains(&mtu) {
+        if !(ip_header + 24..=MTU).contains(&mtu) {
             return Err(Error::Length.into());
         }
-        let local_mss = (mtu - 40) as u16;
+        let local_mss = (mtu - ip_header - 20) as u16;
         let mss = usize::from(local_mss.min(DEFAULT_MSS));
         Ok(Self {
             local,
@@ -278,7 +304,14 @@ impl Connection {
             .sum()
     }
 
-    pub const fn endpoints(&self) -> (Endpoint, Endpoint) {
+    pub fn endpoints(&self) -> (Endpoint, Endpoint) {
+        (
+            self.local.to_v4().expect("IPv4 local endpoint"),
+            self.remote.to_v4().expect("IPv4 remote endpoint"),
+        )
+    }
+
+    pub const fn endpoints_ip(&self) -> (DualEndpoint, DualEndpoint) {
         (self.local, self.remote)
     }
 
@@ -406,10 +439,20 @@ impl Connection {
 
     /// Supply the verified IP source/destination and the complete TCP payload.
     pub fn receive(&mut self, source: Ip, destination: Ip, bytes: &[u8], now: u64) -> Result<()> {
+        self.receive_ip(IpAddr::V4(source), IpAddr::V4(destination), bytes, now)
+    }
+
+    pub fn receive_ip(
+        &mut self,
+        source: IpAddr,
+        destination: IpAddr,
+        bytes: &[u8],
+        now: u64,
+    ) -> Result<()> {
         if (source, destination) != (self.remote.ip, self.local.ip) {
             return Err(Error::Address.into());
         }
-        let segment = Segment::parse(self.remote, self.local, bytes)?;
+        let segment = Segment::parse_ip(self.remote, self.local, bytes)?;
         self.advance(now)?;
         match self.state {
             State::Closed => Err(StreamError::Closed),
@@ -947,7 +990,7 @@ impl Connection {
             mss,
             data: &payload[..length],
         }
-        .encode(self.local, self.remote)?;
+        .encode_ip(self.local, self.remote)?;
         self.ack_due = false;
         Ok(output)
     }

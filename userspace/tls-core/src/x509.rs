@@ -42,6 +42,7 @@ pub struct Certificate {
     pub server_auth: Option<bool>,
     pub san_dns: Vec<String>,
     pub san_ips: Vec<[u8; 4]>,
+    pub san_ips_v6: Vec<[u8; 16]>,
 }
 
 struct DerReader<'a> {
@@ -290,6 +291,7 @@ impl Certificate {
         let mut server_auth = None;
         let mut san_dns = Vec::new();
         let mut san_ips = Vec::new();
+        let mut san_ips_v6 = Vec::new();
 
         while !tbs.is_empty() {
             let (tag, inner, _) = tbs.read_tlv_raw()?;
@@ -353,6 +355,8 @@ impl Certificate {
                                 }
                             } else if gtag == 0x87 && gval.len() == 4 {
                                 san_ips.push(gval.try_into().unwrap());
+                            } else if gtag == 0x87 && gval.len() == 16 {
+                                san_ips_v6.push(gval.try_into().unwrap());
                             }
                         }
                     }
@@ -375,6 +379,7 @@ impl Certificate {
             server_auth,
             san_dns,
             san_ips,
+            san_ips_v6,
         })
     }
 
@@ -391,6 +396,13 @@ impl Certificate {
     pub fn matches_host(&self, host: &str) -> bool {
         if let Some(ip) = parse_ipv4_literal(host) {
             return self.san_ips.contains(&ip);
+        }
+        let unbracketed = host
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(host);
+        if let Some(ip6) = parse_ipv6_literal(unbracketed) {
+            return self.san_ips_v6.contains(&ip6);
         }
         let target = host.to_ascii_lowercase();
         self.san_dns.iter().any(|pat| dns_name_matches(pat, &target))
@@ -441,6 +453,48 @@ fn parse_ipv4_literal(s: &str) -> Option<[u8; 4]> {
         *slot = p.parse().ok()?;
     }
     parts.next().is_none().then_some(out)
+}
+
+fn parse_ipv6_literal(s: &str) -> Option<[u8; 16]> {
+    if s.is_empty() || s.len() > 45 || !s.contains(':') {
+        return None;
+    }
+    let (h, t, comp) = match s.split_once("::") {
+        Some((h, t)) if !t.contains("::") => (h, t, true),
+        Some(_) => return None,
+        None => (s, "", false),
+    };
+    let mut head = Vec::new();
+    if !h.is_empty() {
+        for g in h.split(':') {
+            if g.is_empty() || g.len() > 4 {
+                return None;
+            }
+            head.push(u16::from_str_radix(g, 16).ok()?);
+        }
+    }
+    let mut tail = Vec::new();
+    if !t.is_empty() {
+        for g in t.split(':') {
+            if g.is_empty() || g.len() > 4 {
+                return None;
+            }
+            tail.push(u16::from_str_radix(g, 16).ok()?);
+        }
+    }
+    if (comp && head.len() + tail.len() >= 8) || (!comp && (head.len() != 8 || !tail.is_empty())) {
+        return None;
+    }
+    let mut words = [0u16; 8];
+    words[..head.len()].copy_from_slice(&head);
+    words[8 - tail.len()..].copy_from_slice(&tail);
+    let mut out = [0u8; 16];
+    for (i, w) in words.iter().enumerate() {
+        let b = w.to_be_bytes();
+        out[i * 2] = b[0];
+        out[i * 2 + 1] = b[1];
+    }
+    Some(out)
 }
 
 pub fn verify_chain(

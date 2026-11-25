@@ -1,0 +1,6 @@
+name = "net-ipv6-test"
+exec = "/system/libexec/net_ipv6_test"
+net_connect = 15
+restart = "never"
+critical = false
+

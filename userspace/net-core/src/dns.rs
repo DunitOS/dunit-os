@@ -3,6 +3,7 @@
 use super::udp::{Address, Send};
 use super::*;
 
+pub mod dual;
 mod stream;
 pub use stream::TCP_DNS_LIMIT;
 
@@ -130,6 +131,32 @@ impl Question {
         b.extend_from_slice(&1u16.to_be_bytes());
         Ok(b)
     }
+
+    pub fn multi_response(&self, ttl: u32, addresses: &[AddressData]) -> Result<Vec<u8>, Error> {
+        let mut b = self.encode()?;
+        put(&mut b, 2, 0x8180);
+        put(&mut b, 6, addresses.len() as u16);
+        for address in addresses {
+            let expected = matches!(
+                (address, self.kind),
+                (AddressData::V4(_), Kind::A) | (AddressData::V6(_), Kind::Aaaa)
+            );
+            if !expected {
+                return Err(Error::Protocol);
+            }
+            b.extend_from_slice(&[0xc0, 12]);
+            b.extend_from_slice(&self.kind.wire().to_be_bytes());
+            b.extend_from_slice(&1u16.to_be_bytes());
+            b.extend_from_slice(&ttl.to_be_bytes());
+            let data: &[u8] = match address {
+                AddressData::V4(ip) => ip,
+                AddressData::V6(ip) => ip,
+            };
+            b.extend_from_slice(&(data.len() as u16).to_be_bytes());
+            b.extend_from_slice(data);
+        }
+        Ok(b)
+    }
     pub fn parse(b: &[u8]) -> Result<Self, Error> {
         if !(12..=DNS_LIMIT).contains(&b.len()) {
             return Err(Error::Length);
@@ -189,6 +216,7 @@ enum Value {
 }
 enum Response {
     Answer(Answer),
+    Answers(Vec<Answer>),
     Negative { ttl: u32, all_types: bool },
     ServerFailure,
     Truncated,
@@ -197,12 +225,24 @@ enum Response {
 pub fn parse_response(b: &[u8], question: &Question) -> Result<Answer, Error> {
     match parse_message(b, question, DNS_LIMIT)? {
         Response::Answer(answer) => Ok(answer),
+        Response::Answers(answers) => answers.into_iter().next().ok_or(Error::NameNotFound),
         Response::Negative { .. } => Err(Error::NameNotFound),
         Response::Truncated | Response::ServerFailure => Err(Error::Unsupported),
     }
 }
 
 fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response, Error> {
+    match parse_message_inner(b, question, limit)? {
+        Response::Answers(mut list) => list
+            .drain(..)
+            .next()
+            .map(Response::Answer)
+            .ok_or(Error::NameNotFound),
+        other => Ok(other),
+    }
+}
+
+fn parse_message_inner(b: &[u8], question: &Question, limit: usize) -> Result<Response, Error> {
     if !(12..=limit).contains(&b.len()) {
         return Err(Error::Length);
     }
@@ -312,19 +352,22 @@ fn parse_message(b: &[u8], question: &Question, limit: usize) -> Result<Response
             return Err(Error::Header);
         }
         visited.push(target.clone());
-        if let Some(record) = records
+        let matches: Vec<Answer> = records
             .iter()
-            .find(|r| r.owner == target && r.kind == question.kind.wire())
-        {
-            if let Value::Address(address) = &record.value {
-                if nxdomain {
-                    return Err(Error::Header);
-                }
-                return Ok(Response::Answer(Answer {
+            .filter(|r| r.owner == target && r.kind == question.kind.wire())
+            .filter_map(|record| match &record.value {
+                Value::Address(address) => Some(Answer {
                     address: address.clone(),
                     ttl: ttl.min(record.ttl),
-                }));
+                }),
+                _ => None,
+            })
+            .collect();
+        if !matches.is_empty() {
+            if nxdomain {
+                return Err(Error::Header);
             }
+            return Ok(Response::Answers(matches));
         }
         let Some(alias) = records
             .iter()
@@ -540,6 +583,9 @@ impl Resolver {
                 }
                 let answer = match parse_message(&packet.data, &tx.question, DNS_LIMIT) {
                     Ok(Response::Answer(answer)) => answer,
+                    Ok(Response::Answers(answers)) => {
+                        answers.into_iter().next().ok_or(Error::NameNotFound)?
+                    }
                     Ok(Response::ServerFailure) => return Err(AttemptError::ServerFailure),
                     Ok(Response::Negative { ttl, all_types }) => {
                         self.finish(None, ttl, all_types, now);
@@ -603,6 +649,11 @@ impl Resolver {
         };
         match response {
             Ok(Response::Answer(answer)) => {
+                self.finish(Some(&answer), answer.ttl, false, now);
+                Ok(Some(answer))
+            }
+            Ok(Response::Answers(answers)) => {
+                let answer = answers.into_iter().next().ok_or(Error::NameNotFound)?;
                 self.finish(Some(&answer), answer.ttl, false, now);
                 Ok(Some(answer))
             }

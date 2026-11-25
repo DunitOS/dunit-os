@@ -10,15 +10,21 @@ pub struct Static {
     mac: Mac,
     seed: u32,
     probe: Option<AddressProbe>,
+    conflicted: bool,
 }
 
 impl Static {
     pub fn new(config: Config, mac: Mac, seed: u32) -> Self {
-        Self { config, mac, seed, probe: None }
+        Self { config, mac, seed, probe: None, conflicted: false }
+    }
+
+    pub fn is_conflicted(&self) -> bool {
+        self.conflicted
     }
 
     pub fn reset(&mut self, up: bool, now: u64, interface: &mut Interface, tx: &mut Outbound) -> Result<()> {
         self.probe = None;
+        self.conflicted = false;
         interface.clear();
         tx.clear();
         if up {
@@ -42,6 +48,7 @@ impl Static {
         }
         // Keep the interface withdrawn until link renegotiation or reboot.
         self.probe = None;
+        self.conflicted = true;
         interface.clear();
         tx.clear();
         let [a, b, c, d] = self.config.address;

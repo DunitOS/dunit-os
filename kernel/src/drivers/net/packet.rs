@@ -1,9 +1,11 @@
-//! Single owner for the reference NIC's production packet queues.
+//! Multi-NIC owner for reference E1000 packet queues (slots 0..MAX_NICS).
 
 use super::{e1000, rings, LegacyRoute, MappedRegisters, PciDevice};
 use crate::sync::{IrqSafeSpinLock, SpinLock};
 use crate::syscall::{EAGAIN, EBUSY, EFBIG, EIO, ENOENT, ENOMEM, EOPNOTSUPP, EPIPE};
 use dunit_packet_abi::{encode_record, record_len, Records, MAX_BATCH_LEN, MAX_RECORDS};
+
+pub const MAX_NICS: usize = 4;
 
 pub(crate) const READ: u32 = 1;
 pub(crate) const WRITE: u32 = 2;
@@ -17,15 +19,37 @@ struct Reference {
     link_up: bool,
 }
 
-static REFERENCE: SpinLock<Option<Reference>> = SpinLock::new(None);
-static SESSION: IrqSafeSpinLock<Owner> = IrqSafeSpinLock::new(Owner {
-    generation: 0,
-    state: State::Idle,
-});
+static REFERENCES: SpinLock<[Option<Reference>; MAX_NICS]> = SpinLock::new([None; MAX_NICS]);
+static SESSIONS: IrqSafeSpinLock<[Owner; MAX_NICS]> = IrqSafeSpinLock::new([
+    Owner::idle(),
+    Owner::idle(),
+    Owner::idle(),
+    Owner::idle(),
+]);
 
 struct Owner {
     generation: u64,
     state: State,
+}
+
+impl Owner {
+    const fn idle() -> Self {
+        Self {
+            generation: 0,
+            state: State::Idle,
+        }
+    }
+
+    fn active(&mut self, generation: u64) -> Result<&mut Session, i64> {
+        if self.generation == generation {
+            match &mut self.state {
+                State::Active(session) => return Ok(session),
+                State::Quarantined => return Err(EIO),
+                State::Idle | State::Opening | State::Closing => {}
+            }
+        }
+        Err(EPIPE)
+    }
 }
 
 enum State {
@@ -62,16 +86,22 @@ pub(crate) struct Reservation {
     generation: u64,
 }
 
-pub(super) fn discover(device: PciDevice, mac: [u8; 6], link_up: bool) {
-    *REFERENCE.lock() = Some(Reference { device, mac, link_up });
+fn slot_of(generation: u64) -> Option<usize> {
+    let tag = (generation >> 56) as usize;
+    tag.checked_sub(1).filter(|&idx| idx < MAX_NICS)
+}
+
+pub(super) fn discover(index: usize, device: PciDevice, mac: [u8; 6], link_up: bool) {
+    if index < MAX_NICS {
+        REFERENCES.lock()[index] = Some(Reference { device, mac, link_up });
+    }
 }
 
 fn interface(index: usize) -> Result<Reference, i64> {
-    if index != 0 {
+    if index >= MAX_NICS {
         return Err(EOPNOTSUPP);
     }
-    let reference = *REFERENCE.lock();
-    let reference = reference.ok_or_else(|| {
+    let reference = REFERENCES.lock()[index].ok_or_else(|| {
         if super::snapshot().total_nics == 0 { ENOENT } else { EOPNOTSUPP }
     })?;
     if !matches!(reference.device.interrupt_line, 10 | 11) {
@@ -86,7 +116,8 @@ pub(crate) fn supports(index: usize) -> Result<(), i64> {
 
 pub(crate) fn info(index: usize, generation: u64) -> Result<Info, i64> {
     let reference = interface(index)?;
-    let mut owner = SESSION.lock();
+    let mut owners = SESSIONS.lock();
+    let owner = &mut owners[index];
     let owns_queue = owner.generation == generation;
     match &mut owner.state {
         State::Quarantined => Err(EIO),
@@ -104,7 +135,8 @@ pub(crate) fn info(index: usize, generation: u64) -> Result<Info, i64> {
                 tx_bytes: counters.tx_bytes,
                 tx_errors: controller.tx_errors(),
                 next_record: if owns_queue {
-                    controller.rx_frame(0)
+                    controller
+                        .rx_frame(0)
                         .and_then(|frame| record_len(frame.len()).ok())
                         .unwrap_or(0)
                 } else {
@@ -123,19 +155,20 @@ pub(crate) fn info(index: usize, generation: u64) -> Result<Info, i64> {
 pub(crate) fn open(index: usize) -> Result<u64, i64> {
     let reference = interface(index)?;
     let generation = {
-        let mut owner = SESSION.lock();
+        let mut owners = SESSIONS.lock();
+        let owner = &mut owners[index];
         match owner.state {
-            State::Idle => {},
+            State::Idle => {}
             State::Quarantined => return Err(EIO),
             _ => return Err(EBUSY),
         }
-        owner.generation = owner.generation.checked_add(1).ok_or(EIO)?;
+        let seq = (owner.generation & ((1u64 << 56) - 1)).checked_add(1).ok_or(EIO)?;
+        let generation = (((index as u64) + 1) << 56) | seq;
+        owner.generation = generation;
         owner.state = State::Opening;
-        owner.generation
+        generation
     };
 
-    // No owner/IRQ guard over MMIO mapping, allocation or reset waits. State
-    // Opening excludes another controller until setup or verified rollback.
     let device = reference.device;
     let started = (|| {
         let registers = MappedRegisters::open(device).map_err(|_| e1000::Error::Registers)?;
@@ -143,13 +176,19 @@ pub(crate) fn open(index: usize) -> Result<u64, i64> {
         e1000::Controller::start_packet(registers)
     })();
 
-    let mut owner = SESSION.lock();
+    let mut owners = SESSIONS.lock();
+    let owner = &mut owners[index];
     match started {
         Ok(mut controller) => {
             let line = device.interrupt_line;
             let route = LegacyRoute::open(line);
             controller.enable_irq();
-            owner.state = State::Active(Session { line, controller, route, rx_reserved: false });
+            owner.state = State::Active(Session {
+                line,
+                controller,
+                route,
+                rx_reserved: false,
+            });
             Ok(generation)
         }
         Err(error) => {
@@ -166,11 +205,11 @@ pub(crate) fn close(generation: u64) {
     let _ = stop(generation);
 }
 
-/// Reset revokes the current generation. A later open creates fresh DMA rings.
 pub(crate) fn reset(index: usize) -> Result<(), i64> {
     supports(index)?;
     let generation = {
-        let owner = SESSION.lock();
+        let owners = SESSIONS.lock();
+        let owner = &owners[index];
         match owner.state {
             State::Active(_) => owner.generation,
             State::Quarantined => return Err(EIO),
@@ -182,16 +221,16 @@ pub(crate) fn reset(index: usize) -> Result<(), i64> {
 }
 
 fn stop(generation: u64) -> Result<(), i64> {
+    let slot = slot_of(generation).ok_or(EPIPE)?;
     let mut session = {
-        let mut owner = SESSION.lock();
+        let mut owners = SESSIONS.lock();
+        let owner = &mut owners[slot];
         if generation != owner.generation || !matches!(owner.state, State::Active(_)) {
             return Err(EPIPE);
         }
         let State::Active(mut session) = core::mem::replace(&mut owner.state, State::Closing) else {
             unreachable!();
         };
-        // Exclude an in-flight IRQ drain and deassert the hardware causes
-        // before making the controller unreachable from the IRQ path.
         session.controller.mask_irq();
         session
     };
@@ -200,21 +239,12 @@ fn stop(generation: u64) -> Result<(), i64> {
     let Session { controller, route, .. } = session;
     drop(controller);
     drop(route);
-    SESSION.lock().state = if result.is_ok() { State::Idle } else { State::Quarantined };
+    SESSIONS.lock()[slot].state = if result.is_ok() {
+        State::Idle
+    } else {
+        State::Quarantined
+    };
     result.map_err(|_| EIO)
-}
-
-impl Owner {
-    fn active(&mut self, generation: u64) -> Result<&mut Session, i64> {
-        if self.generation == generation {
-            match &mut self.state {
-                State::Active(session) => return Ok(session),
-                State::Quarantined => return Err(EIO),
-                State::Idle | State::Opening | State::Closing => {}
-            }
-        }
-        Err(EPIPE)
-    }
 }
 
 impl Session {
@@ -229,7 +259,10 @@ impl Session {
 }
 
 pub(crate) fn ready(generation: u64) -> u32 {
-    match SESSION.lock().active(generation) {
+    let Some(slot) = slot_of(generation) else {
+        return HANGUP;
+    };
+    match SESSIONS.lock()[slot].active(generation) {
         Ok(session) => session.ready(),
         Err(EPIPE) => HANGUP,
         Err(_) => ERROR | HANGUP,
@@ -237,32 +270,42 @@ pub(crate) fn ready(generation: u64) -> u32 {
 }
 
 pub(super) fn handle_irq(line: u8) -> bool {
-    let (handled, notify) = {
-        let mut owner = SESSION.lock();
-        let State::Active(session) = &mut owner.state else { return false; };
-        if session.line != line {
-            return false;
+    let (any_handled, any_notify) = {
+        let mut owners = SESSIONS.lock();
+        let mut any_handled = false;
+        let mut any_notify = false;
+        for owner in owners.iter_mut() {
+            let State::Active(session) = &mut owner.state else {
+                continue;
+            };
+            if session.line != line {
+                continue;
+            }
+            let before = session.ready();
+            if session.controller.handle_irq() {
+                any_handled = true;
+            }
+            if session.ready() & !before != 0 {
+                any_notify = true;
+            }
         }
-        let before = session.ready();
-        let handled = session.controller.handle_irq();
-        (handled, session.ready() & !before != 0)
+        (any_handled, any_notify)
     };
-    if notify {
+    if any_notify {
         crate::process::wake_poll_waiters();
     }
-    handled
+    any_handled
 }
 
 pub(crate) fn transmit(generation: u64, records: Records<'_>) -> Result<usize, i64> {
-    let mut owner = SESSION.lock();
-    let session = owner.active(generation)?;
+    let slot = slot_of(generation).ok_or(EPIPE)?;
+    let mut owners = SESSIONS.lock();
+    let session = owners[slot].active(generation)?;
     if session.controller.failed() {
         return Err(EIO);
     }
     let mut accepted = 0;
     for frame in records {
-        // Records validated all frame lengths and padding before entering the
-        // owner scope. Full is the only normal ring submission failure.
         let size = record_len(frame.len()).map_err(|_| EIO)?;
         match session.controller.submit_packet(frame) {
             Ok(()) => accepted += size,
@@ -273,12 +316,10 @@ pub(crate) fn transmit(generation: u64, records: Records<'_>) -> Result<usize, i
     if accepted == 0 { Err(EAGAIN) } else { Ok(accepted) }
 }
 
-/// Reserve a complete front prefix into a kernel-owned buffer. No caller
-/// mapping is touched under the controller lock. IRQ appends cannot overwrite
-/// the reserved slots and a concurrent reader observes no READ readiness.
 pub(crate) fn reserve(generation: u64, bytes: &mut [u8]) -> Result<Reservation, i64> {
-    let mut owner = SESSION.lock();
-    let session = owner.active(generation)?;
+    let slot = slot_of(generation).ok_or(EPIPE)?;
+    let mut owners = SESSIONS.lock();
+    let session = owners[slot].active(generation)?;
     if session.controller.failed() {
         return Err(EIO);
     }
@@ -289,7 +330,9 @@ pub(crate) fn reserve(generation: u64, bytes: &mut [u8]) -> Result<Reservation, 
     let bytes = &mut bytes[..len];
     let mut reservation = Reservation { bytes: 0, count: 0, generation };
     for index in 0..MAX_RECORDS {
-        let Some(frame) = session.controller.rx_frame(index) else { break; };
+        let Some(frame) = session.controller.rx_frame(index) else {
+            break;
+        };
         let size = record_len(frame.len()).map_err(|_| EIO)?;
         if size > bytes.len() - reservation.bytes {
             if reservation.count == 0 {
@@ -312,9 +355,10 @@ pub(crate) fn finish(generation: u64, reservation: Reservation, consume: bool) -
     if reservation.generation != generation {
         return Err(EPIPE);
     }
+    let slot = slot_of(generation).ok_or(EPIPE)?;
     let (notify, result) = {
-        let mut owner = SESSION.lock();
-        let session = owner.active(generation)?;
+        let mut owners = SESSIONS.lock();
+        let session = owners[slot].active(generation)?;
         debug_assert!(session.rx_reserved);
         session.rx_reserved = false;
         if session.controller.failed() {

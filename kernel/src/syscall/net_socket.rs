@@ -1,5 +1,5 @@
-//! Native IPv4 socket proxy. Endpoint and TCP/UDP behavior belong to the
-//! registered network service; the kernel attests ownership and bounds copies.
+//! Native dual-stack socket proxy. Endpoint and TCP/UDP/DNS behavior belong to
+//! the registered network service; the kernel attests ownership and bounds copies.
 use super::*;
 use crate::handle::RIGHT_NET_SERVICE;
 use crate::process::{self, FdEntry, FdTarget, ProcessId};
@@ -7,7 +7,7 @@ use crate::sync::IrqSafeSpinLock;
 use dunit_socket_abi::*;
 
 mod state;
-use state::{AcceptStep, Bridge, ReadPlan, ERROR, HANGUP, MAX_UDP};
+use state::{AcceptStep6, Bridge, ReadPlan, ERROR, HANGUP, MAX_UDP};
 
 static BRIDGE: IrqSafeSpinLock<Bridge> = IrqSafeSpinLock::new(Bridge::new());
 
@@ -23,12 +23,11 @@ fn report(result: Result<i64, i64>) -> i64 {
     result.unwrap_or_else(|error| error)
 }
 
-fn options(source: *const u8, len: usize) -> Result<(), i64> {
+fn options(source: *const u8, len: usize) -> Result<u16, i64> {
     if len != OPTIONS_LEN {
         return Err(EINVAL);
     }
-    Options::decode(&copy_buffer_from_user(source, len)?).map_err(wire_error)?;
-    Ok(())
+    Options::decode_version(&copy_buffer_from_user(source, len)?).map_err(wire_error)
 }
 
 fn install(target: FdTarget) -> Result<i64, i64> {
@@ -58,8 +57,8 @@ pub(super) fn register(handle: u64, source: *const u8, len: usize) -> i64 {
         if rights.unwrap_or(0) & RIGHT_NET_SERVICE == 0 {
             return Err(EPERM);
         }
-        options(source, len)?;
-        let token = BRIDGE.lock().register(owner)?;
+        let version = options(source, len)?;
+        let token = BRIDGE.lock().register_version(owner, version)?;
         install(FdTarget::NetService { token })
     })())
 }
@@ -94,8 +93,8 @@ pub(super) fn open(handle: u64, protocol: u64, source: *const u8, len: usize) ->
         if scope & expected == 0 {
             return Err(EPERM);
         }
-        options(source, len)?;
-        let token = BRIDGE.lock().open(owner, protocol, scope)?;
+        let version = options(source, len)?;
+        let token = BRIDGE.lock().open_version(owner, protocol, scope, version)?;
         install(FdTarget::NetSocket { token })
     })())
 }
@@ -154,25 +153,33 @@ pub(super) fn write(target: FdTarget, source: *const u8, len: usize) -> i64 {
                     return Err(EMSGSIZE);
                 }
                 let payload = copy_buffer_from_user(source, len.min(MAX_PAYLOAD))?;
-                BRIDGE.lock().send(
-                    owner,
-                    token,
-                    Endpoint {
-                        ip: [0; 4],
-                        port: 0,
-                    },
-                    &payload,
-                )?;
+                BRIDGE.lock().send6(owner, token, Endpoint6::NONE, &payload)?;
                 process::wake_poll_waiters();
                 Ok(payload.len() as i64)
             }
             FdTarget::NetService { token } => {
-                if !(BRIDGE_HEADER_LEN..=MAX_FRAME).contains(&len) {
+                let version = BRIDGE.lock().service_version(owner, token)?;
+                let (min_len, max_len) = if version == VERSION_V2 {
+                    (BRIDGE_HEADER6_LEN, MAX_FRAME_V2)
+                } else {
+                    (BRIDGE_HEADER_LEN, MAX_FRAME)
+                };
+                if !(min_len..=max_len).contains(&len) {
                     return Err(EMSGSIZE);
                 }
                 let frame = copy_buffer_from_user(source, len)?;
-                let (header, payload) = BridgeHeader::decode(&frame).map_err(wire_error)?;
-                BRIDGE.lock().service_write(owner, token, header, payload)?;
+                if version == VERSION_V2 {
+                    let (header, payload) = BridgeHeader6::decode(&frame).map_err(wire_error)?;
+                    BRIDGE.lock().service_write6(owner, token, header, payload)?;
+                } else {
+                    let (header, payload) = BridgeHeader::decode(&frame).map_err(wire_error)?;
+                    BRIDGE.lock().service_write6(
+                        owner,
+                        token,
+                        BridgeHeader6::from_v1(header),
+                        payload,
+                    )?;
+                }
                 process::wake_poll_waiters();
                 Ok(len as i64)
             }
@@ -200,11 +207,15 @@ pub(super) fn operation(
         };
         let owner = caller()?;
         let op = u16::try_from(op).map_err(|_| EOPNOTSUPP)?;
+        let version = BRIDGE.lock().socket_version(owner, token)?;
+        let v2 = version == VERSION_V2;
+        let ep_len = if v2 { ENDPOINT6_LEN } else { ENDPOINT_LEN };
+        let eps_len = if v2 { ENDPOINTS6_LEN } else { ENDPOINTS_LEN };
         match op {
-            OP_CONNECT if in_len == ENDPOINT_LEN && out_len == 0 => {
-                let bytes = copy_buffer_from_user(input, ENDPOINT_LEN)?;
-                let endpoint = unicast(&bytes)?;
-                let complete = BRIDGE.lock().connect(owner, token, endpoint)?;
+            OP_CONNECT if in_len == ep_len && out_len == 0 => {
+                let bytes = copy_buffer_from_user(input, ep_len)?;
+                let endpoint = unicast_version(version, &bytes)?;
+                let complete = BRIDGE.lock().connect6(owner, token, endpoint)?;
                 if complete {
                     Ok(0)
                 } else {
@@ -213,13 +224,13 @@ pub(super) fn operation(
                 }
             }
             OP_SEND_TO if out_len == 0 => {
-                if !(ENDPOINT_LEN..=ENDPOINT_LEN + MAX_UDP).contains(&in_len) {
+                if !(ep_len..=ep_len + MAX_UDP).contains(&in_len) {
                     return Err(EMSGSIZE);
                 }
                 let bytes = copy_buffer_from_user(input, in_len)?;
-                let endpoint = unicast(&bytes[..ENDPOINT_LEN])?;
-                let payload = &bytes[ENDPOINT_LEN..];
-                BRIDGE.lock().send(owner, token, endpoint, payload)?;
+                let endpoint = unicast_version(version, &bytes[..ep_len])?;
+                let payload = &bytes[ep_len..];
+                BRIDGE.lock().send6(owner, token, endpoint, payload)?;
                 process::wake_poll_waiters();
                 Ok(payload.len() as i64)
             }
@@ -236,18 +247,34 @@ pub(super) fn operation(
                 copy_buffer_to_user(output, &error.to_le_bytes())?;
                 Ok(4)
             }
-            OP_ENDPOINTS if in_len == 0 && out_len == ENDPOINTS_LEN => {
-                let endpoints = BRIDGE.lock().endpoints(owner, token)?;
-                copy_buffer_to_user(output, &endpoints.encode())?;
-                Ok(ENDPOINTS_LEN as i64)
+            OP_ENDPOINTS if in_len == 0 && out_len == eps_len => {
+                let endpoints = BRIDGE.lock().endpoints6(owner, token)?;
+                if v2 {
+                    copy_buffer_to_user(output, &endpoints.encode())?;
+                } else {
+                    let v4 = Endpoints {
+                        local: endpoints.local.to_v4().ok_or(EINVAL)?,
+                        remote: endpoints.remote.to_v4().ok_or(EINVAL)?,
+                    };
+                    copy_buffer_to_user(output, &v4.encode())?;
+                }
+                Ok(eps_len as i64)
             }
-            OP_BIND if in_len == ENDPOINT_LEN && out_len == 0 => {
-                let bytes = copy_buffer_from_user(input, ENDPOINT_LEN)?;
-                let endpoint = Endpoint::decode(&bytes).map_err(wire_error)?;
+            OP_BIND if in_len == ep_len && out_len == 0 => {
+                let bytes = copy_buffer_from_user(input, ep_len)?;
+                let endpoint = if v2 {
+                    Endpoint6::decode(&bytes).map_err(wire_error)?
+                } else {
+                    let ep = Endpoint::decode(&bytes).map_err(wire_error)?;
+                    if !ep.is_bind_address() {
+                        return Err(EINVAL);
+                    }
+                    Endpoint6::bind_from_v4(ep)
+                };
                 if !endpoint.is_bind_address() {
                     return Err(EINVAL);
                 }
-                if BRIDGE.lock().bind(owner, token, endpoint)? {
+                if BRIDGE.lock().bind6(owner, token, endpoint)? {
                     Ok(0)
                 } else {
                     process::wake_poll_waiters();
@@ -264,25 +291,38 @@ pub(super) fn operation(
                     Err(EAGAIN)
                 }
             }
-            OP_ACCEPT if in_len == 0 && (out_len == 0 || out_len == ENDPOINT_LEN) => {
-                match BRIDGE.lock().accept_begin(owner, token)? {
-                    AcceptStep::Ready {
+            OP_ACCEPT if in_len == 0 && (out_len == 0 || out_len == ep_len) => {
+                match BRIDGE.lock().accept_begin6(owner, token)? {
+                    AcceptStep6::Ready {
                         child_token,
                         remote,
                     } => {
-                        if out_len == ENDPOINT_LEN {
-                            if let Err(error) = copy_buffer_to_user(output, &remote.encode()) {
+                        if out_len == ep_len {
+                            let encoded = if v2 {
+                                let buf = remote.encode();
+                                copy_buffer_to_user(output, &buf)
+                            } else {
+                                let ep = match remote.to_v4() {
+                                    Some(ep) => ep,
+                                    None => {
+                                        close(FdTarget::NetSocket { token: child_token });
+                                        return Err(EINVAL);
+                                    }
+                                };
+                                copy_buffer_to_user(output, &ep.encode())
+                            };
+                            if let Err(error) = encoded {
                                 close(FdTarget::NetSocket { token: child_token });
                                 return Err(error);
                             }
                         }
                         install(FdTarget::NetSocket { token: child_token })
                     }
-                    AcceptStep::Pending => {
+                    AcceptStep6::Pending => {
                         process::wake_poll_waiters();
                         Err(EAGAIN)
                     }
-                    AcceptStep::Empty => Err(EAGAIN),
+                    AcceptStep6::Empty => Err(EAGAIN),
                 }
             }
             OP_CONNECT | OP_SEND_TO | OP_RECV_FROM | OP_SHUTDOWN_WRITE | OP_ERROR
@@ -292,8 +332,12 @@ pub(super) fn operation(
     })())
 }
 
-fn unicast(bytes: &[u8]) -> Result<Endpoint, i64> {
-    let endpoint = Endpoint::decode(bytes).map_err(wire_error)?;
+fn unicast_version(version: u16, bytes: &[u8]) -> Result<Endpoint6, i64> {
+    let endpoint = if version == VERSION_V2 {
+        Endpoint6::decode(bytes).map_err(wire_error)?
+    } else {
+        Endpoint6::from_v4(Endpoint::decode(bytes).map_err(wire_error)?)
+    };
     if endpoint.is_unicast() {
         Ok(endpoint)
     } else {

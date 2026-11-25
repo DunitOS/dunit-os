@@ -2,20 +2,16 @@
 //! user memory access is performed while the bridge is locked.
 use super::*;
 
-const SOCKETS: usize = 8;
-const SOCKETS_PER_OWNER: usize = 4;
+const SOCKETS: usize = 16;
+const SOCKETS_PER_OWNER: usize = 8;
 pub(super) const MAX_UDP: usize = 1472;
 pub(super) const READ: u16 = 1;
 pub(super) const WRITE: u16 = 2;
 pub(super) const HANGUP: u16 = 4;
 pub(super) const ERROR: u16 = 8;
-const NO_ENDPOINT: Endpoint = Endpoint {
-    ip: [0; 4],
-    port: 0,
-};
 
 pub(super) struct ReadPlan {
-    bytes: [u8; MAX_FRAME],
+    bytes: [u8; MAX_FRAME_V2],
     len: usize,
     source: Source,
 }
@@ -36,7 +32,7 @@ enum Source {
 impl ReadPlan {
     fn new(source: Source) -> Self {
         Self {
-            bytes: [0; MAX_FRAME],
+            bytes: [0; MAX_FRAME_V2],
             len: 0,
             source,
         }
@@ -49,14 +45,14 @@ impl ReadPlan {
 
 struct Request {
     kind: u16,
-    endpoint: Endpoint,
+    endpoint: Endpoint6,
     bytes: [u8; MAX_PAYLOAD],
     len: usize,
     sent: bool,
 }
 
 impl Request {
-    fn new(kind: u16, endpoint: Endpoint, payload: &[u8]) -> Self {
+    fn new(kind: u16, endpoint: Endpoint6, payload: &[u8]) -> Self {
         let mut bytes = [0; MAX_PAYLOAD];
         bytes[..payload.len()].copy_from_slice(payload);
         Self {
@@ -70,14 +66,14 @@ impl Request {
 }
 
 struct Receive {
-    endpoint: Endpoint,
+    endpoint: Endpoint6,
     bytes: [u8; MAX_PAYLOAD],
     start: usize,
     len: usize,
 }
 
-pub(super) enum AcceptStep {
-    Ready { child_token: u64, remote: Endpoint },
+pub(super) enum AcceptStep6 {
+    Ready { child_token: u64, remote: Endpoint6 },
     Pending,
     Empty,
 }
@@ -87,17 +83,18 @@ struct Socket {
     owner: u64,
     protocol: u16,
     scope: u32,
+    version: u16,
     open: bool,
     bound: bool,
-    bind_target: Option<Endpoint>,
+    bind_target: Option<Endpoint6>,
     listening: bool,
     listen_reported: bool,
     accept_ready: bool,
     pending_accept: Option<u64>,
-    accepted: Option<(u64, Endpoint)>,
+    accepted: Option<(u64, Endpoint6)>,
     accepted_pending: bool,
-    local: Endpoint,
-    remote: Endpoint,
+    local: Endpoint6,
+    remote: Endpoint6,
     error: i64,
     eof: bool,
     write_closed: bool,
@@ -109,12 +106,13 @@ struct Socket {
 }
 
 impl Socket {
-    fn new(token: u64, owner: u64, protocol: u16, scope: u32) -> Self {
+    fn new(token: u64, owner: u64, protocol: u16, scope: u32, version: u16) -> Self {
         Self {
             token,
             owner,
             protocol,
             scope,
+            version,
             open: false,
             bound: false,
             bind_target: None,
@@ -124,29 +122,29 @@ impl Socket {
             pending_accept: None,
             accepted: None,
             accepted_pending: false,
-            local: NO_ENDPOINT,
-            remote: NO_ENDPOINT,
+            local: Endpoint6::NONE,
+            remote: Endpoint6::NONE,
             error: 0,
             eof: false,
             write_closed: false,
             closing: false,
-            request: Some(Request::new(BRIDGE_OPEN, NO_ENDPOINT, &[])),
+            request: Some(Request::new(BRIDGE_OPEN, Endpoint6::NONE, &[])),
             rx: None,
             rx_reserved: false,
             credit: false,
         }
     }
 
-    fn new_accepted(token: u64, owner: u64, scope: u32) -> Self {
+    fn new_accepted(token: u64, owner: u64, scope: u32, version: u16) -> Self {
         Self {
             request: None,
             accepted_pending: true,
-            ..Self::new(token, owner, PROTO_TCP, scope)
+            ..Self::new(token, owner, PROTO_TCP, scope, version)
         }
     }
 
-    fn header(&self, kind: u16, endpoint: Endpoint) -> BridgeHeader {
-        BridgeHeader {
+    fn header(&self, kind: u16, endpoint: Endpoint6) -> BridgeHeader6 {
+        BridgeHeader6 {
             token: self.token,
             owner: self.owner,
             kind,
@@ -158,11 +156,11 @@ impl Socket {
         }
     }
 
-    fn next_request(&self) -> Option<(BridgeHeader, &[u8])> {
+    fn next_request(&self) -> Option<(BridgeHeader6, &[u8])> {
         if self.closing {
-            Some((self.header(BRIDGE_CLOSE, NO_ENDPOINT), &[]))
+            Some((self.header(BRIDGE_CLOSE, Endpoint6::NONE), &[]))
         } else if self.credit {
-            Some((self.header(BRIDGE_CREDIT, NO_ENDPOINT), &[]))
+            Some((self.header(BRIDGE_CREDIT, Endpoint6::NONE), &[]))
         } else if let Some(req) = self.request.as_ref().filter(|request| !request.sent) {
             Some((self.header(req.kind, req.endpoint), &req.bytes[..req.len]))
         } else {
@@ -196,7 +194,7 @@ impl Socket {
         }
     }
 
-    fn finish(&mut self, header: BridgeHeader) -> Result<(), i64> {
+    fn finish(&mut self, header: BridgeHeader6) -> Result<(), i64> {
         let pending = self
             .request
             .as_ref()
@@ -205,13 +203,17 @@ impl Socket {
         if header.flags != pending.kind {
             return Err(EINVAL);
         }
+        let valid_local = header.endpoint.is_unicast()
+            || (self.version == VERSION_V2
+                && pending.kind == BRIDGE_BIND
+                && header.endpoint.is_bind_address()
+                && header.endpoint.port != 0);
         if !header.endpoint.is_none()
-            && (!header.endpoint.is_unicast()
-                || (!self.local.is_none() && self.local != header.endpoint))
+            && (!valid_local || (!self.local.is_none() && self.local != header.endpoint))
         {
             return Err(EINVAL);
         }
-        if pending.kind == BRIDGE_BIND && header.error == 0 && !header.endpoint.is_unicast() {
+        if pending.kind == BRIDGE_BIND && header.error == 0 && !valid_local {
             return Err(EINVAL);
         }
         if header.error != 0 {
@@ -237,6 +239,7 @@ impl Socket {
 struct Service {
     owner: u64,
     generation: u64,
+    version: u16,
     cursor: usize,
     read_reserved: bool,
 }
@@ -261,7 +264,7 @@ impl Bridge {
         Ok(self.token)
     }
 
-    pub(super) fn register(&mut self, owner: u64) -> Result<u64, i64> {
+    pub(super) fn register_version(&mut self, owner: u64, version: u16) -> Result<u64, i64> {
         if self.service.is_some() {
             return Err(EBUSY);
         }
@@ -269,6 +272,7 @@ impl Bridge {
         self.service = Some(Service {
             owner,
             generation,
+            version,
             cursor: 0,
             read_reserved: false,
         });
@@ -292,11 +296,33 @@ impl Bridge {
         self.sockets.iter().position(Option::is_none).ok_or(ENFILE)
     }
 
-    pub(super) fn open(&mut self, owner: u64, protocol: u16, scope: u32) -> Result<u64, i64> {
+    pub(super) fn open_version(
+        &mut self,
+        owner: u64,
+        protocol: u16,
+        scope: u32,
+        version: u16,
+    ) -> Result<u64, i64> {
         let slot = self.reserve_slot(owner)?;
         let token = self.next_token()?;
-        self.sockets[slot] = Some(Socket::new(token, owner, protocol, scope));
+        self.sockets[slot] = Some(Socket::new(token, owner, protocol, scope, version));
         Ok(token)
+    }
+
+    pub(super) fn service_version(&self, owner: u64, token: u64) -> Result<u16, i64> {
+        Ok(self.service(owner, token)?.version)
+    }
+
+    pub(super) fn socket_version(&self, owner: u64, token: u64) -> Result<u16, i64> {
+        Ok(self.client(owner, token)?.version)
+    }
+
+    fn check_endpoint_for_service(&self, endpoint: Endpoint6) -> Result<(), i64> {
+        let service = self.service.as_ref().ok_or(EPIPE)?;
+        if service.version == VERSION && endpoint.family == FAMILY_IPV6 {
+            return Err(EOPNOTSUPP);
+        }
+        Ok(())
     }
 
     fn socket_index(&self, token: u64) -> Option<usize> {
@@ -417,11 +443,16 @@ impl Bridge {
         generation: u64,
         capacity: usize,
     ) -> Result<ReadPlan, i64> {
-        let service = self.service(owner, generation)?;
-        if service.read_reserved {
+        let service_version = self.service(owner, generation)?.version;
+        if self.service(owner, generation)?.read_reserved {
             return Err(EAGAIN);
         }
-        let start = service.cursor;
+        let hdr_len = if service_version == VERSION_V2 {
+            BRIDGE_HEADER6_LEN
+        } else {
+            BRIDGE_HEADER_LEN
+        };
+        let start = self.service(owner, generation)?.cursor;
         for offset in 0..SOCKETS {
             let index = (start + offset) % SOCKETS;
             let Some(socket) = self.sockets[index].as_ref() else {
@@ -430,7 +461,7 @@ impl Bridge {
             let Some((header, payload)) = socket.next_request() else {
                 continue;
             };
-            if BRIDGE_HEADER_LEN + payload.len() > capacity {
+            if hdr_len + payload.len() > capacity {
                 return Err(EMSGSIZE);
             }
             let mut plan = ReadPlan::new(Source::Service {
@@ -438,9 +469,14 @@ impl Bridge {
                 token: socket.token,
                 kind: header.kind,
             });
-            plan.len = header
-                .encode(payload, &mut plan.bytes)
-                .map_err(wire_error)?;
+            plan.len = if service_version == VERSION_V2 {
+                header.encode(payload, &mut plan.bytes).map_err(wire_error)?
+            } else {
+                header
+                    .to_v1()
+                    .and_then(|v1| v1.encode(payload, &mut plan.bytes))
+                    .map_err(wire_error)?
+            };
             self.service
                 .as_mut()
                 .expect("validated service")
@@ -464,7 +500,17 @@ impl Bridge {
         if from && socket.protocol != PROTO_UDP {
             return Err(EOPNOTSUPP);
         }
-        if from && capacity < RECV_HEADER_LEN {
+        let v2 = socket.version == VERSION_V2;
+        let prefix = if from {
+            if v2 {
+                RECV_HEADER6_LEN
+            } else {
+                RECV_HEADER_LEN
+            }
+        } else {
+            0
+        };
+        if from && capacity < prefix {
             return Err(EMSGSIZE);
         }
         if socket.rx_reserved {
@@ -479,7 +525,6 @@ impl Bridge {
                 Err(EAGAIN)
             };
         };
-        let prefix = if from { RECV_HEADER_LEN } else { 0 };
         let count = (rx.len - rx.start).min(capacity - prefix);
         let consumed = if socket.protocol == PROTO_UDP {
             rx.len
@@ -488,13 +533,24 @@ impl Bridge {
         };
         let mut plan = ReadPlan::new(Source::Socket { token, consumed });
         if from {
-            plan.bytes[..prefix].copy_from_slice(
-                &RecvHeader {
-                    endpoint: rx.endpoint,
-                    full_len: rx.len as u32,
-                }
-                .encode(),
-            );
+            if v2 {
+                plan.bytes[..prefix].copy_from_slice(
+                    &RecvHeader6 {
+                        endpoint: rx.endpoint,
+                        full_len: rx.len as u32,
+                    }
+                    .encode(),
+                );
+            } else {
+                let endpoint = rx.endpoint.to_v4().ok_or(EINVAL)?;
+                plan.bytes[..prefix].copy_from_slice(
+                    &RecvHeader {
+                        endpoint,
+                        full_len: rx.len as u32,
+                    }
+                    .encode(),
+                );
+            }
         }
         plan.bytes[prefix..prefix + count].copy_from_slice(&rx.bytes[rx.start..rx.start + count]);
         plan.len = prefix + count;
@@ -554,11 +610,11 @@ impl Bridge {
         Ok(())
     }
 
-    pub(super) fn service_write(
+    pub(super) fn service_write6(
         &mut self,
         owner: u64,
         generation: u64,
-        header: BridgeHeader,
+        header: BridgeHeader6,
         data: &[u8],
     ) -> Result<(), i64> {
         self.service(owner, generation)?;
@@ -596,9 +652,15 @@ impl Bridge {
                 if !socket.open || socket.eof || socket.error != 0 {
                     return Err(EPIPE);
                 }
+                let mut dns_recs = [DnsRecord::default(); MAX_DNS_RECORDS];
+                let dns_count = if socket.protocol == PROTO_DNS && data.len() != 4 {
+                    Some(decode_dns_records(data, &mut dns_recs).map_err(wire_error)?)
+                } else {
+                    None
+                };
                 let valid = match socket.protocol {
                     PROTO_UDP => header.endpoint.is_unicast() && data.len() <= MAX_UDP,
-                    PROTO_DNS => header.endpoint.is_none() && data.len() == 4,
+                    PROTO_DNS => header.endpoint.is_none() && (data.len() == 4 || dns_count.is_some()),
                     _ => {
                         header.endpoint.is_none() && !socket.remote.is_none() && !data.is_empty()
                     }
@@ -610,12 +672,38 @@ impl Bridge {
                     return Err(EAGAIN);
                 }
                 let mut bytes = [0; MAX_PAYLOAD];
-                bytes[..data.len()].copy_from_slice(data);
+                let len = if socket.protocol == PROTO_DNS {
+                    if socket.version == VERSION {
+                        if let Some(count) = dns_count {
+                            let Some(v4) = dns_recs[..count]
+                                .iter()
+                                .find(|r| r.family == FAMILY_IPV4)
+                            else {
+                                socket.error = ENOENT;
+                                return Ok(());
+                            };
+                            bytes[..4].copy_from_slice(&v4.addr[..4]);
+                            4
+                        } else {
+                            bytes[..4].copy_from_slice(data);
+                            4
+                        }
+                    } else if dns_count.is_some() {
+                        bytes[..data.len()].copy_from_slice(data);
+                        data.len()
+                    } else {
+                        let rec = DnsRecord::ipv4(data.try_into().map_err(|_| EINVAL)?);
+                        encode_dns_records(&[rec], &mut bytes).map_err(wire_error)?
+                    }
+                } else {
+                    bytes[..data.len()].copy_from_slice(data);
+                    data.len()
+                };
                 socket.rx = Some(Receive {
                     endpoint: header.endpoint,
                     bytes,
                     start: 0,
-                    len: data.len(),
+                    len,
                 });
                 Ok(())
             }
@@ -647,7 +735,7 @@ impl Bridge {
         }
     }
 
-    fn complete_accept(&mut self, index: usize, header: BridgeHeader) -> Result<(), i64> {
+    fn complete_accept(&mut self, index: usize, header: BridgeHeader6) -> Result<(), i64> {
         let (child_token, local) = {
             let socket = self.sockets[index].as_mut().expect("known socket");
             let valid = socket
@@ -698,13 +786,14 @@ impl Bridge {
         Ok(self.client(owner, token)?.protocol)
     }
 
-    pub(super) fn send(
+    pub(super) fn send6(
         &mut self,
         owner: u64,
         token: u64,
-        endpoint: Endpoint,
+        endpoint: Endpoint6,
         payload: &[u8],
     ) -> Result<(), i64> {
+        self.check_endpoint_for_service(endpoint)?;
         let socket = self.client_mut(owner, token)?;
         if socket.listening {
             return Err(EOPNOTSUPP);
@@ -743,12 +832,13 @@ impl Bridge {
         Ok(())
     }
 
-    pub(super) fn connect(
+    pub(super) fn connect6(
         &mut self,
         owner: u64,
         token: u64,
-        endpoint: Endpoint,
+        endpoint: Endpoint6,
     ) -> Result<bool, i64> {
+        self.check_endpoint_for_service(endpoint)?;
         let socket = self.client_mut(owner, token)?;
         if socket.protocol == PROTO_DNS {
             return Err(EOPNOTSUPP);
@@ -794,16 +884,17 @@ impl Bridge {
             return Err(EINVAL);
         }
         socket.write_closed = true;
-        socket.request = Some(Request::new(BRIDGE_SHUTDOWN, NO_ENDPOINT, &[]));
+        socket.request = Some(Request::new(BRIDGE_SHUTDOWN, Endpoint6::NONE, &[]));
         Ok(true)
     }
 
-    pub(super) fn bind(
+    pub(super) fn bind6(
         &mut self,
         owner: u64,
         token: u64,
-        endpoint: Endpoint,
+        endpoint: Endpoint6,
     ) -> Result<bool, i64> {
+        self.check_endpoint_for_service(endpoint)?;
         let socket = self.client_mut(owner, token)?;
         let needed = match socket.protocol {
             PROTO_UDP => SCOPE_UDP_BIND,
@@ -853,15 +944,15 @@ impl Bridge {
         let clamped = backlog.clamp(1, 16);
         socket.request = Some(Request::new(
             BRIDGE_LISTEN,
-            NO_ENDPOINT,
+            Endpoint6::NONE,
             &clamped.to_le_bytes(),
         ));
         Ok(false)
     }
 
-    pub(super) fn accept_begin(&mut self, owner: u64, token: u64) -> Result<AcceptStep, i64> {
+    pub(super) fn accept_begin6(&mut self, owner: u64, token: u64) -> Result<AcceptStep6, i64> {
         let index = self.socket_index(token).ok_or(EPIPE)?;
-        {
+        let (scope, version) = {
             let socket = self.sockets[index].as_mut().ok_or(EPIPE)?;
             if socket.owner != owner || socket.closing || socket.accepted_pending {
                 return Err(EPERM);
@@ -884,7 +975,7 @@ impl Bridge {
                         child.accepted_pending = false;
                     }
                 }
-                return Ok(AcceptStep::Ready {
+                return Ok(AcceptStep6::Ready {
                     child_token,
                     remote,
                 });
@@ -894,39 +985,104 @@ impl Bridge {
                 .as_ref()
                 .is_some_and(|req| req.kind == BRIDGE_ACCEPT)
             {
-                return Ok(AcceptStep::Pending);
+                return Ok(AcceptStep6::Pending);
             }
             socket.check_request()?;
             if !socket.accept_ready {
-                return Ok(AcceptStep::Empty);
+                return Ok(AcceptStep6::Empty);
             }
-        }
+            (socket.scope, socket.version)
+        };
         let child_slot = self.reserve_slot(owner)?;
         let child_token = self.next_token()?;
-        let scope = self.sockets[index].as_ref().unwrap().scope;
-        self.sockets[child_slot] = Some(Socket::new_accepted(child_token, owner, scope));
+        self.sockets[child_slot] = Some(Socket::new_accepted(child_token, owner, scope, version));
         let socket = self.sockets[index].as_mut().unwrap();
         socket.pending_accept = Some(child_token);
         socket.request = Some(Request::new(
             BRIDGE_ACCEPT,
-            NO_ENDPOINT,
+            Endpoint6::NONE,
             &child_token.to_le_bytes(),
         ));
-        Ok(AcceptStep::Pending)
+        Ok(AcceptStep6::Pending)
     }
 
     pub(super) fn error(&self, owner: u64, token: u64) -> Result<i32, i64> {
         Ok(self.client(owner, token)?.error as i32)
     }
 
-    pub(super) fn endpoints(&self, owner: u64, token: u64) -> Result<Endpoints, i64> {
+    pub(super) fn endpoints6(&self, owner: u64, token: u64) -> Result<Endpoints6, i64> {
         let socket = self.client(owner, token)?;
-        Ok(Endpoints {
+        Ok(Endpoints6 {
             local: socket.local,
             remote: socket.remote,
         })
     }
 }
+
+#[cfg(test)]
+impl Bridge {
+    fn register(&mut self, owner: u64) -> Result<u64, i64> {
+        self.register_version(owner, VERSION)
+    }
+
+    fn open(&mut self, owner: u64, protocol: u16, scope: u32) -> Result<u64, i64> {
+        self.open_version(owner, protocol, scope, VERSION)
+    }
+
+    fn service_write(
+        &mut self,
+        owner: u64,
+        generation: u64,
+        header: BridgeHeader,
+        data: &[u8],
+    ) -> Result<(), i64> {
+        self.service_write6(owner, generation, BridgeHeader6::from_v1(header), data)
+    }
+
+    fn send(&mut self, owner: u64, token: u64, endpoint: Endpoint, payload: &[u8]) -> Result<(), i64> {
+        self.send6(owner, token, Endpoint6::from_v4(endpoint), payload)
+    }
+
+    fn connect(&mut self, owner: u64, token: u64, endpoint: Endpoint) -> Result<bool, i64> {
+        self.connect6(owner, token, Endpoint6::from_v4(endpoint))
+    }
+
+    fn bind(&mut self, owner: u64, token: u64, endpoint: Endpoint) -> Result<bool, i64> {
+        self.bind6(owner, token, Endpoint6::bind_from_v4(endpoint))
+    }
+
+    fn accept_begin(&mut self, owner: u64, token: u64) -> Result<AcceptStep, i64> {
+        match self.accept_begin6(owner, token)? {
+            AcceptStep6::Ready {
+                child_token,
+                remote,
+            } => Ok(AcceptStep::Ready {
+                child_token,
+                remote: remote.to_v4().ok_or(EINVAL)?,
+            }),
+            AcceptStep6::Pending => Ok(AcceptStep::Pending),
+            AcceptStep6::Empty => Ok(AcceptStep::Empty),
+        }
+    }
+
+    fn endpoints(&self, owner: u64, token: u64) -> Result<Endpoints, i64> {
+        let eps = self.endpoints6(owner, token)?;
+        Ok(Endpoints {
+            local: eps.local.to_v4().ok_or(EINVAL)?,
+            remote: eps.remote.to_v4().ok_or(EINVAL)?,
+        })
+    }
+}
+
+#[cfg(test)]
+enum AcceptStep {
+    Ready { child_token: u64, remote: Endpoint },
+    Pending,
+    Empty,
+}
+
+#[cfg(test)]
+const NO_ENDPOINT: Endpoint = Endpoint::NONE;
 
 #[cfg(test)]
 mod tests {
@@ -1330,5 +1486,121 @@ mod tests {
                 remote: REMOTE
             }
         );
+    }
+
+    #[test]
+    fn v2_ipv6_and_dns_interoperate_with_v1_and_v2_clients() {
+        let mut bridge = Bridge::new();
+        let generation = bridge.register_version(SERVICE, VERSION_V2).unwrap();
+        assert_eq!(bridge.service_version(SERVICE, generation), Ok(VERSION_V2));
+        let tcp6 = bridge.open_version(APP, PROTO_TCP, SCOPE_TCP, VERSION_V2).unwrap();
+        assert_eq!(bridge.socket_version(APP, tcp6), Ok(VERSION_V2));
+        let plan = bridge
+            .reserve_service(SERVICE, generation, MAX_FRAME_V2)
+            .unwrap();
+        let (open_req, _) = BridgeHeader6::decode(plan.bytes()).unwrap();
+        bridge.finish_read(&plan, true).unwrap();
+        bridge
+            .service_write6(
+                SERVICE,
+                generation,
+                BridgeHeader6 {
+                    kind: BRIDGE_COMPLETE,
+                    flags: BRIDGE_OPEN,
+                    endpoint: Endpoint6::NONE,
+                    ..open_req
+                },
+                &[],
+            )
+            .unwrap();
+        let local6 = Endpoint6::ipv6(
+            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10],
+            50000,
+            0,
+        );
+        let remote6 = Endpoint6::ipv6(
+            [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x20],
+            443,
+            0,
+        );
+        assert_eq!(bridge.connect6(APP, tcp6, remote6), Ok(false));
+        let plan = bridge
+            .reserve_service(SERVICE, generation, MAX_FRAME_V2)
+            .unwrap();
+        let (conn_req, _) = BridgeHeader6::decode(plan.bytes()).unwrap();
+        assert_eq!(conn_req.endpoint, remote6);
+        bridge.finish_read(&plan, true).unwrap();
+        bridge
+            .service_write6(
+                SERVICE,
+                generation,
+                BridgeHeader6 {
+                    kind: BRIDGE_COMPLETE,
+                    flags: BRIDGE_CONNECT,
+                    endpoint: local6,
+                    ..conn_req
+                },
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            bridge.endpoints6(APP, tcp6).unwrap(),
+            Endpoints6 {
+                local: local6,
+                remote: remote6
+            }
+        );
+
+        let dns_v1 = bridge.open_version(APP, PROTO_DNS, SCOPE_UDP, VERSION).unwrap();
+        let plan = bridge
+            .reserve_service(SERVICE, generation, MAX_FRAME_V2)
+            .unwrap();
+        let (dns_open, _) = BridgeHeader6::decode(plan.bytes()).unwrap();
+        bridge.finish_read(&plan, true).unwrap();
+        bridge
+            .service_write6(
+                SERVICE,
+                generation,
+                BridgeHeader6 {
+                    kind: BRIDGE_COMPLETE,
+                    flags: BRIDGE_OPEN,
+                    endpoint: Endpoint6::NONE,
+                    ..dns_open
+                },
+                &[],
+            )
+            .unwrap();
+        bridge.send6(APP, dns_v1, Endpoint6::NONE, b"du.test").unwrap();
+        let plan = bridge
+            .reserve_service(SERVICE, generation, MAX_FRAME_V2)
+            .unwrap();
+        let (dns_req, q) = BridgeHeader6::decode(plan.bytes()).unwrap();
+        assert_eq!(q, b"du.test");
+        bridge.finish_read(&plan, true).unwrap();
+        let mut dns_payload = [0; 64];
+        let dns_len = encode_dns_records(
+            &[
+                DnsRecord::ipv6(remote6.addr, 0),
+                DnsRecord::ipv4([192, 0, 2, 44]),
+            ],
+            &mut dns_payload,
+        )
+        .unwrap();
+        bridge
+            .service_write6(
+                SERVICE,
+                generation,
+                BridgeHeader6 {
+                    kind: BRIDGE_DATA,
+                    flags: 0,
+                    endpoint: Endpoint6::NONE,
+                    ..dns_req
+                },
+                &dns_payload[..dns_len],
+            )
+            .unwrap();
+        let read_plan = bridge.reserve_client(APP, dns_v1, 64, false).unwrap().unwrap();
+        assert_eq!(read_plan.bytes(), &[192, 0, 2, 44]);
+        bridge.finish_read(&read_plan, true).unwrap();
     }
 }

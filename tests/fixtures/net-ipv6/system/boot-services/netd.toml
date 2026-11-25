@@ -1,0 +1,7 @@
+name = "netd"
+exec = "/system/libexec/netd"
+net_devices = "0,1"
+net_service = true
+restart = "never"
+critical = false
+

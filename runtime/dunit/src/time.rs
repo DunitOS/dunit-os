@@ -22,6 +22,9 @@ impl Instant {
             .checked_add(u64::try_from(duration.as_nanos()).ok()?)
             .map(Self)
     }
+    pub fn saturating_duration_since(self, earlier: Self) -> Duration {
+        Duration::from_nanos(self.0.saturating_sub(earlier.0))
+    }
     pub fn elapsed(self) -> Result<Duration> {
         Ok(Duration::from_nanos(Self::now()?.0.saturating_sub(self.0)))
     }

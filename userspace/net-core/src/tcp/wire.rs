@@ -1,5 +1,5 @@
-//! TCPv4 segment framing and checksum, independent of connection state.
-use crate::{put, valid_ip, word, Error, Ip, MTU};
+//! TCPv4/TCPv6 segment framing and checksum, independent of connection state.
+use crate::{checksum_pseudo, put, valid_ip, word, Error, Ip, IpAddr, MTU};
 use alloc::vec::Vec;
 
 pub const FIN: u8 = 0x01;
@@ -28,6 +28,37 @@ impl Endpoint {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DualEndpoint {
+    pub ip: IpAddr,
+    pub port: u16,
+}
+
+impl DualEndpoint {
+    pub fn validate(self) -> Result<(), Error> {
+        if self.port == 0 || !self.ip.is_unicast() {
+            return Err(Error::Address);
+        }
+        Ok(())
+    }
+
+    pub fn to_v4(self) -> Option<Endpoint> {
+        match self.ip {
+            IpAddr::V4(ip) => Some(Endpoint { ip, port: self.port }),
+            IpAddr::V6(_) => None,
+        }
+    }
+}
+
+impl From<Endpoint> for DualEndpoint {
+    fn from(ep: Endpoint) -> Self {
+        Self {
+            ip: IpAddr::V4(ep.ip),
+            port: ep.port,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Segment<'a> {
     pub sequence: u32,
     pub acknowledgement: u32,
@@ -46,11 +77,26 @@ impl<'a> Segment<'a> {
     }
 
     pub fn parse(source: Endpoint, destination: Endpoint, bytes: &'a [u8]) -> Result<Self, Error> {
-        if !(HEADER..=HEADER + MAX_DATA).contains(&bytes.len()) {
-            return Err(Error::Length);
-        }
         source.validate()?;
         destination.validate()?;
+        Self::parse_ip(source.into(), destination.into(), bytes)
+    }
+
+    pub fn parse_ip(
+        source: DualEndpoint,
+        destination: DualEndpoint,
+        bytes: &'a [u8],
+    ) -> Result<Self, Error> {
+        source.validate()?;
+        destination.validate()?;
+        let ip_header = match (source.ip, destination.ip) {
+            (IpAddr::V4(_), IpAddr::V4(_)) => 20,
+            (IpAddr::V6(_), IpAddr::V6(_)) => 40,
+            _ => return Err(Error::Address),
+        };
+        if !(HEADER..=MTU - ip_header).contains(&bytes.len()) {
+            return Err(Error::Length);
+        }
         if Self::ports(bytes)? != (source.port, destination.port) {
             return Err(Error::Address);
         }
@@ -58,7 +104,7 @@ impl<'a> Segment<'a> {
         if !(HEADER..=bytes.len()).contains(&length) || bytes[12] & 15 != 0 {
             return Err(Error::Header);
         }
-        if segment_checksum(source.ip, destination.ip, bytes) != 0 {
+        if segment_checksum_ip(source.ip, destination.ip, bytes) != 0 {
             return Err(Error::Checksum);
         }
         if word(bytes, 18) != 0 {
@@ -79,9 +125,24 @@ impl<'a> Segment<'a> {
     pub fn encode(self, source: Endpoint, destination: Endpoint) -> Result<Vec<u8>, Error> {
         source.validate()?;
         destination.validate()?;
+        self.encode_ip(source.into(), destination.into())
+    }
+
+    pub fn encode_ip(
+        self,
+        source: DualEndpoint,
+        destination: DualEndpoint,
+    ) -> Result<Vec<u8>, Error> {
+        source.validate()?;
+        destination.validate()?;
+        let ip_header = match (source.ip, destination.ip) {
+            (IpAddr::V4(_), IpAddr::V4(_)) => 20,
+            (IpAddr::V6(_), IpAddr::V6(_)) => 40,
+            _ => return Err(Error::Address),
+        };
         self.validate()?;
         let length = HEADER + if self.mss.is_some() { 4 } else { 0 };
-        if self.data.len() > MTU - 20 - length {
+        if self.data.len() > MTU - ip_header - length {
             return Err(Error::Length);
         }
         let mut bytes = alloc::vec![0; length + self.data.len()];
@@ -97,7 +158,7 @@ impl<'a> Segment<'a> {
             put(&mut bytes, 22, size);
         }
         bytes[length..].copy_from_slice(self.data);
-        let checksum = segment_checksum(source.ip, destination.ip, &bytes);
+        let checksum = segment_checksum_ip(source.ip, destination.ip, &bytes);
         put(&mut bytes, 16, checksum);
         Ok(bytes)
     }
@@ -147,16 +208,10 @@ fn parse_options(mut bytes: &[u8]) -> Result<Option<u16>, Error> {
     Ok(mss)
 }
 
-fn segment_checksum(source: Ip, destination: Ip, bytes: &[u8]) -> u16 {
-    let mut sum = 6 + bytes.len() as u32;
-    for addresses in [source, destination] {
-        sum += u32::from(word(&addresses, 0)) + u32::from(word(&addresses, 2));
+fn segment_checksum_ip(source: IpAddr, destination: IpAddr, bytes: &[u8]) -> u16 {
+    match (source, destination) {
+        (IpAddr::V4(s), IpAddr::V4(d)) => checksum_pseudo(&s, &d, 6, bytes),
+        (IpAddr::V6(s), IpAddr::V6(d)) => checksum_pseudo(&s, &d, 6, bytes),
+        _ => 1,
     }
-    for pair in bytes.chunks(2) {
-        sum += (u32::from(pair[0]) << 8) | u32::from(pair.get(1).copied().unwrap_or(0));
-    }
-    while sum > 0xffff {
-        sum = (sum & 0xffff) + (sum >> 16);
-    }
-    !(sum as u16)
 }

@@ -734,10 +734,10 @@ HTML/CSS/JS engine is M10, not a prerequisite for netd.
 
 ### N7 — IPv6 and multiple interfaces
 
-- [ ] After IPv4, implement multicast/IPv6/ICMPv6/NDP/DAD/link-local/SLAAC/RA/DNS;
+- [x] After IPv4, implement multicast/IPv6/ICMPv6/NDP/DAD/link-local/SLAAC/RA/DNS;
   add DHCPv6 only for demonstrated need.
-- [ ] Reuse socket/UDP/TCP with per-interface addresses/routes/DNS/metrics/failover.
-- [ ] Add Happy Eyeballs in resolver/client policy after dual-stack.
+- [x] Reuse socket/UDP/TCP with per-interface addresses/routes/DNS/metrics/failover.
+- [x] Add Happy Eyeballs in resolver/client policy after dual-stack.
 
 Acceptance: IPv4-only/IPv6-only/dual-stack use the same app APIs.
 

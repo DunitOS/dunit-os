@@ -1,6 +1,9 @@
 //! Bootstrap and owning native packet queue for the network service.
 #![no_std]
 
+extern crate alloc;
+
+use alloc::vec::Vec;
 use dunit::{
     errno,
     time::{Duration, Instant},
@@ -27,15 +30,28 @@ impl Device {
     }
 
     pub fn receive_grant() -> Result<Self> {
+        let mut list = Self::receive_grants()?;
+        if list.is_empty() {
+            return Err(Error(errno::EIO));
+        }
+        Ok(list.swap_remove(0))
+    }
+
+    pub fn receive_grants() -> Result<Vec<Self>> {
         // The launcher environment identifies the expected sender. Only an
         // actual kernel-installed device handle authorizes queue creation.
         let expected = dunit::env::var("DUNIT_NET_SUPERVISOR")?
             .and_then(|value| value.parse::<u32>().ok())
             .filter(|pid| *pid != 0)
             .ok_or(Error(errno::EACCES))?;
+        let target_count = dunit::env::var("DUNIT_NET_COUNT")?
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|&n| n >= 1 && n <= 4)
+            .unwrap_or(1);
         let started = Instant::now()?;
         let mut payload = [0; 256];
-        loop {
+        let mut grants = Vec::with_capacity(target_count);
+        while grants.len() < target_count {
             let remaining = GRANT_TIMEOUT
                 .checked_sub(started.elapsed()?)
                 .ok_or(Error(errno::EAGAIN))?;
@@ -62,8 +78,9 @@ impl Device {
             if handle == 0 {
                 return Err(Error(errno::EIO));
             }
-            return Ok(Self(handle));
+            grants.push(Self(handle));
         }
+        Ok(grants)
     }
 
     pub fn info(&self) -> Result<DeviceInfo> {

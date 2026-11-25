@@ -1,289 +1,320 @@
-//! Application DNS transaction runner backed by `dunit_net_core::dns::Resolver`.
-use alloc::vec::Vec;
+//! Dual-stack (AAAA + A) DNS transaction runner across multiple NICs (UDP + TCP fallback).
+use alloc::{collections::VecDeque, vec::Vec};
 use dunit::errno;
 use dunit_net_core::{
-    dns::{AddressData, Answer, Kind, Poll, Resolver},
+    dns::{
+        dual::{DualPoll, DualResolver},
+        Kind, TCP_DNS_LIMIT,
+    },
+    ipv6::PROTO_UDP,
+    ipv6_peer::Egress6,
+    router::MultiRouter,
     tcp::{
         self,
-        table::{Outbound as TcpPacket, StreamId, Table},
-        State, StreamError,
+        table::{DualOutbound, StreamId, Table},
+        DualEndpoint, State, StreamError,
     },
-    udp::Address,
-    Error as NetError, Ip, Peer,
+    udp::{DualAddress, DualEndpoints, Udp},
+    Egress, IpAddr,
 };
-use alloc::collections::VecDeque;
+use dunit_socket_abi::{encode_dns_records, DnsRecord, FAMILY_IPV6, MAX_DNS_RECORDS};
 
-use crate::outbound::Outbound;
+use crate::nic::Nic;
 
 const DNS_PORT: u16 = 53;
 const POLL_STEP_MS: u64 = 50;
 
 struct TcpFallback {
     id: StreamId,
-    server: Address,
+    server: IpAddr,
+    kind: Kind,
     query: Vec<u8>,
     offset: usize,
     deadline_ms: u64,
 }
 
-struct ActiveQuery {
-    token: u64,
+pub(crate) struct DualDnsRuntime {
+    resolver: DualResolver,
+    port: u16,
+    active_token: Option<u64>,
     tcp: Option<TcpFallback>,
-}
-
-pub(crate) struct DnsRuntime {
-    resolver: Resolver,
-    active: Option<ActiveQuery>,
     next_poll: Option<u64>,
 }
 
-impl DnsRuntime {
-    pub(crate) fn open(peer: &mut Peer, servers: [Option<Ip>; 2]) -> core::result::Result<Option<Self>, isize> {
-        let Some(primary_ip) = servers[0] else {
-            return Ok(None);
-        };
-        let primary = Address {
-            ip: primary_ip,
-            port: DNS_PORT,
-        };
-        let resolver = match servers[1] {
-            Some(secondary_ip) => Resolver::with_secondary(
-                peer,
-                primary,
-                Address {
-                    ip: secondary_ip,
-                    port: DNS_PORT,
-                },
-                true,
-            ),
-            None => Resolver::new_with_tcp(peer, primary),
-        }
-        .map_err(dns_errno)?;
-        Ok(Some(Self {
-            resolver,
-            active: None,
+impl DualDnsRuntime {
+    pub(crate) fn open(udp: &mut DualEndpoints) -> core::result::Result<Self, isize> {
+        let port = udp.bind(0).map_err(|_| errno::ENOBUFS)?;
+        Ok(Self {
+            resolver: DualResolver::new(),
+            port,
+            active_token: None,
+            tcp: None,
             next_poll: None,
-        }))
+        })
+    }
+
+    pub(crate) fn port(&self) -> u16 {
+        self.port
     }
 
     pub(crate) fn deadline(&self) -> Option<u64> {
-        let tcp_deadline = self
-            .active
-            .as_ref()
-            .and_then(|q| q.tcp.as_ref().map(|t| t.deadline_ms));
+        let tcp_deadline = self.tcp.as_ref().map(|t| t.deadline_ms);
         match (self.next_poll, tcp_deadline) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
     }
 
-    pub(crate) fn is_active_for(&self, token: u64) -> bool {
-        self.active.as_ref().is_some_and(|q| q.token == token)
-    }
-
     pub(crate) fn is_busy_for(&self, token: u64) -> bool {
-        self.active.as_ref().is_some_and(|q| q.token != token)
+        self.active_token.is_some_and(|t| t != token)
     }
 
     pub(crate) fn cancel(
         &mut self,
         token: u64,
-        tcp: Option<&mut Table>,
-        wire: &mut VecDeque<TcpPacket>,
+        tcp: &mut Table,
+        wire: &mut VecDeque<DualOutbound>,
     ) {
-        if !self.is_active_for(token) {
-            return;
-        }
-        if let Some(active) = self.active.take() {
-            if let (Some(fb), Some(tcp)) = (active.tcp, tcp) {
-                if let Ok((src, dst)) = tcp.endpoints(fb.id) {
-                    wire.retain(|p| (p.source, p.destination) != (src, dst));
-                }
-                let _ = tcp.close(fb.id);
-            }
+        if self.active_token == Some(token) {
+            self.retire_tcp(tcp, wire);
             self.resolver.abort();
+            self.active_token = None;
+            self.next_poll = None;
         }
-        self.next_poll = None;
     }
 
-    pub(crate) fn start(
+    fn retire_tcp(&mut self, tcp: &mut Table, wire: &mut VecDeque<DualOutbound>) {
+        if let Some(fb) = self.tcp.take() {
+            if let Ok((src, dst)) = tcp.endpoints_ip(fb.id) {
+                wire.retain(|p| (p.source, p.destination) != (src, dst));
+            }
+            let _ = tcp.close(fb.id);
+        }
+    }
+
+    pub(crate) fn receive_udp(&mut self, server: IpAddr, payload: &[u8], now: u64) {
+        let _ = self.resolver.receive_udp(server, payload, now);
+    }
+
+    pub(crate) fn step(
         &mut self,
         token: u64,
         name: &[u8],
-        now: u64,
-    ) -> core::result::Result<Option<Ip>, isize> {
-        if self.active.is_some() {
-            return Err(errno::EAGAIN);
-        }
-        match self.resolver.start(name, Kind::A, now) {
-            Ok(Some(Answer {
-                address: AddressData::V4(ip),
-                ..
-            })) => Ok(Some(ip)),
-            Ok(Some(_)) => Err(errno::ENOENT),
-            Ok(None) => {
-                self.active = Some(ActiveQuery { token, tcp: None });
-                self.next_poll = Some(now);
-                Ok(None)
-            }
-            Err(error) => Err(dns_errno(error)),
-        }
-    }
-
-    pub(crate) fn drive(
-        &mut self,
-        token: u64,
-        peer: &mut Peer,
+        router: &MultiRouter,
+        nics: &mut [alloc::boxed::Box<Nic>],
         tcp: &mut Table,
-        tx: &mut Outbound,
-        wire: &mut VecDeque<TcpPacket>,
+        wire: &mut VecDeque<DualOutbound>,
         now: u64,
-    ) -> core::result::Result<Option<Ip>, isize> {
-        if !self.is_active_for(token) {
-            return Err(errno::EINVAL);
+    ) -> core::result::Result<Option<Vec<u8>>, isize> {
+        let servers: Vec<IpAddr> = router.dns_servers().into_iter().map(|c| c.server).collect();
+        if servers.is_empty() {
+            return Ok(None);
         }
+        let want_v6 = router.has_routable_v6();
+        let want_v4 = router.has_usable_v4();
 
-        if let Some(mut fb) = self.active.as_mut().and_then(|q| q.tcp.take()) {
-            if now >= fb.deadline_ms {
-                let _ = tcp.close(fb.id);
-                self.cancel(token, Some(tcp), wire);
-                return Err(errno::EAGAIN);
-            }
-            match tcp.state(fb.id).map_err(|_| errno::EIO)? {
-                State::Established | State::CloseWait => {
-                    if fb.offset < fb.query.len() {
-                        match tcp.send(fb.id, &fb.query[fb.offset..]) {
-                            Ok(n) => fb.offset += n,
-                            Err(StreamError::WouldBlock) => {}
-                            Err(_) => {
-                                let _ = tcp.close(fb.id);
-                                self.cancel(token, Some(tcp), wire);
-                                return Err(errno::EIO);
-                            }
-                        }
-                    }
-                    if fb.offset == fb.query.len() {
-                        let mut buf = [0u8; 512];
-                        match tcp.read(fb.id, &mut buf) {
-                            Ok(0) => {
-                                let _ = self.resolver.tcp_eof(fb.server, now);
-                                let _ = tcp.close(fb.id);
-                                self.cancel(token, Some(tcp), wire);
-                                return Err(errno::EIO);
-                            }
-                            Ok(n) => match self.resolver.receive_tcp(fb.server, &buf[..n], now) {
-                                Ok(Some(Answer {
-                                    address: AddressData::V4(ip),
-                                    ..
-                                })) => {
-                                    let _ = tcp.close(fb.id);
-                                    self.active = None;
-                                    self.next_poll = None;
-                                    return Ok(Some(ip));
-                                }
-                                Ok(Some(_)) => {
-                                    let _ = tcp.close(fb.id);
-                                    self.active = None;
-                                    self.next_poll = None;
-                                    return Err(errno::ENOENT);
-                                }
-                                Ok(None) => {}
-                                Err(err) => {
-                                    let _ = tcp.close(fb.id);
-                                    self.cancel(token, Some(tcp), wire);
-                                    return Err(dns_errno(err));
-                                }
-                            },
-                            Err(StreamError::WouldBlock) => {}
-                            Err(_) => {
-                                let _ = tcp.close(fb.id);
-                                self.cancel(token, Some(tcp), wire);
-                                return Err(errno::EIO);
-                            }
-                        }
-                    }
+        if self.active_token.is_none() {
+            match self.resolver.start(name, &servers, want_v6, want_v4, now) {
+                Ok(Some(ips)) => return Ok(Some(encode_result(&ips)?)),
+                Ok(None) => {
+                    self.active_token = Some(token);
                 }
-                State::Closed => {
-                    let _ = self.resolver.tcp_eof(fb.server, now);
-                    let _ = tcp.close(fb.id);
-                    self.cancel(token, Some(tcp), wire);
-                    return Err(errno::EIO);
-                }
-                _ => {}
+                Err(err) => return Err(map_dns_err(err)),
             }
-            if let Some(active) = &mut self.active {
-                active.tcp = Some(fb);
-            }
-            self.next_poll = Some(now.saturating_add(POLL_STEP_MS));
+        } else if self.active_token != Some(token) {
             return Ok(None);
         }
 
+        if let Some(mut fb) = self.tcp.take() {
+            match self.step_tcp(&mut fb, tcp, now) {
+                Ok(()) => {
+                    self.tcp = Some(fb);
+                }
+                Err(err) => {
+                    if let Ok((src, dst)) = tcp.endpoints_ip(fb.id) {
+                        wire.retain(|p| (p.source, p.destination) != (src, dst));
+                    }
+                    let _ = tcp.close(fb.id);
+                    if err != errno::ENOENT {
+                        self.resolver.tcp_eof(fb.kind);
+                    }
+                }
+            }
+        }
+
         loop {
-            match self.resolver.poll(peer, now) {
-                Ok(Poll::Frame(frame)) => {
-                    tx.push(&frame).map_err(|e| e.0)?;
+            match self.resolver.poll(now) {
+                Ok(DualPoll::SendUdp { server, payload }) => {
+                    let route = router.select(server, 0).map_err(|_| errno::EIO)?;
+                    let udp = Udp::encode_ip(
+                        DualAddress {
+                            ip: route.source,
+                            port: self.port,
+                        },
+                        DualAddress {
+                            ip: server,
+                            port: DNS_PORT,
+                        },
+                        &payload,
+                    )
+                    .map_err(|_| errno::EINVAL)?;
+                    let nic = nics
+                        .iter_mut()
+                        .find(|n| n.id == route.iface_id)
+                        .ok_or(errno::EIO)?;
+                    match (route.source, server, route.next_hop) {
+                        (IpAddr::V4(_), IpAddr::V4(dst4), _) => {
+                            if let Some(peer4) = nic.v4_peer() {
+                                match peer4.route_egress(dst4, 17, &udp, now) {
+                                    Ok(Egress::Sent(f) | Egress::Neighbor(f)) => {
+                                        let _ = nic.tx.try_push(&f);
+                                    }
+                                    Ok(Egress::Waiting) => {}
+                                    Err(e) => return Err(map_dns_err(e)),
+                                }
+                            }
+                        }
+                        (IpAddr::V6(src6), IpAddr::V6(dst6), IpAddr::V6(nh6)) => {
+                            if let Some(peer6) = &mut nic.v6 {
+                                match peer6.send_packet(src6, dst6, nh6, PROTO_UDP, &udp, now) {
+                                    Ok(Egress6::Sent(f) | Egress6::Neighbor(f)) => {
+                                        let _ = nic.tx.try_push(&f);
+                                    }
+                                    Ok(Egress6::Queued) => {}
+                                    Err(e) => return Err(map_dns_err(e)),
+                                }
+                            }
+                        }
+                        _ => return Err(errno::EINVAL),
+                    }
                     self.next_poll = Some(now.saturating_add(POLL_STEP_MS));
-                    return Ok(None);
                 }
-                Ok(Poll::Waiting) => {
-                    self.next_poll = Some(now.saturating_add(POLL_STEP_MS));
-                    return Ok(None);
-                }
-                Ok(Poll::Answer(Answer {
-                    address: AddressData::V4(ip),
-                    ..
-                })) => {
-                    self.active = None;
-                    self.next_poll = None;
-                    return Ok(Some(ip));
-                }
-                Ok(Poll::Answer(_)) => {
-                    self.active = None;
-                    self.next_poll = None;
-                    return Err(errno::ENOENT);
-                }
-                Ok(Poll::TcpFallback {
+                Ok(DualPoll::TcpFallback {
                     server,
+                    kind,
                     query,
                     deadline_ms,
                 }) => {
+                    let route = router.select(server, 0).map_err(|_| errno::EIO)?;
                     let id = tcp
-                        .connect(
-                            tcp::Endpoint {
-                                ip: server.ip,
-                                port: server.port,
+                        .connect_ip(
+                            route.source,
+                            DualEndpoint {
+                                ip: server,
+                                port: DNS_PORT,
                             },
                             now,
                         )
-                        .map_err(|_| errno::EIO)?;
-                    if let Some(active) = &mut self.active {
-                        active.tcp = Some(TcpFallback {
-                            id,
-                            server,
-                            query,
-                            offset: 0,
-                            deadline_ms,
-                        });
-                    }
+                        .map_err(tcp_errno)?;
+                    self.tcp = Some(TcpFallback {
+                        id,
+                        server,
+                        kind,
+                        query,
+                        offset: 0,
+                        deadline_ms,
+                    });
                     self.next_poll = Some(now.saturating_add(POLL_STEP_MS));
                     return Ok(None);
                 }
-                Err(NetError::Unsolicited | NetError::Header | NetError::Length) => continue,
-                Err(err) => {
-                    self.cancel(token, Some(tcp), wire);
-                    return Err(dns_errno(err));
+                Ok(DualPoll::Wait(deadline)) => {
+                    self.next_poll = deadline
+                        .map(|d| d.min(now.saturating_add(POLL_STEP_MS)))
+                        .or_else(|| Some(now.saturating_add(POLL_STEP_MS)));
+                    return Ok(None);
                 }
+                Ok(DualPoll::Resolved(ips)) => {
+                    self.retire_tcp(tcp, wire);
+                    self.active_token = None;
+                    self.next_poll = None;
+                    return Ok(Some(encode_result(&ips)?));
+                }
+                Err(err) => {
+                    self.retire_tcp(tcp, wire);
+                    self.active_token = None;
+                    self.next_poll = None;
+                    return Err(map_dns_err(err));
+                }
+            }
+        }
+    }
+
+    fn step_tcp(
+        &mut self,
+        fb: &mut TcpFallback,
+        tcp: &mut Table,
+        now: u64,
+    ) -> core::result::Result<(), isize> {
+        if now >= fb.deadline_ms {
+            return Err(errno::EIO);
+        }
+        if let Some(err) = tcp.failure(fb.id).map_err(tcp_errno)? {
+            return Err(tcp_errno(err));
+        }
+        let state = tcp.state(fb.id).map_err(tcp_errno)?;
+        if matches!(state, State::Established | State::CloseWait) && fb.offset < fb.query.len() {
+            match tcp.send(fb.id, &fb.query[fb.offset..]) {
+                Ok(n) => fb.offset += n,
+                Err(StreamError::WouldBlock) => {}
+                Err(e) => return Err(tcp_errno(e)),
+            }
+        }
+        let mut buf = [0u8; TCP_DNS_LIMIT + 2];
+        loop {
+            match tcp.read(fb.id, &mut buf) {
+                Ok(0) => {
+                    let _ = self.resolver.tcp_eof(fb.kind);
+                    return Err(errno::ENOENT);
+                }
+                Ok(n) => {
+                    self.resolver
+                        .receive_tcp(fb.server, &buf[..n], fb.kind, now)
+                        .map_err(map_dns_err)?;
+                }
+                Err(StreamError::WouldBlock) => return Ok(()),
+                Err(e) => return Err(tcp_errno(e)),
             }
         }
     }
 }
 
-pub(crate) fn dns_errno(error: NetError) -> isize {
+fn encode_result(ips: &[IpAddr]) -> core::result::Result<Vec<u8>, isize> {
+    let mut recs = Vec::with_capacity(ips.len().min(MAX_DNS_RECORDS));
+    for &ip in ips.iter().take(MAX_DNS_RECORDS) {
+        let r = match ip {
+            IpAddr::V4(v4) => DnsRecord::ipv4(v4),
+            IpAddr::V6(v6) => DnsRecord {
+                family: FAMILY_IPV6,
+                scope_id: 0,
+                addr: v6,
+            },
+        };
+        if r.is_valid() {
+            recs.push(r);
+        }
+    }
+    if recs.is_empty() {
+        return Err(errno::ENOENT);
+    }
+    let mut out = alloc::vec![0; 2 + recs.len() * dunit_socket_abi::DNS_RECORD_LEN];
+    let n = encode_dns_records(&recs, &mut out).map_err(|_| errno::EINVAL)?;
+    out.truncate(n);
+    Ok(out)
+}
+
+fn map_dns_err(err: dunit_net_core::Error) -> isize {
+    match err {
+        dunit_net_core::Error::NameNotFound => errno::ENOENT,
+        dunit_net_core::Error::Capacity => errno::ENOBUFS,
+        dunit_net_core::Error::Unsupported => errno::EOPNOTSUPP,
+        _ => errno::EIO,
+    }
+}
+
+fn tcp_errno(error: tcp::StreamError) -> isize {
     match error {
-        NetError::NameNotFound => errno::ENOENT,
-        NetError::Header => errno::EINVAL,
-        NetError::Timeout | NetError::NoRoute => errno::EAGAIN,
-        NetError::WouldBlock => errno::EAGAIN,
+        StreamError::Closed | StreamError::Reset => errno::EPIPE,
+        StreamError::WouldBlock => errno::EAGAIN,
         _ => errno::EIO,
     }
 }

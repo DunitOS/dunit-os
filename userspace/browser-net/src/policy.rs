@@ -32,10 +32,15 @@ impl Origin {
     }
 
     pub fn canonical(&self) -> String {
-        if self.port == self.scheme.default_port() {
-            format!("{}://{}", self.scheme.as_str(), self.host)
+        let host_fmt = if self.host.contains(':') {
+            format!("[{}]", self.host)
         } else {
-            format!("{}://{}:{}", self.scheme.as_str(), self.host, self.port)
+            self.host.clone()
+        };
+        if self.port == self.scheme.default_port() {
+            format!("{}://{host_fmt}", self.scheme.as_str())
+        } else {
+            format!("{}://{host_fmt}:{}", self.scheme.as_str(), self.port)
         }
     }
 }
@@ -465,15 +470,69 @@ fn is_private_or_loopback_host(host: &str) -> bool {
     if host == "localhost" || host.ends_with(".localhost") {
         return true;
     }
-    let Some(ip) = parse_ipv4(host) else {
-        return false;
-    };
+    if let Some(ip) = parse_ipv4(host) {
+        return is_private_v4(ip);
+    }
+    if let Some(ip6) = parse_ipv6(host) {
+        return ip6 == [0; 16]
+            || ip6 == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+            || (ip6[0] == 0xfe && (ip6[1] & 0xc0) == 0x80)
+            || (ip6[0] & 0xfe == 0xfc)
+            || (ip6[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff]
+                && is_private_v4([ip6[12], ip6[13], ip6[14], ip6[15]]));
+    }
+    false
+}
+
+fn is_private_v4(ip: [u8; 4]) -> bool {
     ip[0] == 127
         || ip[0] == 10
         || (ip[0] == 172 && (16..=31).contains(&ip[1]))
         || (ip[0] == 192 && ip[1] == 168)
         || (ip[0] == 169 && ip[1] == 254)
         || ip[0] == 0
+}
+
+fn parse_ipv6(s: &str) -> Option<[u8; 16]> {
+    if s.is_empty() || s.len() > 45 || !s.contains(':') {
+        return None;
+    }
+    let (h, t, comp) = match s.split_once("::") {
+        Some((h, t)) if !t.contains("::") => (h, t, true),
+        Some(_) => return None,
+        None => (s, "", false),
+    };
+    let mut head = Vec::new();
+    if !h.is_empty() {
+        for g in h.split(':') {
+            if g.is_empty() || g.len() > 4 {
+                return None;
+            }
+            head.push(u16::from_str_radix(g, 16).ok()?);
+        }
+    }
+    let mut tail = Vec::new();
+    if !t.is_empty() {
+        for g in t.split(':') {
+            if g.is_empty() || g.len() > 4 {
+                return None;
+            }
+            tail.push(u16::from_str_radix(g, 16).ok()?);
+        }
+    }
+    if (comp && head.len() + tail.len() >= 8) || (!comp && (head.len() != 8 || !tail.is_empty())) {
+        return None;
+    }
+    let mut words = [0u16; 8];
+    words[..head.len()].copy_from_slice(&head);
+    words[8 - tail.len()..].copy_from_slice(&tail);
+    let mut out = [0u8; 16];
+    for (i, w) in words.iter().enumerate() {
+        let b = w.to_be_bytes();
+        out[i * 2] = b[0];
+        out[i * 2 + 1] = b[1];
+    }
+    Some(out)
 }
 
 fn parse_ipv4(host: &str) -> Option<[u8; 4]> {

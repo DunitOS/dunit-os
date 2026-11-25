@@ -298,14 +298,14 @@ impl<R: Registers> Controller<R> {
             return Err(error);
         }
         // PHY-local loopback never emits diagnostic frames onto the wire.
-        // Legacy 2 KiB RX buffers, accept broadcast, strip FCS; no jumbo frames.
+        // Legacy 2 KiB RX buffers, accept multicast (for IPv6 NDP) and broadcast, strip FCS; no jumbo frames.
         let control = device.io.read(CTRL) | (1 << 6); // SLU
         device.io.write(CTRL, control);
         device.io.write(TIPG, 10 | (8 << 10) | (6 << 20));
         device
             .io
             .write(TCTL, 2 | (1 << 3) | (0x10 << 4) | (0x40 << 12));
-        device.io.write(RCTL, 2 | (1 << 15) | (1 << 26));
+        device.io.write(RCTL, 2 | (1 << 4) | (1 << 15) | (1 << 26));
         let _ = device.io.read(STATUS); // flush posted setup writes
         #[cfg(any(feature = "boot-smoke-tests", test))]
         {
