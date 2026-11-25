@@ -167,12 +167,18 @@ class NetSocketPeer(EthernetPeer):
         self._stages.append("tcp_zero_window_reopened")
 
         retry_suffix = None
+        ooo: dict[int, bytes] = {}
         for _ in range(64):
             source, seq, ack, flags, data = parse_tcp(self._next_ipv4(connection))
-            if (source != endpoint or seq != next_guest or ack != host_next or
-                    flags not in (ACK, PSH | ACK)):
+            if (source != endpoint or ack != host_next or flags not in (ACK, PSH | ACK)):
                 raise ValueError("unexpected guest TCP transmit")
             if not data:
+                continue
+            diff = (seq - next_guest) & 0xffffffff
+            if diff != 0:
+                if diff < 0x80000000:
+                    ooo.setdefault(seq, data)
+                    self._send(connection, host_tcp(endpoint, host_next, next_guest, ACK))
                 continue
             if retry_suffix is not None:
                 if data != retry_suffix:
@@ -184,12 +190,17 @@ class NetSocketPeer(EthernetPeer):
                     raise ValueError("TCP partial ACK fixture requires a multi-byte segment")
                 split = len(data) // 2
                 data, retry_suffix = data[:split], data[split:]
-            first = self._tcp_received
-            self._tcp_received += len(data)
-            if self._tcp_received > TCP_LENGTH or data != bytes(
-                    index % 251 for index in range(first, self._tcp_received)):
-                raise ValueError("guest TCP stream was truncated or changed")
-            next_guest = advance(next_guest, len(data))
+            while True:
+                first = self._tcp_received
+                self._tcp_received += len(data)
+                if self._tcp_received > TCP_LENGTH or data != bytes(
+                        index % 251 for index in range(first, self._tcp_received)):
+                    raise ValueError("guest TCP stream was truncated or changed")
+                next_guest = advance(next_guest, len(data))
+                if retry_suffix is None and next_guest in ooo:
+                    data = ooo.pop(next_guest)
+                    continue
+                break
             self._send(connection, host_tcp(endpoint, host_next, next_guest, ACK))
             if self._tcp_received == TCP_LENGTH:
                 break

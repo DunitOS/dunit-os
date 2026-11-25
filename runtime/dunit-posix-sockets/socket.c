@@ -13,6 +13,7 @@
 #include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -702,6 +703,13 @@ int getsockopt(int fd, int level, int option, void *data, socklen_t *length)
     long ep_res = query_endpoints(fd, &endpoints);
     if (ep_res < 0)
         return (int)result(ep_res);
+    struct sock_state st = get_state(fd);
+    if (level == IPPROTO_TCP && option == TCP_NODELAY) {
+        if (st.active && st.protocol != IPPROTO_TCP)
+            return (int)fail(ENOPROTOOPT);
+        int err = write_int_opt(1, data, length);
+        return err ? (int)fail(err) : 0;
+    }
     if (level != SOL_SOCKET)
         return (int)fail(ENOPROTOOPT);
     if (option == SO_ERROR) {
@@ -720,8 +728,6 @@ int getsockopt(int fd, int level, int option, void *data, socklen_t *length)
         *length = sizeof error;
         return 0;
     }
-
-    struct sock_state st = get_state(fd);
 
     if (option == SO_RCVTIMEO || option == SO_SNDTIMEO) {
         uint64_t ms = option == SO_RCVTIMEO ? st.rcv_timeout_ms : st.snd_timeout_ms;
@@ -749,6 +755,18 @@ int setsockopt(int fd, int level, int option, const void *data, socklen_t length
     long value = query_endpoints(fd, &endpoints);
     if (value < 0)
         return (int)result(value);
+    if (level == IPPROTO_TCP && option == TCP_NODELAY) {
+        struct sock_state st = get_state(fd);
+        if (st.active && st.protocol != IPPROTO_TCP)
+            return (int)fail(ENOPROTOOPT);
+        if (!data)
+            return (int)fail(EFAULT);
+        if (length < sizeof(int))
+            return (int)fail(EINVAL);
+        int enabled = 0;
+        memcpy(&enabled, data, sizeof enabled);
+        return enabled ? 0 : (int)fail(ENOPROTOOPT);
+    }
     if (level != SOL_SOCKET || (option != SO_RCVTIMEO && option != SO_SNDTIMEO))
         return (int)fail(ENOPROTOOPT);
     uint64_t ms = 0;

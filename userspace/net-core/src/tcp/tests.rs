@@ -229,15 +229,21 @@ fn zero_window_probe_and_bounded_growth() {
     let (mut client, mut server) = pair();
     let chunk = [3u8; QUEUE_BYTES];
     client.send(&chunk).unwrap();
-    for ms in 1..=3 {
-        pass(&mut client, &mut server, ms);
-        pass(&mut server, &mut client, ms);
+    let mut ms = 1;
+    while server.receive.len() < QUEUE_BYTES {
+        while let Some(seg) = client.poll(ms).unwrap() {
+            server.receive(A.ip, B.ip, &seg, ms).unwrap();
+        }
+        while let Some(ack) = server.poll(ms).unwrap() {
+            client.receive(B.ip, A.ip, &ack, ms).unwrap();
+        }
+        ms += 1;
     }
     assert_eq!(server.receive.len(), QUEUE_BYTES);
     client.send(b"next").unwrap();
-    assert!(client.poll(4).unwrap().is_none());
+    assert!(client.poll(ms).unwrap().is_none());
     let deadline = client.deadline().unwrap();
-    assert_eq!(deadline, 1004);
+    assert_eq!(deadline, ms + INITIAL_RTO);
     pass(&mut client, &mut server, deadline);
     assert_eq!(server.receive.len(), QUEUE_BYTES);
     pass(&mut server, &mut client, deadline);
@@ -366,4 +372,63 @@ fn timers_bound_retries_and_reject_regressing_clock() {
     assert_eq!(client.poll(now), Err(StreamError::Timeout));
     assert_eq!(client.state(), State::Closed);
     assert!(client.deadline().is_none());
+}
+
+#[test]
+fn reno_pipelines_triggers_fast_retransmit_and_reduces_cwnd_on_loss() {
+    let (mut client, mut server) = pair();
+    let mss = client.mss();
+    let initial = client.cwnd;
+    assert_eq!(initial, (3 * mss).min(4380));
+    let payload = alloc::vec![0x42u8; 8 * mss];
+    assert_eq!(client.send(&payload).unwrap(), 8 * mss);
+
+    // Send full initial congestion window (3 segments) before waiting for any ACK.
+    let mut sent_segs = Vec::new();
+    for _ in 0..3 {
+        sent_segs.push(client.poll(10).unwrap().unwrap());
+    }
+    assert_eq!(client.poll(10).unwrap(), None);
+    assert_eq!(client.data_in_flight(), 3 * mss);
+
+    // Deliver segment 0, drop segment 1, deliver segment 2 (creates 1 dupACK on ack 101+mss? No, deliver all after dropping seg 0!).
+    // Re-test loss of segment 0 with 3 subsequent segments: ack first on 3*mss after slow start opens to 4*mss.
+    for seg in &sent_segs {
+        server.receive(A.ip, B.ip, seg, 10).unwrap();
+    }
+    pass(&mut server, &mut client, 20);
+    // Slow start grows cwnd when ACK arrives (capped by min(acked, mss) on cumulative ack).
+    assert!(client.cwnd > initial);
+
+    // Fill pipeline: drop next segment (S_lost), deliver 3 subsequent segments -> 3 dupACKs -> fast retransmit!
+    let s_lost = client.poll(30).unwrap().unwrap();
+    let lost_seq = Segment::parse(A, B, &s_lost).unwrap().sequence;
+    for _ in 0..3 {
+        let later = client.poll(30).unwrap().unwrap();
+        server.receive(A.ip, B.ip, &later, 30).unwrap();
+        let ack = server.poll(30).unwrap().unwrap();
+        let parsed = Segment::parse(B, A, &ack).unwrap();
+        assert_eq!(parsed.acknowledgement, lost_seq);
+        client.receive(B.ip, A.ip, &ack, 30).unwrap();
+    }
+    // 3rd dupACK triggers immediate fast retransmit at now=30 (before RTO=1030).
+    assert_eq!(client.deadline(), Some(30));
+    let retrans = client.poll(30).unwrap().unwrap();
+    assert_eq!(retrans, s_lost);
+    assert!(client.recover.is_some());
+    let expected_ssthresh = (4 * mss / 2).max(2 * mss);
+    assert_eq!(client.ssthresh, expected_ssthresh);
+
+    // Deliver retransmitted segment -> cumulative ACK exits fast recovery with cwnd = ssthresh.
+    server.receive(A.ip, B.ip, &retrans, 35).unwrap();
+    pass(&mut server, &mut client, 35);
+    assert!(client.recover.is_none());
+    assert_eq!(client.cwnd, expected_ssthresh);
+
+    // Trigger RTO timeout on the next segment -> cwnd collapses to 1 MSS.
+    let _timeout_seg = client.poll(40).unwrap().unwrap();
+    let rto = client.deadline().unwrap();
+    assert!(rto > 40);
+    assert!(client.poll(rto).unwrap().is_some());
+    assert_eq!(client.cwnd, mss);
 }

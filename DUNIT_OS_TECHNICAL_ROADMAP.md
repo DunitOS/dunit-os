@@ -676,7 +676,9 @@ renew/duplicates, DNS NXDOMAIN/malformed/cache/timeout and UDP overflow.
 - [x] Reuse the connection table and route selection in stock netd for
   explicitly granted outbound native TCP sockets. Verify the active path over
   E1000 and leave application listener admission open.
-- [ ] Test an initial congestion algorithm such as Reno before Internet release.
+- [x] Implement TCP Reno congestion control (slow start, congestion avoidance,
+  3-dupACK fast retransmit, NewReno fast recovery) with 16 KiB send/receive
+  buffers and verify pipelined loss recovery over E1000.
 - [ ] Define backlog/accept, ephemeral ports, SO_REUSEADDR/keepalive/TCP_NODELAY,
   quotas and rare-option boundaries.
 

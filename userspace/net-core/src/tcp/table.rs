@@ -50,11 +50,12 @@ impl Outbound {
         self.bytes.len() == super::wire::HEADER && self.bytes[13] == ACK
     }
 
-    /// A newer packet replaces an unsent packet of the same class for its
-    /// four-tuple. A pure ACK and a sequence-consuming flight can coexist.
+    /// A newer packet replaces an unsent packet of the same class (and exact
+    /// sequence number for data/SYN flights) for its four-tuple.
     pub fn same_pending_slot(&self, other: &Self) -> bool {
         (self.source, self.destination) == (other.source, other.destination)
             && self.ack_only() == other.ack_only()
+            && (self.ack_only() || self.bytes.get(4..8) == other.bytes.get(4..8))
     }
 }
 
@@ -378,10 +379,10 @@ impl Table {
                         bytes,
                     };
                     if deferred && !outgoing.ack_only() {
-                        if let Some(flight) = &mut stream.connection.flight {
-                            flight.awaiting_egress = true;
-                            flight.deadline = now.saturating_add(super::EGRESS_WAIT_MS);
-                        }
+                        stream.connection.mark_awaiting_egress(
+                            &outgoing.bytes,
+                            now.saturating_add(super::EGRESS_WAIT_MS),
+                        );
                     }
                     return Ok(Some(outgoing));
                 }
@@ -414,20 +415,8 @@ impl Table {
     pub fn outbound_current(&self, packet: &Outbound) -> bool {
         self.streams.iter().flatten().any(|stream| {
             let connection = &stream.connection;
-            if connection.state() == State::Closed
-                || connection.endpoints() != (packet.source, packet.destination)
-            {
-                return false;
-            }
-            if packet.ack_only() {
-                packet.bytes[8..12] == connection.receive_next.to_be_bytes()
-            } else {
-                connection.flight.is_some_and(|flight| {
-                    packet.bytes.get(4..8) == Some(flight.first.to_be_bytes().as_slice())
-                        && (flight.kind != super::FlightKind::Syn
-                            || (packet.bytes[13] & ACK != 0) == (connection.state() == State::SynReceived))
-                })
-            }
+            connection.endpoints() == (packet.source, packet.destination)
+                && connection.outbound_current(&packet.bytes, packet.ack_only())
         })
     }
 
@@ -443,30 +432,16 @@ impl Table {
         if packet.ack_only() || !self.outbound_current(packet) {
             return Ok(());
         }
-        let Some(connection) = self.streams.iter_mut().flatten().map(|stream| &mut stream.connection)
+        let Some(connection) = self
+            .streams
+            .iter_mut()
+            .flatten()
+            .map(|stream| &mut stream.connection)
             .find(|connection| connection.endpoints() == (packet.source, packet.destination))
         else {
             return Ok(());
         };
-        if let Some(flight) = connection.flight.as_mut().filter(|flight| flight.awaiting_egress) {
-            if now >= flight.deadline {
-                connection.fail(StreamError::Timeout);
-                return Ok(());
-            }
-            match handoff {
-                Ok(()) => {
-                    flight.awaiting_egress = false;
-                    flight.sent_at = now;
-                    if flight.persist_delay.is_some() && connection.remote_window != 0 {
-                        flight.persist_delay = None;
-                        flight.retries = 0;
-                    }
-                    let delay = flight.persist_delay.unwrap_or(connection.retransmission.timeout);
-                    flight.deadline = now.saturating_add(delay);
-                }
-                Err(error) => connection.fail(error.into()),
-            }
-        }
+        connection.complete_egress(&packet.bytes, now, handoff);
         Ok(())
     }
 

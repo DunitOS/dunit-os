@@ -25,8 +25,9 @@ read/write (blocking `send` loops until all bytes are accepted or an error/timeo
 occurs). TCP supports `shutdown(SHUT_WR)`. UDP `sendto` and `recvfrom`
 preserve datagram boundaries, and `MSG_TRUNC` returns the original datagram
 length. `getsockopt` supports `SO_ERROR`, `SO_RCVTIMEO`, `SO_SNDTIMEO`,
-`SO_TYPE`, `SO_DOMAIN` and `SO_PROTOCOL`; `setsockopt` supports `SO_RCVTIMEO`
-and `SO_SNDTIMEO`. `getsockname` and `getpeername` translate native endpoint
+`SO_TYPE`, `SO_DOMAIN`, `SO_PROTOCOL` and `IPPROTO_TCP` `TCP_NODELAY` (always
+enabled; disabling returns `ENOPROTOOPT`); `setsockopt` supports `SO_RCVTIMEO`,
+`SO_SNDTIMEO` and enabling `TCP_NODELAY`. `getsockname` and `getpeername` translate native endpoint
 records to `sockaddr_in`. POSIX `poll`, `dup`, `fcntl` and `close` operate on
 ordinary native descriptors. Revocation wakes pollers and old socket calls
 report EPIPE. A terminal asynchronous error stays associated with the

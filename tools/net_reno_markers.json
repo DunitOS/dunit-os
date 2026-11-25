@@ -1,0 +1,30 @@
+{
+  "description": "TCP Reno slow start, multi-segment pipelining and 3-dupACK fast retransmit over isolated E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-reno",
+    "net_reno": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {"wait_marker": "[NET-RENO] complete", "timeout": 90},
+      {"wait_marker": "gui_server: desktop ready", "timeout": 60}
+    ]
+  },
+  "required": [
+    {"marker": "[NETD] IPv4 static bound 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NET-RENO] pipelined transfer and fast retransmit passed", "source": "userspace/system_apps/net_reno_test/src/main.rs"},
+    {"marker": "[NETD] IPv4 static conflict 192.0.2.12", "source": "userspace/system_apps/netd/src/static_runtime.rs"},
+    {"marker": "[NET-RENO] complete", "source": "userspace/system_apps/net_reno_test/src/main.rs"},
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NET-RENO] FAIL",
+    "[NETD-FIXTURE]",
+    {"marker": "[USER-FAULT]", "after": "[INIT] start: PID 1 userspace service manager"}
+  ]
+}
+

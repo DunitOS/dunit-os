@@ -86,6 +86,26 @@ fn delayed_egress_replaces_retries_and_rejects_acknowledged_packets() {
 }
 
 #[test]
+fn pipelined_data_segments_keep_distinct_pending_slots() {
+    let mut client = new(A);
+    let remote = endpoint(B, PORT);
+    let id = client.connect(remote, 0).unwrap();
+    let syn = packet(&mut client, 0);
+    let local = syn.source;
+    let start = Segment::parse(local, remote, &syn.bytes).unwrap().sequence.wrapping_add(1);
+    dispatch(&mut client, &wire(remote, local, 500, start, SYN | ACK, b""), 1);
+    let _ack = packet(&mut client, 1);
+
+    let payload = [0x5au8; 2000];
+    assert_eq!(client.send(id, &payload), Ok(payload.len()));
+    let seg1 = packet(&mut client, 1);
+    let seg2 = packet(&mut client, 1);
+    assert!(!seg1.same_pending_slot(&seg2));
+    assert!(client.outbound_current(&seg1));
+    assert!(client.outbound_current(&seg2));
+}
+
+#[test]
 fn deferred_egress_starts_rto_and_rtt_at_the_actual_handoff() {
     let mut client = new(A);
     let remote = endpoint(B, PORT);

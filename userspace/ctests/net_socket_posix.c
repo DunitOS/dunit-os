@@ -5,6 +5,7 @@
 #include <dunit/syscall.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <spawn.h>
 #include <stdint.h>
@@ -215,6 +216,9 @@ static void check_blocking_options(void)
     opt_len = sizeof opt;
     check(getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &opt, &opt_len) == 0 && opt == IPPROTO_UDP,
           "SO_PROTOCOL");
+    opt = 1;
+    check(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof opt) == -1 &&
+          errno == ENOPROTOOPT, "reject TCP_NODELAY on UDP socket");
 
     struct timeval bad_tv = { .tv_sec = -1, .tv_usec = 0 };
     check(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &bad_tv, sizeof bad_tv) == -1 && errno == EDOM,
@@ -297,6 +301,16 @@ static void exercise_tcp(void)
         chunks++;
     }
     check(received == sizeof tcp_reply - 1 && chunks > 1, "TCP partial reads and EOF");
+    int nodelay = 0;
+    socklen_t nlen = sizeof nodelay;
+    check(getsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, &nlen) == 0 && nodelay == 1,
+          "TCP_NODELAY default on");
+    nodelay = 0;
+    check(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof nodelay) == -1 &&
+          errno == ENOPROTOOPT, "TCP_NODELAY disable rejected");
+    nodelay = 1;
+    check(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof nodelay) == 0,
+          "TCP_NODELAY enable");
     check(shutdown(fd, SHUT_WR) == 0, "TCP blocking shutdown");
     check(close(fd) == 0, "close TCP descriptor");
     puts("[POSIX-SOCKET] TCP connect, partial I/O, endpoints and EOF passed");
