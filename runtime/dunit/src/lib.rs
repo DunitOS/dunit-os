@@ -6,6 +6,7 @@ pub mod args;
 pub mod display;
 #[cfg(feature = "gui")]
 pub mod canvas;
+pub mod cert;
 pub mod env;
 mod error;
 pub mod event;
@@ -16,6 +17,7 @@ pub mod io;
 pub mod net;
 pub mod process;
 pub mod pty;
+pub mod rand;
 pub mod system;
 pub mod terminal;
 pub mod sync;

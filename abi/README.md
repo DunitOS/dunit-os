@@ -347,12 +347,21 @@ The equivalent checked codecs live in [`abi/socket`](socket).
 The [N4 design](../docs/network/application-sockets-proposal.md)
 describes the owner, service and authorization boundaries.
 
+## Kernel cryptographic entropy
+
+`GetRandom` (`101`, `SYS_GET_RANDOM`) takes `(buf_ptr, len, flags)`. Only
+`flags == 0` or `flags == 1` (`GRND_NONBLOCK`) are accepted; invalid flags return
+`EINVAL`. Calls copy up to `4096` bytes per invocation from the kernel ChaCha20
+CSPRNG (seeded with `RDSEED`/`RDRAND` when available plus timing jitter, with
+fast-key-erasure rekeying after each call) and return the byte count written.
+
 ## Conformance and limits
 
 The freestanding `/app/c_hello` uses generated headers and its own crt0 to read
 stack argv/env/auxv, exercise raw write/exit and validate negative EBADF.
 `tools/m6_c_abi_markers.json` checks native execution through `qemu_test.py`.
-Musl/thread/fd suites validate higher adapters separately. Current support does
-not imply signals, cancellation, fork/image-exec, secure entropy, dynamic linking,
-full termios, POSIX ownership/accounts or a frozen previous-release fixture suite.
+Musl/thread/fd suites validate higher adapters separately. `GetRandom` (101)
+supplies native CSPRNG entropy; current support does not imply signals,
+cancellation, fork/image-exec, dynamic linking, full termios, POSIX
+ownership/accounts or a frozen previous-release fixture suite.
 See [current state](../docs/architecture/current-state.md#open-gates).

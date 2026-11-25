@@ -102,3 +102,4 @@ pub const SYSCALL_NET_SERVICE_REGISTER: usize = 97;
 pub const SYSCALL_NET_CONNECT_GRANT: usize = 98;
 pub const SYSCALL_NET_SOCKET_OPEN: usize = 99;
 pub const SYSCALL_NET_SOCKET_OP: usize = 100;
+pub const SYSCALL_GET_RANDOM: usize = 101;

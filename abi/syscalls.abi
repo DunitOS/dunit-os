@@ -108,3 +108,4 @@
 98	NetConnectGrant
 99	NetSocketOpen
 100	NetSocketOp
+101	GetRandom

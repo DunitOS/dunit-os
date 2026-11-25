@@ -13,6 +13,7 @@ pub mod clock;
 pub mod cpu;
 pub mod drivers;
 pub mod elf;
+pub mod entropy;
 pub mod fs;
 pub mod hal;
 pub mod handle;
@@ -842,6 +843,7 @@ pub extern "C" fn kernel_main(
     screen_log("[ .. ] Configuring interrupt handlers", false);
 
     clock::init_pit();
+    entropy::init();
     screen_log(if clock::is_high_resolution() {"[ OK ] Clocksource: HPET; timer events: PIT 100 Hz"} else {"[ OK ] Clocksource: PIT fallback (100 Hz)"}, false);
 
     if terminal_mode == 0 {

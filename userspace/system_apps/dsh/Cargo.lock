@@ -14,10 +14,19 @@ dependencies = [
 name = "dunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_cert_store",
  "dunit_http_core",
  "dunit_macros",
  "dunit_socket_abi",
+ "dunit_tls_core",
  "libdunit",
+]
+
+[[package]]
+name = "dunit_cert_store"
+version = "0.1.0"
+dependencies = [
+ "dunit_tls_core",
 ]
 
 [[package]]
@@ -47,6 +56,10 @@ version = "0.1.0"
 
 [[package]]
 name = "dunit_socket_abi"
+version = "0.1.0"
+
+[[package]]
+name = "dunit_tls_core"
 version = "0.1.0"
 
 [[package]]

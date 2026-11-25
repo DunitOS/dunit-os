@@ -125,6 +125,7 @@ pub enum Syscall {
     NetConnectGrant = 98,
     NetSocketOpen = 99,
     NetSocketOp = 100,
+    GetRandom = 101,
 }
 
 impl Syscall {
@@ -231,6 +232,7 @@ impl Syscall {
             98 => Some(Syscall::NetConnectGrant),
             99 => Some(Syscall::NetSocketOpen),
             100 => Some(Syscall::NetSocketOp),
+            101 => Some(Syscall::GetRandom),
             _ => None,
         }
     }
@@ -567,6 +569,7 @@ pub extern "C" fn syscall_handler(
         Syscall::NetSocketOp => net_socket::operation(
             arg0, arg1, arg2 as *const u8, arg3 as usize, arg4 as *mut u8, arg5 as usize,
         ),
+        Syscall::GetRandom => sys_get_random(arg0 as *mut u8, arg1 as usize, arg2 as u64),
         Syscall::NetQueueOpen => packet::open(arg0, arg1 as *const u8, arg2 as usize),
         Syscall::HandleRead => sys_handle_read(arg0 as u32, arg1 as *mut u8, arg2 as usize),
         Syscall::HandleWrite => sys_handle_write(arg0 as u32, arg1 as *const u8, arg2 as usize),
@@ -1752,6 +1755,29 @@ fn sys_clock_gettime(clock_id: u64, out: *mut u64) -> i64 {
         Ok(()) => 0,
         Err(error) => error,
     }
+}
+
+fn sys_get_random(buf: *mut u8, len: usize, flags: u64) -> i64 {
+    if flags & !1 != 0 {
+        return EINVAL;
+    }
+    if len == 0 {
+        return 0;
+    }
+    let count = len.min(4096);
+    if let Err(error) = validate_user_range(buf as u64, count) {
+        return error;
+    }
+    let mut tmp = alloc::vec![0u8; count];
+    crate::entropy::fill_bytes(&mut tmp);
+    let res = match copy_buffer_to_user(buf, &tmp) {
+        Ok(()) => count as i64,
+        Err(error) => error,
+    };
+    for b in &mut tmp {
+        unsafe { core::ptr::write_volatile(b, 0) };
+    }
+    res
 }
 
 fn open_flags_from_u32(flags: u32) -> Result<crate::fs::vfs::OpenFlags, i64> {

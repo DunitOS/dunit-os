@@ -6,12 +6,14 @@ version = 4
 name = "dunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_cert_store",
  "dunit_component",
  "dunit_http_core",
  "dunit_macros",
  "dunit_render",
  "dunit_socket_abi",
  "dunit_text",
+ "dunit_tls_core",
  "dunit_transfer",
  "dwm_settings",
  "gui_protocol_v1",
@@ -24,6 +26,13 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "toml",
+]
+
+[[package]]
+name = "dunit_cert_store"
+version = "0.1.0"
+dependencies = [
+ "dunit_tls_core",
 ]
 
 [[package]]
@@ -83,6 +92,10 @@ version = "0.1.0"
 
 [[package]]
 name = "dunit_text"
+version = "0.1.0"
+
+[[package]]
+name = "dunit_tls_core"
 version = "0.1.0"
 
 [[package]]

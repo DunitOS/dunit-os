@@ -47,7 +47,7 @@ impl Transport for FakeConn {
 
 struct FakeConnector {
     queue: VecDeque<FakeConn>,
-    dialed: Vec<(String, u16)>,
+    dialed: Vec<(Scheme, String, u16)>,
 }
 
 impl FakeConnector {
@@ -61,8 +61,8 @@ impl FakeConnector {
 
 impl Connector for FakeConnector {
     type Conn = FakeConn;
-    fn connect(&mut self, host: &str, port: u16) -> Result<Self::Conn, HttpError> {
-        self.dialed.push((host.to_string(), port));
+    fn connect(&mut self, scheme: Scheme, host: &str, port: u16) -> Result<Self::Conn, HttpError> {
+        self.dialed.push((scheme, host.to_string(), port));
         self.queue.pop_front().ok_or(HttpError::Transport(-111))
     }
 }
@@ -70,6 +70,7 @@ impl Connector for FakeConnector {
 #[test]
 fn url_parsing_and_location_resolution() {
     let url = Url::parse("HTTP://Example.COM:8080/a/b/index.html?x=1#frag").unwrap();
+    assert_eq!(url.scheme, Scheme::Http);
     assert_eq!(url.host, "example.com");
     assert_eq!(url.port, 8080);
     assert_eq!(url.path, "/a/b/index.html?x=1");
@@ -81,9 +82,16 @@ fn url_parsing_and_location_resolution() {
     );
     assert_eq!(url.resolve_location("/root").unwrap().path, "/root");
     assert_eq!(url.resolve_location("?q=new").unwrap().path, "/a/b/index.html?q=new");
+    let https = url.resolve_location("https://secure.example/ok").unwrap();
+    assert_eq!(https.scheme, Scheme::Https);
+    assert_eq!(https.port, 443);
     assert_eq!(
-        url.resolve_location("https://secure.example/").unwrap_err(),
-        HttpError::UnsupportedScheme
+        https.resolve_location("http://downgrade.example/"),
+        Err(HttpError::UnsupportedScheme)
+    );
+    assert_eq!(
+        Url::parse("ftp://files.example/"),
+        Err(HttpError::UnsupportedScheme)
     );
     assert_eq!(
         Url::parse("http://user:pass@host/"),

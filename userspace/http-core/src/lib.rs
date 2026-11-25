@@ -37,6 +37,39 @@ impl Method {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scheme {
+    Http,
+    Https,
+}
+
+impl Scheme {
+    pub const fn default_port(self) -> u16 {
+        match self {
+            Self::Http => 80,
+            Self::Https => 443,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Https => "https",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TlsFailure {
+    InvalidCertificate,
+    CertificateExpired,
+    UntrustedRoot,
+    BadSignature,
+    ClockUnavailable,
+    EntropyUnavailable,
+    Handshake,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HttpError {
     InvalidUrl,
@@ -48,6 +81,7 @@ pub enum HttpError {
     TooManyRedirects,
     Decompress,
     UnsupportedEncoding,
+    Tls(TlsFailure),
     Transport(isize),
 }
 
@@ -63,6 +97,7 @@ impl fmt::Display for HttpError {
             Self::TooManyRedirects => f.write_str("too many HTTP redirects"),
             Self::Decompress => f.write_str("HTTP body decompression failed"),
             Self::UnsupportedEncoding => f.write_str("unsupported Content-Encoding"),
+            Self::Tls(reason) => write!(f, "TLS error ({reason:?})"),
             Self::Transport(code) => write!(f, "transport error ({code})"),
         }
     }
@@ -95,6 +130,7 @@ impl Default for Limits {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Url {
+    pub scheme: Scheme,
     pub host: String,
     pub port: u16,
     pub path: String,
@@ -105,8 +141,10 @@ impl Url {
         if raw.is_empty() || has_ctl(raw) {
             return Err(HttpError::InvalidUrl);
         }
-        let rest = if let Some(after) = strip_scheme(raw, "http://") {
-            after
+        let (scheme, rest) = if let Some(after) = strip_scheme(raw, "https://") {
+            (Scheme::Https, after)
+        } else if let Some(after) = strip_scheme(raw, "http://") {
+            (Scheme::Http, after)
         } else if raw.contains("://") {
             return Err(HttpError::UnsupportedScheme);
         } else {
@@ -130,7 +168,7 @@ impl Url {
             }
             (h, port)
         } else {
-            (authority, 80)
+            (authority, scheme.default_port())
         };
         if !valid_host(host) {
             return Err(HttpError::InvalidUrl);
@@ -146,6 +184,7 @@ impl Url {
             return Err(HttpError::InvalidUrl);
         }
         Ok(Self {
+            scheme,
             host: host.to_ascii_lowercase(),
             port,
             path,
@@ -153,7 +192,7 @@ impl Url {
     }
 
     pub fn host_header(&self) -> String {
-        if self.port == 80 {
+        if self.port == self.scheme.default_port() {
             self.host.clone()
         } else {
             format!("{}:{}", self.host, self.port)
@@ -166,10 +205,14 @@ impl Url {
             return Err(HttpError::InvalidResponse);
         }
         if loc.contains("://") {
-            return Self::parse(loc);
+            let next = Self::parse(loc)?;
+            if self.scheme == Scheme::Https && next.scheme == Scheme::Http {
+                return Err(HttpError::UnsupportedScheme);
+            }
+            return Ok(next);
         }
         if loc.starts_with("//") {
-            return Self::parse(&format!("http:{loc}"));
+            return Self::parse(&format!("{}:{loc}", self.scheme.as_str()));
         }
         let no_frag = loc.split('#').next().unwrap_or(loc);
         let path = if no_frag.starts_with('/') {
@@ -189,6 +232,7 @@ impl Url {
             return Err(HttpError::InvalidResponse);
         }
         Ok(Self {
+            scheme: self.scheme,
             host: self.host.clone(),
             port: self.port,
             path,
@@ -333,7 +377,7 @@ pub trait Transport {
 
 pub trait Connector {
     type Conn: Transport;
-    fn connect(&mut self, host: &str, port: u16) -> Result<Self::Conn, HttpError>;
+    fn connect(&mut self, scheme: Scheme, host: &str, port: u16) -> Result<Self::Conn, HttpError>;
 }
 
 struct BufferedConn<T> {
@@ -455,6 +499,7 @@ impl<T: Transport> BufferedConn<T> {
 }
 
 struct PooledConn<T> {
+    scheme: Scheme,
     host: String,
     port: u16,
     conn: T,
@@ -541,11 +586,11 @@ impl<C: Connector> Session<C> {
         Err(HttpError::TooManyRedirects)
     }
 
-    fn take_from_pool(&mut self, host: &str, port: u16) -> Option<(C::Conn, Vec<u8>)> {
+    fn take_from_pool(&mut self, scheme: Scheme, host: &str, port: u16) -> Option<(C::Conn, Vec<u8>)> {
         let idx = self
             .pool
             .iter()
-            .position(|entry| entry.host == host && entry.port == port)?;
+            .position(|entry| entry.scheme == scheme && entry.host == host && entry.port == port)?;
         let entry = self.pool.remove(idx)?;
         Some((entry.conn, entry.leftover))
     }
@@ -568,7 +613,7 @@ impl<C: Connector> Session<C> {
         body: &[u8],
         keep_alive: bool,
     ) -> Result<(Response, Option<PooledConn<C::Conn>>), HttpError> {
-        let mut from_pool = self.take_from_pool(&url.host, url.port);
+        let mut from_pool = self.take_from_pool(url.scheme, &url.host, url.port);
         loop {
             let reused = from_pool.is_some();
             let (mut conn, leftover) = match from_pool.take() {
@@ -577,7 +622,7 @@ impl<C: Connector> Session<C> {
                     pair
                 }
                 None => {
-                    let conn = self.connector.connect(&url.host, url.port)?;
+                    let conn = self.connector.connect(url.scheme, &url.host, url.port)?;
                     self.stats.opened += 1;
                     (conn, Vec::new())
                 }
@@ -596,6 +641,7 @@ impl<C: Connector> Session<C> {
                     let keep = if keep_alive && reusable {
                         let (inner, rest) = reader.take_leftover();
                         Some(PooledConn {
+                            scheme: url.scheme,
                             host: url.host.clone(),
                             port: url.port,
                             conn: inner,

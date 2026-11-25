@@ -1,0 +1,42 @@
+{
+  "description": "Kernel GetRandom CSPRNG, versioned read-only cert store, and real OpenSSL TLS 1.3 HTTPS client over E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-https",
+    "net_https": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {
+        "wait_marker": "[NET-HTTPS] complete",
+        "timeout": 90
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "timeout": 60
+      }
+    ]
+  },
+  "required": [
+    "[ENTROPY] csprng=chacha20",
+    "[NETD] IPv4 static bound 192.0.2.12",
+    "[NET-HTTPS] kernel GetRandom CSPRNG verified",
+    "[NET-HTTPS] versioned cert store rotation and rollback passed",
+    "[NET-HTTPS] TLS 1.3 OpenSSL HTTPS chunked, gzip and keep-alive passed",
+    "[NET-HTTPS] certificate SAN, expiry and untrusted-CA rejections passed",
+    "[NETD] IPv4 static conflict 192.0.2.12",
+    "[NET-HTTPS] complete",
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NET-HTTPS] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[INIT] start: PID 1 userspace service manager"
+    }
+  ]
+}
+

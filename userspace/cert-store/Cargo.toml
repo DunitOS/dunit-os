@@ -1,0 +1,8 @@
+[package]
+name = "dunit_cert_store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit_tls_core = { path = "../tls-core" }
+

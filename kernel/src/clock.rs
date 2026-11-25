@@ -40,7 +40,8 @@ pub fn init_pit() {
 /// Called exactly once for each IRQ0, regardless of whether a task is active.
 #[inline]
 pub fn on_tick() {
-    MONOTONIC_TICKS.fetch_add(1, Ordering::Relaxed);
+    let ticks = MONOTONIC_TICKS.fetch_add(1, Ordering::Relaxed);
+    crate::entropy::mix_irq_jitter(ticks);
 }
 
 #[inline]

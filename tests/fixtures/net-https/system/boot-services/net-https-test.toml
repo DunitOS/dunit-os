@@ -1,0 +1,6 @@
+name = "net-https-test"
+exec = "/system/libexec/net_https_test"
+net_connect = 3
+restart = "never"
+critical = false
+

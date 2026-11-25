@@ -42,3 +42,14 @@ pub fn sleep(duration: Duration) -> Result<()> {
         .map(|_| ())
         .map_err(Error)
 }
+
+/// Bootloader UTC seconds plus monotonic uptime; returns EOPNOTSUPP when boot UTC is unavailable.
+pub fn realtime_secs() -> Result<u64> {
+    let mut time = [0u64; 2];
+    checked(libdunit::syscall2(
+        libdunit::SYSCALL_CLOCK_GET_TIME,
+        0,
+        time.as_mut_ptr() as usize,
+    ))?;
+    Ok(time[0])
+}

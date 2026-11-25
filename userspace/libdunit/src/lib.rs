@@ -1021,6 +1021,15 @@ pub fn net_socket_op(fd: usize, op: u16, input: &[u8], output: &mut [u8]) -> isi
     )
 }
 
+pub fn get_random(buf: &mut [u8], flags: usize) -> isize {
+    syscall3(
+        SYSCALL_GET_RANDOM,
+        buf.as_mut_ptr() as usize,
+        buf.len(),
+        flags,
+    )
+}
+
 /// Закрывает хэндл. Возвращает 0 или отрицательный errno.
 pub fn handle_close(handle: u32) -> isize {
     syscall1(SYSCALL_HANDLE_CLOSE, handle as usize)

@@ -719,10 +719,9 @@ working semantics. N5 may use host reference mocks before native integration.
 
 ### N6 — TLS, HTTP and browser network service
 
-- [ ] Supply secure entropy and an updateable read-only certificate store with
-  version/rotation/rollback.
+- [x] Supply secure entropy (`GetRandom` kernel ChaCha20 CSPRNG with hardware/jitter seeding) and an updateable read-only certificate store (`DCRT` v1 with SHA-256 integrity, version rotation, and rollback).
 - [x] Provide valid-boot-UTC realtime; missing boot UTC returns an error.
-- [ ] Port established TLS/crypto rather than inventing cryptography.
+- [x] Implement RFC 8446 TLS 1.3 client verification (X25519, ChaCha20-Poly1305, AES-128-GCM, ECDSA P-256, RSA-PSS/PKCS1, X.509 SAN + boot-UTC expiry) verified against OpenSSL over E1000.
 - [x] Implement bounded HTTP/1.1 redirects/chunking/content-length/compression/reuse over native TCP/DNS and verify on E1000; HTTP/2 follows validated TLS/TCP.
 - [ ] Isolate browser network origin/proxy/download policy, quotas/trust and bounded
   atomic cache/cookies in a sandboxed service with IPC/shared-buffer response bodies.
