@@ -516,11 +516,26 @@ impl Table {
             .map(|(slot, _)| slot)
     }
 
-    fn free_stream(&self) -> Result<usize> {
-        self.streams
+    fn free_stream(&mut self) -> Result<usize> {
+        if let Some(slot) = self.streams.iter().position(Option::is_none) {
+            return Ok(slot);
+        }
+        if let Some(slot) = self
+            .streams
             .iter()
-            .position(Option::is_none)
-            .ok_or(Error::Capacity.into())
+            .enumerate()
+            .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
+            .filter(|(_, s)| {
+                matches!(s.owner, Owner::Detached { .. })
+                    && matches!(s.connection.state(), State::TimeWait | State::Closed)
+            })
+            .min_by_key(|(_, s)| s.generation)
+            .map(|(i, _)| i)
+        {
+            self.streams[slot] = None;
+            return Ok(slot);
+        }
+        Err(Error::Capacity.into())
     }
 
     pub fn port_in_use(&self, port: u16) -> bool {

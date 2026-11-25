@@ -6,6 +6,7 @@ version = 4
 name = "dunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_browser_net",
  "dunit_cert_store",
  "dunit_http_core",
  "dunit_macros",
@@ -17,6 +18,14 @@ dependencies = [
 [[package]]
 name = "dunit-net-core"
 version = "0.1.0"
+
+[[package]]
+name = "dunit_browser_net"
+version = "0.1.0"
+dependencies = [
+ "dunit_http_core",
+ "dunit_tls_core",
+]
 
 [[package]]
 name = "dunit_cert_store"

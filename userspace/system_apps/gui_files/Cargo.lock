@@ -42,6 +42,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 name = "dunit"
 version = "0.1.0"
 dependencies = [
+ "dunit_browser_net",
  "dunit_cert_store",
  "dunit_component",
  "dunit_http_core",
@@ -62,6 +63,14 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "toml",
+]
+
+[[package]]
+name = "dunit_browser_net"
+version = "0.1.0"
+dependencies = [
+ "dunit_http_core",
+ "dunit_tls_core",
 ]
 
 [[package]]

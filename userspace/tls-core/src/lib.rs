@@ -160,6 +160,7 @@ impl TrafficKey {
 
 pub struct TlsClient<S: ByteStream> {
     stream: S,
+    suite: Suite,
     rx_key: TrafficKey,
     tx_key: TrafficKey,
     rx_buf: VecDeque<u8>,
@@ -257,12 +258,20 @@ impl<S: ByteStream> TlsClient<S> {
 
         Ok(Self {
             stream,
+            suite,
             rx_key: TrafficKey::from_secret(suite, s_ap_secret),
             tx_key: TrafficKey::from_secret(suite, c_ap_secret),
             rx_buf: VecDeque::new(),
             hs_buf,
             closed: false,
         })
+    }
+
+    pub fn cipher_suite_name(&self) -> &'static str {
+        match self.suite {
+            Suite::ChaCha20Poly1305 => "TLS_CHACHA20_POLY1305_SHA256",
+            Suite::Aes128Gcm => "TLS_AES_128_GCM_SHA256",
+        }
     }
 
     pub fn read(&mut self, out: &mut [u8]) -> Result<usize, TlsError> {

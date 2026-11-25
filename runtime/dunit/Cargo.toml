@@ -8,6 +8,7 @@ dunit_render = { path = "../dunit-render", optional = true }
 dunit_text = { path = "../dunit-text", optional = true }
 dunit_macros = { path = "../dunit-macros" }
 dunit_http_core = { path = "../../userspace/http-core" }
+dunit_browser_net = { path = "../../userspace/browser-net" }
 dunit_tls_core = { path = "../../userspace/tls-core" }
 dunit_cert_store = { path = "../../userspace/cert-store" }
 dunit_socket_abi = { path = "../../abi/socket" }

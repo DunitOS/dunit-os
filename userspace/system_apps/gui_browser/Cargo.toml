@@ -1,0 +1,19 @@
+[package]
+name = "gui_browser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit", features = ["gui"] }
+dunit_browser_net = { path = "../../browser-net" }
+libdunit = { path = "../../libdunit" }
+
+[[bin]]
+name = "gui_browser"
+path = "src/main.rs"
+
+[profile.release]
+lto = "fat"
+opt-level = "z"
+codegen-units = 1
+

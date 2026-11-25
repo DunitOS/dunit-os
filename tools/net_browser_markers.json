@@ -1,0 +1,55 @@
+{
+  "description": "Isolated Browser Network Service (origin/proxy/download/quota policy, SHA-256 atomic cache/cookies, IPC/SHM bodies), renderer socket denial, GUI Response Viewer, adversarial TLS/HTTP rejections, and service crash/restart.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-browser",
+    "net_browser": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {
+        "wait_marker": "[NET-BROWSER] complete",
+        "timeout": 110
+      },
+      {
+        "wait_marker": "[GUI-BROWSER] surface presented OK",
+        "timeout": 60
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "timeout": 60
+      }
+    ]
+  },
+  "required": [
+    "[INIT] browser-netd: registered",
+    "[BROWSER-NETD] ready pid=",
+    "[BROWSER-RENDERER] ambient sockets denied OK",
+    "[GUI-BROWSER] HTTPS shared-buffer response rendered",
+    "[GUI-BROWSER] surface presented OK",
+    "[NET-BROWSER] client ambient socket denial passed",
+    "[NET-BROWSER] origin, private-IP and method policy passed",
+    "[NET-BROWSER] HTTPS cache, cookies, download policy and CONNECT proxy passed",
+    "[NET-BROWSER] adversarial certs, redirect loop, truncated framing and bomb rejected",
+    "[NET-BROWSER] corrupt cache detection and repair passed",
+    "[BROWSER-NETD] simulated crash exit=42",
+    "[INIT] browser-netd: restart (1/3)",
+    "[NET-BROWSER] service crash recovery and persisted state passed",
+    "[NET-BROWSER] complete",
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[INIT] browser-netd: restart budget exhausted",
+    "[BROWSER-RENDERER] FAIL",
+    "[GUI-BROWSER] FAIL",
+    "[NET-BROWSER] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[INIT] start: PID 1 userspace service manager"
+    }
+  ]
+}
+

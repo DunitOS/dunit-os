@@ -723,9 +723,9 @@ working semantics. N5 may use host reference mocks before native integration.
 - [x] Provide valid-boot-UTC realtime; missing boot UTC returns an error.
 - [x] Implement RFC 8446 TLS 1.3 client verification (X25519, ChaCha20-Poly1305, AES-128-GCM, ECDSA P-256, RSA-PSS/PKCS1, X.509 SAN + boot-UTC expiry) verified against OpenSSL over E1000.
 - [x] Implement bounded HTTP/1.1 redirects/chunking/content-length/compression/reuse over native TCP/DNS and verify on E1000; HTTP/2 follows validated TLS/TCP.
-- [ ] Isolate browser network origin/proxy/download policy, quotas/trust and bounded
-  atomic cache/cookies in a sandboxed service with IPC/shared-buffer response bodies.
-- [ ] Deny ambient sockets to renderers/content; browser UI uses ordinary GUI rights.
+- [x] Isolate browser network origin/proxy/download policy, quotas/trust and bounded
+  atomic cache/cookies in a sandboxed service with IPC/shared-buffer response bodies (`browser_netd` + `dunit_browser_net` `DNWC`/`DNCK`/`DBNT`).
+- [x] Deny ambient sockets to renderers/content; browser UI (`gui_browser`) uses ordinary GUI rights and receives HTTPS bodies over shared frames.
 
 Acceptance: deterministic local HTTPS/test-root fetch then GUI response viewer;
 expired/wrong-host/invalid certificates, redirect loops, truncated framing,

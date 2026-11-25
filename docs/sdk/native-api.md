@@ -45,6 +45,7 @@ Use one generated entry per binary. A dependency must be named `dunit`.
 | `io` | `Read`, `Write`, `BufReader`, stdin/stdout/stderr, formatted output |
 | `net` | `Ipv4Addr`, `SocketAddrV4`, `NetGrant`, `TcpStream` (`Read`/`Write`, `connect_host`), `TcpListener` (`bind`, `accept`, `try_accept`), `UdpSocket` (`open`, `bind`), `resolve_ipv4` with blocking/nonblocking modes and timeouts |
 | `http` | Bounded HTTP/1.1 & HTTPS `Client` (`get`, `request`, `Method`, `Request`, `Response`, `Limits`, TLS 1.3 via `dunit::rand` and `dunit::cert`) with redirects, `chunked` framing, `gzip`/`deflate` inflation and keep-alive reuse |
+| `browser` | Sandboxed `BrowserClient` (`fetch`, `wait_ready`, `wait_restart`, `EndpointInfo`) talking to isolated `browser_netd` via kernel IPC + read-only `SharedFrames` (`DBNT` v1) without ambient socket capabilities |
 | `cert` | Versioned read-only X.509 `TrustBundle` / `ManagedStore` (`DCRT` SHA-256 verification, rotation, rollback, PEM import) |
 | `rand` | Kernel ChaCha20 CSPRNG (`fill_bytes`, `bytes`, `next_u64`) backed by `SYSCALL_GET_RANDOM` |
 | `fs` | Owned `File`, `OpenOptions`, read/write helpers, metadata, seek, sync, rename/remove, directories and cwd |

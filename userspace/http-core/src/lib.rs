@@ -537,6 +537,10 @@ impl<C: Connector> Session<C> {
         self.stats
     }
 
+    pub fn connector(&self) -> &C {
+        &self.connector
+    }
+
     pub fn idle_connections(&self) -> usize {
         self.pool.len()
     }

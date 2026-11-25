@@ -44,6 +44,16 @@ impl Child {
     pub fn spawn_with_env(path: &str, args: &[&str], env: &[&str]) -> Result<Self> {
         Self::from_spawned(libdunit::process::spawn_args_env(path, args, env))
     }
+    pub fn spawn_with_actions(
+        path: &str,
+        args: &[&str],
+        env: &[&str],
+        actions: &[libdunit::process::SpawnAction],
+    ) -> Result<Self> {
+        Self::from_spawned(libdunit::process::spawn_args_env_actions(
+            path, args, env, actions,
+        ))
+    }
     pub(crate) fn from_spawned(result: isize) -> Result<Self> {
         let pid = checked(result)?;
         if pid == 0 {

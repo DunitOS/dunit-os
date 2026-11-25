@@ -1,0 +1,9 @@
+[package]
+name = "dunit_browser_net"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit_http_core = { path = "../http-core" }
+dunit_tls_core = { path = "../tls-core" }
+

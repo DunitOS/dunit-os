@@ -56,6 +56,61 @@ pub fn resolve_program(name: &str) -> Result<String, isize> {
     Err(error)
 }
 
+pub enum SpawnAction {
+    Close(u32),
+    Dup { src: u32, dst: u32 },
+}
+
+const SPAWN_EXTENDED: usize = 1usize << 63;
+
+pub fn spawn_args_env_actions(
+    path: &str,
+    argv: &[&str],
+    extra: &[&str],
+    actions: &[SpawnAction],
+) -> isize {
+    if argv.is_empty()
+        || argv.iter().chain(extra.iter()).any(|s| s.as_bytes().contains(&0))
+        || extra
+            .iter()
+            .any(|value| !value.split_once('=').is_some_and(|(key, _)| !key.is_empty()))
+    {
+        return crate::EINVAL;
+    }
+    let resolved = match resolve_program(path) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
+    let env = environment(extra);
+    let mut block = Vec::new();
+    for value in argv.iter().copied().chain(env.iter().map(String::as_str)) {
+        block.extend_from_slice(value.as_bytes());
+        block.push(0);
+    }
+    let strings_end = block.len();
+    for action in actions {
+        let (tag, fd, src) = match *action {
+            SpawnAction::Close(fd) => (1u32, fd, 0u32),
+            SpawnAction::Dup { src, dst } => (2u32, dst, src),
+        };
+        block.extend_from_slice(&tag.to_le_bytes());
+        block.extend_from_slice(&fd.to_le_bytes());
+        block.extend_from_slice(&src.to_le_bytes());
+        block.extend_from_slice(&0u32.to_le_bytes());
+        block.extend_from_slice(&0u32.to_le_bytes());
+        block.extend_from_slice(&0u32.to_le_bytes());
+    }
+    crate::syscall6(
+        crate::SYSCALL_SPAWN_ARGS,
+        resolved.as_ptr() as usize,
+        resolved.len(),
+        block.as_ptr() as usize,
+        block.len() | SPAWN_EXTENDED,
+        argv.len(),
+        strings_end,
+    )
+}
+
 /// Spawn with explicit argv and inherited environment using the existing
 /// SpawnArgs transaction (no file actions). Strings remain distinct; no shell
 /// parsing occurs. Kernel limits and errors are preserved. This syscall creates

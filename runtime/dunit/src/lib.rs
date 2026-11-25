@@ -3,6 +3,7 @@
 #![no_std]
 extern crate alloc;
 pub mod args;
+pub mod browser;
 pub mod display;
 #[cfg(feature = "gui")]
 pub mod canvas;

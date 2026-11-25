@@ -1,0 +1,12 @@
+[package]
+name = "browser_netd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+dunit_browser_net = { path = "../../browser-net" }
+dunit_http_core = { path = "../../http-core" }
+dunit_tls_core = { path = "../../tls-core" }
+libdunit = { path = "../../libdunit" }
+

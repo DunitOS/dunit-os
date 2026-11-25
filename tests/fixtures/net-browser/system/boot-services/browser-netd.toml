@@ -1,0 +1,7 @@
+name = "browser-netd"
+exec = "/system/libexec/browser_netd"
+net_connect = 3
+restart = "on-failure"
+critical = false
+max_restarts = 3
+

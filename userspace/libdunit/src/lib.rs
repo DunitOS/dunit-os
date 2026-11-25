@@ -1030,6 +1030,10 @@ pub fn get_random(buf: &mut [u8], flags: usize) -> isize {
     )
 }
 
+pub fn pipe(fds: &mut [u32; 2], flags: usize) -> isize {
+    syscall2(SYSCALL_PIPE, fds.as_mut_ptr() as usize, flags)
+}
+
 /// Закрывает хэндл. Возвращает 0 или отрицательный errno.
 pub fn handle_close(handle: u32) -> isize {
     syscall1(SYSCALL_HANDLE_CLOSE, handle as usize)

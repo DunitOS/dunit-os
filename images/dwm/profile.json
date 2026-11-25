@@ -12,6 +12,7 @@
     "gui_calc",
     "gui_settings",
     "gui_stat",
+    "gui_browser",
     "dsh",
     "dufetch",
     "calc",
