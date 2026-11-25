@@ -617,7 +617,8 @@ def run(args: argparse.Namespace) -> RunResult:
     net_listen = bool(getattr(args, "net_listen", False) or run_defaults.get("net_listen"))
     net_listen_posix = bool(getattr(args, "net_listen_posix", False) or run_defaults.get("net_listen_posix"))
     net_reno = bool(getattr(args, "net_reno", False) or run_defaults.get("net_reno"))
-    peers = sum((net_test, net_live, net_dhcp, net_static, net_socket, net_dns, net_dns_posix, net_listen, net_listen_posix, net_reno))
+    net_http = bool(getattr(args, "net_http", False) or run_defaults.get("net_http"))
+    peers = sum((net_test, net_live, net_dhcp, net_static, net_socket, net_dns, net_dns_posix, net_listen, net_listen_posix, net_reno, net_http))
     if peers > 1:
         raise ValueError("choose one network test peer")
     if peers and (args.interactive or args.variant or args.disk or args.build_disk):
@@ -702,7 +703,10 @@ def run(args: argparse.Namespace) -> RunResult:
                arg.startswith(("-nic=", "-netdev=", "-net=")) or
                arg.startswith("e1000,") for arg in extra_args):
             raise ValueError("network peer owns its reference NIC and backend")
-        if net_reno:
+        if net_http:
+            from net_http_transport import NetHttpPeer
+            peer = NetHttpPeer(workdir)
+        elif net_reno:
             from net_reno_transport import NetRenoPeer
             peer = NetRenoPeer(workdir)
         elif net_listen or net_listen_posix:
@@ -852,7 +856,7 @@ def run(args: argparse.Namespace) -> RunResult:
         # Boot-scene waits can refer to this VM's startup output. Command waits
         # above remain scoped to their own launch.
         # The per-command budget applies only to command_actions above.
-        if (net_dhcp or net_static or net_socket or net_dns or net_dns_posix or net_listen or net_listen_posix or net_reno) and not peer.wait_complete(remaining()):
+        if (net_dhcp or net_static or net_socket or net_dns or net_dns_posix or net_listen or net_listen_posix or net_reno or net_http) and not peer.wait_complete(remaining()):
             raise RuntimeError("IPv4 peer did not complete the wire exchange")
         run_command_actions(qmp, serial, run_defaults.get("actions", []),
                             0, hard_deadline)
@@ -1046,6 +1050,8 @@ def main() -> int:
                         help="verify C POSIX bind/listen/accept over isolated E1000")
     parser.add_argument("--net-reno", action="store_true",
                         help="verify TCP Reno slow start and fast retransmit over isolated E1000")
+    parser.add_argument("--net-http", action="store_true",
+                        help="verify bounded HTTP/1.1 client over isolated E1000")
     parser.add_argument("--qmp-transport", choices=("unix", "stdio"), default="unix",
                         help="QMP control channel; stdio uses local pipes without sockets")
     parser.add_argument(

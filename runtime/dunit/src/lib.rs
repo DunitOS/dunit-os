@@ -11,6 +11,7 @@ mod error;
 pub mod event;
 pub mod fs;
 pub mod fsck;
+pub mod http;
 pub mod io;
 pub mod net;
 pub mod process;

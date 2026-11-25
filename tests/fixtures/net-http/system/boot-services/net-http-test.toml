@@ -1,0 +1,6 @@
+name = "net-http-test"
+exec = "/system/libexec/net_http_test"
+net_connect = 3
+restart = "never"
+critical = false
+

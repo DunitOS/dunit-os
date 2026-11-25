@@ -1,0 +1,9 @@
+[package]
+name = "net_http_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+libdunit = { path = "../../libdunit" }
+

@@ -1,0 +1,39 @@
+{
+  "description": "Bounded HTTP/1.1 client with DNS, keep-alive reuse, chunked framing, gzip, redirects and revocation over stock netd + E1000.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-http",
+    "net_http": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {
+        "wait_marker": "[NET-HTTP] complete",
+        "timeout": 90
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "timeout": 60
+      }
+    ]
+  },
+  "required": [
+    "[NETD] IPv4 static bound 192.0.2.12",
+    "[NET-HTTP] keep-alive, chunked, gzip and redirects passed",
+    "[NET-HTTP] bounded rejection checks passed",
+    "[NETD] IPv4 static conflict 192.0.2.12",
+    "[NET-HTTP] complete",
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: restart",
+    "[INIT] netd: faulted",
+    "[NET-HTTP] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[INIT] start: PID 1 userspace service manager"
+    }
+  ]
+}
+

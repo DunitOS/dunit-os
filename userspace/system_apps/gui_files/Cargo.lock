@@ -43,6 +43,7 @@ name = "dunit"
 version = "0.1.0"
 dependencies = [
  "dunit_component",
+ "dunit_http_core",
  "dunit_macros",
  "dunit_render",
  "dunit_socket_abi",
@@ -74,6 +75,10 @@ dependencies = [
 
 [[package]]
 name = "dunit_file_cap_abi"
+version = "0.1.0"
+
+[[package]]
+name = "dunit_http_core"
 version = "0.1.0"
 
 [[package]]

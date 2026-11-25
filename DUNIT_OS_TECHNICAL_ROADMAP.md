@@ -723,8 +723,7 @@ working semantics. N5 may use host reference mocks before native integration.
   version/rotation/rollback.
 - [x] Provide valid-boot-UTC realtime; missing boot UTC returns an error.
 - [ ] Port established TLS/crypto rather than inventing cryptography.
-- [ ] Implement bounded HTTP/1.1 redirects/chunking/content-length/compression/reuse;
-  HTTP/2 follows validated TLS/TCP.
+- [x] Implement bounded HTTP/1.1 redirects/chunking/content-length/compression/reuse over native TCP/DNS and verify on E1000; HTTP/2 follows validated TLS/TCP.
 - [ ] Isolate browser network origin/proxy/download policy, quotas/trust and bounded
   atomic cache/cookies in a sandboxed service with IPC/shared-buffer response bodies.
 - [ ] Deny ambient sockets to renderers/content; browser UI uses ordinary GUI rights.

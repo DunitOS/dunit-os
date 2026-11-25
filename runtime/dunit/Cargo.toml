@@ -7,6 +7,7 @@ edition = "2021"
 dunit_render = { path = "../dunit-render", optional = true }
 dunit_text = { path = "../dunit-text", optional = true }
 dunit_macros = { path = "../dunit-macros" }
+dunit_http_core = { path = "../../userspace/http-core" }
 dunit_socket_abi = { path = "../../abi/socket" }
 libdunit = { path = "../../userspace/libdunit" }
 
