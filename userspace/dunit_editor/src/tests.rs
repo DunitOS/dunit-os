@@ -1,4 +1,7 @@
-use crate::{parse_markdown, sha256_hex, CursorPos, DocBlock, DocumentBuffer, EditorError};
+use crate::{
+    compute_line_states, highlight_line, parse_markdown, sha256_hex, CursorPos, DocBlock,
+    DocumentBuffer, EditorError, Language, TokenKind,
+};
 
 #[test]
 fn sha256_matches_standard_vector() {
@@ -145,4 +148,84 @@ fn fuzz_buffer_and_markdown_never_panic() {
         let _ = parse_markdown(doc.text());
         assert!(doc.text().len() <= crate::buffer::MAX_DOC_BYTES);
     }
+}
+
+#[test]
+fn syntax_highlights_rust_c_toml_markdown_with_multiline_comments() {
+    let rust_src = "/* outer /* nested */ still comment */\nfn main() -> u32 {\n    let msg = \"hi\"; // note\n    return 42;\n}\n";
+    let states = compute_line_states(rust_src, Language::Rust);
+    assert_eq!(states.len(), 6);
+    assert_eq!(states[0].block_comment_depth, 0);
+    assert_eq!(states[1].block_comment_depth, 0);
+
+    let (line0, st1) = highlight_line("/* multi", Language::C, states[0]);
+    assert_eq!(st1.block_comment_depth, 1);
+    assert_eq!(line0[0].kind, TokenKind::Comment);
+
+    let (line_cont, st2) = highlight_line("  end */ int x = 7;", Language::C, st1);
+    assert_eq!(st2.block_comment_depth, 0);
+    assert_eq!(line_cont[0].kind, TokenKind::Comment);
+    assert!(line_cont.iter().any(|s| s.kind == TokenKind::Type));
+    assert!(line_cont.iter().any(|s| s.kind == TokenKind::Number));
+
+    let (rust_fn, _) = highlight_line("pub fn helper(v: usize) -> \"x\"", Language::Rust, Default::default());
+    assert!(rust_fn.iter().any(|s| s.kind == TokenKind::Keyword));
+    assert!(rust_fn.iter().any(|s| s.kind == TokenKind::Function));
+    assert!(rust_fn.iter().any(|s| s.kind == TokenKind::Type));
+    assert!(rust_fn.iter().any(|s| s.kind == TokenKind::String));
+
+    let (toml_hdr, _) = highlight_line("[desktop] # cfg", Language::Toml, Default::default());
+    assert!(toml_hdr.iter().any(|s| s.kind == TokenKind::Preprocessor));
+    assert!(toml_hdr.iter().any(|s| s.kind == TokenKind::Comment));
+
+    assert_eq!(
+        Language::from_path_and_text(Some("/tmp/a.rs"), ""),
+        Language::Rust
+    );
+    assert_eq!(
+        Language::from_path_and_text(None, "#!/bin/dsh\necho ok\n"),
+        Language::Shell
+    );
+}
+
+#[test]
+fn vim_motions_brackets_indent_comments_and_linewise_paste() {
+    let mut doc = DocumentBuffer::from_bytes(
+        Some("/tmp/demo.rs".into()),
+        b"fn demo() {\n    let a = (1 + 2);\n}\n",
+    )
+    .unwrap();
+
+    // Bracket match '(' -> ')' and '%'
+    doc.goto_line(2);
+    assert!(doc.find_char_in_line('(', true, false, false));
+    assert_eq!(doc.cursor_pos().col, 12);
+    let pair = doc.matching_bracket_pair().unwrap();
+    assert_eq!(&doc.text()[pair.0..=pair.0], "(");
+    assert_eq!(&doc.text()[pair.1..=pair.1], ")");
+    assert!(doc.move_matching_bracket(false));
+    assert_eq!(doc.cursor_pos().col, 18);
+
+    // Inner word + yank/delete/linewise paste + indent + toggle comment + undo
+    assert_eq!(doc.word_under_cursor(), None); // on ')'
+    doc.goto_line(2);
+    doc.move_word_right(false); // on 'a'
+    let w = doc.word_under_cursor().unwrap();
+    assert_eq!(w, "let");
+
+    doc.goto_line(2);
+    assert!(doc.yank_lines(1));
+    assert!(doc.clipboard_is_linewise());
+    assert!(doc.paste_vim(false).unwrap());
+    assert_eq!(doc.line_count(), 5);
+
+    assert_eq!(doc.toggle_comment_lines(1, 2, "//"), 2);
+    assert_eq!(doc.line_slice(1), Some("    // let a = (1 + 2);"));
+    assert_eq!(doc.toggle_comment_lines(1, 2, "//"), 2);
+    assert_eq!(doc.line_slice(1), Some("    let a = (1 + 2);"));
+
+    assert_eq!(doc.indent_lines(1, 1, true), 1);
+    assert_eq!(doc.line_slice(1), Some("        let a = (1 + 2);"));
+    assert_eq!(doc.indent_lines(1, 1, false), 1);
+    assert_eq!(doc.line_slice(1), Some("    let a = (1 + 2);"));
 }

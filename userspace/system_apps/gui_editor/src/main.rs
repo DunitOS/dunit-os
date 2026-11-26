@@ -15,7 +15,7 @@ use dunit::{
     window::{WindowEvent, KEYMOD_CTRL},
     Error, Result,
 };
-use dunit_editor::{DocumentBuffer, SHORTCUT_HINTS};
+use dunit_editor::{DocumentBuffer, Language, SHORTCUT_HINTS};
 
 const W: u32 = 680;
 const H: u32 = 460;
@@ -429,10 +429,11 @@ impl Component for EditorApp {
                 ..Default::default()
             },
         );
+        let lang = Language::from_path_and_text(self.doc.path(), self.doc.text());
         let status = View::status_bar(
             "status",
             "Status",
-            format!("{} | {}", self.doc.status_line(), self.note),
+            format!("[{}] {} | {}", lang.display_name(), self.doc.status_line(), self.note),
         );
         let main = View::column(
             "root_body",

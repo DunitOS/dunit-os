@@ -1,0 +1,22 @@
+[meta]
+schema_version = 2
+
+[desktop]
+sdk_theme = "/assets/dwm/sdk/dark.dss"
+
+[application.gui_terminal]
+name = "Terminal"
+exec = "/app/gui_terminal"
+
+[startup]
+entries = ["gui_terminal"]
+self_test = false
+
+[widgets]
+enabled = false
+
+[notifications]
+enabled = false
+
+[effects]
+anim = false

@@ -154,3 +154,21 @@ fn selection_tracks_scrollback_identity_and_expires_when_evicted() {
     t.feed(b"\nnew");assert_eq!(t.selected_text().as_deref(),Some("one"));
     for _ in 0..201{t.feed(b"\nx");}assert!(t.selected_text().is_none());
 }
+
+#[test]
+fn sgr_truecolor_background_and_inverse_attributes_apply_cleanly() {
+    let mut t = term(12, 2);
+    t.feed(b"\x1b[38;2;250;100;50;48;2;10;20;30;7;4mX\x1b[0mY");
+    let x = t.grid[0][0];
+    assert_eq!(x.ch, 'X');
+    assert_eq!(x.fg, 0xFFFA_6432);
+    assert_eq!(x.bg, 0xFF0A_141E);
+    assert_ne!(x.attrs & terminal_model::ATTR_INVERSE, 0);
+    assert_ne!(x.attrs & terminal_model::ATTR_UNDERLINE, 0);
+
+    let y = t.grid[0][1];
+    assert_eq!(y.ch, 'Y');
+    assert_eq!(y.fg, 7);
+    assert_eq!(y.bg, 0);
+    assert_eq!(y.attrs, 0);
+}

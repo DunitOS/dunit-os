@@ -148,11 +148,21 @@ mod tests {
         q.clear();
         assert!(q.is_empty());
     }
+
+    #[test]
+    fn encode_key_translates_escape_and_arrows() {
+        let mut out = [0u8; 4];
+        assert_eq!(encode_key(SC_ESCAPE, 0, 0, &mut out), 1);
+        assert_eq!(out[0], 0x1B);
+        assert_eq!(encode_key(SC_UP, 0, 0, &mut out), 3);
+        assert_eq!(&out[..3], b"\x1b[A");
+    }
 }
 
 use libdunit::KEYMOD_CTRL;
 
 // PS/2 scancodes (sc & 0x7F) for keys the kernel leaves un-cooked (ascii = 0).
+const SC_ESCAPE: u8 = 0x01;
 const SC_BACKSPACE: u8 = 0x0E;
 const SC_HOME: u8 = 0x47;
 const SC_UP: u8 = 0x48;
@@ -181,6 +191,7 @@ pub fn encode_key(scancode: u8, mods: u8, ascii: u8, out: &mut [u8; 4]) -> usize
     }
     // Extended / navigation keys arrive with ascii == 0.
     let esc: &[u8] = match scancode {
+        SC_ESCAPE => &[0x1B],
         SC_BACKSPACE => &[0x08],
         SC_UP => &[0x1B, b'[', b'A'],
         SC_DOWN => &[0x1B, b'[', b'B'],

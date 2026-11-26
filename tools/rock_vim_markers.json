@@ -1,0 +1,113 @@
+{
+  "description": "Rock 2.0 Vim + Syntax Highlighting showcase inside gui_terminal with interactive screenshots.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "initrd_overlay": "tests/fixtures/rock-vim",
+    "cmd": [
+      "exec /app/rock --vim --verify /rock_demo.rs --script jjwwciwtotal\\e:w\\s/tmp/rock_vim_out.rs\\r:q\\r",
+      "exec /app/setup import-desktop /rock-vim-desktop.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "gui_server: desktop ready",
+          "timeout": 45
+        },
+        {
+          "wait_marker": "gui_terminal: surface presented OK",
+          "timeout": 45
+        },
+        {
+          "delay_ms": 800
+        },
+        {
+          "type_text": "/app/rock --vim /rock_demo.rs",
+          "submit": true
+        },
+        {
+          "delay_ms": 1300
+        },
+        {
+          "type_text": "jjf(",
+          "submit": false
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/rock-vim-normal.ppm"
+          }
+        },
+        {
+          "type_text": ":set rnu",
+          "submit": true
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "type_text": "/Dunit",
+          "submit": true
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "type_text": "Vj",
+          "submit": false
+        },
+        {
+          "delay_ms": 400
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/rock-vim-visual.ppm"
+          }
+        },
+        {
+          "execute": "input-send-event",
+          "arguments": {
+            "events": [
+              { "type": "key", "data": { "down": true, "key": { "type": "qcode", "data": "esc" } } },
+              { "type": "key", "data": { "down": false, "key": { "type": "qcode", "data": "esc" } } }
+            ]
+          }
+        },
+        {
+          "delay_ms": 200
+        },
+        {
+          "type_text": ":q!",
+          "submit": true
+        },
+        {
+          "delay_ms": 300
+        },
+        {
+          "type_text": "echo ROCK_VIM_QEMU_OK",
+          "submit": true
+        },
+        {
+          "wait_marker": "[STDOUT] ROCK_VIM_QEMU_OK",
+          "timeout": 45
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[ROCK] saved /tmp/rock_vim_out.rs",
+    "gui_terminal: surface presented OK",
+    "[STDOUT] ROCK_VIM_QEMU_OK"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "gui_server: FAIL",
+    "FAIL"
+  ]
+}

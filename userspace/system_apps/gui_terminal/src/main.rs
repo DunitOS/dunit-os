@@ -78,7 +78,7 @@ fn mono_cell_w(font: &Font) -> i32 {
 }
 
 mod terminal_model;
-use terminal_model::{Cell, Palette, Term};
+use terminal_model::{Cell, Palette, Term, ATTR_DIM, ATTR_INVERSE, ATTR_UNDERLINE};
 
 /// ARGB8888 -> render Color.
 fn col(argb: u32) -> Color {
@@ -127,7 +127,7 @@ fn render(pixels: &mut [u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32)
                 );
             }
         }
-        draw_row(&mut surf, font, term.cell_w, y, row);
+        draw_row(&mut surf, font, term.cell_w, y, row, bg | 0xFF00_0000);
     }
 
     // Block caret: only when pinned to the bottom (scroll == 0), drawn as a
@@ -146,24 +146,51 @@ fn render(pixels: &mut [u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32)
     }
 }
 
+fn dim_argb(argb: u32) -> u32 {
+    let a = argb & 0xFF00_0000;
+    let r = (((argb >> 16) & 0xFF) * 2) / 3;
+    let g = (((argb >> 8) & 0xFF) * 2) / 3;
+    let b = ((argb & 0xFF) * 2) / 3;
+    a | (r << 16) | (g << 8) | b
+}
+
 /// Draw each character at its cell origin, independent of foreground changes
 /// and fractional advances in the configured font.
-fn draw_row(surf: &mut Surface, font: &Font, cell_w: i32, y: i32, row: &[Cell]) {
-    // Every cell has its own origin. Grouping text into naturally spaced runs
-    // drifts from the integer cell grid even with a monospace font's fractional
-    // advance, and becomes incorrect for a configured proportional font.
+fn draw_row(surf: &mut Surface, font: &Font, cell_w: i32, y: i32, row: &[Cell], default_bg_opaque: u32) {
     let baseline = y as f32 + font.line_metrics(FONT_PX).ascent;
     for (column, cell) in row.iter().enumerate() {
-        if cell.ch == ' ' {
-            continue;
+        let mut fg = if (cell.attrs & ATTR_DIM) != 0 {
+            dim_argb(cell.fg)
+        } else {
+            cell.fg
+        };
+        let mut cell_bg = cell.bg;
+        if (cell.attrs & ATTR_INVERSE) != 0 {
+            let old_fg = fg;
+            fg = if cell_bg != 0 { cell_bg } else { default_bg_opaque };
+            cell_bg = old_fg;
         }
-        if let Some(bitmap) = font.rasterize(font.glyph_index(cell.ch), FONT_PX) {
-            let x = PAD_X + column as i32 * cell_w;
-            surf.blit_glyph(
-                &bitmap,
-                x + bitmap.left,
-                (baseline + 0.5) as i32 - bitmap.top,
-                col(cell.fg),
+        let x = PAD_X + column as i32 * cell_w;
+        if cell_bg != 0 {
+            surf.fill_rect(x as f32, y as f32, cell_w as f32, ROW_PX as f32, col(cell_bg));
+        }
+        if cell.ch != ' ' {
+            if let Some(bitmap) = font.rasterize(font.glyph_index(cell.ch), FONT_PX) {
+                surf.blit_glyph(
+                    &bitmap,
+                    x + bitmap.left,
+                    (baseline + 0.5) as i32 - bitmap.top,
+                    col(fg),
+                );
+            }
+        }
+        if (cell.attrs & ATTR_UNDERLINE) != 0 {
+            surf.fill_rect(
+                x as f32,
+                (y + ROW_PX - 2) as f32,
+                cell_w as f32,
+                1.0,
+                col(fg),
             );
         }
     }
@@ -267,7 +294,9 @@ fn main() -> dunit::Result<()> {
     // Hand the shell its prompt through the environment (desktop policy lives in
     // config, not baked into dsh): `[terminal] prompt` → `PROMPT=<value>`.
     let prompt_env = alloc::format!("PROMPT={}", tcfg.prompt.as_str());
-    let mut child = Some(pty.spawn(command[0], &command, &[&prompt_env])?);
+    let lines_env = alloc::format!("LINES={}", term.rows);
+    let cols_env = alloc::format!("COLUMNS={}", term.cols);
+    let mut child = Some(pty.spawn(command[0], &command, &[&prompt_env, &lines_env, &cols_env])?);
 
     let mut sbuf = [0u8; 256];
     let mut input = PendingInput::new(dunit::transfer::MAX_BODY_BYTES);

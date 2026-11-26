@@ -501,12 +501,23 @@ fn run_diag(line: &str) {
 /// the GUI terminal behave "just like a clean terminal" WITHOUT the kernel pty
 /// (a raw byte mechanism) growing any line discipline of its own. Spawn and
 /// bridge errors retain their native errno; every started child is reaped.
+fn is_raw_tui_program(path: &str) -> bool {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    base == "rock"
+}
+
 fn spawn_external(path: &str, argv: &[&str]) -> Result<()> {
     let mut inner = Pty::open()?;
-    let path_environment = env::var("PATH")?.map(|path| format!("PATH={}", path));
-    let env: Vec<&str> = path_environment.iter().map(|s| s.as_str()).collect();
-    let mut child = inner.spawn(path, argv, &env)?;
-    let result = bridge(&mut inner, &mut child);
+    let mut env_owned = Vec::new();
+    for key in ["PATH", "LINES", "COLUMNS"] {
+        if let Some(val) = env::var(key)? {
+            env_owned.push(format!("{}={}", key, val));
+        }
+    }
+    let env_refs: Vec<&str> = env_owned.iter().map(|s| s.as_str()).collect();
+    let mut child = inner.spawn(path, argv, &env_refs)?;
+    let raw = is_raw_tui_program(path);
+    let result = bridge(&mut inner, &mut child, raw);
     // Always reap, including bridge failures and the exit/kill race.
     let reaped = if result.is_ok() {
         child.wait()
@@ -517,28 +528,31 @@ fn spawn_external(path: &str, argv: &[&str]) -> Result<()> {
     result.and(reaped.map(|_| ())).and(closed)
 }
 
-fn bridge(inner: &mut Pty, child: &mut process::Child) -> Result<()> {
+fn bridge(inner: &mut Pty, child: &mut process::Child, raw: bool) -> Result<()> {
     let mut output = io::stdout();
     let mut input = io::stdin();
     let mut out_buf = [0u8; 512];
-    let mut in_buf = [0u8; 1];
+    let mut in_buf = [0u8; 64];
     let mut line = dunit_shell::CookedLine::new(4096);
     // Bound queued complete lines while continuing to service controls when
     // the child stops reading its native PTY ring.
     let mut pending = PendingInput::new(8192);
     let mut interrupted = false;
-    // ESC-sequence state: normal, ESC, CSI. Child input stays cooked.
+    // ESC-sequence state: normal, ESC, CSI. Child input stays cooked unless raw=true.
     let mut esc = 0u8;
     loop {
         let mut progressed = false;
-        match inner.read(&mut out_buf) {
-            Ok(n) => {
-                output.write_all(&out_buf[..n])?;
-                progressed = n > 0;
+        for _ in 0..8 {
+            match inner.read(&mut out_buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    output.write_all(&out_buf[..n])?;
+                    progressed = true;
+                }
+                Err(Error(dunit::errno::EPIPE)) => return Ok(()),
+                Err(Error(dunit::errno::EAGAIN)) => break,
+                Err(error) => return Err(error),
             }
-            Err(Error(dunit::errno::EPIPE)) => return Ok(()),
-            Err(Error(dunit::errno::EAGAIN)) => {}
-            Err(error) => return Err(error),
         }
         if !interrupted {
             let had_pending = !pending.is_empty();
@@ -548,12 +562,18 @@ fn bridge(inner: &mut Pty, child: &mut process::Child) -> Result<()> {
                 Err(error) => return Err(error),
             }
             // Always service controls, even when the inner ring and pending
-            // queue are full. Reading only this byte preserves stdin ownership
-            // when the bridge hands control back to the shell editor.
-            match input.try_read(&mut in_buf) {
+            // queue are full. Reading only one byte in cooked mode preserves stdin
+            // ownership when the bridge hands control back to the shell editor.
+            let max_read = if raw { in_buf.len() } else { 1 };
+            match input.try_read(&mut in_buf[..max_read]) {
                 Ok(0) => return Err(Error(dunit::errno::EPIPE)),
-                Ok(_) => {
-                    let b = in_buf[0];
+                Ok(n) => {
+                    if raw {
+                        let _ = pending.push(&in_buf[..n]);
+                        let _ = pending.drain(|bytes| inner.write(bytes));
+                        progressed = true;
+                    } else {
+                        let b = in_buf[0];
                     if b == 0x03 {
                         // Ctrl-C preempts incomplete ESC/CSI sequences.
                         esc = 0;
@@ -599,8 +619,9 @@ fn bridge(inner: &mut Pty, child: &mut process::Child) -> Result<()> {
                             interrupted = true;
                         }
                         dunit_shell::CookedEvent::None => {}
+                        }
+                        progressed = true;
                     }
-                    progressed = true;
                 }
                 Err(Error(dunit::errno::EAGAIN)) => {}
                 Err(error) => return Err(error),

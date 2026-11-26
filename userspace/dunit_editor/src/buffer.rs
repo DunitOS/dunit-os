@@ -63,6 +63,7 @@ pub struct DocumentBuffer {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     clipboard: String,
+    clipboard_linewise: bool,
 }
 
 impl Default for DocumentBuffer {
@@ -138,6 +139,7 @@ impl DocumentBuffer {
             undo: Vec::new(),
             redo: Vec::new(),
             clipboard: String::new(),
+            clipboard_linewise: false,
         }
     }
 
@@ -158,6 +160,7 @@ impl DocumentBuffer {
             undo: Vec::new(),
             redo: Vec::new(),
             clipboard: String::new(),
+            clipboard_linewise: false,
         })
     }
 
@@ -211,6 +214,27 @@ impl DocumentBuffer {
 
     pub fn clipboard(&self) -> &str {
         &self.clipboard
+    }
+
+    pub fn clipboard_is_linewise(&self) -> bool {
+        self.clipboard_linewise
+    }
+
+    pub fn set_clipboard(&mut self, text: impl Into<String>, linewise: bool) {
+        self.clipboard = text.into();
+        self.clipboard_linewise = linewise;
+    }
+
+    pub fn selected_line_bounds(&self) -> (usize, usize) {
+        let sel = self.selection_range();
+        let a = self.pos_at(sel.start).line;
+        let b = if sel.is_empty() {
+            a
+        } else {
+            let end_pos = self.pos_at(prev_char_boundary(&self.text, sel.end));
+            end_pos.line.max(a)
+        };
+        (a, b)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -267,7 +291,7 @@ impl DocumentBuffer {
         CursorPos { line, col }
     }
 
-    fn offset_at(&self, line: usize, col: usize) -> usize {
+    pub fn offset_at(&self, line: usize, col: usize) -> usize {
         let target = line.min(self.line_count().saturating_sub(1));
         let (start, end) = self.line_byte_bounds(target).unwrap_or((0, self.text.len()));
         let slice = &self.text[start..end];
@@ -511,6 +535,7 @@ impl DocumentBuffer {
         let sel = self.selection_range();
         if !sel.is_empty() {
             self.clipboard = String::from(&self.text[sel.clone()]);
+            self.clipboard_linewise = false;
             self.push_undo();
             self.text.replace_range(sel.clone(), "");
             self.set_cursor(sel.start, false, true);
@@ -525,6 +550,7 @@ impl DocumentBuffer {
             return false;
         }
         self.clipboard = String::from(&self.text[start..kill_end]);
+        self.clipboard_linewise = true;
         self.push_undo();
         self.text.replace_range(start..kill_end, "");
         self.set_cursor(start.min(self.text.len()), false, true);
@@ -538,6 +564,578 @@ impl DocumentBuffer {
         let clip = self.clipboard.clone();
         self.insert_str(&clip)?;
         Ok(true)
+    }
+
+    pub fn move_first_non_blank(&mut self, extend: bool) {
+        let pos = self.cursor_pos();
+        let Some((start, end)) = self.line_byte_bounds(pos.line) else {
+            return;
+        };
+        let mut off = start;
+        for (rel, ch) in self.text[start..end].char_indices() {
+            if !ch.is_whitespace() {
+                off = start + rel;
+                break;
+            }
+            off = start + rel + ch.len_utf8();
+        }
+        if off == end && end > start {
+            off = prev_char_boundary(&self.text, end);
+        }
+        self.set_cursor(off, extend, true);
+    }
+
+    pub fn move_word_end(&mut self, extend: bool) {
+        let bytes = self.text.as_bytes();
+        let len = bytes.len();
+        if len == 0 || self.cursor >= len {
+            return;
+        }
+        let mut pos = next_char_boundary(&self.text, self.cursor);
+        while pos < len && bytes[pos].is_ascii_whitespace() {
+            pos = next_char_boundary(&self.text, pos);
+        }
+        if pos >= len {
+            self.set_cursor(prev_char_boundary(&self.text, len), extend, true);
+            return;
+        }
+        let target_word = is_word_byte(bytes[pos]);
+        while pos + 1 < len {
+            let nxt = next_char_boundary(&self.text, pos);
+            if nxt >= len || bytes[nxt].is_ascii_whitespace() || is_word_byte(bytes[nxt]) != target_word {
+                break;
+            }
+            pos = nxt;
+        }
+        self.set_cursor(pos, extend, true);
+    }
+
+    pub fn move_paragraph_prev(&mut self, extend: bool) {
+        let mut line = self.cursor_pos().line;
+        while line > 0 && self.line_slice(line).is_some_and(|s| s.trim().is_empty()) {
+            line -= 1;
+        }
+        while line > 0 && !self.line_slice(line - 1).is_some_and(|s| s.trim().is_empty()) {
+            line -= 1;
+        }
+        let target = line.saturating_sub(usize::from(line > 0 && self.line_slice(line - 1).is_some_and(|s| s.trim().is_empty())));
+        let off = self.offset_at(target, 0);
+        self.set_cursor(off, extend, true);
+    }
+
+    pub fn move_paragraph_next(&mut self, extend: bool) {
+        let total = self.line_count();
+        let mut line = self.cursor_pos().line;
+        while line + 1 < total && self.line_slice(line).is_some_and(|s| s.trim().is_empty()) {
+            line += 1;
+        }
+        while line + 1 < total && !self.line_slice(line).is_some_and(|s| s.trim().is_empty()) {
+            line += 1;
+        }
+        let off = self.offset_at(line, 0);
+        self.set_cursor(off, extend, true);
+    }
+
+    pub fn word_bounds_at(&self, pos: usize) -> Option<Range<usize>> {
+        let bytes = self.text.as_bytes();
+        let len = bytes.len();
+        if len == 0 {
+            return None;
+        }
+        let mut idx = pos.min(len);
+        while idx > 0 && !self.text.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        if idx == len {
+            if idx > 0 && is_word_byte(bytes[idx - 1]) {
+                idx = prev_char_boundary(&self.text, idx);
+            } else {
+                return None;
+            }
+        } else if !is_word_byte(bytes[idx]) {
+            return None;
+        }
+        let mut start = idx;
+        while start > 0 && is_word_byte(bytes[start - 1]) {
+            start = prev_char_boundary(&self.text, start);
+        }
+        let mut end = next_char_boundary(&self.text, idx);
+        while end < len && is_word_byte(bytes[end]) {
+            end = next_char_boundary(&self.text, end);
+        }
+        Some(start..end)
+    }
+
+    pub fn word_bounds_around(&self, pos: usize, around: bool) -> Option<Range<usize>> {
+        let r = self.word_bounds_at(pos)?;
+        if !around {
+            return Some(r);
+        }
+        let bytes = self.text.as_bytes();
+        let mut start = r.start;
+        let mut end = r.end;
+        while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
+            end += 1;
+        }
+        if end == r.end {
+            while start > 0 && matches!(bytes[start - 1], b' ' | b'\t') {
+                start -= 1;
+            }
+        }
+        Some(start..end)
+    }
+
+    pub fn word_under_cursor(&self) -> Option<String> {
+        let r = self.word_bounds_at(self.cursor)?;
+        Some(String::from(&self.text[r]))
+    }
+
+    pub fn find_char_in_line(&mut self, target: char, forward: bool, till: bool, extend: bool) -> bool {
+        let pos = self.cursor_pos();
+        let Some((start, end)) = self.line_byte_bounds(pos.line) else {
+            return false;
+        };
+        if forward {
+            let search_from = next_char_boundary(&self.text, self.cursor).min(end);
+            for (rel, ch) in self.text[search_from..end].char_indices() {
+                if ch == target {
+                    let hit = search_from + rel;
+                    let dest = if till {
+                        prev_char_boundary(&self.text, hit).max(self.cursor)
+                    } else {
+                        hit
+                    };
+                    self.set_cursor(dest, extend, true);
+                    return true;
+                }
+            }
+        } else if self.cursor > start {
+            for (rel, ch) in self.text[start..self.cursor].char_indices().rev() {
+                if ch == target {
+                    let hit = start + rel;
+                    let dest = if till {
+                        next_char_boundary(&self.text, hit).min(self.cursor)
+                    } else {
+                        hit
+                    };
+                    self.set_cursor(dest, extend, true);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn matching_bracket_pair(&self) -> Option<(usize, usize)> {
+        let bytes = self.text.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
+        let mut probe = self.cursor.min(bytes.len());
+        let is_bracket = |b: u8| matches!(b, b'(' | b')' | b'[' | b']' | b'{' | b'}');
+        if probe >= bytes.len() || !is_bracket(bytes[probe]) {
+            if probe > 0 && is_bracket(bytes[probe - 1]) {
+                probe -= 1;
+            } else {
+                return None;
+            }
+        }
+        let (open, close, forward) = match bytes[probe] {
+            b'(' => (b'(', b')', true),
+            b'[' => (b'[', b']', true),
+            b'{' => (b'{', b'}', true),
+            b')' => (b'(', b')', false),
+            b']' => (b'[', b']', false),
+            b'}' => (b'{', b'}', false),
+            _ => return None,
+        };
+        let mut depth = 0usize;
+        let max_scan = 32 * 1024;
+        if forward {
+            let limit = bytes.len().min(probe + max_scan);
+            for idx in probe..limit {
+                if bytes[idx] == open {
+                    depth += 1;
+                } else if bytes[idx] == close {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some((probe, idx));
+                    }
+                }
+            }
+        } else {
+            let low = probe.saturating_sub(max_scan);
+            for idx in (low..=probe).rev() {
+                if bytes[idx] == close {
+                    depth += 1;
+                } else if bytes[idx] == open {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some((idx, probe));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn move_matching_bracket(&mut self, extend: bool) -> bool {
+        let Some((a, b)) = self.matching_bracket_pair() else {
+            return false;
+        };
+        let dest = if self.cursor == a || self.cursor.saturating_sub(1) == a {
+            b
+        } else {
+            a
+        };
+        self.set_cursor(dest, extend, true);
+        true
+    }
+
+    pub fn delete_range(&mut self, range: Range<usize>, yank: bool, linewise: bool) -> bool {
+        let start = range.start.min(self.text.len());
+        let end = range.end.min(self.text.len());
+        if start >= end {
+            return false;
+        }
+        if yank {
+            self.clipboard = String::from(&self.text[start..end]);
+            self.clipboard_linewise = linewise;
+        }
+        self.push_undo();
+        self.text.replace_range(start..end, "");
+        self.set_cursor(start.min(self.text.len()), false, true);
+        true
+    }
+
+    pub fn yank_range(&mut self, range: Range<usize>, linewise: bool) -> bool {
+        let start = range.start.min(self.text.len());
+        let end = range.end.min(self.text.len());
+        if start >= end {
+            return false;
+        }
+        self.clipboard = String::from(&self.text[start..end]);
+        self.clipboard_linewise = linewise;
+        true
+    }
+
+    fn line_span_range(&self, start_line: usize, count: usize) -> Option<Range<usize>> {
+        let last = self.line_count().saturating_sub(1);
+        if start_line > last || count == 0 {
+            return None;
+        }
+        let end_line = (start_line + count - 1).min(last);
+        let (s, _) = self.line_byte_bounds(start_line)?;
+        let (_, e) = self.line_byte_bounds(end_line)?;
+        let full_end = if e < self.text.len() { e + 1 } else { e };
+        Some(s..full_end)
+    }
+
+    pub fn delete_lines(&mut self, count: usize) -> bool {
+        let cur = self.cursor_pos().line;
+        let Some(r) = self.line_span_range(cur, count) else {
+            return false;
+        };
+        let mut clip = String::from(&self.text[r.clone()]);
+        if !clip.ends_with('\n') {
+            clip.push('\n');
+        }
+        self.clipboard = clip;
+        self.clipboard_linewise = true;
+        self.push_undo();
+        self.text.replace_range(r.clone(), "");
+        let target_line = cur.min(self.line_count().saturating_sub(1));
+        let next_off = self.offset_at(target_line, 0);
+        self.set_cursor(next_off, false, true);
+        true
+    }
+
+    pub fn yank_lines(&mut self, count: usize) -> bool {
+        let cur = self.cursor_pos().line;
+        let Some(r) = self.line_span_range(cur, count) else {
+            return false;
+        };
+        let mut clip = String::from(&self.text[r]);
+        if !clip.ends_with('\n') {
+            clip.push('\n');
+        }
+        self.clipboard = clip;
+        self.clipboard_linewise = true;
+        true
+    }
+
+    pub fn paste_vim(&mut self, before: bool) -> Result<bool, EditorError> {
+        if self.clipboard.is_empty() {
+            return Ok(false);
+        }
+        if self.clipboard_linewise {
+            let pos = self.cursor_pos();
+            let Some((start, end)) = self.line_byte_bounds(pos.line) else {
+                return Ok(false);
+            };
+            let mut body = self.clipboard.clone();
+            let insert_at = if before {
+                if !body.ends_with('\n') {
+                    body.push('\n');
+                }
+                start
+            } else {
+                if !body.ends_with('\n') {
+                    body.push('\n');
+                }
+                if end < self.text.len() {
+                    end + 1
+                } else {
+                    if !self.text.ends_with('\n') {
+                        body.insert(0, '\n');
+                        body.pop();
+                    }
+                    end
+                }
+            };
+            if self.text.len().saturating_add(body.len()) > MAX_DOC_BYTES {
+                return Err(EditorError::TooLarge);
+            }
+            self.push_undo();
+            self.text.insert_str(insert_at, &body);
+            let placed_line = if before { pos.line } else { pos.line + 1 };
+            let off = self.offset_at(placed_line, 0);
+            self.set_cursor(off, false, true);
+            Ok(true)
+        } else {
+            let at = if before || self.cursor >= self.text.len() {
+                self.cursor
+            } else {
+                let (_, line_end) = self.line_byte_bounds(self.cursor_pos().line).unwrap_or((0, self.text.len()));
+                if self.cursor < line_end {
+                    next_char_boundary(&self.text, self.cursor)
+                } else {
+                    self.cursor
+                }
+            };
+            self.set_cursor(at, false, true);
+            let clip = self.clipboard.clone();
+            self.insert_str(&clip)?;
+            Ok(true)
+        }
+    }
+
+    pub fn auto_indent_for_line(&self, line_idx: usize) -> String {
+        let Some(line) = self.line_slice(line_idx) else {
+            return String::new();
+        };
+        let mut indent = String::new();
+        for ch in line.chars() {
+            if ch == ' ' || ch == '\t' {
+                indent.push(ch);
+            } else {
+                break;
+            }
+        }
+        let trimmed = line.trim_end();
+        if trimmed.ends_with('{') || trimmed.ends_with('(') || trimmed.ends_with('[') {
+            indent.push_str("    ");
+        }
+        indent
+    }
+
+    pub fn insert_newline_indented(&mut self, auto_indent: bool) -> Result<(), EditorError> {
+        if !auto_indent {
+            return self.insert_char('\n');
+        }
+        let line_idx = self.cursor_pos().line;
+        let (start, _) = self.line_byte_bounds(line_idx).unwrap_or((0, 0));
+        let prefix = &self.text[start..self.cursor.max(start).min(self.text.len())];
+        let mut indent = String::new();
+        for ch in prefix.chars() {
+            if ch == ' ' || ch == '\t' {
+                indent.push(ch);
+            } else {
+                break;
+            }
+        }
+        if prefix.trim_end().ends_with('{') {
+            indent.push_str("    ");
+        }
+        let mut ins = String::from("\n");
+        ins.push_str(&indent);
+        self.insert_str(&ins)
+    }
+
+    pub fn open_line(&mut self, above: bool, auto_indent: bool) -> Result<(), EditorError> {
+        let pos = self.cursor_pos();
+        let indent = if auto_indent {
+            self.auto_indent_for_line(pos.line)
+        } else {
+            String::new()
+        };
+        let Some((start, end)) = self.line_byte_bounds(pos.line) else {
+            return Ok(());
+        };
+        if above {
+            self.set_cursor(start, false, true);
+            let mut s = indent.clone();
+            s.push('\n');
+            self.insert_str(&s)?;
+            self.set_cursor(start + indent.len(), false, true);
+        } else {
+            self.set_cursor(end, false, true);
+            let mut s = String::from("\n");
+            s.push_str(&indent);
+            self.insert_str(&s)?;
+        }
+        Ok(())
+    }
+
+    pub fn join_next_line(&mut self) -> bool {
+        let line = self.cursor_pos().line;
+        let Some((_, end)) = self.line_byte_bounds(line) else {
+            return false;
+        };
+        let Some((next_start, next_end)) = self.line_byte_bounds(line + 1) else {
+            return false;
+        };
+        let trimmed_next = self.text[next_start..next_end].trim_start();
+        let insert_space = !trimmed_next.is_empty() && !self.text[..end].ends_with(' ');
+        let rep = if insert_space { " " } else { "" };
+        let lead_ws_len = (next_end - next_start) - trimmed_next.len();
+        self.push_undo();
+        self.text.replace_range(end..(next_start + lead_ws_len), rep);
+        self.set_cursor(end, false, true);
+        true
+    }
+
+    pub fn replace_char_at_cursor(&mut self, ch: char) -> bool {
+        if self.cursor >= self.text.len() || ch.is_control() {
+            return false;
+        }
+        let next = next_char_boundary(&self.text, self.cursor);
+        if &self.text[self.cursor..next] == "\n" {
+            return false;
+        }
+        let mut buf = [0u8; 4];
+        let rep = ch.encode_utf8(&mut buf);
+        self.push_undo();
+        self.text.replace_range(self.cursor..next, rep);
+        self.set_cursor(self.cursor, false, true);
+        true
+    }
+
+    pub fn indent_lines(&mut self, start_line: usize, end_line: usize, shift_right: bool) -> usize {
+        let last = self.line_count().saturating_sub(1);
+        let a = start_line.min(last);
+        let b = end_line.min(last).max(a);
+        let mut changed = 0usize;
+        self.push_undo();
+        for ln in (a..=b).rev() {
+            let Some((s, e)) = self.line_byte_bounds(ln) else {
+                continue;
+            };
+            if shift_right {
+                if s < e && self.text.len() + 4 <= MAX_DOC_BYTES {
+                    self.text.insert_str(s, "    ");
+                    changed += 1;
+                }
+            } else {
+                let slice = &self.text[s..e];
+                let mut remove_bytes = 0usize;
+                if slice.starts_with('\t') {
+                    remove_bytes = 1;
+                } else {
+                    for b_ch in slice.bytes().take(4) {
+                        if b_ch == b' ' {
+                            remove_bytes += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if remove_bytes > 0 {
+                    self.text.replace_range(s..s + remove_bytes, "");
+                    changed += 1;
+                }
+            }
+        }
+        if changed == 0 {
+            let _ = self.undo.pop();
+        } else {
+            let off = self.offset_at(a, 0);
+            self.set_cursor(off, false, true);
+        }
+        changed
+    }
+
+    pub fn toggle_comment_lines(&mut self, start_line: usize, end_line: usize, prefix: &str) -> usize {
+        if prefix.is_empty() {
+            return 0;
+        }
+        let last = self.line_count().saturating_sub(1);
+        let a = start_line.min(last);
+        let b = end_line.min(last).max(a);
+        let mut all_commented = true;
+        let mut any_nonempty = false;
+        for ln in a..=b {
+            if let Some(line) = self.line_slice(ln) {
+                let trimmed = line.trim_start();
+                if !trimmed.is_empty() {
+                    any_nonempty = true;
+                    if !trimmed.starts_with(prefix) {
+                        all_commented = false;
+                        break;
+                    }
+                }
+            }
+        }
+        if !any_nonempty {
+            return 0;
+        }
+        let mut changed = 0usize;
+        self.push_undo();
+        for ln in (a..=b).rev() {
+            let Some((s, e)) = self.line_byte_bounds(ln) else {
+                continue;
+            };
+            let slice = &self.text[s..e];
+            let lead = slice.len() - slice.trim_start().len();
+            if slice[lead..].is_empty() {
+                continue;
+            }
+            if all_commented {
+                let after = s + lead + prefix.len();
+                let drop_space = usize::from(self.text[after..].starts_with(' '));
+                self.text.replace_range(s + lead..after + drop_space, "");
+                changed += 1;
+            } else {
+                let ins = format!("{} ", prefix);
+                if self.text.len() + ins.len() <= MAX_DOC_BYTES {
+                    self.text.insert_str(s + lead, &ins);
+                    changed += 1;
+                }
+            }
+        }
+        if changed == 0 {
+            let _ = self.undo.pop();
+        } else {
+            let off = self.offset_at(a, 0);
+            self.set_cursor(off, false, true);
+        }
+        changed
+    }
+
+    pub fn find_all_line_matches(line: &str, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
+        let mut hits = Vec::new();
+        if query.is_empty() {
+            return hits;
+        }
+        let mut from = 0usize;
+        while hits.len() < 128 {
+            let Some(m) = find_match(line, query, from, case_sensitive) else {
+                break;
+            };
+            from = m.end.max(from + 1);
+            hits.push(m);
+        }
+        hits
     }
 
     pub fn undo(&mut self) -> bool {

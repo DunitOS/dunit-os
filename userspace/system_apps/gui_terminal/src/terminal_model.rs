@@ -19,19 +19,58 @@ pub(super) struct Palette {
     pub(super) ansi_bright: [u32; 8],
 }
 
-/// One screen cell: a glyph plus its SGR foreground color. The background is the
-/// surface-wide `bg` (config `[terminal] bg`/`bg_alpha`), so cells carry only what
-/// the shell actually controls per character.
+pub(super) const ATTR_BOLD: u8 = 1 << 0;
+pub(super) const ATTR_DIM: u8 = 1 << 1;
+pub(super) const ATTR_UNDERLINE: u8 = 1 << 2;
+pub(super) const ATTR_INVERSE: u8 = 1 << 3;
+
+/// One screen cell: glyph, SGR foreground, optional opaque background (`0` = inherit
+/// terminal surface background), and text attribute flags.
 #[derive(Clone, Copy)]
 pub(super) struct Cell {
     pub(super) ch: char,
     pub(super) fg: u32,
+    pub(super) bg: u32,
+    pub(super) attrs: u8,
 }
 
 impl Cell {
     pub(super) fn blank(fg: u32) -> Self {
-        Cell { ch: ' ', fg }
+        Cell {
+            ch: ' ',
+            fg,
+            bg: 0,
+            attrs: 0,
+        }
     }
+
+    pub(super) fn blank_with_bg(fg: u32, bg: u32) -> Self {
+        Cell {
+            ch: ' ',
+            fg,
+            bg,
+            attrs: 0,
+        }
+    }
+}
+
+/// Convert an xterm-256 color index into `0xFFRRGGBB` using the active palette
+/// for indices 0..16.
+fn xterm256(palette: &Palette, n: u32) -> u32 {
+    if n < 8 {
+        return palette.ansi[n as usize];
+    }
+    if n < 16 {
+        return palette.ansi_bright[(n - 8) as usize];
+    }
+    if n >= 232 {
+        let l = 8 + (n - 232).min(23) * 10;
+        return 0xFF00_0000 | (l << 16) | (l << 8) | l;
+    }
+    let idx = (n - 16).min(215);
+    let (r, g, b) = ((idx / 36) % 6, (idx / 6) % 6, idx % 6);
+    let comp = |v: u32| if v == 0 { 0 } else { 55 + v * 40 };
+    0xFF00_0000 | (comp(r) << 16) | (comp(g) << 8) | comp(b)
 }
 
 /// A fresh row of `cols` blank cells in the default foreground.
@@ -79,13 +118,15 @@ pub(super) struct Term {
     pub(super) crow: usize,
     pub(super) ccol: usize,
     pub(super) fg: u32,
+    pub(super) bg: u32,
+    pub(super) attrs: u8,
     pub(super) dirty: bool,
     /// Rows the view is lifted above the live bottom (0 = following new output).
     pub(super) scroll: usize,
     pub(super) selection:Option<Selection>,
     pub(super) selecting:bool,
     esc: Esc,
-    pub(super) params: [u32; 8],
+    pub(super) params: [u32; 16],
     pub(super) nparams: usize,
     pub(super) param: u32,
     pub(super) has_param: bool,
@@ -116,12 +157,14 @@ impl Term {
             crow: 0,
             ccol: 0,
             fg: palette.fg,
+            bg: 0,
+            attrs: 0,
             dirty: true,
             scroll: 0,
             selection:None,
             selecting:false,
             esc: Esc::Normal,
-            params: [0; 8],
+            params: [0; 16],
             nparams: 0,
             param: 0,
             has_param: false,
@@ -240,7 +283,12 @@ impl Term {
         if self.ccol >= self.cols {
             self.newline(false);
         }
-        self.grid[self.crow][self.ccol] = Cell { ch: c, fg: self.fg };
+        self.grid[self.crow][self.ccol] = Cell {
+            ch: c,
+            fg: self.fg,
+            bg: self.bg,
+            attrs: self.attrs,
+        };
         self.ccol += 1;
         self.echo.push(c);
     }
@@ -284,9 +332,10 @@ impl Term {
             _ => (self.ccol, self.cols),
         };
         let fg = self.palette.fg;
+        let bg = self.bg;
         let end = b.min(self.cols);
         for cell in self.grid[self.crow].iter_mut().take(end).skip(a) {
-            *cell = Cell::blank(fg);
+            *cell = Cell::blank_with_bg(fg, bg);
         }
         if end == self.cols {
             self.grid_wrap[self.crow] = false;
@@ -419,17 +468,71 @@ impl Term {
         self.dirty = true;
     }
 
-    /// Apply the collected SGR (`ESC [ … m`) params to the live foreground.
+    /// Apply collected SGR (`ESC [ … m`) params to foreground, background, and attributes.
     pub(super) fn apply_sgr(&mut self) {
         let n = if self.nparams == 0 { 1 } else { self.nparams };
-        for i in 0..n {
+        let mut i = 0usize;
+        while i < n {
             let p = if self.nparams == 0 { 0 } else { self.params[i] };
             match p {
-                0 | 39 => self.fg = self.palette.fg,
-                30..=37 => self.fg = self.palette.ansi[(p - 30) as usize],
+                0 => {
+                    self.fg = self.palette.fg;
+                    self.bg = 0;
+                    self.attrs = 0;
+                }
+                1 => self.attrs |= ATTR_BOLD,
+                2 => self.attrs |= ATTR_DIM,
+                4 => self.attrs |= ATTR_UNDERLINE,
+                7 => self.attrs |= ATTR_INVERSE,
+                22 => self.attrs &= !(ATTR_BOLD | ATTR_DIM),
+                24 => self.attrs &= !ATTR_UNDERLINE,
+                27 => self.attrs &= !ATTR_INVERSE,
+                30..=37 => {
+                    let slot = (p - 30) as usize;
+                    self.fg = if (self.attrs & ATTR_BOLD) != 0 {
+                        self.palette.ansi_bright[slot]
+                    } else {
+                        self.palette.ansi[slot]
+                    };
+                }
+                38 => {
+                    if i + 1 < n {
+                        let mode = self.params[i + 1];
+                        if mode == 2 && i + 4 < n {
+                            let r = self.params[i + 2] & 0xFF;
+                            let g = self.params[i + 3] & 0xFF;
+                            let b = self.params[i + 4] & 0xFF;
+                            self.fg = 0xFF00_0000 | (r << 16) | (g << 8) | b;
+                            i += 4;
+                        } else if mode == 5 && i + 2 < n {
+                            self.fg = xterm256(&self.palette, self.params[i + 2]);
+                            i += 2;
+                        }
+                    }
+                }
+                39 => self.fg = self.palette.fg,
+                40..=47 => self.bg = self.palette.ansi[(p - 40) as usize] | 0xFF00_0000,
+                48 => {
+                    if i + 1 < n {
+                        let mode = self.params[i + 1];
+                        if mode == 2 && i + 4 < n {
+                            let r = self.params[i + 2] & 0xFF;
+                            let g = self.params[i + 3] & 0xFF;
+                            let b = self.params[i + 4] & 0xFF;
+                            self.bg = 0xFF00_0000 | (r << 16) | (g << 8) | b;
+                            i += 4;
+                        } else if mode == 5 && i + 2 < n {
+                            self.bg = xterm256(&self.palette, self.params[i + 2]);
+                            i += 2;
+                        }
+                    }
+                }
+                49 => self.bg = 0,
                 90..=97 => self.fg = self.palette.ansi_bright[(p - 90) as usize],
-                _ => {} // bold/reverse/background — not modeled
+                100..=107 => self.bg = self.palette.ansi_bright[(p - 100) as usize] | 0xFF00_0000,
+                _ => {}
             }
+            i += 1;
         }
     }
 

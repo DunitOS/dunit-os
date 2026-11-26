@@ -7,14 +7,14 @@ extern crate alloc;
 mod native {
     use alloc::{format, string::String, vec::Vec};
     use dunit::{
-        args, errno, fs,
+        args, env, errno, fs,
         io::{self, Read, Write},
         time::{self, Duration},
         Error, Result,
     };
     use dunit_editor::DocumentBuffer;
 
-    use crate::tui::{default_dims, RockTui};
+    use crate::tui::{default_dims, EditMode, RockTui};
 
     fn load_doc(path: Option<&str>) -> Result<DocumentBuffer> {
         let Some(p) = path else {
@@ -51,10 +51,21 @@ mod native {
         let mut target: Option<String> = None;
         let mut script: Option<String> = None;
         let mut verify_report = false;
+        let mut start_mode = EditMode::Insert;
+        let (mut rows, mut cols) = detect_env_dims();
         let mut idx = 1usize;
         while idx < argv.len() {
             match argv[idx].as_str() {
                 "--verify" => verify_report = true,
+                "--vim" => start_mode = EditMode::Normal,
+                "--nano" => start_mode = EditMode::Insert,
+                "--size" if idx + 1 < argv.len() => {
+                    idx += 1;
+                    if let Some((r, c)) = parse_dims(&argv[idx]) {
+                        rows = r;
+                        cols = c;
+                    }
+                }
                 "--script" if idx + 1 < argv.len() => {
                     idx += 1;
                     script = Some(argv[idx].clone());
@@ -66,13 +77,13 @@ mod native {
         }
 
         let doc = load_doc(target.as_deref())?;
-        let (rows, cols) = default_dims();
-        let mut tui = RockTui::new(doc, rows, cols);
+        let mut tui = RockTui::with_mode(doc, rows, cols, start_mode);
         let mut out = io::stdout();
 
         if let Some(seq) = script {
             let unescaped = decode_script(&seq);
             let _ = tui.feed_bytes(&unescaped, save_atomic);
+            let _ = tui.flush_pending_esc();
             if verify_report {
                 if let Some(hash) = tui.last_saved_sha256.as_deref() {
                     let path = tui.doc.path().unwrap_or("");
@@ -87,8 +98,8 @@ mod native {
             return Ok(());
         }
 
-        out.write_all(b"\x1b[2J\x1b[H")?;
-        out.write_all(tui.render_ansi().as_bytes())?;
+        write_retry(&mut out, b"\x1b[2J\x1b[H")?;
+        write_retry(&mut out, tui.render_ansi().as_bytes())?;
 
         let mut stdin = io::stdin();
         let mut buf = [0u8; 64];
@@ -100,20 +111,23 @@ mod native {
                         if tui.quit {
                             break;
                         }
-                        out.write_all(tui.render_ansi().as_bytes())?;
+                        write_retry(&mut out, tui.render_ansi().as_bytes())?;
                     }
                     if tui.quit {
                         break;
                     }
                 }
                 Err(Error(errno::EAGAIN)) => {
+                    if tui.flush_pending_esc() {
+                        write_retry(&mut out, tui.render_ansi().as_bytes())?;
+                    }
                     time::sleep(Duration::from_millis(15))?;
                 }
                 Err(e) => return Err(e),
             }
         }
 
-        out.write_all(b"\x1b[?25h\x1b[2J\x1b[H")?;
+        write_retry(&mut out, b"\x1b[?25h\x1b[2J\x1b[H")?;
         if verify_report {
             if let Some(hash) = tui.last_saved_sha256.as_deref() {
                 let path = tui.doc.path().unwrap_or("");
@@ -126,6 +140,47 @@ mod native {
             }
         }
         Ok(())
+    }
+
+    fn write_retry(out: &mut io::Stdout, mut bytes: &[u8]) -> Result<()> {
+        let mut spins = 0u32;
+        while !bytes.is_empty() {
+            match out.write(bytes) {
+                Ok(0) => return Err(Error(errno::EIO)),
+                Ok(n) => {
+                    bytes = &bytes[n.min(bytes.len())..];
+                    spins = 0;
+                }
+                Err(Error(errno::EAGAIN)) if spins < 50 => {
+                    spins += 1;
+                    time::sleep(Duration::from_millis(2))?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_dims(spec: &str) -> Option<(usize, usize)> {
+        let (r, c) = spec.split_once('x').or_else(|| spec.split_once('X'))?;
+        let rows = r.trim().parse::<usize>().ok()?;
+        let cols = c.trim().parse::<usize>().ok()?;
+        Some((rows.max(8), cols.max(32)))
+    }
+
+    fn detect_env_dims() -> (usize, usize) {
+        let (mut rows, mut cols) = default_dims();
+        if let Ok(Some(v)) = env::var("LINES") {
+            if let Ok(n) = v.trim().parse::<usize>() {
+                rows = n.max(8);
+            }
+        }
+        if let Ok(Some(v)) = env::var("COLUMNS") {
+            if let Ok(n) = v.trim().parse::<usize>() {
+                cols = n.max(32);
+            }
+        }
+        (rows, cols)
     }
 
     fn decode_script(spec: &str) -> Vec<u8> {
@@ -152,6 +207,11 @@ mod native {
                     }
                     b't' => {
                         out.push(b'\t');
+                        i += 2;
+                        continue;
+                    }
+                    b's' => {
+                        out.push(b' ');
                         i += 2;
                         continue;
                     }
