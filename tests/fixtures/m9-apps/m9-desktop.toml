@@ -1,0 +1,39 @@
+[meta]
+schema_version = 2
+
+[desktop]
+sdk_theme = "/assets/dwm/sdk/dark.dss"
+
+[application.m9_c_gui]
+name = "M9 C GUI"
+exec = "/tmp/m9-c-gui"
+
+[application.gui_editor]
+name = "Text Editor"
+exec = "/app/gui_editor"
+
+[application.gui_image]
+name = "Image Viewer"
+exec = "/app/gui_image"
+open_formats = ["application/x-dunit-file-list"]
+
+[application.gui_reader]
+name = "Document Reader"
+exec = "/app/gui_reader"
+
+[application.gui_files]
+name = "Files"
+exec = "/app/gui_files"
+
+[startup]
+entries = ["m9_c_gui", "gui_editor", "gui_image", "gui_reader", "gui_files"]
+self_test = false
+
+[widgets]
+enabled = false
+
+[notifications]
+enabled = false
+
+[effects]
+anim = false

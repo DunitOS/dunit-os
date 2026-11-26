@@ -419,6 +419,8 @@ enum Mode {
 /// A context-menu command.
 #[derive(Clone, Copy)]
 enum Action {
+    OpenViewer,
+    EditFile,
     NewFolder,
     Rename,
     Delete,
@@ -428,7 +430,9 @@ enum Action {
 }
 
 /// The fixed context-menu rows, in display order.
-const MENU_ACTIONS: [(Action, &str); 6] = [
+const MENU_ACTIONS: [(Action, &str); 8] = [
+    (Action::OpenViewer, "Open"),
+    (Action::EditFile, "Edit"),
     (Action::NewFolder, "New Folder"),
     (Action::Rename, "Rename"),
     (Action::Delete, "Delete"),
@@ -440,6 +444,7 @@ const MENU_ACTIONS: [(Action, &str); 6] = [
 /// Whether `a` is applicable given the current selection / clipboard state.
 fn action_enabled(action: Action, files: &Files) -> bool {
     match action {
+        Action::OpenViewer | Action::EditFile => files.selected_file_path().is_some(),
         Action::NewFolder | Action::Paste => files.can_write(),
         Action::Rename => files.can_write() && files.single_index().is_some(),
         Action::Delete => files.can_write() && !files.selection.selected.is_empty(),
@@ -450,7 +455,7 @@ fn action_enabled(action: Action, files: &Files) -> bool {
 
 #[derive(Clone)]
 enum Message {
-    Sync(Mode, [bool; 6]),
+    Sync(Mode, [bool; 8]),
     Action(Action),
     Name(String),
     Confirm,
@@ -459,7 +464,7 @@ enum Message {
 }
 struct Controls {
     mode: Mode,
-    enabled: [bool; 6],
+    enabled: [bool; 8],
     pending: Option<Message>,
 }
 impl Component for Controls {
@@ -590,7 +595,21 @@ fn open_browser() -> dunit::Result<(Window, Files)> {
     };
     let mut files = Files::new(pal, clear_bg);
     let args = dunit::args::args()?;
-    if let Some(path) = args.get(1).map(|s| s.as_str()) {
+    let mut open_item: Option<String> = None;
+    let mut initial_path: Option<&str> = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        if args[i] == "--open-item" && i + 1 < args.len() {
+            open_item = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            if initial_path.is_none() {
+                initial_path = Some(args[i].as_str());
+            }
+            i += 1;
+        }
+    }
+    if let Some(path) = initial_path {
         match dunit::transfer::File::open(path, true)
             .or_else(|error| {
                 if matches!(error.0, dunit::errno::EPERM | dunit::errno::EACCES) {
@@ -605,13 +624,26 @@ fn open_browser() -> dunit::Result<(Window, Files)> {
             Err(error) => files.error("Initial path", error),
         }
     }
+    if let Some(target_name) = open_item {
+        if let Some(idx) = files.items.iter().position(|it| it.name == target_name) {
+            files.open(idx);
+        }
+    } else if dunit::fs::metadata("/m9_files_open_image").is_ok() {
+        if let Ok(dir_file) = dunit::transfer::File::open("/assets/images", false) {
+            if files.open_initial(dir_file).is_ok() {
+                if let Some(idx) = files.items.iter().position(|it| it.name == "logo.bmp") {
+                    files.open(idx);
+                }
+            }
+        }
+    }
     let (theme,ui_font)=dunit::ui::load_theme("Stack#browser { width: fill; height: fill; background: #00000000; } Stack#files { width: fill; height: fill; background: #00000000; } Input#name { height: 30; }")?;
     let window = ComponentWindow::open_format(
         W,
         H,
         Controls {
             mode: Mode::Browse,
-            enabled: [false; 6],
+            enabled: [false; 8],
             pending: None,
         },
         Renderer::new(ui_font, theme.cascade, Color::rgba(0, 0, 0, 0)),
@@ -895,6 +927,20 @@ fn main() -> dunit::Result<()> {
             }
             match message {
                 Message::Action(action) if action_enabled(action, &files) => match action {
+                    Action::OpenViewer => {
+                        if let Some(i) = files.single_index() {
+                            if !files.open_with_app(i, false) {
+                                files.open(i);
+                            }
+                        }
+                    }
+                    Action::EditFile => {
+                        if let Some(i) = files.single_index() {
+                            if !files.open_with_app(i, true) {
+                                files.open(i);
+                            }
+                        }
+                    }
                     Action::NewFolder => {
                         mode = Mode::Text {
                             rename: false,

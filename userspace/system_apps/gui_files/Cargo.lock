@@ -110,6 +110,7 @@ dependencies = [
 name = "dunit_image"
 version = "0.1.0"
 dependencies = [
+ "dunit_http_core",
  "dunit_icons",
  "dunit_svg",
  "libdunit",

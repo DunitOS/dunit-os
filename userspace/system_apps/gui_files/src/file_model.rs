@@ -348,13 +348,68 @@ impl Files {
             Err(error) => self.error("Open directory", error),
         }
     }
-    pub fn open(&mut self, index: usize) {
+    pub fn selected_file_path(&self) -> Option<String> {
+        if self.restricted {
+            return None;
+        }
+        let idx = self.single_index()?;
+        let item = self.items.get(idx)?;
+        if item.is_dir() {
+            return None;
+        }
+        Some(self.child_path(&item.name))
+    }
+    pub fn is_image_name(name: &str) -> bool {
+        let lower = name.to_ascii_lowercase();
+        lower.ends_with(".bmp")
+            || lower.ends_with(".png")
+            || lower.ends_with(".jpg")
+            || lower.ends_with(".jpeg")
+            || lower.ends_with(".svg")
+    }
+    pub fn open_with_app(&mut self, index: usize, edit: bool) -> bool {
         let Some(item) = self.items.get(index) else {
+            return false;
+        };
+        if item.is_dir() {
+            return false;
+        }
+        let name = item.name.clone();
+        if !edit && Self::is_image_name(&name) {
+            if let Ok(file) = self.open_file(&name, false) {
+                if let Ok(bytes) = file.read_all(dunit_image::MAX_IMAGE_FILE_BYTES) {
+                    if let Ok(img) = dunit_image::decode(&bytes) {
+                        self.status = alloc::format!("Image {} {}x{}", name, img.width, img.height);
+                        self.preview = Some(Preview {
+                            path: self.child_path(&name),
+                            text: alloc::format!("Image file: {}\nDimensions: {}x{} px\nBytes: {}", name, img.width, img.height, bytes.len()),
+                            row: 0,
+                            _file: file,
+                        });
+                        log(&alloc::format!("gui_files: decoded {} {}x{}", self.child_path(&name), img.width, img.height));
+                        return true;
+                    }
+                }
+            }
+        }
+        if let Ok(file) = self.open_file(&name, false) {
+            if let Ok(preview) = Self::preview_file(file) {
+                self.preview = Some(preview);
+                return true;
+            }
+        }
+        false
+    }
+    pub fn open(&mut self, index: usize) {
+        let Some((name, is_dir)) = self.items.get(index).map(|i| (i.name.clone(), i.is_dir())) else {
             return;
         };
-        if !item.is_dir() {
+        if !is_dir {
+            if Self::is_image_name(&name) && self.open_with_app(index, false) {
+                return;
+            }
             let result = self
-                .open_file(&item.name, false)
+                .open_file(&name, false)
                 .and_then(|file| Self::preview_file(file));
             match result {
                 Ok(preview) => self.preview = Some(preview),
@@ -362,7 +417,6 @@ impl Files {
             }
             return;
         }
-        let name = item.name.clone();
         let path = self.child_path(&name);
         let authority = match self.open_file(&name, true) {
             Ok(file) => Some(file),

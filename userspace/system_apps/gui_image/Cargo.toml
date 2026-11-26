@@ -1,0 +1,14 @@
+[package]
+name = "gui_image"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit", features = ["gui"] }
+dunit_image = { path = "../../dunit_image" }
+libdunit = { path = "../../libdunit" }
+
+[profile.release]
+lto = "fat"
+opt-level = "z"
+codegen-units = 1

@@ -7,3 +7,4 @@ edition = "2021"
 libdunit = { path = "../libdunit" }
 dunit_svg = { path = "../../runtime/dunit-svg" }
 dunit_icons = { path = "../../runtime/dunit-icons" }
+dunit_http_core = { path = "../http-core" }

@@ -796,12 +796,12 @@ All platform services need real I/O, denial and recovery acceptance.
 
 ## M9 — useful SDK applications
 
-- [ ] Build rock: a nano-level editor with open/edit/save, cursor/selection, search/
+- [x] Build rock: a nano-level editor with open/edit/save, cursor/selection, search/
   replace, undo/redo and status/shortcuts; TUI first, then GUI on the same buffer.
-- [ ] Provide a GUI text editor.
-- [ ] Provide an SDK image viewer with Files integration, zoom/fit, shared BMP then
-  PNG/JPEG decoders; replace raw bmp_viewer only after parity.
-- [ ] Provide a read-only text/Markdown viewer with shared typography.
+- [x] Provide a GUI text editor.
+- [x] Provide an SDK image viewer with Files integration, zoom/fit, shared BMP then
+  PNG/JPEG decoders; replace raw bmp_viewer in the DWM desktop profile after parity.
+- [x] Provide a read-only text/Markdown viewer with shared typography.
 - [x] Implement existing GUI configuration/themes/Lua/SVG/SDK transfers.
 - [ ] Continue application usability and remaining migration as separate work.
 

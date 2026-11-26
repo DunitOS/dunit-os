@@ -1,0 +1,78 @@
+{
+  "description": "M9 acceptance: rock TUI edit/replace/save/hash -> on-device TCC C GUI window, gui_editor both-theme check, gui_reader Markdown view, gui_image BMP/PNG/JPEG dimensions & zoom/fit, and gui_files launch integration.",
+  "run": {
+    "config": "limine_test_terminal.conf",
+    "initrd_overlay": "tests/fixtures/m9-apps",
+    "cmd": [
+      "exec /app/gui_image --dimensions /assets/images/logo.bmp",
+      "exec /app/gui_image --dimensions /assets/images/banner.png",
+      "exec /app/gui_image --dimensions /m9_sample.jpg",
+      "exec /app/rock --verify /tmp/m9_rock.c --script ^RROCK_C_TITLE\\rM9-Rock-TCC-CGUI-OK\\ra^O\\r^X",
+      "exec /system/bin/tcc /tmp/m9_rock.c -o /tmp/m9-c-gui -ldunit_ui",
+      "exec /app/setup import-desktop /m9-desktop.toml",
+      "exec /app/gui_server"
+    ],
+    "command_actions": {
+      "exec /app/gui_server": [
+        {
+          "wait_marker": "[GUI-PRESENT] app=m9_c_gui",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[GUI-EDITOR] self-test OK sha256=",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[GUI-READER] self-test OK blocks=",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[GUI-PRESENT] app=gui_reader",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "[GUI-PRESENT] app=gui_image",
+          "timeout": 60
+        },
+        {
+          "wait_marker": "gui_files: decoded /assets/images/logo.bmp 500x500",
+          "timeout": 60
+        },
+        {
+          "delay_ms": 400
+        },
+        {
+          "execute": "screendump",
+          "arguments": {
+            "filename": "build/m9-apps-desktop.ppm"
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "[TERM-007] Starting main loop",
+    "[GUI-IMAGE] /assets/images/logo.bmp 500x500",
+    "[GUI-IMAGE] /assets/images/banner.png 869x287",
+    "[GUI-IMAGE] /m9_sample.jpg 16x16",
+    "[ROCK] saved /tmp/m9_rock.c",
+    "[M9-CGUI] M9-Rock-TCC-CGUI-OK",
+    "[GUI-PRESENT] app=m9_c_gui",
+    "[GUI-PRESENT] app=gui_editor",
+    "[GUI-EDITOR] theme dark hash=",
+    "[GUI-EDITOR] theme light hash=",
+    "[GUI-EDITOR] self-test OK sha256=",
+    "[GUI-PRESENT] app=gui_reader",
+    "[GUI-READER] self-test OK blocks=",
+    "gui_files: decoded /assets/images/logo.bmp 500x500",
+    "[GUI-IMAGE] loaded /assets/images/logo.png 500x500",
+    "[GUI-PRESENT] app=gui_image"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[SDK] PANIC",
+    "gui_server: FAIL",
+    "FAIL",
+    "tcc: error"
+  ]
+}

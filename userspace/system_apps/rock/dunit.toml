@@ -1,0 +1,8 @@
+schema_version = 1
+
+[application]
+id = "rock"
+name = "Rock Editor"
+kind = "tui"
+binary = "rock"
+capabilities = ["READ", "WRITE"]

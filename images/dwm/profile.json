@@ -13,12 +13,15 @@
     "gui_settings",
     "gui_stat",
     "gui_browser",
+    "gui_editor",
+    "gui_image",
+    "gui_reader",
+    "rock",
     "dsh",
     "dufetch",
     "calc",
     "fsck_dunit",
-    "setup",
-    "bmp_viewer"
+    "setup"
   ],
   "assets": [
     "exec-path",

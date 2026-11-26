@@ -10,7 +10,7 @@ use alloc::{
 };
 use core::fmt;
 
-mod inflate;
+pub mod inflate;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Method {

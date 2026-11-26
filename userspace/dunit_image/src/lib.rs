@@ -1,16 +1,23 @@
-//! Shared checked VFS image loading; SVG rendering stays entirely in userspace.
-#![no_std]
+//! Shared checked VFS image loading; SVG/BMP/PNG/JPEG decoding stays in userspace.
+#![cfg_attr(not(test), no_std)]
 extern crate alloc;
 use alloc::{format, vec::Vec};
+
+pub mod codecs;
 mod theme;
+#[cfg(test)]
+mod tests;
+
+pub use codecs::{decode, ImageFormat, MAX_IMAGE_DIM, MAX_IMAGE_FILE_BYTES, MAX_IMAGE_PIXELS};
 pub use theme::IconTheme;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
     pub width: usize,
     pub height: usize,
     pub pixels: Vec<u32>,
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     Missing,
     Io,
@@ -19,6 +26,7 @@ pub enum Error {
     Svg(dunit_svg::Error),
 }
 
+#[cfg(not(test))]
 fn read(path: &str, cap: usize) -> Result<Vec<u8>, Error> {
     let fd = libdunit::open(path, libdunit::OPEN_READ);
     if fd < 0 {
@@ -43,7 +51,22 @@ fn read(path: &str, cap: usize) -> Result<Vec<u8>, Error> {
     result
 }
 
-/// SVG is rasterized at the requested dimensions. Legacy raw RGBA stays 32×32.
+#[cfg(test)]
+fn read(path: &str, cap: usize) -> Result<Vec<u8>, Error> {
+    let bytes = std::fs::read(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Error::Missing
+        } else {
+            Error::Io
+        }
+    })?;
+    if bytes.len() > cap {
+        return Err(Error::Limit);
+    }
+    Ok(bytes)
+}
+
+/// SVG is rasterized at the requested dimensions. Raster images decode at intrinsic size.
 pub fn load(path: &str, width: u32, height: u32) -> Result<Image, Error> {
     if path.ends_with(".svg") {
         let data = read(path, 1024 * 1024)?;
@@ -53,20 +76,22 @@ pub fn load(path: &str, width: u32, height: u32) -> Result<Image, Error> {
         if data.len() != 32 * 32 * 4 {
             return Err(Error::Format);
         }
-        let pixels = data
-            .chunks_exact(4)
-            .map(|c| {
-                ((c[3] as u32) << 24) | ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | c[2] as u32
-            })
-            .collect();
-        Ok(Image {
-            width: 32,
-            height: 32,
-            pixels,
-        })
+        codecs::decode(&data)
+    } else if path.ends_with(".bmp")
+        || path.ends_with(".png")
+        || path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+    {
+        load_auto(path)
     } else {
         Err(Error::Format)
     }
+}
+
+/// Decode BMP, PNG, JPEG, SVG, or RGBA from a VFS path at natural image dimensions.
+pub fn load_auto(path: &str) -> Result<Image, Error> {
+    let data = read(path, MAX_IMAGE_FILE_BYTES)?;
+    codecs::decode(&data)
 }
 
 fn svg(data: &[u8], width: u32, height: u32) -> Result<Image, Error> {

@@ -1,0 +1,8 @@
+[package]
+name = "dunit_editor"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dunit_editor"
+path = "src/lib.rs"

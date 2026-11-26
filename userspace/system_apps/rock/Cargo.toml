@@ -1,0 +1,14 @@
+[package]
+name = "rock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+dunit_editor = { path = "../../dunit_editor" }
+dunit_shell = { path = "../../../runtime/dunit-shell" }
+
+[profile.release]
+lto = "fat"
+opt-level = "z"
+codegen-units = 1
