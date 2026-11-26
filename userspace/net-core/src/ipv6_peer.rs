@@ -55,6 +55,12 @@ pub enum RxEvent6<'a> {
         destination: Ip6,
         payload: &'a [u8],
     },
+    IcmpEchoReply {
+        source: Ip6,
+        identifier: u16,
+        sequence: u16,
+        data: &'a [u8],
+    },
 }
 
 pub struct Ip6Peer {
@@ -557,7 +563,22 @@ impl Ip6Peer {
                             &reply,
                         )?))
                     }
-                    Icmpv6::EchoReply { .. } | Icmpv6::RouterSolicitation { .. } => Ok(RxEvent6::None),
+                    Icmpv6::EchoReply {
+                        identifier,
+                        sequence,
+                        data,
+                    } => {
+                        if !self.owns_preferred(pkt.destination) {
+                            return Ok(RxEvent6::None);
+                        }
+                        Ok(RxEvent6::IcmpEchoReply {
+                            source: pkt.source,
+                            identifier,
+                            sequence,
+                            data,
+                        })
+                    }
+                    Icmpv6::RouterSolicitation { .. } => Ok(RxEvent6::None),
                 }
             }
             PROTO_UDP => {

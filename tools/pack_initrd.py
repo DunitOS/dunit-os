@@ -77,6 +77,9 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
             raise RuntimeError(f"missing boot service executable: {source}")
         add(f"/system/libexec/{name}", source, executable=True)
     entries["/system/share/dunit-image.json"] = (json.dumps(profile, sort_keys=True) + "\n").encode()
+    net_defaults = Path(args.assets_dir) / "network" / "defaults.toml"
+    if net_defaults.is_file():
+        add("/system/share/network/defaults.toml", net_defaults)
 
     assets = Path(args.assets_dir)
     excludes = {e.strip("/") for e in args.exclude}

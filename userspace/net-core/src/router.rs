@@ -87,6 +87,10 @@ impl MultiRouter {
         Self { ifaces: Vec::new() }
     }
 
+    pub fn interfaces(&self) -> &[InterfaceView] {
+        &self.ifaces
+    }
+
     pub fn set_interface(&mut self, view: InterfaceView) {
         if let Some(slot) = self.ifaces.iter_mut().find(|i| i.id == view.id) {
             *slot = view;

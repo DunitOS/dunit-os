@@ -67,7 +67,13 @@ pub(super) fn grant(root: u64, child: u64, scope: u64) -> i64 {
     report((|| {
         let root = u32::try_from(root).map_err(|_| EBADF)?;
         let scope = u32::try_from(scope).map_err(|_| EINVAL)?;
-        let allowed = SCOPE_UDP | SCOPE_TCP | SCOPE_UDP_BIND | SCOPE_TCP_LISTEN | SCOPE_LOW_PORT;
+        let allowed = SCOPE_UDP
+            | SCOPE_TCP
+            | SCOPE_UDP_BIND
+            | SCOPE_TCP_LISTEN
+            | SCOPE_LOW_PORT
+            | SCOPE_STATUS
+            | SCOPE_PING;
         if scope == 0 || scope & !allowed != 0 {
             return Err(EINVAL);
         }
@@ -83,6 +89,8 @@ pub(super) fn open(handle: u64, protocol: u64, source: *const u8, len: usize) ->
             PROTO_TCP => SCOPE_TCP | SCOPE_TCP_LISTEN,
             PROTO_UDP => SCOPE_UDP | SCOPE_UDP_BIND,
             PROTO_DNS => SCOPE_TCP | SCOPE_UDP,
+            PROTO_ICMP => SCOPE_PING,
+            PROTO_STATUS => SCOPE_STATUS,
             _ => return Err(EOPNOTSUPP),
         };
         let (scope, owner) = process::with_current_process(|task| {
@@ -147,8 +155,12 @@ pub(super) fn write(target: FdTarget, source: *const u8, len: usize) -> i64 {
         match target {
             FdTarget::NetSocket { token } => {
                 let protocol = BRIDGE.lock().protocol(owner, token)?;
+                if protocol == PROTO_ICMP {
+                    return Err(EOPNOTSUPP);
+                }
                 if (protocol == PROTO_UDP && len > MAX_UDP)
                     || (protocol == PROTO_DNS && len > MAX_DNS_NAME)
+                    || (protocol == PROTO_STATUS && len > 64)
                 {
                     return Err(EMSGSIZE);
                 }
@@ -224,11 +236,21 @@ pub(super) fn operation(
                 }
             }
             OP_SEND_TO if out_len == 0 => {
-                if !(ep_len..=ep_len + MAX_UDP).contains(&in_len) {
+                let protocol = BRIDGE.lock().protocol(owner, token)?;
+                let max_payload = if protocol == PROTO_ICMP {
+                    MAX_ICMP_PAYLOAD
+                } else {
+                    MAX_UDP
+                };
+                if !(ep_len..=ep_len + max_payload).contains(&in_len) {
                     return Err(EMSGSIZE);
                 }
                 let bytes = copy_buffer_from_user(input, in_len)?;
-                let endpoint = unicast_version(version, &bytes[..ep_len])?;
+                let endpoint = if protocol == PROTO_ICMP {
+                    unicast_ip_version(version, &bytes[..ep_len])?
+                } else {
+                    unicast_version(version, &bytes[..ep_len])?
+                };
                 let payload = &bytes[ep_len..];
                 BRIDGE.lock().send6(owner, token, endpoint, payload)?;
                 process::wake_poll_waiters();
@@ -333,14 +355,27 @@ pub(super) fn operation(
 }
 
 fn unicast_version(version: u16, bytes: &[u8]) -> Result<Endpoint6, i64> {
-    let endpoint = if version == VERSION_V2 {
-        Endpoint6::decode(bytes).map_err(wire_error)?
-    } else {
-        Endpoint6::from_v4(Endpoint::decode(bytes).map_err(wire_error)?)
-    };
+    let endpoint = decode_version_ep(version, bytes)?;
     if endpoint.is_unicast() {
         Ok(endpoint)
     } else {
         Err(EINVAL)
+    }
+}
+
+fn unicast_ip_version(version: u16, bytes: &[u8]) -> Result<Endpoint6, i64> {
+    let endpoint = decode_version_ep(version, bytes)?;
+    if endpoint.is_unicast_ip() {
+        Ok(endpoint)
+    } else {
+        Err(EINVAL)
+    }
+}
+
+fn decode_version_ep(version: u16, bytes: &[u8]) -> Result<Endpoint6, i64> {
+    if version == VERSION_V2 {
+        Endpoint6::decode(bytes).map_err(wire_error)
+    } else {
+        Ok(Endpoint6::from_v4(Endpoint::decode(bytes).map_err(wire_error)?))
     }
 }

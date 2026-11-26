@@ -743,6 +743,11 @@ Acceptance: IPv4-only/IPv6-only/dual-stack use the same app APIs.
 
 ### Configuration, security and network acceptance
 
+- [x] Ship versioned network config (`version = 1`), `/system/share/network/defaults.toml`, `/run/netd/staged.conf`, `/persist/config/network.conf`, and bounded `/var/lib/netd/last-good.conf` + `/var/log/netd/events.log` (`<= 4096 B`) with validation, staging, atomic swap, and rollback on invalid config.
+- [x] Expose scoped non-ambient status/route/counter telemetry (`PROTO_STATUS` + `SCOPE_STATUS`), bounded ICMPv4/v6 ping (`PROTO_ICMP` + `SCOPE_PING`), and CLI diagnostics (`/app/dnet`: `status`, `route`, `ping`, `dns`, `connect`, `capture`, `validate`) with default raw/low-port/status denial.
+- [x] Fuzz all wire/control/protocol parsers deterministically (`net-core` 4,000-round wire/control fuzzer + `tools/fuzz_net_parsers.py` 2,500-round overflow-checked host harness over `dunit_socket_abi`, `http-core`, `tls-core`, `cert-store`, `browser-net`).
+- [x] Verify M8 networking acceptance matrix in QEMU (`tools/qemu_test.py --net-acceptance` / `tools/net_acceptance_markers.json`): config rollback, privilege isolation, `dnet`/ICMPv4/v6 ping, packet loss/reorder/dup/corruption/garbage, TLS 1.3 over E1000, 24-cycle connect-close/DNS soak, and live `netd` crash/restart with active stream/listener `EPIPE` recovery.
+
 Proposed paths: `/system/share/network/defaults.toml`,
 `/system/services/netd.toml`, `/users/<uid>/config/network`, bounded
 `/var/{lib,log}/netd`, volatile `/run/netd`. Versioned configuration validates,

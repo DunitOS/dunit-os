@@ -1,13 +1,20 @@
-//! Per-interface configuration parsing (`/system/boot-services/netd-nics.conf`
-//! and legacy `/system/boot-services/netd-ipv4.conf`).
-use alloc::vec::Vec;
-use dunit::{errno, Error, Result};
+//! Versioned network configuration (`version = 1`), staging, atomic apply, and rollback.
+use alloc::{format, string::String, vec::Vec};
+use dunit::{errno, fs, Error, Result};
 use dunit_net_core::{ipv6, Ip6};
 
 use crate::interface::Config as V4Config;
 
-const MULTI_CONFIG_PATH: &str = "/system/boot-services/netd-nics.conf";
-const LEGACY_V4_CONFIG_PATH: &str = "/system/boot-services/netd-ipv4.conf";
+pub const DEFAULT_CONFIG_PATH: &str = "/system/share/network/defaults.toml";
+pub const MULTI_CONFIG_PATH: &str = "/system/boot-services/netd-nics.conf";
+pub const LEGACY_V4_CONFIG_PATH: &str = "/system/boot-services/netd-ipv4.conf";
+pub const PERSIST_CONFIG_PATH: &str = "/persist/config/network.conf";
+pub const STAGED_CONFIG_PATH: &str = "/run/netd/staged.conf";
+pub const LAST_GOOD_CONFIG_PATH: &str = "/var/lib/netd/last-good.conf";
+pub const EVENTS_LOG_PATH: &str = "/var/log/netd/events.log";
+pub const SCHEMA_VERSION: u32 = 1;
+const MAX_CONFIG_BYTES: usize = 2048;
+const MAX_EVENT_LOG_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum V4ModeSpec {
@@ -48,27 +55,110 @@ impl NicSpec {
 }
 
 pub fn load_nic_specs(count: usize) -> Result<Vec<NicSpec>> {
+    ensure_runtime_dirs();
+
+    // Candidate order: staged override -> persistent config -> boot service multi-NIC -> legacy IPv4 -> defaults.toml.
+    for (label, path, require_version) in [
+        ("staged", STAGED_CONFIG_PATH, true),
+        ("persistent", PERSIST_CONFIG_PATH, true),
+        ("boot-nics", MULTI_CONFIG_PATH, false),
+    ] {
+        match fs::read_to_string(path) {
+            Ok(text) => {
+                let mut specs: Vec<NicSpec> = (0..count).map(NicSpec::default_for).collect();
+                if parse_multi_config(&text, &mut specs, require_version).is_some() {
+                    let _ = record_last_good(&text);
+                    append_event(&format!("applied {} config ({})", label, path));
+                    return Ok(specs);
+                }
+                append_event(&format!("rejected invalid {} config ({}); rolling back", label, path));
+                dunit::println!("[NETD] invalid {} config; rolling back", label)?;
+                if label == "staged" {
+                    let _ = fs::remove_file(STAGED_CONFIG_PATH);
+                }
+                if let Some(specs) = try_rollback(count) {
+                    dunit::println!("[NETD] config rolled back")?;
+                    return Ok(specs);
+                }
+            }
+            Err(Error(errno::ENOENT)) => {}
+            Err(e) => return Err(e),
+        }
+    }
+
     let mut specs: Vec<NicSpec> = (0..count).map(NicSpec::default_for).collect();
-    match dunit::fs::read_to_string(MULTI_CONFIG_PATH) {
+    match fs::read_to_string(LEGACY_V4_CONFIG_PATH) {
         Ok(text) => {
-            parse_multi_config(&text, &mut specs).ok_or(Error(errno::EINVAL))?;
+            let v4 = V4Config::static_address(&text).ok_or(Error(errno::EINVAL))?;
+            if let Some(first) = specs.get_mut(0) {
+                first.v4 = V4ModeSpec::Static(v4);
+            }
+            append_event("applied legacy netd-ipv4.conf");
             return Ok(specs);
         }
         Err(Error(errno::ENOENT)) => {}
         Err(e) => return Err(e),
     }
 
-    match dunit::fs::read_to_string(LEGACY_V4_CONFIG_PATH) {
-        Ok(text) => {
-            let v4 = V4Config::static_address(&text).ok_or(Error(errno::EINVAL))?;
-            if let Some(first) = specs.get_mut(0) {
-                first.v4 = V4ModeSpec::Static(v4);
+    if let Ok(text) = fs::read_to_string(DEFAULT_CONFIG_PATH) {
+        if parse_multi_config(&text, &mut specs, true).is_some() {
+            let _ = record_last_good(&text);
+            append_event("applied /system/share/network/defaults.toml");
+            return Ok(specs);
+        }
+        append_event("ignored invalid defaults.toml");
+    }
+
+    Ok(specs)
+}
+
+fn ensure_runtime_dirs() {
+    for dir in ["/run", "/run/netd", "/var", "/var/lib", "/var/lib/netd", "/var/log", "/var/log/netd"] {
+        let _ = fs::create_dir(dir);
+    }
+}
+
+fn try_rollback(count: usize) -> Option<Vec<NicSpec>> {
+    for (source, require_version) in [
+        (LAST_GOOD_CONFIG_PATH, false),
+        (MULTI_CONFIG_PATH, false),
+        (DEFAULT_CONFIG_PATH, true),
+    ] {
+        if let Ok(text) = fs::read_to_string(source) {
+            let mut specs: Vec<NicSpec> = (0..count).map(NicSpec::default_for).collect();
+            if parse_multi_config(&text, &mut specs, require_version).is_some() {
+                if source != LAST_GOOD_CONFIG_PATH {
+                    let _ = record_last_good(&text);
+                }
+                append_event(&format!("rolled back to {}", source));
+                return Some(specs);
             }
         }
-        Err(Error(errno::ENOENT)) => {}
-        Err(e) => return Err(e),
     }
-    Ok(specs)
+    None
+}
+
+fn record_last_good(text: &str) -> Result<()> {
+    let tmp = "/var/lib/netd/last-good.tmp";
+    let _ = fs::remove_file(tmp);
+    fs::write(tmp, text.as_bytes())?;
+    let _ = fs::remove_file(LAST_GOOD_CONFIG_PATH);
+    fs::rename(tmp, LAST_GOOD_CONFIG_PATH)
+}
+
+pub fn append_event(msg: &str) {
+    let mut existing = fs::read_to_string(EVENTS_LOG_PATH).unwrap_or_default();
+    existing.push_str(msg);
+    existing.push('\n');
+    if existing.len() > MAX_EVENT_LOG_BYTES {
+        let cut = existing.len() - MAX_EVENT_LOG_BYTES;
+        let trimmed = existing[cut..]
+            .find('\n')
+            .map_or(&existing[cut..], |i| &existing[cut + i + 1..]);
+        let owned = String::from(trimmed);
+        existing = owned;
+    }
+    let _ = fs::write(EVENTS_LOG_PATH, existing.as_bytes());
 }
 
 #[derive(Default)]
@@ -78,17 +168,18 @@ struct RawSection {
     ipv4_mode: Option<V4ModeSpec>,
     gateway4: Option<[u8; 4]>,
     dns4: Vec<[u8; 4]>,
-    ipv6_mode: Option<(bool, Option<(Ip6, u8)>)>, // (slaac_enabled, static_cidr)
+    ipv6_mode: Option<(bool, Option<(Ip6, u8)>)>,
     gateway6: Option<Ip6>,
     dns6: Vec<Ip6>,
 }
 
-fn parse_multi_config(text: &str, specs: &mut [NicSpec]) -> Option<()> {
-    if text.len() > 2048 {
+pub fn parse_multi_config(text: &str, specs: &mut [NicSpec], require_version: bool) -> Option<u32> {
+    if text.len() > MAX_CONFIG_BYTES {
         return None;
     }
     let mut current: Option<usize> = None;
     let mut raw: [Option<RawSection>; 4] = [None, None, None, None];
+    let mut version: Option<u32> = None;
 
     for line in text
         .lines()
@@ -106,11 +197,22 @@ fn parse_multi_config(text: &str, specs: &mut [NicSpec]) -> Option<()> {
             current = Some(idx);
             continue;
         }
-        let idx = current?;
-        let sec = raw[idx].as_mut()?;
         let (key, val) = line.split_once('=')?;
         let key = key.trim();
-        let val = val.trim();
+        let val = val.trim().trim_matches('"');
+        if current.is_none() {
+            if key == "version" {
+                let v = val.parse::<u32>().ok()?;
+                if v != SCHEMA_VERSION {
+                    return None;
+                }
+                version = Some(v);
+                continue;
+            }
+            return None;
+        }
+        let idx = current?;
+        let sec = raw[idx].as_mut()?;
         match key {
             "metric" => sec.metric = Some(val.parse().ok()?),
             "dad_probes" => sec.dad_probes = Some(val.parse().ok()?),
@@ -156,6 +258,10 @@ fn parse_multi_config(text: &str, specs: &mut [NicSpec]) -> Option<()> {
         }
     }
 
+    if require_version && version != Some(SCHEMA_VERSION) {
+        return None;
+    }
+
     for (idx, spec) in specs.iter_mut().enumerate() {
         let Some(sec) = raw.get_mut(idx).and_then(Option::take) else {
             continue;
@@ -191,7 +297,7 @@ fn parse_multi_config(text: &str, specs: &mut [NicSpec]) -> Option<()> {
             };
         }
     }
-    Some(())
+    Some(version.unwrap_or(SCHEMA_VERSION))
 }
 
 pub fn parse_ipv6(s: &str) -> Option<Ip6> {
@@ -244,4 +350,3 @@ pub fn parse_ipv6(s: &str) -> Option<Ip6> {
     }
     Some(out)
 }
-

@@ -303,6 +303,18 @@ impl Bridge {
         scope: u32,
         version: u16,
     ) -> Result<u64, i64> {
+        if matches!(protocol, PROTO_ICMP | PROTO_STATUS) {
+            if version != VERSION_V2 {
+                return Err(EINVAL);
+            }
+            if self
+                .service
+                .as_ref()
+                .is_some_and(|service| service.version != VERSION_V2)
+            {
+                return Err(EOPNOTSUPP);
+            }
+        }
         let slot = self.reserve_slot(owner)?;
         let token = self.next_token()?;
         self.sockets[slot] = Some(Socket::new(token, owner, protocol, scope, version));
@@ -497,7 +509,7 @@ impl Bridge {
         if socket.listening {
             return Err(EOPNOTSUPP);
         }
-        if from && socket.protocol != PROTO_UDP {
+        if from && !matches!(socket.protocol, PROTO_UDP | PROTO_ICMP) {
             return Err(EOPNOTSUPP);
         }
         let v2 = socket.version == VERSION_V2;
@@ -526,7 +538,7 @@ impl Bridge {
             };
         };
         let count = (rx.len - rx.start).min(capacity - prefix);
-        let consumed = if socket.protocol == PROTO_UDP {
+        let consumed = if matches!(socket.protocol, PROTO_UDP | PROTO_ICMP) {
             rx.len
         } else {
             count
@@ -660,7 +672,9 @@ impl Bridge {
                 };
                 let valid = match socket.protocol {
                     PROTO_UDP => header.endpoint.is_unicast() && data.len() <= MAX_UDP,
+                    PROTO_ICMP => header.endpoint.is_unicast_ip() && data.len() <= MAX_ICMP_PAYLOAD,
                     PROTO_DNS => header.endpoint.is_none() && (data.len() == 4 || dns_count.is_some()),
+                    PROTO_STATUS => header.endpoint.is_none() && !data.is_empty(),
                     _ => {
                         header.endpoint.is_none() && !socket.remote.is_none() && !data.is_empty()
                     }
@@ -802,6 +816,8 @@ impl Bridge {
         let max = match socket.protocol {
             PROTO_UDP => MAX_UDP,
             PROTO_DNS => MAX_DNS_NAME,
+            PROTO_ICMP => MAX_ICMP_PAYLOAD,
+            PROTO_STATUS => 64,
             _ => MAX_PAYLOAD,
         };
         if payload.len() > max {
@@ -810,7 +826,7 @@ impl Bridge {
         if socket.write_closed {
             return Err(EPIPE);
         }
-        if socket.protocol == PROTO_DNS {
+        if matches!(socket.protocol, PROTO_DNS | PROTO_STATUS) {
             if !endpoint.is_none() {
                 return Err(EOPNOTSUPP);
             }
@@ -821,8 +837,11 @@ impl Bridge {
             return Err(EINVAL);
         }
         if !endpoint.is_none() {
-            if socket.protocol != PROTO_UDP {
+            if !matches!(socket.protocol, PROTO_UDP | PROTO_ICMP) {
                 return Err(EOPNOTSUPP);
+            }
+            if socket.protocol == PROTO_ICMP && !endpoint.is_unicast_ip() {
+                return Err(EINVAL);
             }
             if !socket.remote.is_none() && socket.remote != endpoint {
                 return Err(EINVAL);
@@ -840,7 +859,7 @@ impl Bridge {
     ) -> Result<bool, i64> {
         self.check_endpoint_for_service(endpoint)?;
         let socket = self.client_mut(owner, token)?;
-        if socket.protocol == PROTO_DNS {
+        if matches!(socket.protocol, PROTO_DNS | PROTO_ICMP | PROTO_STATUS) {
             return Err(EOPNOTSUPP);
         }
         let needed = if socket.protocol == PROTO_TCP {
@@ -1602,5 +1621,91 @@ mod tests {
         let read_plan = bridge.reserve_client(APP, dns_v1, 64, false).unwrap().unwrap();
         assert_eq!(read_plan.bytes(), &[192, 0, 2, 44]);
         bridge.finish_read(&read_plan, true).unwrap();
+
+        let icmp = bridge
+            .open_version(APP, PROTO_ICMP, SCOPE_PING, VERSION_V2)
+            .unwrap();
+        let status = bridge
+            .open_version(APP, PROTO_STATUS, SCOPE_STATUS, VERSION_V2)
+            .unwrap();
+        assert_eq!(
+            bridge.open_version(APP, PROTO_ICMP, SCOPE_PING, VERSION),
+            Err(EINVAL)
+        );
+        for _ in 0..2 {
+            let p = bridge
+                .reserve_service(SERVICE, generation, MAX_FRAME_V2)
+                .unwrap();
+            let (hdr, _) = BridgeHeader6::decode(p.bytes()).unwrap();
+            bridge.finish_read(&p, true).unwrap();
+            bridge
+                .service_write6(
+                    SERVICE,
+                    generation,
+                    BridgeHeader6 {
+                        kind: BRIDGE_COMPLETE,
+                        flags: BRIDGE_OPEN,
+                        endpoint: Endpoint6::NONE,
+                        ..hdr
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+        let ping_ep = Endpoint6::ipv6(remote6.addr, 0, 0);
+        bridge.send6(APP, icmp, ping_ep, b"ping-m8").unwrap();
+        bridge.send6(APP, status, Endpoint6::NONE, b"status").unwrap();
+        let mut handled = 0;
+        while handled < 2 {
+            let p = bridge
+                .reserve_service(SERVICE, generation, MAX_FRAME_V2)
+                .unwrap();
+            let (hdr, body) = BridgeHeader6::decode(p.bytes()).unwrap();
+            bridge.finish_read(&p, true).unwrap();
+            if hdr.kind == BRIDGE_CREDIT {
+                continue;
+            }
+            handled += 1;
+            let (resp_ep, resp_body) = if hdr.protocol == PROTO_ICMP {
+                assert_eq!(body, b"ping-m8");
+                (ping_ep, &b"ping-m8"[..])
+            } else {
+                assert_eq!(hdr.protocol, PROTO_STATUS);
+                assert_eq!(body, b"status");
+                (Endpoint6::NONE, &b"nic0 link=up\n"[..])
+            };
+            bridge
+                .service_write6(
+                    SERVICE,
+                    generation,
+                    BridgeHeader6 {
+                        kind: BRIDGE_DATA,
+                        flags: 0,
+                        endpoint: resp_ep,
+                        ..hdr
+                    },
+                    resp_body,
+                )
+                .unwrap();
+            bridge
+                .service_write6(
+                    SERVICE,
+                    generation,
+                    BridgeHeader6 {
+                        kind: BRIDGE_COMPLETE,
+                        flags: BRIDGE_SEND,
+                        endpoint: Endpoint6::NONE,
+                        ..hdr
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+        let rp = bridge.reserve_client(APP, icmp, 64, true).unwrap().unwrap();
+        assert_eq!(rp.bytes()[RECV_HEADER6_LEN..], *b"ping-m8");
+        bridge.finish_read(&rp, true).unwrap();
+        let rs = bridge.reserve_client(APP, status, 64, false).unwrap().unwrap();
+        assert_eq!(rs.bytes(), b"nic0 link=up\n");
+        bridge.finish_read(&rs, true).unwrap();
     }
 }

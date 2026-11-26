@@ -169,4 +169,17 @@ fn v2_endpoints_bridge_and_dns_records_roundtrip() {
     let mut out = [DnsRecord::default(); 4];
     assert_eq!(decode_dns_records(&dns_buf[..dns_len], &mut out), Ok(2));
     assert_eq!(out[..2], recs);
+
+    let ping_hdr = BridgeHeader6 {
+        protocol: PROTO_ICMP,
+        endpoint: Endpoint6::ipv6(ip6, 1, 0),
+        ..hdr6
+    };
+    assert!(ping_hdr.encode(b"ping", &mut frame).is_ok());
+    let status_hdr = BridgeHeader6 {
+        protocol: PROTO_STATUS,
+        endpoint: Endpoint6::NONE,
+        ..hdr6
+    };
+    assert!(status_hdr.encode(b"status", &mut frame).is_ok());
 }

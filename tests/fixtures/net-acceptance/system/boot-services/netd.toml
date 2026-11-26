@@ -1,0 +1,7 @@
+name = "netd"
+exec = "/system/libexec/netd"
+net_device = 0
+net_service = true
+restart = "on-failure"
+critical = false
+max_restarts = 3

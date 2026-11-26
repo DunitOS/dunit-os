@@ -6,13 +6,14 @@ use crate::{
     time::{timeout_ns, Duration, Instant},
     Error, Result,
 };
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use core::{fmt, str::FromStr};
 use dunit_socket_abi::{
-    decode_dns_records, DnsRecord, Endpoint6, Endpoints6, Options, RecvHeader6, DNS_RECORDS_HEADER_LEN,
-    DNS_RECORD_LEN, ENDPOINT6_LEN, ENDPOINTS6_LEN, FAMILY_IPV4, FAMILY_IPV6, MAX_DNS_NAME,
-    MAX_DNS_RECORDS, MAX_PAYLOAD, OP_ACCEPT, OP_BIND, OP_CONNECT, OP_ENDPOINTS, OP_ERROR,
-    OP_LISTEN, OP_RECV_FROM, OP_SEND_TO, OP_SHUTDOWN_WRITE, PROTO_DNS, PROTO_TCP, PROTO_UDP,
+    decode_dns_records, DnsRecord, Endpoint6, Endpoints6, Options, RecvHeader6,
+    DNS_RECORDS_HEADER_LEN, DNS_RECORD_LEN, ENDPOINT6_LEN, ENDPOINTS6_LEN, FAMILY_IPV4,
+    FAMILY_IPV6, MAX_DNS_NAME, MAX_DNS_RECORDS, MAX_ICMP_PAYLOAD, MAX_PAYLOAD, OP_ACCEPT,
+    OP_BIND, OP_CONNECT, OP_ENDPOINTS, OP_ERROR, OP_LISTEN, OP_RECV_FROM, OP_SEND_TO,
+    OP_SHUTDOWN_WRITE, PROTO_DNS, PROTO_ICMP, PROTO_STATUS, PROTO_TCP, PROTO_UDP,
     RECV_HEADER6_LEN, VERSION_V2,
 };
 
@@ -1419,4 +1420,133 @@ pub fn resolve_ipv4_timeout(grant: &NetGrant, host: &str, timeout: Duration) -> 
         }
     }
     Err(Error(libdunit::ENOENT))
+}
+
+fn query_status_cmd(grant: &NetGrant, cmd: &[u8], timeout: Duration) -> Result<String> {
+    validate_timeout(Some(timeout))?;
+    let deadline = deadline_from(Some(timeout))?;
+    let sock = SocketFd::open(grant, PROTO_STATUS, timeout.min(OPEN_TIMEOUT))?;
+    let mut written = 0;
+    while written < cmd.len() {
+        let res = libdunit::write(sock.fd, &cmd[written..]);
+        if res > 0 {
+            written += res as usize;
+        } else if res == libdunit::EAGAIN {
+            sock.wait_for(event::WRITE, deadline, libdunit::EAGAIN)?;
+        } else {
+            return Err(Error(res));
+        }
+    }
+    let mut buf = alloc::vec![0u8; MAX_PAYLOAD];
+    loop {
+        let res = libdunit::read(sock.fd, &mut buf);
+        if res > 0 {
+            let text = core::str::from_utf8(&buf[..res as usize])
+                .map_err(|_| Error(libdunit::EIO))?;
+            return Ok(String::from(text));
+        }
+        if res == 0 {
+            return Err(Error(libdunit::EIO));
+        }
+        if res != libdunit::EAGAIN {
+            return Err(Error(res));
+        }
+        sock.wait_for(event::READ, deadline, libdunit::EAGAIN)?;
+        if let Some(err) = sock.take_error()? {
+            return Err(err);
+        }
+    }
+}
+
+pub fn query_status(grant: &NetGrant, timeout: Duration) -> Result<String> {
+    query_status_cmd(grant, b"status", timeout)
+}
+
+pub fn query_routes(grant: &NetGrant, timeout: Duration) -> Result<String> {
+    query_status_cmd(grant, b"routes", timeout)
+}
+
+pub struct IcmpSocket {
+    sock: SocketFd,
+}
+
+impl IcmpSocket {
+    pub fn open(grant: &NetGrant) -> Result<Self> {
+        Ok(Self {
+            sock: SocketFd::open(grant, PROTO_ICMP, OPEN_TIMEOUT)?,
+        })
+    }
+
+    pub fn ping(
+        &mut self,
+        target: IpAddr,
+        sequence: u16,
+        payload: &[u8],
+        timeout: Duration,
+    ) -> Result<(IpAddr, u16, Duration)> {
+        if payload.len() > MAX_ICMP_PAYLOAD {
+            return Err(Error(libdunit::EMSGSIZE));
+        }
+        validate_timeout(Some(timeout))?;
+        let started = Instant::now()?;
+        let deadline = deadline_from(Some(timeout))?;
+        let ep = match target {
+            IpAddr::V4(v4) => Endpoint6::ipv4(v4.0, sequence),
+            IpAddr::V6(v6) => Endpoint6::ipv6(v6.0, sequence, 0),
+        };
+        let mut req = [0u8; ENDPOINT6_LEN + MAX_ICMP_PAYLOAD];
+        req[..ENDPOINT6_LEN].copy_from_slice(&ep.encode());
+        req[ENDPOINT6_LEN..ENDPOINT6_LEN + payload.len()].copy_from_slice(payload);
+        let send_len = ENDPOINT6_LEN + payload.len();
+        loop {
+            let res = self.sock.op(OP_SEND_TO, &req[..send_len], &mut []);
+            if res >= 0 {
+                break;
+            }
+            if res != libdunit::EAGAIN {
+                return Err(Error(res));
+            }
+            self.sock.wait_for(event::WRITE, deadline, libdunit::EAGAIN)?;
+        }
+        let mut rx = [0u8; RECV_HEADER6_LEN + MAX_ICMP_PAYLOAD];
+        loop {
+            let res = self.sock.op(OP_RECV_FROM, &[], &mut rx);
+            if res > 0 {
+                let n = res as usize;
+                if n < RECV_HEADER6_LEN {
+                    return Err(Error(libdunit::EIO));
+                }
+                let hdr = RecvHeader6::decode(&rx[..RECV_HEADER6_LEN])
+                    .map_err(|_| Error(libdunit::EIO))?;
+                let body_len = n - RECV_HEADER6_LEN;
+                if body_len != payload.len() || &rx[RECV_HEADER6_LEN..n] != payload {
+                    continue;
+                }
+                if hdr.endpoint.port != sequence {
+                    continue;
+                }
+                let from = match hdr.endpoint.family {
+                    FAMILY_IPV4 => {
+                        let v4: [u8; 4] = hdr.endpoint.addr[..4]
+                            .try_into()
+                            .map_err(|_| Error(libdunit::EIO))?;
+                        IpAddr::V4(Ipv4Addr(v4))
+                    }
+                    FAMILY_IPV6 => IpAddr::V6(Ipv6Addr(hdr.endpoint.addr)),
+                    _ => return Err(Error(libdunit::EIO)),
+                };
+                return Ok((from, hdr.endpoint.port, started.elapsed()?));
+            }
+            if res == 0 {
+                return Err(Error(libdunit::EIO));
+            }
+            if res != libdunit::EAGAIN {
+                return Err(Error(res));
+            }
+            self.sock.wait_for(event::READ, deadline, libdunit::EAGAIN)?;
+            if let Some(err) = self.sock.take_error()? {
+                return Err(err);
+            }
+        }
+    }
 }

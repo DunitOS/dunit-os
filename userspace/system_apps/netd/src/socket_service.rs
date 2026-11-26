@@ -2,8 +2,9 @@
 use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
 use dunit::{errno, Error, Result};
 use dunit_net_core::{
-    ipv6::{self, PROTO_TCP, PROTO_UDP as V6_PROTO_UDP},
-    ipv6_peer::Egress6,
+    ipv6::{self, PROTO_ICMPV6, PROTO_TCP, PROTO_UDP as V6_PROTO_UDP},
+    ipv6_peer::{Egress6, RxEvent6},
+    ndp::Icmpv6,
     router::{MultiRouter, RouteChoice},
     tcp::{
         table::{DualOutbound, ListenerId, StreamId, Table, MAX_PENDING, MAX_STREAMS},
@@ -16,12 +17,16 @@ use dunit_socket_abi::{
     BridgeHeader6, Endpoint6, Options, BRIDGE_ACCEPT, BRIDGE_BIND, BRIDGE_CLOSE, BRIDGE_COMPLETE,
     BRIDGE_CONNECT, BRIDGE_CREDIT, BRIDGE_DATA, BRIDGE_EOF, BRIDGE_ERROR, BRIDGE_LISTEN,
     BRIDGE_LISTENER_READY, BRIDGE_OPEN, BRIDGE_SEND, BRIDGE_SHUTDOWN, FAMILY_IPV4, FAMILY_IPV6,
-    FAMILY_NONE, MAX_FRAME_V2, MAX_PAYLOAD, PROTO_DNS, PROTO_TCP as ABI_TCP,
-    PROTO_UDP as ABI_UDP, VERSION_V2,
+    FAMILY_NONE, MAX_FRAME_V2, MAX_PAYLOAD, PROTO_DNS, PROTO_ICMP, PROTO_STATUS,
+    PROTO_TCP as ABI_TCP, PROTO_UDP as ABI_UDP, VERSION_V2,
 };
 use netd::{checked, Device};
 
-use crate::{dns_runtime::DualDnsRuntime, nic::Nic};
+use crate::{
+    dns_runtime::DualDnsRuntime,
+    nic::Nic,
+    telemetry::{render_routes, render_status},
+};
 
 const SOCKETS: usize = 16;
 const REQUEST_TIMEOUT_MS: u64 = 10_000;
@@ -271,15 +276,15 @@ impl SocketService {
         if Nic::is_v6_ethertype(frame) {
             if let Some(peer6) = &mut nic.v6 {
                 match peer6.receive(frame, now) {
-                    Ok(dunit_net_core::ipv6_peer::RxEvent6::Reply(reply)) => {
+                    Ok(RxEvent6::Reply(reply)) => {
                         let _ = nic.tx.try_push(&reply);
                     }
-                    Ok(dunit_net_core::ipv6_peer::RxEvent6::Flush(frames)) => {
+                    Ok(RxEvent6::Flush(frames)) => {
                         for f in frames {
                             let _ = nic.tx.try_push(&f);
                         }
                     }
-                    Ok(dunit_net_core::ipv6_peer::RxEvent6::Udp {
+                    Ok(RxEvent6::Udp {
                         source,
                         source_port,
                         destination_port,
@@ -299,7 +304,7 @@ impl SocketService {
                             );
                         }
                     }
-                    Ok(dunit_net_core::ipv6_peer::RxEvent6::Tcp {
+                    Ok(RxEvent6::Tcp {
                         source,
                         destination,
                         payload,
@@ -311,7 +316,20 @@ impl SocketService {
                             now,
                         );
                     }
-                    Ok(dunit_net_core::ipv6_peer::RxEvent6::None) | Err(_) => {}
+                    Ok(RxEvent6::IcmpEchoReply {
+                        source,
+                        identifier,
+                        sequence,
+                        data,
+                    }) => {
+                        deliver_icmp_reply(
+                            &mut self.sockets,
+                            Endpoint6::ipv6(source, sequence, (nic.id + 1) as u32),
+                            identifier,
+                            data,
+                        );
+                    }
+                    Ok(RxEvent6::None) | Err(_) => {}
                 }
             }
             return Ok(());
@@ -321,6 +339,15 @@ impl SocketService {
             return Ok(());
         }
         if let Some(peer4) = nic.v4_peer() {
+            if let Ok(Some((source, echo))) = peer4.icmp_echo_reply(frame) {
+                deliver_icmp_reply(
+                    &mut self.sockets,
+                    Endpoint6::ipv4(source, echo.sequence),
+                    echo.identifier,
+                    echo.data,
+                );
+                return Ok(());
+            }
             if let Ok(Some(ip4)) = peer4.ipv4_frame(frame) {
                 match ip4.protocol {
                     6 => {
@@ -435,6 +462,37 @@ impl SocketService {
                                 Ok(None) => Ok(false),
                                 Err(err) => Err(err),
                             }
+                        }
+                    } else if socket.open.protocol == PROTO_STATUS {
+                        if request.kind != BRIDGE_SEND {
+                            Err(errno::EOPNOTSUPP)
+                        } else {
+                            match request.data.as_slice() {
+                                b"status" => {
+                                    socket.rx = Some((Endpoint6::NONE, render_status(&self.router, nics)));
+                                    receive(&mut self.bridge, &mut socket, &mut self.udp, &mut self.tcp)?;
+                                    Ok(true)
+                                }
+                                b"routes" => {
+                                    socket.rx = Some((Endpoint6::NONE, render_routes(&self.router)));
+                                    receive(&mut self.bridge, &mut socket, &mut self.udp, &mut self.tcp)?;
+                                    Ok(true)
+                                }
+                                _ => Err(errno::EINVAL),
+                            }
+                        }
+                    } else if socket.open.protocol == PROTO_ICMP {
+                        if request.kind != BRIDGE_SEND {
+                            Err(errno::EOPNOTSUPP)
+                        } else {
+                            progress_icmp(
+                                &socket,
+                                &request,
+                                &self.router,
+                                nics,
+                                self.v4_revoked,
+                                now,
+                            )
                         }
                     } else {
                         progress(
@@ -741,6 +799,85 @@ fn tcp_port_pending(sockets: &[Option<Socket>], port: u16) -> bool {
         .iter()
         .flatten()
         .any(|s| matches!(s.transport, Transport::TcpBound(p, _) if p == port))
+}
+
+fn deliver_icmp_reply(
+    sockets: &mut [Option<Socket>; SOCKETS],
+    source: Endpoint6,
+    identifier: u16,
+    data: &[u8],
+) {
+    if data.len() > MAX_PAYLOAD {
+        return;
+    }
+    for slot in sockets.iter_mut().flatten() {
+        if slot.open.protocol == PROTO_ICMP
+            && !slot.failed
+            && slot.rx.is_none()
+            && (slot.open.token & 0xFFFF) as u16 == identifier
+        {
+            slot.rx = Some((source, data.to_vec()));
+            break;
+        }
+    }
+}
+
+fn progress_icmp(
+    socket: &Socket,
+    request: &Request,
+    router: &MultiRouter,
+    nics: &mut [Box<Nic>],
+    v4_revoked: bool,
+    now: u64,
+) -> core::result::Result<bool, isize> {
+    let ep = request.destination;
+    if !ep.is_unicast_ip() {
+        return Err(errno::EINVAL);
+    }
+    let dst = match ep.family {
+        FAMILY_IPV4 => IpAddr::V4(ep.addr[..4].try_into().map_err(|_| errno::EINVAL)?),
+        FAMILY_IPV6 => IpAddr::V6(ep.addr),
+        _ => return Err(errno::EINVAL),
+    };
+    let Some(choice) = find_route_or_wait(router, nics, dst, ep.scope_id, v4_revoked)? else {
+        return Ok(false);
+    };
+    let nic = nics
+        .iter_mut()
+        .find(|n| n.id == choice.iface_id)
+        .ok_or(errno::EIO)?;
+    let id = (socket.open.token & 0xFFFF) as u16;
+    let seq = ep.port;
+    match (choice.source, dst, choice.next_hop) {
+        (IpAddr::V4(_), IpAddr::V4(dst4), _) => {
+            let peer4 = nic.v4_peer().ok_or(errno::EIO)?;
+            match peer4.echo(dst4, id, seq, &request.data, now).map_err(net_errno)? {
+                Some(frame) if frame.len() >= 14 && &frame[12..14] == [0x08, 0x06] => {
+                    nic.tx.push(&frame).map_err(|e| e.0)?;
+                    Ok(false)
+                }
+                Some(frame) => nic.tx.try_push(&frame).map_err(|e| e.0),
+                None => Ok(false),
+            }
+        }
+        (IpAddr::V6(src6), IpAddr::V6(dst6), IpAddr::V6(nh6)) => {
+            let peer6 = nic.v6.as_mut().ok_or(errno::EIO)?;
+            let echo = Icmpv6::encode_echo(src6, dst6, false, id, seq, &request.data)
+                .map_err(net_errno)?;
+            match peer6
+                .send_packet(src6, dst6, nh6, PROTO_ICMPV6, &echo, now)
+                .map_err(net_errno)?
+            {
+                Egress6::Sent(frame) => nic.tx.try_push(&frame).map_err(|e| e.0),
+                Egress6::Neighbor(frame) => {
+                    let _ = nic.tx.try_push(&frame);
+                    Ok(true)
+                }
+                Egress6::Queued => Ok(true),
+            }
+        }
+        _ => Err(errno::EINVAL),
+    }
 }
 
 fn progress_accept(

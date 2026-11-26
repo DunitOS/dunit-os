@@ -1,0 +1,4 @@
+name = "net-acceptance-test"
+exec = "/system/libexec/net_acceptance_test"
+net_connect = 111
+restart = "never"

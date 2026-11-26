@@ -620,8 +620,9 @@ def run(args: argparse.Namespace) -> RunResult:
     net_http = bool(getattr(args, "net_http", False) or run_defaults.get("net_http"))
     net_https = bool(getattr(args, "net_https", False) or run_defaults.get("net_https"))
     net_ipv6 = bool(getattr(args, "net_ipv6", False) or run_defaults.get("net_ipv6"))
+    net_acceptance = bool(getattr(args, "net_acceptance", False) or run_defaults.get("net_acceptance"))
     net_browser = bool(getattr(args, "net_browser", False) or run_defaults.get("net_browser"))
-    peers = sum((net_test, net_live, net_dhcp, net_static, net_socket, net_dns, net_dns_posix, net_listen, net_listen_posix, net_reno, net_http, net_https, net_ipv6, net_browser))
+    peers = sum((net_test, net_live, net_dhcp, net_static, net_socket, net_dns, net_dns_posix, net_listen, net_listen_posix, net_reno, net_http, net_https, net_ipv6, net_acceptance, net_browser))
     if peers > 1:
         raise ValueError("choose one network test peer")
     if peers and (args.interactive or args.variant or args.disk or args.build_disk):
@@ -718,7 +719,10 @@ def run(args: argparse.Namespace) -> RunResult:
                 "-device", "e1000,id=dunit-nic1,netdev=dunit-test1,mac=52:54:00:12:34:57",
             ]
         else:
-            if net_browser:
+            if net_acceptance:
+                from net_acceptance_transport import NetAcceptancePeer
+                peer = NetAcceptancePeer(workdir)
+            elif net_browser:
                 from net_browser_transport import NetBrowserPeer
                 peer = NetBrowserPeer(workdir)
             elif net_https:
@@ -883,7 +887,7 @@ def run(args: argparse.Namespace) -> RunResult:
             if not peer.wait_complete(remaining()):
                 raise RuntimeError("network peer did not complete the wire exchange")
         else:
-            if (net_dhcp or net_static or net_socket or net_dns or net_dns_posix or net_listen or net_listen_posix or net_reno or net_http or net_https or net_browser) and not peer.wait_complete(remaining()):
+            if (net_dhcp or net_static or net_socket or net_dns or net_dns_posix or net_listen or net_listen_posix or net_reno or net_http or net_https or net_acceptance or net_browser) and not peer.wait_complete(remaining()):
                 raise RuntimeError("network peer did not complete the wire exchange")
             run_command_actions(qmp, serial, run_defaults.get("actions", []),
                                 0, hard_deadline)

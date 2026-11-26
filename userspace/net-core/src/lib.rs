@@ -706,6 +706,20 @@ impl Peer {
         }
         Ok(Some(ip))
     }
+    pub fn icmp_echo_reply<'a>(&self, bytes: &'a [u8]) -> Result<Option<(Ip, Echo<'a>)>, Error> {
+        let Some(ip) = self.ipv4_frame(bytes)? else {
+            return Ok(None);
+        };
+        if ip.protocol != 1 {
+            return Ok(None);
+        }
+        let echo = Echo::parse(ip.payload)?;
+        if echo.reply {
+            Ok(Some((ip.source, echo)))
+        } else {
+            Ok(None)
+        }
+    }
     /// Returns an ARP request, an echo request, or None while ARP is pending.
     pub fn echo(
         &mut self,
@@ -866,6 +880,8 @@ pub mod ipv6;
 pub mod ipv6_peer;
 pub mod ndp;
 pub mod router;
+#[cfg(test)]
+mod fuzz_tests;
 #[cfg(test)]
 mod ipv6_tests;
 #[cfg(test)]

@@ -1,0 +1,13 @@
+[package]
+name = "net_acceptance_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+libdunit = { path = "../../libdunit" }
+dunit_packet_abi = { path = "../../../abi/packet" }
+
+[[bin]]
+name = "net_acceptance_test"
+path = "src/main.rs"

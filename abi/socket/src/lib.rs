@@ -7,7 +7,10 @@ pub const VERSION_V2: u16 = 2;
 pub const PROTO_UDP: u16 = 1;
 pub const PROTO_TCP: u16 = 2;
 pub const PROTO_DNS: u16 = 3;
+pub const PROTO_ICMP: u16 = 4;
+pub const PROTO_STATUS: u16 = 5;
 pub const MAX_DNS_NAME: usize = 253;
+pub const MAX_ICMP_PAYLOAD: usize = 256;
 pub const FAMILY_NONE: u8 = 0;
 pub const FAMILY_IPV4: u8 = 4;
 pub const FAMILY_IPV6: u8 = 6;
@@ -16,6 +19,8 @@ pub const SCOPE_TCP: u32 = 2;
 pub const SCOPE_UDP_BIND: u32 = 4;
 pub const SCOPE_TCP_LISTEN: u32 = 8;
 pub const SCOPE_LOW_PORT: u32 = 16;
+pub const SCOPE_STATUS: u32 = 32;
+pub const SCOPE_PING: u32 = 64;
 
 pub const OP_CONNECT: u16 = 1;
 pub const OP_SEND_TO: u16 = 2;
@@ -297,7 +302,10 @@ fn validate_bridge_fields(
         _ => false,
     };
     if !flags_valid
-        || !matches!(protocol, PROTO_UDP | PROTO_TCP | PROTO_DNS)
+        || !matches!(
+            protocol,
+            PROTO_UDP | PROTO_TCP | PROTO_DNS | PROTO_ICMP | PROTO_STATUS
+        )
         || token == 0
         || owner == 0
         || error > 0

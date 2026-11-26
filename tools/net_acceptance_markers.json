@@ -1,0 +1,43 @@
+{
+  "description": "M8 networking v1 acceptance matrix: versioned config rollback, privilege isolation, dnet/ICMPv4+v6 ping, loss/reorder/dup/corruption impairment + TLS 1.3, 24-cycle leak soak, and netd crash/restart recovery with active sockets.",
+  "run": {
+    "config": "limine_test_gui.conf",
+    "initrd_overlay": "tests/fixtures/net-acceptance",
+    "net_acceptance": true,
+    "ready_marker": "[INIT] start: PID 1 userspace service manager",
+    "actions": [
+      {
+        "wait_marker": "[NET-ACCEPTANCE] complete",
+        "timeout": 120
+      },
+      {
+        "wait_marker": "gui_server: desktop ready",
+        "timeout": 60
+      }
+    ]
+  },
+  "required": [
+    "[NETD] invalid staged config; rolling back",
+    "[NETD] config rolled back",
+    "[NETD] dual-stack v2 socket bridge ready (1 nic)",
+    "[NET-ACCEPTANCE] config rollback and privilege isolation passed",
+    "[NET-ACCEPTANCE] status, routes and ICMPv4/v6 ping passed",
+    "[NET-ACCEPTANCE] impairment loss/reorder/dup/corrupt and TLS 1.3 passed",
+    "[NET-ACCEPTANCE] 24-cycle connect-close/DNS leak soak passed",
+    "[NETD] injected fault exit (test-only)",
+    "[INIT] netd: restart (1/3)",
+    "[NET-ACCEPTANCE] netd crash/restart with active sockets passed",
+    "[NET-ACCEPTANCE] complete",
+    "gui_server: desktop ready"
+  ],
+  "forbidden": [
+    "[PANIC]",
+    "[INIT] PANIC in init",
+    "[INIT] netd: faulted",
+    "[NET-ACCEPTANCE] FAIL",
+    {
+      "marker": "[USER-FAULT]",
+      "after": "[INIT] start: PID 1 userspace service manager"
+    }
+  ]
+}

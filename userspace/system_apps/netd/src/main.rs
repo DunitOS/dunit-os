@@ -13,6 +13,7 @@ mod nic;
 mod outbound;
 mod socket_service;
 mod static_runtime;
+mod telemetry;
 
 use alloc::vec::Vec;
 use dunit::{errno, process, time::Instant, Error, Result};
@@ -65,6 +66,8 @@ fn wait_ready(nics: &[alloc::boxed::Box<Nic>], sockets: Option<&SocketService>, 
 fn main() -> Result<()> {
     let devices = Device::receive_grants()?;
     let specs = config::load_nic_specs(devices.len())?;
+    let allow_test_fault =
+        dunit::fs::read_to_string("/system/boot-services/netd-allow-test-fault").is_ok();
     let started = Instant::now()?;
     let ticks = dunit::system::stats().map_or(0, |stats| stats.uptime_ticks as u32);
     let seed = process::id() ^ ticks.rotate_left(13);
@@ -85,6 +88,11 @@ fn main() -> Result<()> {
     }
 
     loop {
+        if allow_test_fault && dunit::fs::read_to_string("/run/netd/crash-once").is_ok() {
+            let _ = dunit::fs::remove_file("/run/netd/crash-once");
+            dunit::println!("[NETD] injected fault exit (test-only)")?;
+            process::exit(1);
+        }
         let now = clock_ms(started)?;
         for nic in &mut nics {
             let _ = nic.poll_link_and_timers(now)?;

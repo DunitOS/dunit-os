@@ -230,7 +230,7 @@ fn parse_service(text: &str, boot_catalog: bool) -> Option<Service> {
                     return None;
                 }
                 let scope = parse_u32(val)?;
-                if scope == 0 || scope & !0x1f != 0 {
+                if scope == 0 || scope & !0x7f != 0 {
                     return None;
                 }
                 net_connect = Some(scope);

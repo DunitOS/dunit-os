@@ -1,0 +1,8 @@
+# Dunit OS default network profile (version 1 schema)
+version = 1
+
+[nic0]
+metric = 10
+dad_probes = 1
+ipv4 = dhcp
+ipv6 = none

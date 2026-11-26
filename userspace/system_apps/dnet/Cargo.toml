@@ -1,0 +1,14 @@
+[package]
+name = "dnet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dunit = { path = "../../../runtime/dunit" }
+libdunit = { path = "../../libdunit" }
+dunit_http_core = { path = "../../http-core" }
+dunit_packet_abi = { path = "../../../abi/packet" }
+
+[[bin]]
+name = "dnet"
+path = "src/main.rs"
