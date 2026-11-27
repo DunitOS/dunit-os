@@ -42,10 +42,12 @@ pub(crate) struct DualDnsRuntime {
 }
 
 impl DualDnsRuntime {
-    pub(crate) fn open(udp: &mut DualEndpoints) -> core::result::Result<Self, isize> {
+    pub(crate) fn open(udp: &mut DualEndpoints, seed: u32) -> core::result::Result<Self, isize> {
         let port = udp.bind(0).map_err(|_| errno::ENOBUFS)?;
+        let mut resolver = DualResolver::new();
+        resolver.seed_id(((seed >> 16) ^ seed) as u16);
         Ok(Self {
-            resolver: DualResolver::new(),
+            resolver,
             port,
             active_token: None,
             tcp: None,

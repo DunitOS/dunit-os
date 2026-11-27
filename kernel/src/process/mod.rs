@@ -993,15 +993,17 @@ impl Process {
                 .map_shared_vm(id, addr, writable)
                 .map_err(|_| HandleError::MapFailed);
         }
-        let map_len = {
+        let (map_len, writable) = {
             let entry = self.handle_table.get(handle)?;
+            let writable = entry.rights & RIGHT_WRITE != 0;
             match &entry.object {
-                HandleObject::Memory(data) => len.min(data.len()),
+                HandleObject::Memory(data) => (len.min(data.len()), writable),
                 _ => return Err(HandleError::WrongType),
             }
         };
+        let req_len = len.max(1);
         let mapped = self
-            .map_anonymous(addr, len.max(1), true, false, false, true)
+            .map_anonymous(addr, req_len, true, false, false, true)
             .map_err(|_| HandleError::MapFailed)?;
         // Адресное пространство вызывающего процесса активно во время системного
         // вызова, поэтому пишем прямо в только что отображённый пользовательский
@@ -1011,6 +1013,14 @@ impl Process {
             unsafe {
                 core::ptr::copy_nonoverlapping(data.as_ptr(), mapped as *mut u8, map_len);
             }
+        }
+        if !writable {
+            let page_len = req_len
+                .checked_add(USER_PAGE_SIZE - 1)
+                .map(|v| v & !(USER_PAGE_SIZE - 1))
+                .ok_or(HandleError::MapFailed)?;
+            self.protect_range(mapped, page_len, false, false, true)
+                .map_err(|_| HandleError::MapFailed)?;
         }
         Ok(mapped)
     }

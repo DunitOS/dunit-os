@@ -46,6 +46,7 @@ enum Msg {
     ZoomOut,
     Pan(i32, i32),
     ResetPan,
+    WindowSize(u32, u32),
     CanvasSynced,
     LoadDecoded {
         name: String,
@@ -63,6 +64,8 @@ struct ImageApp {
     zoom: ZoomMode,
     pan_x: i32,
     pan_y: i32,
+    win_w: u32,
+    win_h: u32,
     status: String,
     dialog: DialogMode,
     canvas_dirty: bool,
@@ -77,6 +80,8 @@ impl ImageApp {
             zoom: ZoomMode::Fit,
             pan_x: 0,
             pan_y: 0,
+            win_w: W,
+            win_h: H,
             status: String::new(),
             dialog: DialogMode::None,
             canvas_dirty: true,
@@ -141,12 +146,12 @@ impl Component for ImageApp {
                 self.canvas_dirty = true;
             }
             Msg::ZoomIn => {
-                let cur = self.zoom_pct(W, H);
+                let cur = self.zoom_pct(self.win_w, self.win_h);
                 self.zoom = ZoomMode::Percent((cur + 25).min(400));
                 self.canvas_dirty = true;
             }
             Msg::ZoomOut => {
-                let cur = self.zoom_pct(W, H);
+                let cur = self.zoom_pct(self.win_w, self.win_h);
                 self.zoom = ZoomMode::Percent(cur.saturating_sub(25).max(10));
                 self.canvas_dirty = true;
             }
@@ -158,6 +163,11 @@ impl Component for ImageApp {
             Msg::ResetPan => {
                 self.pan_x = 0;
                 self.pan_y = 0;
+                self.canvas_dirty = true;
+            }
+            Msg::WindowSize(w, h) => {
+                self.win_w = w;
+                self.win_h = h;
                 self.canvas_dirty = true;
             }
             Msg::CanvasSynced => {
@@ -357,21 +367,22 @@ fn main() -> Result<()> {
             0xFF00_0000 | ((c.r as u32) << 16) | ((c.g as u32) << 8) | c.b as u32
         });
     let mut ui = ComponentWindow::open_themed_with_style(W, H, app, STYLE)?;
+    let offer = Offer {
+        formats: alloc::vec![Format::Files],
+        actions: Action::Copy as u32 | Action::Link as u32,
+        preferred: Action::Copy,
+    };
     if let Ok(t) = ui.transfers() {
-        let offer = Offer {
-            formats: alloc::vec![Format::Files],
-            actions: Action::Copy as u32 | Action::Link as u32,
-            preferred: Action::Copy,
-        };
         let _ = t.register_opener(offer.clone());
-        let _ = t.register_target(offer);
     }
+    let _ = ui.set_transfer_target(Some(offer));
     if let Some(img) = &ui.component().image {
-        dunit::println!("[GUI-IMAGE] loaded {} {}x{}", path, img.width, img.height)?;
+        let _ = dunit::println!("[GUI-IMAGE] loaded {} {}x{}", path, img.width, img.height);
     }
 
     if self_test {
         let cur_size = ui.size();
+        ui.update(Msg::WindowSize(cur_size.0, cur_size.1))?;
         let pixels = render_image_canvas(ui.component(), cur_size.0, cur_size.1, bg);
         ui.set_canvas(pixels, cur_size.0, cur_size.1)?;
         ui.update(Msg::ZoomActual)?;
@@ -388,6 +399,9 @@ fn main() -> Result<()> {
             return ui.close();
         }
         let cur_size = ui.size();
+        if cur_size != last_size {
+            ui.update(Msg::WindowSize(cur_size.0, cur_size.1))?;
+        }
         if ui.component().canvas_dirty || cur_size != last_size {
             last_size = cur_size;
             let pixels = render_image_canvas(ui.component(), cur_size.0, cur_size.1, bg);

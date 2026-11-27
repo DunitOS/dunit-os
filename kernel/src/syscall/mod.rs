@@ -693,7 +693,10 @@ fn sys_handle_read(handle: u32, user_buf: *mut u8, len: usize) -> i64 {
     // ядра (DoS из любого процесса). Клампим (а не отвергаем): handle_memory_read
     // всё равно копирует min(cap, размер_объекта), так что легальное чтение не
     // усекается — объект физически не бывает больше cap.
-    let cap = len.min(crate::handle::MAX_MEMORY_OBJECT);
+    let cap = len.min(crate::handle::MAX_MEMORY_OBJECT).min(MAX_USER_COPY);
+    if let Err(error) = validate_user_range(user_buf as u64, cap) {
+        return error;
+    }
     let mut scratch = alloc::vec![0u8; cap];
     let copied = match crate::process::with_current_process_mut(|process| process.handle_memory_read(handle, &mut scratch)) {
         Some(Ok(n)) => n,
@@ -1491,6 +1494,9 @@ fn sys_fsync(fd: u32) -> i64 {
 /// in-kernel `dunitfs::fsck`; `fsck_dunit` — лишь CLI поверх этого. Серийный
 /// вывод оставлен за CLI (здесь не эмитим), чтобы не задваивать строки.
 fn sys_fsck(out: *mut UserFsckReport) -> i64 {
+    if let Err(error) = validate_user_mapping(out as u64, core::mem::size_of::<UserFsckReport>(), true) {
+        return error;
+    }
     let Some((device, start, blocks)) = crate::fs::dunitfs::locate_dunit_partition() else {
         return ENOENT;
     };
@@ -1914,6 +1920,12 @@ fn sys_receive_message_from(msg: *mut u8, len: usize, sender_out: *mut u32) -> i
     if len == 0 || len > crate::ipc::MAX_MESSAGE_SIZE {
         return EMSGSIZE;
     }
+    if let Err(error) = validate_user_mapping(msg as u64, len, true) {
+        return error;
+    }
+    if let Err(error) = validate_user_mapping(sender_out as u64, core::mem::size_of::<u32>(), true) {
+        return error;
+    }
     let pid = match crate::process::with_current_process(|process| process.pid) {
         Some(value) => value,
         None => return EINVAL,
@@ -2081,6 +2093,12 @@ fn sys_get_key_event() -> i64 {
 }
 
 fn sys_get_mouse_pos(x: *mut u32, y: *mut u32) -> i64 {
+    if let Err(error) = validate_user_mapping(x as u64, core::mem::size_of::<u32>(), true) {
+        return error;
+    }
+    if let Err(error) = validate_user_mapping(y as u64, core::mem::size_of::<u32>(), true) {
+        return error;
+    }
     let (mx, my) = crate::input::mouse_position();
     let x_bytes = (mx as u32).to_le_bytes();
     let y_bytes = (my as u32).to_le_bytes();
@@ -2282,6 +2300,9 @@ fn sys_pty_close(id: u32) -> i64 {
 
 
 fn sys_wait_process(pid: u32, status: *mut WaitStatus) -> i64 {
+    if let Err(error) = validate_user_mapping(status as u64, core::mem::size_of::<WaitStatus>(), true) {
+        return error;
+    }
     let wait_record = match crate::process::wait_for_child(crate::process::ProcessId(pid as u64)) {
         Ok(record) => record,
         Err(error) => return process_error_to_errno(error),

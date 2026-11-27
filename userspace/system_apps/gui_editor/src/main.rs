@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use alloc::{borrow::ToOwned, format, string::String, vec};
+use alloc::{borrow::ToOwned, format, string::String, vec, vec::Vec};
 use dunit::{
     args, errno, fs,
     process::Child,
@@ -51,6 +51,10 @@ enum Msg {
     Redo,
     SelectAll,
     CompileC,
+    CompileFinished {
+        saved_path: Option<String>,
+        note: String,
+    },
     HelpPrompt,
     DialogField1(String),
     DialogField2(String),
@@ -293,7 +297,7 @@ impl Component for EditorApp {
     fn update(&mut self, msg: Msg) {
         match msg {
             Msg::TextChanged(text) => {
-                if self.doc.apply_full_text(&text).is_ok() {
+                if self.doc.bytes_len() <= 64 * 1024 && self.doc.apply_full_text(&text).is_ok() {
                     self.note = String::from("Editing");
                 }
             }
@@ -353,6 +357,14 @@ impl Component for EditorApp {
             }
             Msg::CompileC => {
                 self.pending_compile = true;
+            }
+            Msg::CompileFinished { saved_path, note } => {
+                self.pending_compile = false;
+                if let Some(p) = saved_path {
+                    self.doc.set_path(p);
+                    self.doc.mark_saved();
+                }
+                self.note = note;
             }
             Msg::HelpPrompt => {
                 self.dialog = DialogMode::Help;
@@ -416,6 +428,7 @@ impl Component for EditorApp {
     }
 
     fn view(&self) -> View<Msg> {
+        let too_large = self.doc.bytes_len() > 64 * 1024;
         let field_text = sanitize_for_textarea(self.doc.text());
         let body_area = View::text_area(
             "editor_body",
@@ -425,15 +438,20 @@ impl Component for EditorApp {
             InputOptions {
                 placeholder: String::from("Start typing or File -> Open..."),
                 soft_wrap: false,
-                read_only: false,
+                read_only: too_large,
                 ..Default::default()
             },
         );
         let lang = Language::from_path_and_text(self.doc.path(), self.doc.text());
+        let status_note = if too_large {
+            format!("{} (read-only >64 KiB)", self.note)
+        } else {
+            self.note.clone()
+        };
         let status = View::status_bar(
             "status",
             "Status",
-            format!("[{}] {} | {}", lang.display_name(), self.doc.status_line(), self.note),
+            format!("[{}] {} | {}", lang.display_name(), self.doc.status_line(), status_note),
         );
         let main = View::column(
             "root_body",
@@ -491,14 +509,11 @@ fn load_initial_doc(path: Option<&str>) -> Result<DocumentBuffer> {
     }
 }
 
-fn compile_and_run(doc: &mut DocumentBuffer, note: &mut String) {
+fn compile_and_run(doc: &DocumentBuffer) -> (Option<String>, String, Option<Child>) {
     let src_path = doc.path().unwrap_or("/tmp/editor_prog.c").to_owned();
     if let Err(e) = fs::write(&src_path, doc.text().as_bytes()) {
-        *note = format!("Write failed: {}", e.name());
-        return;
+        return (None, format!("Write failed: {}", e.name()), None);
     }
-    doc.set_path(src_path.clone());
-    doc.mark_saved();
     let out_bin = "/tmp/editor_prog.out";
     let tcc_args = [
         "/system/bin/tcc",
@@ -512,13 +527,13 @@ fn compile_and_run(doc: &mut DocumentBuffer, note: &mut String) {
     match Child::spawn_with_env("/system/bin/tcc", &tcc_args, &[]) {
         Ok(mut cc) => match cc.wait() {
             Ok(st) if st.success() => match Child::spawn_with_env(out_bin, &[out_bin], &[]) {
-                Ok(_) => *note = format!("Compiled & launched {}", out_bin),
-                Err(e) => *note = format!("Launch failed: {}", e.name()),
+                Ok(child) => (Some(src_path), format!("Compiled & launched {}", out_bin), Some(child)),
+                Err(e) => (Some(src_path), format!("Launch failed: {}", e.name()), None),
             },
-            Ok(st) => *note = format!("TCC exited with {:?}", st.code()),
-            Err(e) => *note = format!("Wait failed: {}", e.name()),
+            Ok(st) => (Some(src_path), format!("TCC exited with {:?}", st.code()), None),
+            Err(e) => (Some(src_path), format!("Wait failed: {}", e.name()), None),
         },
-        Err(e) => *note = format!("TCC unavailable: {}", e.name()),
+        Err(e) => (Some(src_path), format!("TCC unavailable: {}", e.name()), None),
     }
 }
 
@@ -600,6 +615,7 @@ fn run_self_test(ui: &mut ComponentWindow<EditorApp>) -> Result<()> {
     let reread = fs::read(out_path)?;
     let h1 = dunit_editor::sha256_hex(model.text().as_bytes());
     let h2 = dunit_editor::sha256_hex(&reread);
+    let _ = fs::remove_file(out_path);
     if h1 != h2 {
         return Err(Error(errno::EIO));
     }
@@ -626,19 +642,22 @@ fn main() -> Result<()> {
 
     let doc = load_initial_doc(path.as_deref())?;
     let mut ui = open_editor_window(doc)?;
-    dunit::println!("[GUI-EDITOR] window opened")?;
+    let _ = dunit::println!("[GUI-EDITOR] window opened");
 
     if self_test {
         run_self_test(&mut ui)?;
         return ui.close();
     }
 
+    let mut children: Vec<Child> = Vec::new();
     loop {
+        children.retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_)) | Err(_)));
         if ui.component().pending_compile {
-            let mut d = ui.component().doc.clone();
-            let mut n = String::new();
-            compile_and_run(&mut d, &mut n);
-            ui.update(Msg::DialogCancel)?;
+            let (saved_path, note, spawned) = compile_and_run(&ui.component().doc);
+            if let Some(child) = spawned {
+                children.push(child);
+            }
+            ui.update(Msg::CompileFinished { saved_path, note })?;
         }
         if ui.component().should_quit {
             return ui.close();

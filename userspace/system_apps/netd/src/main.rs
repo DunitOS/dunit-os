@@ -69,8 +69,13 @@ fn main() -> Result<()> {
     let allow_test_fault =
         dunit::fs::read_to_string("/system/boot-services/netd-allow-test-fault").is_ok();
     let started = Instant::now()?;
-    let ticks = dunit::system::stats().map_or(0, |stats| stats.uptime_ticks as u32);
-    let seed = process::id() ^ ticks.rotate_left(13);
+    let seed = match dunit::rand::bytes::<4>() {
+        Ok(b) => u32::from_le_bytes(b),
+        Err(_) => {
+            let ticks = dunit::system::stats().map_or(0, |stats| stats.uptime_ticks as u32);
+            process::id() ^ ticks.rotate_left(13)
+        }
+    };
 
     let mut nics = Vec::with_capacity(devices.len());
     let now = clock_ms(started)?;

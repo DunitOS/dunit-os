@@ -22,6 +22,7 @@ class ImageProfiles(unittest.TestCase):
             lua_config=None, lua_build_rsp=None)
         for path, data in {
             "assets/exec-path": b"/system/bin:/app\n",
+            "assets/network/defaults.toml": b"[dns]\n",
             "assets/dwm/default.toml": b"desktop", "assets/dwm/session.toml": b"session",
             "assets/dwm/test.toml": b"test desktop", "assets/fonts/font.ttf": b"font",
             "assets/images/demo.gif": b"large demo",
@@ -49,6 +50,7 @@ class ImageProfiles(unittest.TestCase):
         self.assertNotIn("/system/lib/libdunit_ui.a", entries)
         self.assertNotIn("/system/lib/libdunit_posix_sockets.a", entries)
         self.assertNotIn("/assets/fonts/font.ttf", entries)
+        self.assertNotIn("/system/share/network/defaults.toml", entries)
 
     def test_missing_required_app_fails_instead_of_shipping_partial_image(self):
         (self.args.userspace_dir / "dsh").unlink()
@@ -67,6 +69,7 @@ class ImageProfiles(unittest.TestCase):
         self.assertNotIn("/system/libexec/net_socket_posix", entries)
         self.assertIn("/system/libexec/netd", entries)
         self.assertIn("/system/boot-services/netd.toml", entries)
+        self.assertIn("/system/share/network/defaults.toml", entries)
         self.assertNotIn("/app/netd", entries)
         for path in ("/app/test_only", "/assets/images/demo.gif", "/system/services/probe.toml"):
             self.assertNotIn(path, entries)

@@ -159,6 +159,23 @@ open_formats = ["application/x-dunit-file-list"]
 name  = "Settings"
 label = "SET"
 
+[application.gui_editor]
+name  = "Editor"
+label = "EDIT"
+
+[application.gui_image]
+open_formats = ["application/x-dunit-file-list"]
+name  = "Images"
+label = "IMG"
+
+[application.gui_reader]
+name  = "Reader"
+label = "READ"
+
+[application.gui_browser]
+name  = "Browser"
+label = "WEB"
+
 # Ordered pinned app IDs. Unknown IDs reject the document.
 [dock]
 entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
@@ -166,7 +183,7 @@ entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui
 # Ordered launcher entries.
 [launcher]
 terminal = "/app/gui_terminal"
-entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_terminal", "gui_settings"]
+entries = ["gui_demo", "gui_calc", "gui_stat", "gui_files", "gui_editor", "gui_image", "gui_reader", "gui_browser", "gui_terminal", "gui_settings"]
 
 # Start with no windows. test.toml owns the isolation smoke.
 [startup]

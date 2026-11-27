@@ -391,7 +391,15 @@ impl Ip6Peer {
                 }
             }
         }
-        if router_lifetime > 0 && !self.routers.iter().any(|r| r.addr == router_src) {
+        const MAX_RA_ROUTERS: usize = 16;
+        const MAX_RA_PREFIXES: usize = 32;
+        const MAX_RA_GLOBALS: usize = 16;
+        const MAX_RA_RDNSS: usize = 16;
+
+        if router_lifetime > 0
+            && self.routers.len() < MAX_RA_ROUTERS
+            && !self.routers.iter().any(|r| r.addr == router_src)
+        {
             self.routers.push(RouterSlot { addr: router_src });
         }
         for p in prefixes {
@@ -400,10 +408,11 @@ impl Ip6Peer {
             }
             if p.on_link {
                 if let Some(masked) = ipv6::mask_prefix(p.prefix, p.prefix_len) {
-                    if !self
-                        .prefixes
-                        .iter()
-                        .any(|s| s.prefix == masked && s.prefix_len == p.prefix_len)
+                    if self.prefixes.len() < MAX_RA_PREFIXES
+                        && !self
+                            .prefixes
+                            .iter()
+                            .any(|s| s.prefix == masked && s.prefix_len == p.prefix_len)
                     {
                         self.prefixes.push(PrefixSlot {
                             prefix: masked,
@@ -414,7 +423,9 @@ impl Ip6Peer {
             }
             if p.autonomous && self.slaac_enabled && p.prefix_len == 64 {
                 if let Ok(addr) = ipv6::slaac_from_prefix(p.prefix, p.prefix_len, self.mac) {
-                    if !self.globals.iter().any(|g| g.addr == addr) {
+                    if self.globals.len() < MAX_RA_GLOBALS
+                        && !self.globals.iter().any(|g| g.addr == addr)
+                    {
                         self.globals.push(GlobalSlot {
                             addr,
                             prefix_len: 64,
@@ -430,7 +441,7 @@ impl Ip6Peer {
                 continue;
             }
             for &srv in &entry.servers {
-                if !self.rdnss.contains(&srv) {
+                if self.rdnss.len() < MAX_RA_RDNSS && !self.rdnss.contains(&srv) {
                     self.rdnss.push(srv);
                 }
             }

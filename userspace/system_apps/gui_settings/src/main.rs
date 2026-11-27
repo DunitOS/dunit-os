@@ -1208,7 +1208,7 @@ fn main() -> dunit::Result<()> {
             ui.update(Message::Apply(action))?;
             imported_theme = matches!(action, Action::ImportTheme(_)) && !ui.component().error;
             if let Action::SelectPage(page) = action {
-                dunit::println!("gui_settings: page {}", page)?;
+                let _ = dunit::println!("gui_settings: page {}", page);
             }
         }
         if ui.component().reload {
@@ -1218,24 +1218,28 @@ fn main() -> dunit::Result<()> {
             // watcher remains responsible for changes made by other clients.
             if ok && imported_theme {
                 match ui.reload_theme() {
-                    Ok(_) => dunit::println!(
-                        "gui_settings: SDK theme applied {}",
-                        ui.component().s.desktop.sdk_theme.as_str()
-                    )?,
-                    Err(error) => dunit::println!("gui_settings: SDK theme rejected {}", error)?,
+                    Ok(_) => {
+                        let _ = dunit::println!(
+                            "gui_settings: SDK theme applied {}",
+                            ui.component().s.desktop.sdk_theme.as_str()
+                        );
+                    }
+                    Err(error) => {
+                        let _ = dunit::println!("gui_settings: SDK theme rejected {}", error);
+                    }
                 }
             }
         }
         match ui.next_event(dunit::time::Duration::from_millis(40))? {
             Some(WindowEvent::CloseRequested) => break,
             Some(WindowEvent::Resized { .. }) => {
-                dunit::println!("gui_settings: reconfigured OK")?;
+                let _ = dunit::println!("gui_settings: reconfigured OK");
             }
             Some(WindowEvent::Input(input)) if input.kind == dunit::window::IN_SCROLL => {
                 let key = alloc::format!("content{}", ui.component().page);
                 let x = ui.scroll_offset_x(&key).unwrap_or(0.) as i32;
                 let y = ui.scroll_offset(&key).unwrap_or(0.) as i32;
-                dunit::println!("gui_settings: scroll {},{}", x, y)?;
+                let _ = dunit::println!("gui_settings: scroll {},{}", x, y);
             }
             Some(WindowEvent::Transfer(event))
                 if event.message.kind == dunit::transfer::Kind::OpenData =>

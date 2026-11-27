@@ -717,7 +717,11 @@ impl DunitFs {
     }
 
     fn read_node(&self, index: usize, offset: usize, output: &mut [u8]) -> Result<usize> {
-        let node = self.nodes[index].as_ref().ok_or(VfsError::NotFound)?;
+        let node = self
+            .nodes
+            .get(index)
+            .and_then(Option::as_ref)
+            .ok_or(VfsError::NotFound)?;
         if offset >= node.size as usize {
             return Ok(0);
         }
@@ -959,6 +963,9 @@ impl FileSystem for DunitFs {
             return Err(VfsError::PermissionDenied);
         }
         let node = self.handles[handle_index].1.node;
+        if node == usize::MAX {
+            return Err(VfsError::IsADirectory);
+        }
         let offset = self.handles[handle_index].1.offset;
         let read = self.read_node(node, offset, buf)?;
         self.handles[handle_index].1.offset += read;
@@ -971,8 +978,17 @@ impl FileSystem for DunitFs {
             return Err(VfsError::PermissionDenied);
         }
         let node = self.handles[handle_index].1.node;
+        if node == usize::MAX {
+            return Err(VfsError::IsADirectory);
+        }
+        let size = self
+            .nodes
+            .get(node)
+            .and_then(Option::as_ref)
+            .ok_or(VfsError::NotFound)?
+            .size as usize;
         let offset = if self.handles[handle_index].1.flags.append() {
-            self.nodes[node].as_ref().unwrap().size as usize
+            size
         } else {
             self.handles[handle_index].1.offset
         };
@@ -991,7 +1007,15 @@ impl FileSystem for DunitFs {
     fn seek(&mut self, handle: FileHandle, offset: i64, whence: u32) -> Result<u64> {
         let handle_index = self.handle_index(handle).ok_or(VfsError::InvalidDescriptor)?;
         let node = self.handles[handle_index].1.node;
-        let size = self.nodes[node].as_ref().ok_or(VfsError::NotFound)?.size as i64;
+        if node == usize::MAX {
+            return Err(VfsError::IsADirectory);
+        }
+        let size = self
+            .nodes
+            .get(node)
+            .and_then(Option::as_ref)
+            .ok_or(VfsError::NotFound)?
+            .size as i64;
         let base = match whence {
             0 => 0,                                       // SEEK_SET
             1 => self.handles[handle_index].1.offset as i64, // SEEK_CUR
@@ -1029,7 +1053,14 @@ impl FileSystem for DunitFs {
             return Err(VfsError::PermissionDenied);
         }
         let node = self.handles[hidx].1.node;
-        let meta = self.nodes[node].as_ref().ok_or(VfsError::NotFound)?;
+        if node == usize::MAX {
+            return Err(VfsError::IsADirectory);
+        }
+        let meta = self
+            .nodes
+            .get(node)
+            .and_then(Option::as_ref)
+            .ok_or(VfsError::NotFound)?;
         if meta.file_type != FileType::File {
             return Err(VfsError::IsADirectory);
         }

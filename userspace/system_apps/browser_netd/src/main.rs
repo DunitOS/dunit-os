@@ -418,11 +418,25 @@ impl Service {
         }
         http_req.body = req.body;
 
-        let resp = match self.session.send(&http_req) {
+        let mut redirect_violation: Option<PolicyViolation> = None;
+        let policy = &self.policy;
+        let intent = req.intent;
+        let resp = match self.session.send_with_redirect_check(&http_req, |from, to| {
+            if let Err(v) = check_redirect_hop(policy, from, to, intent) {
+                redirect_violation = Some(v);
+                return Err(HttpError::Transport(errno::EACCES));
+            }
+            Ok(())
+        }) {
             Ok(r) => r,
             Err(err) => {
-                let (code, label) = map_http_error(&self.policy, &err);
-                self.send_error(client, ctrl.request_id, code, label, extra_flags);
+                if let Some(v) = redirect_violation {
+                    let detail = format!("{v}");
+                    self.send_error(client, ctrl.request_id, ERR_POLICY, &detail, extra_flags);
+                } else {
+                    let (code, label) = map_http_error(&self.policy, &err);
+                    self.send_error(client, ctrl.request_id, code, label, extra_flags);
+                }
                 return;
             }
         };
@@ -496,6 +510,18 @@ impl Service {
         };
         self.send_payload(client, ctrl.request_id, flags, &tls_info, &payload);
     }
+}
+
+fn check_redirect_hop(
+    policy: &BrowserPolicy,
+    from: &Url,
+    to: &Url,
+    intent: dunit_browser_net::policy::ResourceIntent,
+) -> core::result::Result<(), PolicyViolation> {
+    policy.origins.check_redirect(from, to)?;
+    policy.origins.check_url(to, intent)?;
+    let _ = policy.proxy.resolve(&to.host)?;
+    Ok(())
 }
 
 fn check_redirect_origin(

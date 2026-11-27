@@ -569,13 +569,13 @@ impl<C: Component> ComponentWindow<C> {
                         return Err(error);
                     }
                     if previous_error != self.theme_error_detail {
-                        crate::println!(
+                        let _ = crate::println!(
                             "{}",
                             alloc::format!(
                                 "[SDKTHEME] reload rejected: {}",
                                 self.theme_error_detail.as_deref().unwrap_or(error.name())
                             )
-                        )?;
+                        );
                     }
                     self.theme_error = Some(error);
                 }

@@ -174,7 +174,7 @@ impl SocketService {
         ))?;
         let fd = u32::try_from(fd).map_err(|_| Error(errno::EIO))?;
         let mut udp = Box::new(DualEndpoints::new());
-        let dns = Box::new(DualDnsRuntime::open(&mut udp).map_err(Error)?);
+        let dns = Box::new(DualDnsRuntime::open(&mut udp, seed).map_err(Error)?);
         let tcp = Box::new(Table::new_dual(mtu, seed).map_err(|e| Error(tcp_errno(e)))?);
         Ok(Some(Self {
             bridge: Bridge {

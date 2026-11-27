@@ -78,7 +78,9 @@ def collect(args: argparse.Namespace) -> list[tuple[str, bytes]]:
         add(f"/system/libexec/{name}", source, executable=True)
     entries["/system/share/dunit-image.json"] = (json.dumps(profile, sort_keys=True) + "\n").encode()
     net_defaults = Path(args.assets_dir) / "network" / "defaults.toml"
-    if net_defaults.is_file():
+    if net_defaults.is_file() and (
+        profile["desktop"] or profile.get("boot_services") or profile.get("services") is None
+    ):
         add("/system/share/network/defaults.toml", net_defaults)
 
     assets = Path(args.assets_dir)

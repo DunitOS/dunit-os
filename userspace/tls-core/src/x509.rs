@@ -303,8 +303,10 @@ impl Certificate {
                     let ext_seq = list.read_tag(0x30)?;
                     let mut x = DerReader::new(ext_seq);
                     let oid = x.read_tag(0x06)?;
+                    let mut critical = false;
                     if x.peek() == Some(0x01) {
-                        let _crit = x.read_tag(0x01)?;
+                        let crit = x.read_tag(0x01)?;
+                        critical = crit.len() == 1 && crit[0] != 0;
                     }
                     let oct = x.read_tag(0x04)?;
                     if oid == OID_EXT_BASIC_CONSTRAINTS {
@@ -359,6 +361,8 @@ impl Certificate {
                                 san_ips_v6.push(gval.try_into().unwrap());
                             }
                         }
+                    } else if critical {
+                        return Err(TlsError::InvalidCertificate);
                     }
                 }
             }
@@ -437,8 +441,8 @@ fn dns_name_matches(pattern: &str, host: &str) -> bool {
     }
     if let Some(rest) = pattern.strip_prefix("*.") {
         if !rest.contains('*') && rest.contains('.') {
-            if let Some((_, suffix)) = host.split_once('.') {
-                return suffix == rest;
+            if let Some((label, suffix)) = host.split_once('.') {
+                return !label.is_empty() && suffix == rest;
             }
         }
     }
@@ -546,7 +550,9 @@ pub fn verify_chain(
         } else {
             // Check exact DER / SPKI match for directly pinned root certificate if provided.
             if anchors.iter().any(|a| {
-                a.subject_der == cur.subject_der
+                now_unix >= a.not_before
+                    && now_unix <= a.not_after
+                    && a.subject_der == cur.subject_der
                     && a.public_key == cur.public_key
                     && cur.verify_signed_by(a).is_ok()
             }) {

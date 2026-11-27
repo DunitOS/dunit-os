@@ -471,7 +471,7 @@ fn cmd_top() {
 /// through the `terminal_diag` gateway, then print its text verbatim — identical
 /// output to kernel Terminal Mode. 16 KiB covers the largest listing.
 fn run_diag(line: &str) {
-    let mut buf = [0u8; 16384];
+    let mut buf = alloc::vec![0u8; 16384];
     match system::terminal_diagnostic(line, &mut buf) {
         Ok(n) => {
             if io::stdout().write_all(&buf[..n]).is_err() {
@@ -538,6 +538,7 @@ fn bridge(inner: &mut Pty, child: &mut process::Child, raw: bool) -> Result<()> 
     // the child stops reading its native PTY ring.
     let mut pending = PendingInput::new(8192);
     let mut interrupted = false;
+    let mut child_exited = false;
     // ESC-sequence state: normal, ESC, CSI. Child input stays cooked unless raw=true.
     let mut esc = 0u8;
     loop {
@@ -554,7 +555,10 @@ fn bridge(inner: &mut Pty, child: &mut process::Child, raw: bool) -> Result<()> 
                 Err(error) => return Err(error),
             }
         }
-        if !interrupted {
+        if !interrupted && !child_exited {
+            child_exited = child.try_wait()?.is_some();
+        }
+        if !interrupted && !child_exited {
             let had_pending = !pending.is_empty();
             match pending.drain(|bytes| inner.write(bytes)) {
                 Ok(()) => progressed |= had_pending && pending.is_empty(),
@@ -571,57 +575,56 @@ fn bridge(inner: &mut Pty, child: &mut process::Child, raw: bool) -> Result<()> 
                     if raw {
                         let _ = pending.push(&in_buf[..n]);
                         let _ = pending.drain(|bytes| inner.write(bytes));
-                        progressed = true;
                     } else {
                         let b = in_buf[0];
-                    if b == 0x03 {
-                        // Ctrl-C preempts incomplete ESC/CSI sequences.
-                        esc = 0;
-                    } else {
-                        match esc {
-                            1 => {
-                                esc = if b == b'[' { 2 } else { 0 };
-                                continue;
-                            }
-                            2 => {
-                                if (0x40..=0x7e).contains(&b) {
-                                    esc = 0;
+                        if b == 0x03 {
+                            // Ctrl-C preempts incomplete ESC/CSI sequences.
+                            esc = 0;
+                        } else {
+                            match esc {
+                                1 => {
+                                    esc = if b == b'[' { 2 } else { 0 };
+                                    continue;
                                 }
+                                2 => {
+                                    if (0x40..=0x7e).contains(&b) {
+                                        esc = 0;
+                                    }
+                                    continue;
+                                }
+                                _ => {}
+                            }
+                            if b == 0x1b {
+                                esc = 1;
                                 continue;
                             }
-                            _ => {}
                         }
-                        if b == 0x1b {
-                            esc = 1;
-                            continue;
-                        }
-                    }
-                    match line.feed(b) {
-                        dunit_shell::CookedEvent::Echo(ch) => {
-                            let mut bytes = [0; 4];
-                            output.write_all(ch.encode_utf8(&mut bytes).as_bytes())?;
-                        }
-                        dunit_shell::CookedEvent::Erase => output.write_all(b"\x08 \x08")?,
-                        dunit_shell::CookedEvent::Submit(bytes) => {
-                            output.write_all(b"\n")?;
-                            if !pending.push(&bytes) {
-                                output.write_all(b"input queue full; line discarded\n")?;
+                        match line.feed(b) {
+                            dunit_shell::CookedEvent::Echo(ch) => {
+                                let mut bytes = [0; 4];
+                                output.write_all(ch.encode_utf8(&mut bytes).as_bytes())?;
                             }
+                            dunit_shell::CookedEvent::Erase => output.write_all(b"\x08 \x08")?,
+                            dunit_shell::CookedEvent::Submit(bytes) => {
+                                output.write_all(b"\n")?;
+                                if !pending.push(&bytes) {
+                                    output.write_all(b"input queue full; line discarded\n")?;
+                                }
+                            }
+                            dunit_shell::CookedEvent::Rejected => {
+                                output.write_all(b"\ninput line too long; discarded\n")?
+                            }
+                            dunit_shell::CookedEvent::Interrupt => {
+                                pending.clear();
+                                child.terminate_and_wait()?;
+                                // Drain the child's output without stealing the
+                                // next shell command after this interrupt byte.
+                                interrupted = true;
+                            }
+                            dunit_shell::CookedEvent::None => {}
                         }
-                        dunit_shell::CookedEvent::Rejected => {
-                            output.write_all(b"\ninput line too long; discarded\n")?
-                        }
-                        dunit_shell::CookedEvent::Interrupt => {
-                            pending.clear();
-                            child.terminate_and_wait()?;
-                            // Drain the child's output without stealing the
-                            // next shell command after this interrupt byte.
-                            interrupted = true;
-                        }
-                        dunit_shell::CookedEvent::None => {}
-                        }
-                        progressed = true;
                     }
+                    progressed = true;
                 }
                 Err(Error(dunit::errno::EAGAIN)) => {}
                 Err(error) => return Err(error),

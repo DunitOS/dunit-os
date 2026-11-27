@@ -84,6 +84,20 @@ impl DualResolver {
         }
     }
 
+    pub fn seed_id(&mut self, seed: u16) {
+        self.next_id = seed.max(1);
+    }
+
+    fn alloc_id(&mut self) -> u16 {
+        let id = self.next_id;
+        // Mix via odd-multiplier Weyl step so consecutive live DNS txids aren't sequential.
+        self.next_id = self.next_id.wrapping_mul(40503).wrapping_add(13);
+        if self.next_id == 0 {
+            self.next_id = 1;
+        }
+        id
+    }
+
     fn advance(&mut self, now: u64) {
         if now >= self.last_ms {
             self.last_ms = now;
@@ -187,12 +201,6 @@ impl DualResolver {
 
         self.active = true;
         Ok(None)
-    }
-
-    fn alloc_id(&mut self) -> u16 {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
-        id
     }
 
     fn merged_results(&self) -> Result<Vec<IpAddr>, Error> {

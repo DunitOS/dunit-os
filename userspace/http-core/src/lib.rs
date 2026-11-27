@@ -608,13 +608,25 @@ impl<C: Connector> Session<C> {
     }
 
     pub fn send(&mut self, request: &Request) -> Result<Response, HttpError> {
+        self.send_with_redirect_check(request, |_, _| Ok(()))
+    }
+
+    pub fn send_with_redirect_check<F>(
+        &mut self,
+        request: &Request,
+        mut on_redirect: F,
+    ) -> Result<Response, HttpError>
+    where
+        F: FnMut(&Url, &Url) -> Result<(), HttpError>,
+    {
         let mut method = request.method;
         let mut url = request.url.clone();
+        let mut headers = request.headers.clone();
         let mut body = request.body.clone();
 
         for hop in 0..=self.limits.max_redirects {
             let (raw_resp, conn_for_reuse) =
-                self.exchange_once(method, &url, &request.headers, &body, request.keep_alive)?;
+                self.exchange_once(method, &url, &headers, &body, request.keep_alive)?;
             if let Some(pc) = conn_for_reuse {
                 self.return_to_pool(pc);
             }
@@ -624,7 +636,16 @@ impl<C: Connector> Session<C> {
                     if hop == self.limits.max_redirects {
                         return Err(HttpError::TooManyRedirects);
                     }
-                    url = url.resolve_location(location)?;
+                    let next_url = url.resolve_location(location)?;
+                    on_redirect(&url, &next_url)?;
+                    if !same_origin(&url, &next_url) {
+                        headers.retain(|h| {
+                            !h.name.eq_ignore_ascii_case("authorization")
+                                && !h.name.eq_ignore_ascii_case("proxy-authorization")
+                                && !h.name.eq_ignore_ascii_case("cookie")
+                        });
+                    }
+                    url = next_url;
                     if raw_resp.status == 303
                         || (matches!(raw_resp.status, 301 | 302) && method == Method::Post)
                     {
@@ -723,6 +744,10 @@ impl<C: Connector> Session<C> {
             }
         }
     }
+}
+
+fn same_origin(a: &Url, b: &Url) -> bool {
+    a.scheme == b.scheme && a.host.eq_ignore_ascii_case(&b.host) && a.port == b.port
 }
 
 fn is_redirect(status: u16) -> bool {

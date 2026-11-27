@@ -471,8 +471,8 @@ fn read_handshake_encrypted<S: ByteStream>(
 fn build_client_hello(hostname: &str, random: &[u8; 32], x25519_pub: &[u8; 32]) -> Vec<u8> {
     let mut exts = Vec::new();
 
-    // SNI (0x0000) when hostname is not an IPv4 literal.
-    if !hostname.is_empty() && !is_ipv4_str(hostname) {
+    // SNI (0x0000) when hostname is a DNS name (not an IPv4 or IPv6 literal).
+    if !hostname.is_empty() && !is_ip_literal(hostname) {
         let hbytes = hostname.as_bytes();
         let name_len = hbytes.len() as u16;
         let list_len = name_len + 3;
@@ -515,6 +515,10 @@ fn build_client_hello(hostname: &str, random: &[u8; 32], x25519_pub: &[u8; 32]) 
     hs.push(body.len() as u8);
     hs.extend_from_slice(&body);
     hs
+}
+
+fn is_ip_literal(s: &str) -> bool {
+    is_ipv4_str(s) || s.contains(':')
 }
 
 fn is_ipv4_str(s: &str) -> bool {

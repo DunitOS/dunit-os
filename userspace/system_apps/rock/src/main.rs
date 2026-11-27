@@ -104,7 +104,13 @@ mod native {
         let mut stdin = io::stdin();
         let mut buf = [0u8; 64];
         loop {
-            match stdin.read(&mut buf) {
+            let read_res = if tui.has_pending_esc() {
+                time::sleep(Duration::from_millis(15))?;
+                stdin.try_read(&mut buf)
+            } else {
+                stdin.read(&mut buf)
+            };
+            match read_res {
                 Ok(0) => break,
                 Ok(n) => {
                     if tui.feed_bytes(&buf[..n], save_atomic) {
@@ -121,7 +127,6 @@ mod native {
                     if tui.flush_pending_esc() {
                         write_retry(&mut out, tui.render_ansi().as_bytes())?;
                     }
-                    time::sleep(Duration::from_millis(15))?;
                 }
                 Err(e) => return Err(e),
             }

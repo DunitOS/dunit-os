@@ -338,6 +338,10 @@ impl RockTui {
         }
     }
 
+    pub fn has_pending_esc(&self) -> bool {
+        self.esc == EscState::Esc
+    }
+
     pub fn flush_pending_esc(&mut self) -> bool {
         if self.esc != EscState::Esc {
             return false;

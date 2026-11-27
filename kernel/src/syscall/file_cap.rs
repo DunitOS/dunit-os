@@ -52,6 +52,19 @@ pub(super) fn open(path: u64, len: u64, rights: u64) -> i64 {
         Some(value) => value,
         None => return EINVAL,
     };
+    if flags.can_write() {
+        let vfs = match crate::fs::vfs::get_vfs() {
+            Some(vfs) => vfs,
+            None => return EIO,
+        };
+        let abs = match vfs.normalize_at(&cwd, &path) {
+            Ok(abs) => abs,
+            Err(e) => return vfs_error_to_errno(e),
+        };
+        if path_is_protected(&abs) {
+            return EACCES;
+        }
+    }
     let file = match crate::fs::vfs::open_capability(&cwd, &path, flags) {
         Ok(f) => f,
         Err(e) => return vfs_error_to_errno(e),

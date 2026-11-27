@@ -189,11 +189,10 @@ fn prepare_initial_stack(
     }
     env_ptrs.reverse();
 
-    // 16 random bytes for the auxv AT_RANDOM entry (a libc seeds its stack guard
+    // 16 random bytes for the auxv AT_RANDOM entry (libc seeds its stack guard
     // / TLS canary from these). Written in the strings region before alignment.
-    // TSC-derived — adequate for a hobby OS, not a cryptographic RNG.
     let mut random = [0u8; 16];
-    fill_random(&mut random);
+    crate::entropy::fill_bytes(&mut random);
     let random_ptr = write_stack_bytes(process, &mut sp, &random)?;
 
     // Use the actual mapped table when a LOAD contains it. musl derives its
@@ -296,18 +295,6 @@ fn write_stack_bytes(
     *sp &= !0xF;
     write_user_bytes(process, *sp, bytes)?;
     Ok(*sp)
-}
-
-/// Fill `out` with TSC-seeded pseudo-random bytes (xorshift*). Non-cryptographic;
-/// enough to seed a libc stack guard on a hobby OS.
-fn fill_random(out: &mut [u8]) {
-    let mut x = unsafe { core::arch::x86_64::_rdtsc() } | 1;
-    for byte in out.iter_mut() {
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        *byte = (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u8;
-    }
 }
 
 fn push_user_u64(process: &mut Process, sp: &mut usize, value: u64) -> Result<(), ElfError> {
