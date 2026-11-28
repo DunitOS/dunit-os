@@ -26,7 +26,7 @@ dynamic linking, signals and secure entropy remain incomplete. The desktop
 uses software rendering, Genie animates a frozen snapshot, and clocks show
 uptime.
 
-See the [Dunit OS Wiki](wiki/Home.md) (or on [GitHub Wiki](https://github.com/DunitOS/dunit-os/wiki)) for an ArchWiki-style comprehensive reference covering architecture, system calls, hardware drivers, DWM v2, SDK, porting guides, and troubleshooting. Additional documents include the [desktop manual](docs/architecture/desktop.md),
+See the [DunitOS Wiki](https://github.com/DunitOS/dunit-os/wiki) for an ArchWiki-style comprehensive reference covering architecture, system calls, hardware drivers, DWM v2, SDK, porting guides, and troubleshooting. Additional documents include the [desktop manual](docs/architecture/desktop.md),
 [SDK guide](docs/sdk/README.md) and [native ABI](abi/README.md).
 [Current state](docs/architecture/current-state.md), the
 [technical roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) and
