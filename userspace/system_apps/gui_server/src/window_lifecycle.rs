@@ -244,6 +244,7 @@ impl Environment<'_> {
                     w.sh = w.surface_h;
                 }
                 w.format = c.format;
+                w.buf_seq = c.buf_seq;
             }
         }
 

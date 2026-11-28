@@ -170,23 +170,9 @@ impl UserMapping<'_> {
             .is_some_and(|end| end <= self.len));
         let source = (self.ptr as usize + offset) as *const u8;
         if source as usize & 3 == 0 {
-            for i in 0..count {
-                core::ptr::write_volatile(
-                    destination.add(i),
-                    core::ptr::read_volatile((source as *const u32).add(i)),
-                );
-            }
+            core::ptr::copy_nonoverlapping(source as *const u32, destination, count);
         } else {
-            for i in 0..count {
-                let at = source.add(i * 4);
-                let word = u32::from_le_bytes([
-                    core::ptr::read_volatile(at),
-                    core::ptr::read_volatile(at.add(1)),
-                    core::ptr::read_volatile(at.add(2)),
-                    core::ptr::read_volatile(at.add(3)),
-                ]);
-                core::ptr::write_volatile(destination.add(i), word);
-            }
+            core::ptr::copy_nonoverlapping(source, destination as *mut u8, count * 4);
         }
     }
 }

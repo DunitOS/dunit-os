@@ -1159,36 +1159,64 @@ impl Component for App {
         )
     }
 }
+#[inline(never)]
+fn res_picker_self_test_enabled() -> bool {
+    dwm_settings::load_config().apps.self_test
+}
+
+#[inline(never)]
+fn run_res_picker_self_test(app: &mut App) -> dunit::Result<()> {
+    let previous = app.s;
+    let previous_resolution = app.res_idx;
+    for _ in 0..NRES {
+        if RES_PRESETS[app.res_idx] == (1600, 900) {
+            break;
+        }
+        app.apply(Action::ResNext);
+    }
+    if dwm_settings::save_changes(&previous, &app.s) {
+        app.reload = true;
+        let (w, h) = RES_PRESETS[app.res_idx];
+        dunit::println!(
+            "gui_settings: res picker self-test picked {}x{} (saved, reload pinged)",
+            w,
+            h
+        )?;
+    } else {
+        app.s = previous;
+        app.res_idx = previous_resolution;
+        app.status = "Save failed. Previous settings restored.";
+        app.error = true;
+        dunit::println!("gui_settings: FAIL resolution picker save")?;
+    }
+    Ok(())
+}
+
+#[inline(never)]
+fn init_app_boxed() -> dunit::Result<alloc::boxed::Box<App>> {
+    let mut app = alloc::boxed::Box::new(App::new());
+    if res_picker_self_test_enabled() {
+        run_res_picker_self_test(&mut app)?;
+    }
+    Ok(app)
+}
+
+#[inline(never)]
+fn open_component_window(app: alloc::boxed::Box<App>) -> dunit::Result<ComponentWindow<App>> {
+    ComponentWindow::open_themed_with_style(
+        W,
+        H,
+        *app,
+        "Column#settings { height: fill; gap: 0; } Row#body { height: fill; gap: 0; } Column#pages { padding: 8; gap: 4; } Button.navigation { height: 30; font-size: 12; padding: 4; } Column#form { padding: 16; gap: 12; min-width: 420; } Text#heading { font-size: 23; } Text#hint { font-size: 12; } Column.field { gap: 6; } Row { gap: 8; } Button { min-width: 26; } Text#status { height: 52; padding: 8; font-size: 11; } Button.selected { height: 30; font-size: 12; padding: 4; background: $accent; } Text.error { color: #F38BA8; } Input { height: 30; font-size: 13; }",
+    )
+    .map_err(|e| dunit::Error(e.0))
+}
+
 // Release large configuration/constructor temporaries before the event loop.
 #[inline(never)]
 fn open_window() -> dunit::Result<ComponentWindow<App>> {
-    let mut app = App::new();
-    if dwm_settings::load_config().apps.self_test {
-        let previous = app.s;
-        let previous_resolution = app.res_idx;
-        for _ in 0..NRES {
-            if RES_PRESETS[app.res_idx] == (1600, 900) {
-                break;
-            }
-            app.apply(Action::ResNext);
-        }
-        if dwm_settings::save_changes(&previous, &app.s) {
-            app.reload = true;
-            let (w, h) = RES_PRESETS[app.res_idx];
-            dunit::println!(
-                "gui_settings: res picker self-test picked {}x{} (saved, reload pinged)",
-                w,
-                h
-            )?;
-        } else {
-            app.s = previous;
-            app.res_idx = previous_resolution;
-            app.status = "Save failed. Previous settings restored.";
-            app.error = true;
-            dunit::println!("gui_settings: FAIL resolution picker save")?;
-        }
-    }
-    let mut ui=ComponentWindow::open_themed_with_style(W,H,app,"Column#settings { height: fill; gap: 0; } Row#body { height: fill; gap: 0; } Column#pages { padding: 8; gap: 4; } Button.navigation { height: 30; font-size: 12; padding: 4; } Column#form { padding: 16; gap: 12; min-width: 420; } Text#heading { font-size: 23; } Text#hint { font-size: 12; } Column.field { gap: 6; } Row { gap: 8; } Button { min-width: 26; } Text#status { height: 52; padding: 8; font-size: 11; } Button.selected { height: 30; font-size: 12; padding: 4; background: $accent; } Text.error { color: #F38BA8; } Input { height: 30; font-size: 13; }")?;
+    let app = init_app_boxed()?;
+    let mut ui = open_component_window(app)?;
     ui.transfers()?
         .register_opener(dunit::transfer::Offer {
             formats: alloc::vec![dunit::transfer::Format::Files],

@@ -92,12 +92,25 @@ impl Frame {
         }
         let mut copied = 0;
         for r in rects {
+            let rx = r.x as usize;
+            let rw = r.w as usize;
             for y in r.y as usize..r.y as usize + r.h as usize {
-                for x in r.x as usize..r.x as usize + r.w as usize {
-                    let at = offset + y * stride + x * 4;
-                    target[y * w + x] = u32::from_le_bytes(source[at..at + 4].try_into().ok()?);
-                    copied += 1;
+                let at = offset + y * stride + rx * 4;
+                let src_row = &source[at..at + rw * 4];
+                let dst_row = &mut target[y * w + rx..y * w + rx + rw];
+                #[cfg(target_endian = "little")]
+                if (src_row.as_ptr() as usize) & 3 == 0 {
+                    let src_words = unsafe {
+                        core::slice::from_raw_parts(src_row.as_ptr() as *const u32, rw)
+                    };
+                    dst_row.copy_from_slice(src_words);
+                    copied += rw as u64;
+                    continue;
                 }
+                for (dst, chunk) in dst_row.iter_mut().zip(src_row.chunks_exact(4)) {
+                    *dst = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                }
+                copied += rw as u64;
             }
         }
         Some(copied)

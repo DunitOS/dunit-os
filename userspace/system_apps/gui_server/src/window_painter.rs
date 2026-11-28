@@ -1,5 +1,25 @@
 //! Shared decoration and client-surface painter used for live windows and isolated animation snapshots.
 use super::*;
+
+#[derive(Default)]
+pub struct BlurCache {
+    sig: u64,
+    rect: (usize, usize, usize, usize),
+    pixels: Vec<u32>,
+    valid: bool,
+}
+
+impl BlurCache {
+    pub fn matches(&self, sig: u64, rect: (usize, usize, usize, usize)) -> bool {
+        self.valid
+            && self.sig == sig
+            && self.rect == rect
+            && rect.2 > 0
+            && rect.3 > 0
+            && self.pixels.len() >= rect.2 * rect.3
+    }
+}
+
 pub fn paint(
     back: &mut [u32],
     bw: usize,
@@ -19,6 +39,50 @@ pub fn paint(
     argb_blit_logged: &mut bool,
     blur_a: &mut Vec<u32>,
     blur_b: &mut Vec<u32>,
+) {
+    paint_with_blur_cache(
+        back,
+        bw,
+        bh,
+        w,
+        is_focused,
+        a,
+        theme,
+        ly,
+        skin,
+        fx,
+        font,
+        apps,
+        mx,
+        my,
+        win_backing,
+        argb_blit_logged,
+        blur_a,
+        blur_b,
+        None,
+    );
+}
+
+pub fn paint_with_blur_cache(
+    back: &mut [u32],
+    bw: usize,
+    bh: usize,
+    w: &Win,
+    is_focused: bool,
+    a: i32,
+    theme: &Theme,
+    ly: &Layout,
+    skin: &dunit_style::shell::Visuals,
+    fx: &Effects,
+    font: Option<&Font>,
+    apps: &Applications,
+    mx: i32,
+    my: i32,
+    _win_backing: &mut Vec<u32>,
+    argb_blit_logged: &mut bool,
+    blur_a: &mut Vec<u32>,
+    blur_b: &mut Vec<u32>,
+    blur_cache: Option<(&mut BlurCache, u64)>,
 ) {
     let (ox, oy, ow, oh) = w.outer();
     let bcol = if is_focused {
@@ -45,28 +109,14 @@ pub fn paint(
             fx.shadow_alpha * a / 255,
         );
     }
-    // Translucent (ARGB) window: snapshot the real backing (wallpaper +
-    // lower-z windows already composited into `back`) under the content
-    // rect NOW, before the opaque frame gradient below overwrites it. It's
-    // restored right before the client blit so the client's semi-transparent
-    // background blends over what's genuinely behind the window. Opaque
-    // (XRGB) windows skip this — they overwrite the content rect wholesale.
-    let translucent = w.format == FORMAT_ARGB8888 || a < 255;
-    let mut backing_rect: Option<(usize, usize, usize, usize)> = None;
-    if translucent {
-        let (bx, by, cw, ch) = clip_to_screen(w.cx, w.cy, w.sw, w.sh, bw, bh);
-        if cw > 0 && ch > 0 {
-            win_backing.clear();
-            for ry in 0..ch {
-                let srow = (by + ry) * bw + bx;
-                win_backing.extend_from_slice(&back[srow..srow + cw]);
-            }
-            backing_rect = Some((bx, by, cw, ch));
-        }
-    }
     // Rounded frame: top corners only, so the square-bottomed client
     // surface tucks flush against the bottom edge (no corner poke-through).
-    fill_rrect_grad(
+    // Skip the content rectangle so we neither waste work under opaque clients
+    // nor clobber the background under translucent ARGB clients.
+    let want = (w.surface_w as usize).saturating_mul(w.surface_h as usize);
+    let has_content = !w.buf_ptr.is_null() && want > 0 && want * 4 <= w.buf_size;
+    let cutout = has_content.then_some((w.cx, w.cy, w.sw, w.sh));
+    fill_rrect_grad_cutout(
         back,
         bw,
         bh,
@@ -79,6 +129,7 @@ pub fn paint(
         shade(bcol, skin.border_gradient_top),
         shade(bcol, skin.border_gradient_bottom),
         a,
+        cutout,
     );
     fill_rrect_grad(
         back,
@@ -178,36 +229,57 @@ pub fn paint(
     if a > 0 {
         let want = (w.surface_w as usize) * (w.surface_h as usize);
         if !w.buf_ptr.is_null() && want > 0 && want * 4 <= w.buf_size {
-            // Restore the pre-frame backing under the content rect so the
-            // ARGB blend composites over wallpaper/lower windows, not frame.
-            if let Some((bx, by, cw, ch)) = backing_rect {
-                for ry in 0..ch {
-                    let drow = (by + ry) * bw + bx;
-                    let srow = ry * cw;
-                    back[drow..drow + cw].copy_from_slice(&win_backing[srow..srow + cw]);
-                }
-            }
             if w.format == FORMAT_ARGB8888 && fx.blur && fx.blur_radius > 0 {
-                let size = (w.sw.max(1) as usize)
-                    .saturating_mul(w.sh.max(1) as usize)
-                    .min(bw * bh);
-                if blur_a.len() < size {
-                    blur_a.resize(size, 0);
-                    blur_b.resize(size, 0);
+                let (x0, y0, cw, ch) = clip_to_screen(w.cx, w.cy, w.sw, w.sh, bw, bh);
+                let mut used_cache = false;
+                if let Some((ref cache, sig)) = blur_cache {
+                    if cache.matches(sig, (x0, y0, cw, ch)) {
+                        for yy in 0..ch {
+                            let sr = yy * cw;
+                            let dr = (y0 + yy) * bw + x0;
+                            back[dr..dr + cw].copy_from_slice(&cache.pixels[sr..sr + cw]);
+                        }
+                        used_cache = true;
+                    }
                 }
-                blur_region(
-                    back,
-                    bw,
-                    bh,
-                    w.cx,
-                    w.cy,
-                    w.sw,
-                    w.sh,
-                    fx.blur_radius,
-                    fx.blur_iters,
-                    blur_a,
-                    blur_b,
-                );
+                if !used_cache {
+                    let size = (w.sw.max(1) as usize)
+                        .saturating_mul(w.sh.max(1) as usize)
+                        .min(bw * bh);
+                    if blur_a.len() < size {
+                        blur_a.resize(size, 0);
+                        blur_b.resize(size, 0);
+                    }
+                    blur_region(
+                        back,
+                        bw,
+                        bh,
+                        w.cx,
+                        w.cy,
+                        w.sw,
+                        w.sh,
+                        fx.blur_radius,
+                        fx.blur_iters,
+                        blur_a,
+                        blur_b,
+                    );
+                    if let Some((cache, sig)) = blur_cache {
+                        if cw > 0 && ch > 0 {
+                            let total = cw * ch;
+                            if cache.pixels.len() < total {
+                                cache.pixels.resize(total, 0);
+                            }
+                            for yy in 0..ch {
+                                let dr = yy * cw;
+                                let sr = (y0 + yy) * bw + x0;
+                                cache.pixels[dr..dr + cw].copy_from_slice(&back[sr..sr + cw]);
+                            }
+                            cache.sig = sig;
+                            cache.rect = (x0, y0, cw, ch);
+                            cache.valid = true;
+                        }
+                    }
+                }
             }
             let src = unsafe { core::slice::from_raw_parts(w.buf_ptr as *const u32, want) };
             let argb = w.format == FORMAT_ARGB8888;

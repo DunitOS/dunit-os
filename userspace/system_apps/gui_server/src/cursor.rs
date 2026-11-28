@@ -40,6 +40,60 @@ impl Cursor {
     }
 }
 
+/// Bounding rectangle `(x, y, w, h)` in framebuffer pixels for the cursor at `(px, py)`.
+pub fn bounds(
+    px: i32,
+    py: i32,
+    cursor: &Cursor,
+    bw: usize,
+    bh: usize,
+) -> Option<(i32, i32, usize, usize)> {
+    let cw = cursor.width;
+    let ch = if cw == 0 { 0 } else { cursor.pixels.len() / cw };
+    if cw == 0 || ch == 0 {
+        return None;
+    }
+    let x0 = px.max(0);
+    let y0 = py.max(0);
+    let x1 = (px + cw as i32).min(bw as i32);
+    let y1 = (py + ch as i32).min(bh as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    Some((x0, y0, (x1 - x0) as usize, (y1 - y0) as usize))
+}
+
+pub fn save_under(
+    buf: &[u32],
+    bw: usize,
+    rect: (i32, i32, usize, usize),
+    out: &mut Vec<u32>,
+) {
+    let (x, y, w, h) = rect;
+    out.clear();
+    for ry in 0..h {
+        let start = (y as usize + ry) * bw + x as usize;
+        out.extend_from_slice(&buf[start..start + w]);
+    }
+}
+
+pub fn restore_under(
+    buf: &mut [u32],
+    bw: usize,
+    rect: (i32, i32, usize, usize),
+    saved: &[u32],
+) {
+    let (x, y, w, h) = rect;
+    if saved.len() < w * h {
+        return;
+    }
+    for ry in 0..h {
+        let dst = (y as usize + ry) * bw + x as usize;
+        let src = ry * w;
+        buf[dst..dst + w].copy_from_slice(&saved[src..src + w]);
+    }
+}
+
 /// Draw the arrow cursor into the back buffer with its hotspot at (px, py).
 pub fn draw_cursor(
     buf: &mut [u32],

@@ -24,6 +24,8 @@ pub(super) struct Context<'a> {
     pub shell: &'a mut shell_runtime::Shell,
     pub blur_a: &'a mut Vec<u32>,
     pub blur_b: &'a mut Vec<u32>,
+    pub blur_cache: &'a mut window_painter::BlurCache,
+    pub scene_epoch: u64,
     pub win_backing: &'a mut Vec<u32>,
     pub argb_blit_logged: &'a mut bool,
     pub animation_now: u64,
@@ -63,6 +65,124 @@ pub(super) struct Context<'a> {
     pub transfers: &'a transfer_runtime::Runtime,
     pub performance: &'a mut performance::Profiler,
     pub desktop_ready_announced: &'a mut bool,
+    pub cursor_rect: &'a mut Option<(i32, i32, usize, usize)>,
+    pub cursor_under: &'a mut Vec<u32>,
+}
+
+#[inline(always)]
+fn fnv_mix(mut h: u64, v: u64) -> u64 {
+    h ^= v;
+    h.wrapping_mul(0x1000_0000_01B3)
+}
+
+pub(super) fn prune_notifs(
+    notifs: &mut Vec<Toast>,
+    animation_now: u64,
+    clock_valid: bool,
+    notify_st_done: bool,
+    notify_expired_logged: &mut bool,
+) {
+    notifs.retain(|t| clock_valid && animation_now < t.expire);
+    if notify_st_done && !*notify_expired_logged && notifs.is_empty() {
+        libdunit::println("gui_server: notify expired (self-test)");
+        *notify_expired_logged = true;
+    }
+}
+
+fn notif_card_view(
+    slot: usize,
+    t: &Toast,
+    bw: usize,
+    bh: usize,
+    notifications: &settings::Notifications,
+    ly: &Layout,
+    skin: &dunit_style::shell::Visuals,
+    font: Option<&Font>,
+    desktop_tracks: &shell_motion::Tracks,
+    animation_now: u64,
+    duration_ms: u32,
+    lua_ease_out: bool,
+) -> shell_motion::Visual {
+    let margin = skin.notification_margin;
+    let cardh = skin.notification_height;
+    let gap = skin.notification_gap;
+    let corner = notifications.corner;
+    let top = corner == 0 || corner == 1;
+    let leftc = corner == 0 || corner == 2;
+    let px = ly.title_font_px as f32;
+    let tw = font
+        .map(|f| text_width_ttf(f, &t.text, px))
+        .unwrap_or(t.text.len() as i32 * ly.title_font_px / 2);
+    let max_width = (bw as i32 - 2 * margin).max(1);
+    let cardw = (tw + 2 * skin.notification_padding)
+        .clamp(skin.notification_min_width.min(max_width), max_width);
+    let progress = animation::progress(animation_now, t.born, duration_ms, lua_ease_out);
+    let slide =
+        skin.notification_slide - (progress * skin.notification_slide as u32 / 255) as i32;
+    let base_x = if leftc { margin } else { bw as i32 - margin - cardw };
+    let cx = if leftc { base_x - slide } else { base_x + slide };
+    let cy = if top {
+        margin + slot as i32 * (cardh + gap)
+    } else {
+        bh as i32 - margin - cardh - slot as i32 * (cardh + gap)
+    };
+    desktop_tracks.sample(desktop_motion::NOTIFICATIONS, (cx, cy, cardw, cardh), animation_now)
+}
+
+pub(super) fn notif_blockers_and_sig(
+    notifs: &[Toast],
+    bw: usize,
+    bh: usize,
+    notifications: &settings::Notifications,
+    ly: &Layout,
+    skin: &dunit_style::shell::Visuals,
+    font: Option<&Font>,
+    desktop_tracks: &shell_motion::Tracks,
+    animation_now: u64,
+    duration_ms: u32,
+    lua_ease_out: bool,
+) -> (Vec<crate::damage_plan::Rect>, u64, bool) {
+    let mut sig = 0xCBF2_9CE4_8422_2325u64;
+    sig = fnv_mix(sig, u64::from(notifications.enabled));
+    sig = fnv_mix(sig, notifs.len() as u64);
+    let mut blockers = Vec::new();
+    let mut animating = false;
+    if notifications.enabled && !notifs.is_empty() {
+        for (slot, t) in notifs.iter().enumerate() {
+            if animation::progress(animation_now, t.born, duration_ms, lua_ease_out) < 255 {
+                animating = true;
+            }
+            sig = fnv_mix(sig, t.born);
+            sig = fnv_mix(sig, t.expire);
+            for &b in t.text.as_bytes() {
+                sig = fnv_mix(sig, b as u64);
+            }
+            let view = notif_card_view(
+                slot,
+                t,
+                bw,
+                bh,
+                notifications,
+                ly,
+                skin,
+                font,
+                desktop_tracks,
+                animation_now,
+                duration_ms,
+                lua_ease_out,
+            );
+            let (cx, cy, cardw, cardh) = view.rect;
+            let sh = if view.shadow > 0 { view.shadow } else { skin.notification_shadow }.max(0);
+            let off = sh / 2 + skin.shadow_offset.max(0);
+            blockers.push(crate::damage_plan::Rect {
+                x: cx - sh,
+                y: cy - sh,
+                w: (cardw + 2 * sh).max(0) as u32,
+                h: (cardh + 2 * sh + off).max(0) as u32,
+            });
+        }
+    }
+    (blockers, sig, animating)
 }
 
 pub(super) fn paint(c: Context<'_>) {
@@ -89,6 +209,8 @@ pub(super) fn paint(c: Context<'_>) {
         shell,
         mut blur_a,
         mut blur_b,
+        blur_cache,
+        scene_epoch,
         mut win_backing,
         argb_blit_logged,
         animation_now,
@@ -128,26 +250,261 @@ pub(super) fn paint(c: Context<'_>) {
         transfers,
         performance,
         desktop_ready_announced,
+        cursor_rect,
+        cursor_under,
     } = c;
-    // Desktop backdrop: the wallpaper (pre-scaled) when present, else a
-    // subtle vertical gradient (or a flat fill when the gradient effect is
-    // off — the pre-§5 look).
+    let duration_ms = if clock_valid { anim_duration_ms } else { 0 };
+    let workspace_view = desktop_tracks.sample(
+        desktop_motion::WORKSPACE,
+        (0, 0, bw as i32, bh as i32),
+        animation_now,
+    );
+    let workspace_transform =
+        desktop_motion::changed(&workspace_view, bw, bh) && workspace_layer.begin(&back);
+    let ws_fade = animation::progress(animation_now, ws_switch_tick, duration_ms, lua_ease_out);
+    let ws_opacity_track =
+        desktop_tracks.has(desktop_motion::WORKSPACE, lua_policy::Property::Opacity);
+    let win_alpha = |w: &Win| -> i32 {
+        (animation::progress(animation_now, w.born, duration_ms, lua_ease_out).min(
+            if ws_opacity_track {
+                255
+            } else {
+                ws_fade
+            },
+        ) * effects.alpha(w.pid, animation_now)
+            / 255
+            * w.opacity as u32
+            / 255) as i32
+    };
+    let mut opaque_cover: Option<(usize, i32, i32, i32, i32)> = None;
+    if !workspace_transform {
+        for (pos, &wi) in z.iter().enumerate().rev() {
+            let w = &wins[wi];
+            if !w.alive
+                || w.ws != current_ws
+                || w.minimized
+                || effects.covers(w.pid, animation_now)
+                || w.format != FORMAT_XRGB8888
+                || w.buf_ptr.is_null()
+            {
+                continue;
+            }
+            let want = (w.surface_w as usize).saturating_mul(w.surface_h as usize);
+            if want == 0 || want * 4 > w.buf_size || win_alpha(w) != 255 {
+                continue;
+            }
+            let (visual, _, _) = effects.visual(w, animation_now, &theme, &fx);
+            let (ox, oy, ow, oh) = clip_to_screen(visual.cx, visual.cy, visual.sw, visual.sh, bw, bh);
+            if ow > 0 && oh > 0 {
+                opaque_cover = Some((pos, ox as i32, oy as i32, ow as i32, oh as i32));
+                break;
+            }
+        }
+    }
+
+    let mut blur_target: Option<(usize, (usize, usize, usize, usize), u64, bool)> = None;
+    if !workspace_transform
+        && !effects.animating(animation_now)
+        && !desktop_tracks.animating(animation_now)
+        && ws_fade == 255
+    {
+        for (pos, &wi) in z.iter().enumerate().rev() {
+            let w = &wins[wi];
+            if !w.alive
+                || w.ws != current_ws
+                || w.minimized
+                || effects.covers(w.pid, animation_now)
+                || w.format != FORMAT_ARGB8888
+                || w.buf_ptr.is_null()
+            {
+                continue;
+            }
+            let want = (w.surface_w as usize).saturating_mul(w.surface_h as usize);
+            if want == 0 || want * 4 > w.buf_size || win_alpha(w) <= 0 {
+                continue;
+            }
+            let (visual, _, visual_fx) = effects.visual(w, animation_now, &theme, &fx);
+            if !visual_fx.blur || visual_fx.blur_radius <= 0 || visual_fx.blur_iters <= 0 {
+                break;
+            }
+            let rect = clip_to_screen(visual.cx, visual.cy, visual.sw, visual.sh, bw, bh);
+            if rect.2 == 0 || rect.3 == 0 {
+                break;
+            }
+            if let Some((cover_pos, ocx, ocy, ocw, och)) = opaque_cover {
+                if cover_pos > pos
+                    && ocx <= rect.0 as i32
+                    && ocy <= rect.1 as i32
+                    && ocx + ocw >= (rect.0 + rect.2) as i32
+                    && ocy + och >= (rect.1 + rect.3) as i32
+                {
+                    break;
+                }
+            }
+            let mut sig = 0xCBF2_9CE4_8422_2325u64;
+            for v in [
+                scene_epoch,
+                bw as u64,
+                bh as u64,
+                current_ws as u64,
+                u64::from(wallpaper.is_some()),
+                pos as u64,
+                rect.0 as u64,
+                rect.1 as u64,
+                rect.2 as u64,
+                rect.3 as u64,
+                visual_fx.blur_radius as u64,
+                visual_fx.blur_iters as u64,
+                theme.desktop as u64,
+                theme.title_focused as u64,
+                theme.title_unfocused as u64,
+                theme.border_focused as u64,
+                theme.border_unfocused as u64,
+                theme.close as u64,
+                theme.minimize as u64,
+                theme.maximize as u64,
+                theme.title_text_focused as u64,
+                theme.title_text_unfocused as u64,
+                theme.menu as u64,
+                theme.launcher as u64,
+                theme.panel_text as u64,
+                u64::from(fx.blur),
+                fx.blur_radius as u64,
+                fx.blur_iters as u64,
+                u64::from(fx.gradient),
+                fx.corner_radius as u64,
+                fx.shadow as u64,
+                fx.shadow_alpha as u64,
+                fx.menu_alpha as u64,
+                ly.border as u64,
+                ly.title_h as u64,
+                ly.title_font_px as u64,
+                u64::from(widgets_enabled),
+            ] {
+                sig = fnv_mix(sig, v);
+            }
+            if widgets_enabled && !desk_widgets.is_empty() {
+                let secs = if desktop_widget_stats_valid && desktop_widget_stats.uptime_hz > 0 {
+                    desktop_widget_stats.uptime_ticks / desktop_widget_stats.uptime_hz
+                } else {
+                    0
+                };
+                sig = fnv_mix(sig, secs);
+                sig = fnv_mix(sig, desktop_widget_stats.memory_used_percent() as u64);
+                sig = fnv_mix(sig, desktop_widget_stats.live_processes());
+            }
+            for (bpos, &bwi) in z.iter().enumerate() {
+                if bpos >= pos {
+                    break;
+                }
+                let bw_win = &wins[bwi];
+                if !bw_win.alive
+                    || bw_win.ws != current_ws
+                    || bw_win.minimized
+                    || effects.covers(bw_win.pid, animation_now)
+                {
+                    continue;
+                }
+                let ba = win_alpha(bw_win);
+                if ba <= 0 {
+                    continue;
+                }
+                for v in [
+                    bpos as u64,
+                    bw_win.pid as u64,
+                    bw_win.app as u64,
+                    bw_win.buf_seq,
+                    bw_win.cx as u64,
+                    bw_win.cy as u64,
+                    bw_win.sw as u64,
+                    bw_win.sh as u64,
+                    bw_win.surface_w as u64,
+                    bw_win.surface_h as u64,
+                    bw_win.format as u64,
+                    u64::from(focused == Some(bwi)),
+                    ba as u64,
+                    bw_win.title_h as u64,
+                    bw_win.border as u64,
+                    u64::from(bw_win.traffic_lights),
+                ] {
+                    sig = fnv_mix(sig, v);
+                }
+            }
+            let hit = blur_cache.matches(sig, rect);
+            blur_target = Some((pos, rect, sig, hit));
+            break;
+        }
+    }
+
+    let blur_skip = match blur_target {
+        Some((pos, (rx, ry, rw, rh), _, true)) => Some((pos, rx as i32, ry as i32, rw as i32, rh as i32)),
+        _ => None,
+    };
+    let backdrop_cover = match (opaque_cover, blur_skip) {
+        (Some(oc), Some(bs)) => {
+            if oc.3 as i64 * oc.4 as i64 >= bs.3 as i64 * bs.4 as i64 {
+                Some(oc)
+            } else {
+                Some(bs)
+            }
+        }
+        (Some(oc), None) => Some(oc),
+        (None, Some(bs)) => Some(bs),
+        (None, None) => None,
+    };
+
+    // Desktop backdrop: paint only strips outside any full-opacity top cover
+    // or cached blurred window backdrop.
+    let strips: [(usize, usize, usize, usize); 4] = if let Some((_, cx, cy, cw, ch)) = backdrop_cover {
+        let (cx, cy, cw, ch) = (cx as usize, cy as usize, cw as usize, ch as usize);
+        [
+            (0, 0, bw, cy),
+            (0, cy + ch, bw, bh - (cy + ch)),
+            (0, cy, cx, ch),
+            (cx + cw, cy, bw - (cx + cw), ch),
+        ]
+    } else {
+        [(0, 0, bw, bh), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)]
+    };
     if let Some(wp) = &wallpaper {
-        back.copy_from_slice(wp);
+        for &(sx, sy, sw, sh) in &strips {
+            if sw == 0 || sh == 0 {
+                continue;
+            }
+            if sw == bw && sx == 0 {
+                let start = sy * bw;
+                let end = (sy + sh) * bw;
+                back[start..end].copy_from_slice(&wp[start..end]);
+            } else {
+                for y in sy..sy + sh {
+                    let base = y * bw + sx;
+                    back[base..base + sw].copy_from_slice(&wp[base..base + sw]);
+                }
+            }
+        }
     } else if fx.gradient {
         let top = shade(theme.desktop, skin.desktop_gradient_top);
         let bot = shade(theme.desktop, skin.desktop_gradient_bottom);
         let span = (bh as u32 - 1).max(1);
-        for y in 0..bh {
-            let row = 0xFF00_0000 | lerp_color(top, bot, (y as u32 * 255) / span);
-            let base = y * bw;
-            for px in &mut back[base..base + bw] {
-                *px = row;
+        for &(sx, sy, sw, sh) in &strips {
+            if sw == 0 || sh == 0 {
+                continue;
+            }
+            for y in sy..sy + sh {
+                let row = 0xFF00_0000 | lerp_color(top, bot, (y as u32 * 255) / span);
+                let base = y * bw + sx;
+                back[base..base + sw].fill(row);
             }
         }
     } else {
-        for px in back.iter_mut() {
-            *px = theme.desktop;
+        for &(sx, sy, sw, sh) in &strips {
+            if sw == 0 || sh == 0 {
+                continue;
+            }
+            for y in sy..sy + sh {
+                let base = y * bw + sx;
+                back[base..base + sw].fill(theme.desktop);
+            }
         }
     }
 
@@ -197,6 +554,11 @@ pub(super) fn paint(c: Context<'_>) {
                 } else {
                     ins.top + margin
                 };
+                if let Some((_, ocx, ocy, ocw, och)) = backdrop_cover {
+                    if cx >= ocx && cy >= ocy && cx + card_w <= ocx + ocw && cy + card_h <= ocy + och {
+                        continue;
+                    }
+                }
                 if fx.blur {
                     blur_region(
                         &mut back,
@@ -330,36 +692,48 @@ pub(super) fn paint(c: Context<'_>) {
     }
 
     // Paint windows bottom to top with window and workspace opacity.
-    let duration_ms = if clock_valid { anim_duration_ms } else { 0 };
-    let workspace_view = desktop_tracks.sample(
-        desktop_motion::WORKSPACE,
-        (0, 0, bw as i32, bh as i32),
-        animation_now,
-    );
-    let workspace_transform =
-        desktop_motion::changed(&workspace_view, bw, bh) && workspace_layer.begin(&back);
-    let ws_fade = animation::progress(animation_now, ws_switch_tick, duration_ms, lua_ease_out);
-    for &wi in z.iter() {
+    for (pos, &wi) in z.iter().enumerate() {
         let w = &wins[wi];
         if !w.alive || w.ws != current_ws || w.minimized || effects.covers(w.pid, animation_now) {
             continue;
         }
         let is_focused = focused == Some(wi);
-        let a = (animation::progress(animation_now, w.born, duration_ms, lua_ease_out).min(
-            if desktop_tracks.has(desktop_motion::WORKSPACE, lua_policy::Property::Opacity) {
-                255
-            } else {
-                ws_fade
-            },
-        ) * effects.alpha(w.pid, animation_now)
-            / 255
-            * w.opacity as u32
-            / 255) as i32;
+        let a = win_alpha(w);
         if a <= 0 {
             continue;
         }
         let (visual, visual_theme, visual_fx) = effects.visual(w, animation_now, &theme, &fx);
-        window_painter::paint(
+        if let Some((cover_pos, ocx, ocy, ocw, och)) = opaque_cover {
+            if pos < cover_pos {
+                let (ox, oy, ow, oh) = visual.outer();
+                let sh = visual_fx.shadow.max(0);
+                if ox - sh >= ocx
+                    && oy - sh >= ocy
+                    && ox + ow + sh <= ocx + ocw
+                    && oy + oh + sh <= ocy + och
+                {
+                    continue;
+                }
+            }
+        }
+        if let Some((cover_pos, ocx, ocy, ocw, och)) = blur_skip {
+            if pos < cover_pos {
+                let (ox, oy, ow, oh) = visual.outer();
+                let sh = visual_fx.shadow.max(0);
+                if ox - sh >= ocx
+                    && oy - sh >= ocy
+                    && ox + ow + sh <= ocx + ocw
+                    && oy + oh + sh <= ocy + och
+                {
+                    continue;
+                }
+            }
+        }
+        let target_cache = match blur_target {
+            Some((tpos, _, sig, _)) if pos == tpos => Some((&mut *blur_cache, sig)),
+            _ => None,
+        };
+        window_painter::paint_with_blur_cache(
             &mut back,
             bw,
             bh,
@@ -378,6 +752,7 @@ pub(super) fn paint(c: Context<'_>) {
             argb_blit_logged,
             &mut blur_a,
             &mut blur_b,
+            target_cache,
         );
     }
 
@@ -788,50 +1163,23 @@ pub(super) fn paint(c: Context<'_>) {
     }
 
     // Expire toasts before painting the remaining queue.
-    notifs.retain(|t| clock_valid && animation_now < t.expire);
-    if notify_st_done && !*notify_expired_logged && notifs.is_empty() {
-        libdunit::println("gui_server: notify expired (self-test)");
-        *notify_expired_logged = true;
-    }
+    prune_notifs(notifs, animation_now, clock_valid, notify_st_done, notify_expired_logged);
     if notifications.enabled && !notifs.is_empty() {
-        let margin = skin.notification_margin;
-        let cardh = skin.notification_height;
-        let gap = skin.notification_gap;
-        let corner = notifications.corner;
-        let top = corner == 0 || corner == 1;
-        let leftc = corner == 0 || corner == 2;
         for (slot, t) in notifs.iter().enumerate() {
             let px = ly.title_font_px as f32;
-            let tw = font
-                .as_ref()
-                .map(|f| text_width_ttf(f, &t.text, px))
-                .unwrap_or(t.text.len() as i32 * ly.title_font_px / 2);
-            let max_width = (bw as i32 - 2 * margin).max(1);
-            let cardw = (tw + 2 * skin.notification_padding)
-                .clamp(skin.notification_min_width.min(max_width), max_width);
-            // Slide-in follows the same monotonic transition duration.
-            let progress = animation::progress(animation_now, t.born, duration_ms, lua_ease_out);
-            let slide =
-                skin.notification_slide - (progress * skin.notification_slide as u32 / 255) as i32;
-            let base_x = if leftc {
-                margin
-            } else {
-                bw as i32 - margin - cardw
-            };
-            let cx = if leftc {
-                base_x - slide
-            } else {
-                base_x + slide
-            };
-            let cy = if top {
-                margin + slot as i32 * (cardh + gap)
-            } else {
-                bh as i32 - margin - cardh - slot as i32 * (cardh + gap)
-            };
-            let view = desktop_tracks.sample(
-                desktop_motion::NOTIFICATIONS,
-                (cx, cy, cardw, cardh),
+            let view = notif_card_view(
+                slot,
+                t,
+                bw,
+                bh,
+                notifications,
+                ly,
+                skin,
+                font,
+                desktop_tracks,
                 animation_now,
+                duration_ms,
+                lua_ease_out,
             );
             let (cx, cy, cardw, cardh) = view.rect;
             let radius = view.radius.unwrap_or(skin.notification_radius);
@@ -986,6 +1334,12 @@ pub(super) fn paint(c: Context<'_>) {
         }
     }
     if cursor_visible {
+        *cursor_rect = crate::cursor::bounds(mx, my, &shell.cursor, bw, bh);
+        if let Some(rect) = *cursor_rect {
+            crate::cursor::save_under(&back, bw, rect, cursor_under);
+        } else {
+            cursor_under.clear();
+        }
         draw_cursor(
             &mut back,
             bw,
@@ -995,6 +1349,9 @@ pub(super) fn paint(c: Context<'_>) {
             &shell.cursor,
             skin.cursor_colors(),
         );
+    } else {
+        *cursor_rect = None;
+        cursor_under.clear();
     }
 
     let bytes = unsafe { core::slice::from_raw_parts(back.as_ptr() as *const u8, back.len() * 4) };

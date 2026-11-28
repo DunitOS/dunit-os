@@ -1,19 +1,19 @@
 //! Shared software raster, blur, clipping and TrueType primitives.
 use super::*;
 pub(super) fn fill_rect(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, color: u32) {
+    if w <= 0 || h <= 0 {
+        return;
+    }
     let x0 = x.max(0) as usize;
     let y0 = y.max(0) as usize;
     let x1 = ((x + w).max(0) as usize).min(bw);
     let y1 = ((y + h).max(0) as usize).min(bh);
-    let mut yy = y0;
-    while yy < y1 {
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    for yy in y0..y1 {
         let row = yy * bw;
-        let mut xx = x0;
-        while xx < x1 {
-            buf[row + xx] = color;
-            xx += 1;
-        }
-        yy += 1;
+        buf[row + x0..row + x1].fill(color);
     }
 }
 
@@ -89,18 +89,63 @@ pub(super) fn fill_rrect(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, 
     let y0 = y.max(0);
     let x1 = (x + w).min(bw as i32);
     let y1 = (y + h).min(bh as i32);
-    let mut py = y0;
-    while py < y1 {
-        let mut px = x0;
-        while px < x1 {
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    let rgb = color & 0x00FF_FFFF;
+    let top_cut = if corners & (dunit_render::raster::RR_TL | dunit_render::raster::RR_TR) != 0 {
+        y + r
+    } else {
+        y
+    };
+    let bot_cut = if corners & (dunit_render::raster::RR_BL | dunit_render::raster::RR_BR) != 0 {
+        y + h - r
+    } else {
+        y + h
+    };
+    for py in y0..y1 {
+        let row = py as usize * bw;
+        if r == 0 || (py >= top_cut && py < bot_cut) {
+            if base_a == 255 {
+                buf[row + x0 as usize..row + x1 as usize].fill(color);
+            } else {
+                for px in x0 as usize..x1 as usize {
+                    buf[row + px] = blend(buf[row + px], color);
+                }
+            }
+            continue;
+        }
+        let left_end = (x + r).clamp(x0, x1);
+        let right_start = (x + w - r).clamp(left_end, x1);
+        for px in x0..left_end {
             let cov = rr_cov(px, py, x, y, w, h, r, corners);
             if cov > 0 {
                 let a = base_a * cov / 255;
-                blend_pixel(buf, bw, bh, px, py, (a << 24) | (color & 0x00FF_FFFF));
+                if a == 255 {
+                    buf[row + px as usize] = 0xFF00_0000 | rgb;
+                } else if a > 0 {
+                    buf[row + px as usize] = blend(buf[row + px as usize], (a << 24) | rgb);
+                }
             }
-            px += 1;
         }
-        py += 1;
+        if base_a == 255 {
+            buf[row + left_end as usize..row + right_start as usize].fill(color);
+        } else {
+            for px in left_end as usize..right_start as usize {
+                buf[row + px] = blend(buf[row + px], color);
+            }
+        }
+        for px in right_start..x1 {
+            let cov = rr_cov(px, py, x, y, w, h, r, corners);
+            if cov > 0 {
+                let a = base_a * cov / 255;
+                if a == 255 {
+                    buf[row + px as usize] = 0xFF00_0000 | rgb;
+                } else if a > 0 {
+                    buf[row + px as usize] = blend(buf[row + px as usize], (a << 24) | rgb);
+                }
+            }
+        }
     }
 }
 
@@ -108,6 +153,24 @@ pub(super) fn fill_rrect(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, 
 /// opacity `alpha` (0..255), corner arcs anti-aliased. Used for glass panels,
 /// title bars and buttons.
 pub(super) fn fill_rrect_grad(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: i32, w: i32, h: i32, r: i32, corners: u8, top: u32, bottom: u32, alpha: i32) {
+    fill_rrect_grad_cutout(buf, bw, bh, x, y, w, h, r, corners, top, bottom, alpha, None);
+}
+
+pub(super) fn fill_rrect_grad_cutout(
+    buf: &mut [u32],
+    bw: usize,
+    bh: usize,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    r: i32,
+    corners: u8,
+    top: u32,
+    bottom: u32,
+    alpha: i32,
+    cutout: Option<(i32, i32, i32, i32)>,
+) {
     if w <= 0 || h <= 0 || alpha <= 0 {
         return;
     }
@@ -117,21 +180,84 @@ pub(super) fn fill_rrect_grad(buf: &mut [u32], bw: usize, bh: usize, x: i32, y: 
     let y0 = y.max(0);
     let x1 = (x + w).min(bw as i32);
     let y1 = (y + h).min(bh as i32);
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
     let span = (h - 1).max(1) as u32;
-    let mut py = y0;
-    while py < y1 {
+    let top_cut = if corners & (dunit_render::raster::RR_TL | dunit_render::raster::RR_TR) != 0 {
+        y + r
+    } else {
+        y
+    };
+    let bot_cut = if corners & (dunit_render::raster::RR_BL | dunit_render::raster::RR_BR) != 0 {
+        y + h - r
+    } else {
+        y + h
+    };
+    for py in y0..y1 {
         let t = ((py - y).max(0) as u32 * 255) / span;
-        let row = lerp_color(top, bottom, t);
+        let row_rgb = lerp_color(top, bottom, t) & 0x00FF_FFFF;
+        let row_argb = (alpha << 24) | row_rgb;
+        let row = py as usize * bw;
+        let straight = r == 0 || (py >= top_cut && py < bot_cut);
+        let skip = cutout.filter(|&(_sx, sy, sw, sh)| sw > 0 && sh > 0 && py >= sy && py < sy + sh);
         let mut px = x0;
         while px < x1 {
-            let cov = rr_cov(px, py, x, y, w, h, r, corners);
-            if cov > 0 {
-                let a = alpha * cov / 255;
-                blend_pixel(buf, bw, bh, px, py, (a << 24) | (row & 0x00FF_FFFF));
+            if let Some((sx, _, sw, _)) = skip {
+                if px >= sx && px < sx + sw {
+                    px = sx + sw;
+                    continue;
+                }
             }
-            px += 1;
+            let seg_end = if let Some((sx, _, _, _)) = skip {
+                if px < sx { sx.min(x1) } else { x1 }
+            } else {
+                x1
+            };
+            if straight {
+                if alpha == 255 {
+                    buf[row + px as usize..row + seg_end as usize].fill(row_argb);
+                } else {
+                    for ix in px as usize..seg_end as usize {
+                        buf[row + ix] = blend(buf[row + ix], row_argb);
+                    }
+                }
+                px = seg_end;
+                continue;
+            }
+            let left_end = (x + r).clamp(px, seg_end);
+            for ix in px..left_end {
+                let cov = rr_cov(ix, py, x, y, w, h, r, corners);
+                if cov > 0 {
+                    let a = alpha * cov / 255;
+                    if a == 255 {
+                        buf[row + ix as usize] = 0xFF00_0000 | row_rgb;
+                    } else if a > 0 {
+                        buf[row + ix as usize] = blend(buf[row + ix as usize], (a << 24) | row_rgb);
+                    }
+                }
+            }
+            let right_start = (x + w - r).clamp(left_end, seg_end);
+            if alpha == 255 {
+                buf[row + left_end as usize..row + right_start as usize].fill(row_argb);
+            } else {
+                for ix in left_end as usize..right_start as usize {
+                    buf[row + ix] = blend(buf[row + ix], row_argb);
+                }
+            }
+            for ix in right_start..seg_end {
+                let cov = rr_cov(ix, py, x, y, w, h, r, corners);
+                if cov > 0 {
+                    let a = alpha * cov / 255;
+                    if a == 255 {
+                        buf[row + ix as usize] = 0xFF00_0000 | row_rgb;
+                    } else if a > 0 {
+                        buf[row + ix as usize] = blend(buf[row + ix as usize], (a << 24) | row_rgb);
+                    }
+                }
+            }
+            px = seg_end;
         }
-        py += 1;
     }
 }
 
@@ -246,28 +372,32 @@ pub(super) fn blit_surface(
     sh: usize,
     argb: bool,
 ) {
-    let mut sy = 0usize;
-    while sy < sh {
-        let dy = y + sy as i32;
-        if dy >= 0 && (dy as usize) < bh {
-            let drow = dy as usize * bw;
-            let srow = sy * sw;
-            let mut sx = 0usize;
-            while sx < sw {
-                let dx = x + sx as i32;
-                if dx >= 0 && (dx as usize) < bw {
-                    if argb {
-                        // src-over: opaque (a==255) pixels overwrite, translucent
-                        // ones blend, fully transparent (a==0) leave the desktop.
-                        blend_pixel(buf, bw, bh, dx, dy, src[srow + sx]);
-                    } else {
-                        buf[drow + dx as usize] = 0xff00_0000 | src[srow + sx];
-                    }
+    let (dx0, dy0, cw, ch) = clip_to_screen(x, y, sw as i32, sh as i32, bw, bh);
+    if cw == 0 || ch == 0 {
+        return;
+    }
+    let sx0 = (dx0 as i32 - x) as usize;
+    let sy0 = (dy0 as i32 - y) as usize;
+    for ry in 0..ch {
+        let drow = &mut buf[(dy0 + ry) * bw + dx0..(dy0 + ry) * bw + dx0 + cw];
+        let srow = &src[(sy0 + ry) * sw + sx0..(sy0 + ry) * sw + sx0 + cw];
+        if argb {
+            for (dst, &pixel) in drow.iter_mut().zip(srow.iter()) {
+                let sa = pixel >> 24;
+                if sa == 0 {
+                    continue;
                 }
-                sx += 1;
+                if sa == 255 {
+                    *dst = pixel;
+                } else {
+                    *dst = blend(*dst, pixel);
+                }
+            }
+        } else {
+            for (dst, &pixel) in drow.iter_mut().zip(srow.iter()) {
+                *dst = 0xff00_0000 | pixel;
             }
         }
-        sy += 1;
     }
 }
 pub(super) use crate::cursor::draw_cursor;

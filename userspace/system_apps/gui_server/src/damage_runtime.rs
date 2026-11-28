@@ -25,21 +25,27 @@ struct VisualKey {
 struct Key {
     epoch: u64,
     shell: u64,
+    shell_hover: u64,
+    title_hover: Option<(u32, u8)>,
     ws: usize,
     focus: Option<usize>,
-    mouse: (i32, i32),
-    cursor_visible: bool,
     z: Vec<usize>,
     wins: Vec<VisualKey>,
     theme: Theme,
     layout: Layout,
     effects: Effects,
     widgets: (bool, u64, u32, u64),
+    notif_sig: u64,
 }
 pub struct Cache {
     previous: Option<Key>,
     present: Vec<u32>,
     announced: bool,
+    pub(super) cursor_rect: Option<(i32, i32, usize, usize)>,
+    pub(super) cursor_under: Vec<u32>,
+    cursor_pos: (i32, i32),
+    cursor_visible: bool,
+    cursor_ready: bool,
 }
 pub(super) enum Composition {
     Full,
@@ -53,26 +59,82 @@ pub struct Context<'a> {
     pub focused: Option<usize>,
     pub workspace: usize,
     pub mouse: (i32, i32),
+    pub logical_mouse: (i32, i32),
     pub cursor_visible: bool,
     pub now: u64,
     pub duration: u32,
     pub epoch: u64,
     pub theme: &'a Theme,
     pub layout: &'a Layout,
+    pub skin: &'a dunit_style::shell::Visuals,
     pub effects: &'a Effects,
     pub shell: &'a shell_runtime::Shell,
     pub window_effects: &'a window_effects::Effects,
     pub blocked: bool,
     pub trace: bool,
     pub widgets: (bool, u64, u32, u64),
+    pub notif_sig: u64,
+    pub notif_blockers: &'a [Rect],
 }
+
+fn to_rect(r: (i32, i32, usize, usize)) -> Rect {
+    Rect {
+        x: r.0,
+        y: r.1,
+        w: r.2 as u32,
+        h: r.3 as u32,
+    }
+}
+
+fn rect_contains(outer: Rect, inner: Rect) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x as i64 + inner.w as i64 <= outer.x as i64 + outer.w as i64
+        && inner.y as i64 + inner.h as i64 <= outer.y as i64 + outer.h as i64
+}
+
+fn present_rect(
+    back: &[u32],
+    bw: usize,
+    r: Rect,
+    scratch: &mut Vec<u32>,
+    performance: &mut crate::performance::Profiler,
+) -> bool {
+    if r.w == 0 || r.h == 0 || r.x < 0 || r.y < 0 {
+        return true;
+    }
+    scratch.clear();
+    for y in r.y as usize..r.y as usize + r.h as usize {
+        scratch.extend_from_slice(
+            &back[y * bw + r.x as usize..y * bw + r.x as usize + r.w as usize],
+        );
+    }
+    let bytes = unsafe {
+        core::slice::from_raw_parts(scratch.as_ptr() as *const u8, scratch.len() * 4)
+    };
+    let perf_present = performance.stamp();
+    let res = libdunit::fb_present(bytes, r.w, r.h, r.x as u32, r.y as u32);
+    performance.present(perf_present, (r.w as u64) * (r.h as u64));
+    res == 0
+}
+
 impl Cache {
     pub fn new() -> Self {
         Self {
             previous: None,
             present: Vec::new(),
             announced: false,
+            cursor_rect: None,
+            cursor_under: Vec::new(),
+            cursor_pos: (0, 0),
+            cursor_visible: false,
+            cursor_ready: false,
         }
+    }
+    pub fn mark_cursor(&mut self, mx: i32, my: i32, visible: bool) {
+        self.cursor_pos = (mx, my);
+        self.cursor_visible = visible;
+        self.cursor_ready = true;
     }
     pub fn compose(
         &mut self,
@@ -88,6 +150,7 @@ impl Cache {
         let mut wins = Vec::new();
         let mut surfaces = Vec::new();
         let mut updates = Vec::new();
+        let mut title_hover = None;
         for w in c.wins {
             let (v, t, fx) = c.window_effects.visual(w, c.now, c.theme, c.effects);
             let alpha = (animation::progress(c.now, w.born, c.duration, false)
@@ -97,6 +160,19 @@ impl Cache {
                 / 255) as i32;
             if w.motion.is_some() || alpha != w.opacity as i32 {
                 stable = false;
+            }
+            if title_hover.is_none()
+                && w.alive
+                && !w.minimized
+                && w.ws == c.workspace
+                && v.traffic_lights
+            {
+                for role in 0..3u8 {
+                    if in_rect(v.control_rect(role as i32, c.skin), c.logical_mouse.0, c.logical_mouse.1) {
+                        title_hover = Some((w.pid, role));
+                        break;
+                    }
+                }
             }
             wins.push(VisualKey {
                 pid: w.pid,
@@ -119,16 +195,17 @@ impl Cache {
         let key = Key {
             epoch: c.epoch,
             shell: c.shell.revision,
+            shell_hover: c.shell.hover_token(c.mouse.0, c.mouse.1),
+            title_hover,
             ws: c.workspace,
             focus: c.focused,
-            mouse: c.mouse,
-            cursor_visible: c.cursor_visible,
             z: c.z.to_vec(),
             wins,
             theme: *c.theme,
             layout: *c.layout,
             effects: *c.effects,
             widgets: c.widgets,
+            notif_sig: c.notif_sig,
         };
         for &wi in c.z {
             let w = &c.wins[wi];
@@ -186,28 +263,100 @@ impl Cache {
         }
         let same = stable && self.previous.as_ref() == Some(&key);
         self.previous = if stable { Some(key) } else { None };
-        if !same {
+        if !same || !self.cursor_ready {
+            self.cursor_ready = false;
             return Composition::Full;
         }
-        // The cache key includes pointer position: this path has a stationary
-        // opaque software cursor. Restore its pixels after applying client
-        // damage instead of treating it as a whole-scene fallback blocker.
-        let blockers = c.shell.damage_blockers(c.now, c.effects);
+
+        let new_cursor = if c.cursor_visible {
+            crate::cursor::bounds(c.mouse.0, c.mouse.1, &c.shell.cursor, bw, bh)
+        } else {
+            None
+        };
+        let cursor_changed = new_cursor != self.cursor_rect
+            || c.cursor_visible != self.cursor_visible
+            || (c.cursor_visible && c.mouse != self.cursor_pos);
+
+        if updates.is_empty() {
+            if !cursor_changed {
+                return Composition::Idle;
+            }
+            let old_cursor = self.cursor_rect;
+            if let Some(old) = old_cursor {
+                crate::cursor::restore_under(back, bw, old, &self.cursor_under);
+            }
+            if let Some(new) = new_cursor {
+                crate::cursor::save_under(back, bw, new, &mut self.cursor_under);
+                draw_cursor(
+                    back,
+                    bw,
+                    bh,
+                    c.mouse.0,
+                    c.mouse.1,
+                    &c.shell.cursor,
+                    c.shell.visuals.cursor_colors(),
+                );
+            } else {
+                self.cursor_under.clear();
+            }
+            let ok = match (old_cursor.map(to_rect), new_cursor.map(to_rect)) {
+                (Some(a), Some(b)) => {
+                    let x0 = a.x.min(b.x);
+                    let y0 = a.y.min(b.y);
+                    let x1 = (a.x + a.w as i32).max(b.x + b.w as i32);
+                    let y1 = (a.y + a.h as i32).max(b.y + b.h as i32);
+                    let union = Rect {
+                        x: x0,
+                        y: y0,
+                        w: (x1 - x0) as u32,
+                        h: (y1 - y0) as u32,
+                    };
+                    if union.w * union.h <= (a.w * a.h + b.w * b.h) * 2 {
+                        present_rect(back, bw, union, &mut self.present, performance)
+                    } else {
+                        present_rect(back, bw, a, &mut self.present, performance)
+                            && present_rect(back, bw, b, &mut self.present, performance)
+                    }
+                }
+                (Some(r), None) | (None, Some(r)) => {
+                    present_rect(back, bw, r, &mut self.present, performance)
+                }
+                (None, None) => true,
+            };
+            if !ok {
+                self.cursor_ready = false;
+                return Composition::Full;
+            }
+            self.cursor_rect = new_cursor;
+            self.cursor_pos = c.mouse;
+            self.cursor_visible = c.cursor_visible;
+            return Composition::Partial;
+        }
+
+        let mut blockers = c.shell.damage_blockers(c.now, c.effects);
+        blockers.extend_from_slice(c.notif_blockers);
         let Some(p) = plan::plan(&surfaces, &updates, &blockers, bw as u32, bh as u32) else {
+            self.cursor_ready = false;
             return Composition::Full;
         };
-        let visible: Vec<_> =
-            c.z.iter()
-                .copied()
-                .filter(|&wi| {
-                    let w = &c.wins[wi];
-                    w.alive && !w.minimized && w.ws == c.workspace
-                })
-                .collect();
+        let visible: Vec<_> = c
+            .z
+            .iter()
+            .copied()
+            .filter(|&wi| {
+                let w = &c.wins[wi];
+                w.alive && !w.minimized && w.ws == c.workspace
+            })
+            .collect();
+        let old_cursor = self.cursor_rect;
+        if let Some(old) = old_cursor {
+            crate::cursor::restore_under(back, bw, old, &self.cursor_under);
+        }
         for copy in &p.copies {
             let w = &c.wins[visible[copy.surface]];
             let count = (w.surface_w as usize).saturating_mul(w.surface_h as usize);
             if w.buf_ptr.is_null() || count * 4 > w.buf_size {
+                self.cursor_ready = false;
                 return Composition::Full;
             }
             let pixels = unsafe { core::slice::from_raw_parts(w.buf_ptr as *const u32, count) };
@@ -220,31 +369,50 @@ impl Cache {
                 bw,
                 bh,
             ) {
+                self.cursor_ready = false;
                 return Composition::Full;
             }
         }
-        if c.cursor_visible {draw_cursor(back, bw, bh, c.mouse.0, c.mouse.1, &c.shell.cursor, c.shell.visuals.cursor_colors());}
+        if c.cursor_visible {
+            if let Some(new) = new_cursor {
+                crate::cursor::save_under(back, bw, new, &mut self.cursor_under);
+            } else {
+                self.cursor_under.clear();
+            }
+            draw_cursor(
+                back,
+                bw,
+                bh,
+                c.mouse.0,
+                c.mouse.1,
+                &c.shell.cursor,
+                c.shell.visuals.cursor_colors(),
+            );
+        } else {
+            self.cursor_under.clear();
+        }
         for copy in &p.copies {
-            let r = copy.destination;
-            self.present.clear();
-            for y in r.y as usize..r.y as usize + r.h as usize {
-                self.present.extend_from_slice(
-                    &back[y * bw + r.x as usize..y * bw + r.x as usize + r.w as usize],
-                );
-            }
-            let bytes = unsafe {
-                core::slice::from_raw_parts(
-                    self.present.as_ptr() as *const u8,
-                    self.present.len() * 4,
-                )
-            };
-            let perf_present = performance.stamp();
-            let present_result = libdunit::fb_present(bytes, r.w, r.h, r.x as u32, r.y as u32);
-            performance.present(perf_present,(r.w as u64)*(r.h as u64));
-            if present_result != 0 {
+            if !present_rect(back, bw, copy.destination, &mut self.present, performance) {
+                self.cursor_ready = false;
                 return Composition::Full;
             }
         }
+        if cursor_changed {
+            for r in [old_cursor.map(to_rect), new_cursor.map(to_rect)]
+                .into_iter()
+                .flatten()
+            {
+                if !p.copies.iter().any(|cp| rect_contains(cp.destination, r))
+                    && !present_rect(back, bw, r, &mut self.present, performance)
+                {
+                    self.cursor_ready = false;
+                    return Composition::Full;
+                }
+            }
+        }
+        self.cursor_rect = new_cursor;
+        self.cursor_pos = c.mouse;
+        self.cursor_visible = c.cursor_visible;
         if p.pixels > 0 && (c.trace || performance.collecting()) {
             let texture: u64 = clients.iter().map(|c| c.buffers.copied).sum();
             performance.partial_present(texture);
@@ -261,7 +429,7 @@ impl Cache {
                 }
             }
         }
-        if p.pixels > 0 {
+        if p.pixels > 0 || cursor_changed {
             Composition::Partial
         } else {
             Composition::Idle

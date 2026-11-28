@@ -38,6 +38,7 @@ struct Source {
     animations: bool,
 }
 impl Source {
+    #[inline(never)]
     fn read() -> Result<Self> {
         let document = dwm_settings::load_document().map_err(|_| Error(libdunit::EIO))?;
         let config = dwm_settings::validate_installed_document(&document)
@@ -74,6 +75,7 @@ impl Watcher {
     pub fn animations_enabled(&self) -> bool {
         self.source.animations
     }
+    #[inline(never)]
     pub fn open(overlay: &str) -> Result<(Self, Theme, Font)> {
         let source = Source::read()?;
         let theme = source.theme(overlay).map_err(|failure| {

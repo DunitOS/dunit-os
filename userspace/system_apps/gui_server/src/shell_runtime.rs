@@ -348,6 +348,24 @@ impl Shell {
             .any(|p| self.visible(p, x, y) && in_rect(p.rect, x, y))
             || self.popup.is_some()
     }
+    /// Hash of all pointer-sensitive shell hover/autohide state so pointer movement
+    /// inside client windows does not invalidate the cached desktop scene.
+    pub fn hover_token(&self, x: i32, y: i32) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for panel in &self.panels {
+            let vis = self.visible(panel, x, y);
+            h = (h ^ u64::from(vis)).wrapping_mul(0x100_0000_01b3);
+            if vis {
+                for cell in &panel.cells {
+                    let hot = cell.rect.2 > 0 && cell.rect.3 > 0 && in_rect(cell.rect, x, y);
+                    if hot {
+                        h = (h ^ (cell.component as u64 + 1)).wrapping_mul(0x100_0000_01b3);
+                    }
+                }
+            }
+        }
+        h
+    }
     pub fn first_quicksettings_anchor(&self) -> Option<(Rect, Edge)> {
         self.panels.iter().find_map(|panel| {
             panel

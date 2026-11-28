@@ -332,6 +332,8 @@ pub(super) struct Win {
     /// terminal with `bg_alpha < 255`) shows the desktop through its background;
     /// `FORMAT_XRGB8888` keeps the opaque fast-path copy.
     pub(super) format: u32,
+    /// Monotonic client commit counter mirrored from `ClientState.buf_seq`.
+    pub(super) buf_seq: u64,
 }
 
 impl Win {
@@ -345,7 +347,7 @@ impl Win {
             app: client.app, opacity: 255, rule_applied: false, ws, born: now,
             minimized: false, motion: None, state: WinState::Floating,
             lua_floating: false, restore: None, st_step: 0, st_deadline: None,
-            format: client.format,
+            format: client.format, buf_seq: client.buf_seq,
         }
     }
     pub(super) fn resize_edges(&self, x: i32, y: i32, skin: &dunit_style::shell::Visuals) -> Option<window_gesture::Edges> {

@@ -123,6 +123,7 @@ fn run_desktop_session(
     pointer: &mut PointerSession,
     transfers: &mut transfer_runtime::Runtime,
     isolation_proven: &mut bool,
+    argb_blit_logged: &mut bool,
 ) -> bool {
     // Apply the configured display mode before sizing framebuffer resources.
     let cfg = settings::load_config();
@@ -295,9 +296,9 @@ fn run_desktop_session(
     let scratch_len = panel_area.max(dock_area).max(menu_area).max(1);
     let mut blur_a: Vec<u32> = alloc::vec![0u32; scratch_len];
     let mut blur_b: Vec<u32> = alloc::vec![0u32; scratch_len];
+    let mut blur_cache = window_painter::BlurCache::default();
     // Snapshot lower layers before painting an ARGB window frame.
     let mut win_backing: Vec<u32> = Vec::new();
-    let mut argb_blit_logged = false;
     // Publish no client presentation until the desktop's persistent framebuffer,
     // wallpaper, assets, font cache and blur scratch are ready. A client may draw
     // again as soon as FRAME_DONE arrives; startup must not add these allocations
@@ -654,7 +655,7 @@ fn run_desktop_session(
                     let all_settled =
                         !live.is_empty() && live.iter().all(|&i| wins[i].st_step == 3);
                     // Let the ARGB composition proof finish before closing all windows.
-                    if all_settled && argb_blit_logged && !clients.is_empty() {
+                    if all_settled && *argb_blit_logged && !clients.is_empty() {
                         recycle_pre = clients.len();
                         for &wi in &live {
                             effects.start(&wins[wi],&back,bw,bh,wins[wi].outer(),animation_now,anim_duration_ms,
@@ -1403,6 +1404,26 @@ fn run_desktop_session(
         if pointer_modes.take_cancelled(){drag=None;pressed_win=None;input_focus=None;last_lx=i32::MIN;}
 
         let damage_duration=if animation_clock.is_some(){anim_duration_ms}else{0};
+        desktop_painter::prune_notifs(
+            &mut notifs,
+            animation_now,
+            animation_clock.is_some(),
+            notify_st_done,
+            &mut notify_expired_logged,
+        );
+        let (notif_blockers, notif_sig, notifs_animating) = desktop_painter::notif_blockers_and_sig(
+            &notifs,
+            bw,
+            bh,
+            &notifications,
+            &ly,
+            &skin,
+            font.as_ref(),
+            &desktop_tracks,
+            animation_now,
+            damage_duration,
+            lua_ease_out,
+        );
         let mut desktop_widget_stats=libdunit::SystemStats::default();
         let desktop_widget_stats_valid=wg.enabled&&!desk_widgets.is_empty()
             &&libdunit::get_system_stats(&mut desktop_widget_stats)>=0;
@@ -1410,17 +1431,19 @@ fn run_desktop_session(
             desktop_widget_stats.uptime_ticks/desktop_widget_stats.uptime_hz
         }else{0};
         let workspace_damage_view=desktop_tracks.sample(desktop_motion::WORKSPACE,(0,0,bw as i32,bh as i32),animation_now);
-        let damage_blocked=transfers.active().is_some()||menu_open||menu_was_open||qs_open||switcher.active||!notifs.is_empty()
+        let damage_blocked=transfers.active().is_some()||menu_open||menu_was_open||qs_open||switcher.active||notifs_animating
             ||(menu_closed_at!=0&&animation_now.saturating_sub(menu_closed_at)<damage_duration as u64)
             ||animation::progress(animation_now,ws_switch_tick,damage_duration,lua_ease_out)<255
             ||desktop_tracks.animating(animation_now)||desktop_motion::changed(&workspace_damage_view,bw,bh);
         let perf_compose = performance.begin_compose();
         let composition=damage_cache.compose(damage_runtime::Context{
-            wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),cursor_visible:!pointer_modes.hidden(),now:animation_now,
-            duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,effects:&fx,
+            wins:&wins,z:&z,focused,workspace:current_ws,mouse:(mx,my),logical_mouse:(wx,wy),cursor_visible:!pointer_modes.hidden(),now:animation_now,
+            duration:damage_duration,epoch:scene_epoch,theme:&theme,layout:&ly,skin:&skin,effects:&fx,
             shell:&shell,window_effects:&effects,blocked:damage_blocked,
             trace: damage_trace,
             widgets:(wg.enabled,widget_seconds,desktop_widget_stats.memory_used_percent(),desktop_widget_stats.live_processes()),
+            notif_sig,
+            notif_blockers:&notif_blockers,
         },clients,&mut back,bw,bh,&mut performance);
         let full = matches!(composition, damage_runtime::Composition::Full);
         performance.composition(!full,damage_blocked);
@@ -1448,8 +1471,10 @@ fn run_desktop_session(
                 shell: &mut shell,
                 blur_a: &mut blur_a,
                 blur_b: &mut blur_b,
+                blur_cache: &mut blur_cache,
+                scene_epoch,
                 win_backing: &mut win_backing,
-                argb_blit_logged: &mut argb_blit_logged,
+                argb_blit_logged,
                 animation_now,
                 clock_valid: animation_clock.is_some(),
                 anim_duration_ms,
@@ -1487,7 +1512,10 @@ fn run_desktop_session(
                 transfers,
                 performance: &mut performance,
                 desktop_ready_announced: &mut desktop_ready_announced,
+                cursor_rect: &mut damage_cache.cursor_rect,
+                cursor_under: &mut damage_cache.cursor_under,
             });
+            damage_cache.mark_cursor(mx, my, !pointer_modes.hidden());
         }
         performance.finish_compose(perf_compose);
         for c in clients.iter_mut(){c.dirty=None;c.buffers.copied=0;}

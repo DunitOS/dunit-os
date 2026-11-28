@@ -108,7 +108,8 @@ impl<C: Component> ComponentWindow<C> {
             crate::window::PixelFormat::Xrgb8888,
         )
     }
-    pub fn open_format(
+    #[inline(never)]
+    fn open_format_unrendered(
         width: u32,
         height: u32,
         component: C,
@@ -119,7 +120,7 @@ impl<C: Component> ComponentWindow<C> {
         // their ownership on the heap so construction does not multiply large
         // return slots on the native 64 KiB user stack.
         let application = alloc::boxed::Box::new(Application::new(component).map_err(native)?);
-        let mut ui = Self {
+        Ok(Self {
             canvas: None,
             metrics_enabled: false,
             metrics: Default::default(),
@@ -141,7 +142,17 @@ impl<C: Component> ComponentWindow<C> {
             pointer_position: None,
             text_clicks: TextClickState::default(),
             transfers: alloc::boxed::Box::default(),
-        };
+        })
+    }
+    #[inline(never)]
+    pub fn open_format(
+        width: u32,
+        height: u32,
+        component: C,
+        renderer: Renderer,
+        format: crate::window::PixelFormat,
+    ) -> NativeResult<Self> {
+        let mut ui = Self::open_format_unrendered(width, height, component, renderer, format)?;
         ui.redraw()?;
         Ok(ui)
     }
@@ -185,19 +196,32 @@ impl<C: Component> ComponentWindow<C> {
         Self::open_themed_with_style(width, height, component, "")
     }
     /// An optional application layer can reference the selected profile tokens.
+    #[inline(never)]
     pub fn open_themed_with_style(
         width: u32,
         height: u32,
         component: C,
         overlay: &str,
     ) -> NativeResult<Self> {
+        let (watcher, renderer) = Self::prepare_themed_renderer(overlay)?;
+        let mut ui = Self::open_format_unrendered(
+            width,
+            height,
+            component,
+            renderer,
+            crate::window::PixelFormat::Xrgb8888,
+        )?;
+        ui.theme = Some(alloc::boxed::Box::new(watcher));
+        ui.theme_checked = Some(crate::time::Instant::now()?);
+        ui.redraw()?;
+        Ok(ui)
+    }
+    #[inline(never)]
+    fn prepare_themed_renderer(overlay: &str) -> NativeResult<(crate::ui_theme::Watcher, Renderer)> {
         let (watcher, theme, font) = crate::ui_theme::Watcher::open(overlay)?;
         let mut renderer = Renderer::new(font, theme.cascade, theme.background);
         renderer.set_motion_enabled(watcher.animations_enabled());
-        let mut ui = Self::open(width, height, component, renderer)?;
-        ui.theme = Some(alloc::boxed::Box::new(watcher));
-        ui.theme_checked = Some(crate::time::Instant::now()?);
-        Ok(ui)
+        Ok((watcher, renderer))
     }
     pub fn supports_pointer_mode(&self)->bool{self.window.supports_pointer_mode()}
     pub fn pointer_mode(&self)->crate::window::PointerMode{self.window.pointer_mode()}

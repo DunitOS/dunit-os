@@ -91,6 +91,12 @@ impl Surface<'_> {
         }
         let radius = ((radius.max(0.) + 0.5) as i32).min(outer.2.min(outer.3).max(0) / 2);
         let thickness = ((border.max(0.) + 0.5) as i32).min((w.min(h) + 1) / 2);
+        if !group && radius == 0 && thickness == 0 && gradient.is_none() {
+            if let Some(color) = fill {
+                self.fill_rect(rect.x, rect.y, rect.w, rect.h, color);
+            }
+            return;
+        }
         let inner = (
             x + thickness,
             y + thickness,
@@ -98,8 +104,37 @@ impl Surface<'_> {
             h - 2 * thickness,
         );
         let (x0, y0, x1, y1) = self.clip_rect(rect.x, rect.y, rect.w, rect.h);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let inner_x0 = (x + thickness.max(radius)).max(0) as usize;
+        let inner_x1 = (x + w - thickness.max(radius)).max(0) as usize;
+        let inner_y0 = (y + thickness.max(radius)).max(0) as usize;
+        let inner_y1 = (y + h - thickness.max(radius)).max(0) as usize;
         for py in y0..y1 {
-            for px in x0..x1 {
+            let row_solid = !group
+                && gradient.is_none()
+                && py >= inner_y0
+                && py < inner_y1
+                && inner_x0 < inner_x1;
+            let mut px = x0;
+            while px < x1 {
+                if row_solid && px >= inner_x0 && px < inner_x1 {
+                    let span_end = inner_x1.min(x1);
+                    if let Some(color) = fill {
+                        if color.a == 255 {
+                            let row_off = py * self.stride;
+                            self.pixels[row_off + px..row_off + span_end]
+                                .fill(crate::pack_argb(color));
+                        } else if color.a > 0 {
+                            for sx in px..span_end {
+                                self.blend(sx, py, color, 255);
+                            }
+                        }
+                    }
+                    px = span_end;
+                    continue;
+                }
                 let cov = coverage(px as i32, py as i32, outer, radius);
                 let color = gradient
                     .map(|g| {
@@ -127,6 +162,7 @@ impl Surface<'_> {
                     };
                     self.blend(px, py, ink, ring as u8);
                 }
+                px += 1;
             }
         }
     }

@@ -472,6 +472,7 @@ pub(super) struct ClientState {
     pub(super) buf_ptr: *const u8,
     pub(super) buf_size: usize,
     pub(super) buffers: crate::client_buffers::Buffers,
+    pub(super) buf_seq: u64,
     pub(super) dirty: Option<gui_protocol_v1::Rect>,
     pub(super) surf_w: u32,
     pub(super) surf_h: u32,
@@ -514,6 +515,7 @@ impl ClientState {
             buf_ptr: core::ptr::null(),
             buf_size: 0,
             buffers: crate::client_buffers::Buffers::new(),
+            buf_seq: 0,
             dirty: None,
             surf_w: 0,
             surf_h: 0,
@@ -613,6 +615,7 @@ pub(super) fn refresh_client(server:&Server,c:&mut ClientState) {
     (c.buf_ptr,c.buf_size)=c.buffers.image();
     if let Some(frame)=c.buffers.frame {
         if old!=Some(frame.commit) || frame.damage.continuous {
+            c.buf_seq = c.buf_seq.wrapping_add(1);
             let full=[gui_protocol_v1::Rect{x:0,y:0,w:frame.width,h:frame.height}];
             let rects=if frame.damage.rects().is_empty(){&full[..]}else{frame.damage.rects()};
             for r in rects {
@@ -741,8 +744,9 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
     let mut bringup_reload = false;
 
     // Resource preparation in the session precedes the first client callback.
-    // Keep the isolation result across display-mode re-entry.
+    // Keep the isolation and ARGB composition proofs across display-mode re-entry.
     let mut both = false;
+    let mut argb_blit_logged = false;
     // Loop so a live `[display]` change re-enters the session at the new
     // resolution (rebuilding all buffers); unprocessed notifications survive.
     let mut pn = pending_notifies;
@@ -759,6 +763,7 @@ pub(super) fn serve_two_clients(input: u32) -> bool {
         &mut pointer,
         &mut transfers,
         &mut both,
+        &mut argb_blit_logged,
     ) {}
 
     for c in clients.iter() {

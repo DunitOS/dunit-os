@@ -104,6 +104,9 @@ fn render(pixels: &mut [u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32)
     let mut surf = Surface::new(pixels, w as usize, h as usize);
     surf.clear(col(bg));
 
+    let ascent = font.line_metrics(FONT_PX).ascent;
+    let has_selection = term.selection.is_some();
+    let default_bg_opaque = bg | 0xFF00_0000;
     // The document is `scrollback` (evicted rows) followed by the live `grid`.
     // `scroll` counts how many rows the view is lifted above the live bottom
     // (0 = pinned to the bottom, where the cursor lives).
@@ -116,18 +119,20 @@ fn render(pixels: &mut [u32], font: &Font, term: &Term, w: u32, h: u32, bg: u32)
         } else {
             &term.grid[idx - sb]
         };
-        for column in 0..term.cols {
-            if term.selected(idx, column) {
-                surf.fill_rect(
-                    (PAD_X + column as i32 * term.cell_w) as f32,
-                    y as f32,
-                    term.cell_w as f32,
-                    ROW_PX as f32,
-                    col(term.palette.ansi[4]),
-                );
+        if has_selection {
+            for column in 0..term.cols {
+                if term.selected(idx, column) {
+                    surf.fill_rect(
+                        (PAD_X + column as i32 * term.cell_w) as f32,
+                        y as f32,
+                        term.cell_w as f32,
+                        ROW_PX as f32,
+                        col(term.palette.ansi[4]),
+                    );
+                }
             }
         }
-        draw_row(&mut surf, font, term.cell_w, y, row, bg | 0xFF00_0000);
+        draw_row(&mut surf, font, term.cell_w, y, ascent, row, default_bg_opaque);
     }
 
     // Block caret: only when pinned to the bottom (scroll == 0), drawn as a
@@ -156,8 +161,8 @@ fn dim_argb(argb: u32) -> u32 {
 
 /// Draw each character at its cell origin, independent of foreground changes
 /// and fractional advances in the configured font.
-fn draw_row(surf: &mut Surface, font: &Font, cell_w: i32, y: i32, row: &[Cell], default_bg_opaque: u32) {
-    let baseline = y as f32 + font.line_metrics(FONT_PX).ascent;
+fn draw_row(surf: &mut Surface, font: &Font, cell_w: i32, y: i32, ascent: f32, row: &[Cell], default_bg_opaque: u32) {
+    let baseline = y as f32 + ascent;
     for (column, cell) in row.iter().enumerate() {
         let mut fg = if (cell.attrs & ATTR_DIM) != 0 {
             dim_argb(cell.fg)

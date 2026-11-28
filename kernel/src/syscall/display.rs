@@ -185,9 +185,31 @@ pub(super) fn sys_fb_present(
                 let offset = (y + row) * framebuffer.pitch as usize + (x + column) * 4;
                 let destination =
                     unsafe { (framebuffer.address as *mut u8).add(offset) } as *mut u32;
-                for (index, pixel) in staging[..count].iter().enumerate() {
-                    unsafe {
-                        destination.add(index).write_volatile(*pixel);
+                let mut i = 0usize;
+                if (destination as usize) & 3 == 0 {
+                    if count > 0 && (destination as usize) & 7 != 0 {
+                        unsafe {
+                            destination.write_volatile(staging[0]);
+                        }
+                        i = 1;
+                    }
+                    while i + 1 < count {
+                        let word = (staging[i] as u64) | ((staging[i + 1] as u64) << 32);
+                        unsafe {
+                            (destination.add(i) as *mut u64).write_volatile(word);
+                        }
+                        i += 2;
+                    }
+                    if i < count {
+                        unsafe {
+                            destination.add(i).write_volatile(staging[i]);
+                        }
+                    }
+                } else {
+                    for (index, pixel) in staging[..count].iter().enumerate() {
+                        unsafe {
+                            destination.add(index).write_volatile(*pixel);
+                        }
                     }
                 }
                 column += count;
