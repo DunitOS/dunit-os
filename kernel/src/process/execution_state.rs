@@ -18,6 +18,7 @@ pub(crate) struct State {
     generation: u64,
     held: Option<(Ticket, Phase)>,
     finalizing: bool,
+    pending_cancel: Option<i32>,
 }
 impl State {
     pub(crate) fn reserve(&mut self, cpu: usize) -> Option<Ticket> {
@@ -88,6 +89,7 @@ impl State {
             _ => return false,
         }
         self.finalizing = true;
+        self.pending_cancel = None;
         true
     }
     /// Publishing a waitable result requires all dispatch backing to have been
@@ -106,5 +108,18 @@ impl State {
     /// their HAL return and dispatcher bookkeeping before external retirement.
     pub(crate) fn entered(&self) -> bool {
         matches!(self.held, Some((_, Phase::Active | Phase::Returned)))
+    }
+    /// Sticky cancellation signal for tasks/groups currently held inside HAL.
+    pub(crate) fn request_cancel(&mut self, code: i32) {
+        self.pending_cancel.get_or_insert(code);
+    }
+    pub(crate) fn pending_cancel(&self) -> Option<i32> {
+        self.pending_cancel
+    }
+    pub(crate) fn active_cpu(&self) -> Option<usize> {
+        match self.held {
+            Some((ticket, Phase::Active)) => Some(ticket.cpu),
+            _ => None,
+        }
     }
 }

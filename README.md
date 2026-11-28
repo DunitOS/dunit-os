@@ -29,8 +29,9 @@ uptime.
 See the [DunitOS Wiki](https://github.com/DunitOS/dunit-os/wiki) for an ArchWiki-style comprehensive reference covering architecture, system calls, hardware drivers, DWM v2, SDK, porting guides, and troubleshooting. Additional documents include the [desktop manual](docs/architecture/desktop.md),
 [SDK guide](docs/sdk/README.md) and [native ABI](abi/README.md).
 [Current state](docs/architecture/current-state.md), the
-[technical roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md) and
-[performance roadmap](DUNIT_OS_PERFORMANCE_ROADMAP.md) track implementation and
+[technical roadmap](DUNIT_OS_TECHNICAL_ROADMAP.md),
+[performance roadmap](DUNIT_OS_PERFORMANCE_ROADMAP.md), and
+[platform roadmap](DUNIT_OS_PLATFORM_ROADMAP.md) track implementation and
 remaining work. Contribution rules are in the
 [contributor guide](.github/CONTRIBUTING.md).
 

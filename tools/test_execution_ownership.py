@@ -60,6 +60,22 @@ fn main() {
     let abandoned=state.reserve(3).unwrap();assert!(state.release(abandoned));
     assert!(!state.busy()); // an unused frame does not strand a Ready task
 
+    // Active-CPU tracking and cancellation clearing on finalization entry.
+    let active=state.reserve(5).unwrap();
+    assert_eq!(state.active_cpu(),None);
+    assert!(state.start(active,5));
+    assert_eq!(state.active_cpu(),Some(5));
+    state.request_cancel(-9);
+    state.request_cancel(-15); // sticky first kill code
+    assert_eq!(state.pending_cancel(),Some(-9));
+    assert!(!state.begin_finalization(None));
+    state.returned(active);
+    assert_eq!(state.active_cpu(),None);
+    assert!(state.begin_finalization(Some(5)));
+    assert_eq!(state.pending_cancel(),None);
+    assert!(state.release(active));
+    assert!(state.complete_finalization());
+
     let state=Arc::new(Mutex::new(State::default()));
     let in_hal=Arc::new(AtomicUsize::new(0));let completed=Arc::new(AtomicUsize::new(0));
     let barrier=Arc::new(Barrier::new(8));

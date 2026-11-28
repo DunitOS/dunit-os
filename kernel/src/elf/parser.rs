@@ -46,7 +46,7 @@ pub const ELF_CLASS_64: u8 = 2;
 pub const ELF_DATA_LSB: u8 = 1;
 pub const ELF_MACHINE_X86_64: u16 = 0x3E;
 pub const ELF_TYPE_EXEC: u16 = 2;
-const ELF_TYPE_DYN: u16 = 3;
+pub(super) const ELF_TYPE_DYN: u16 = 3;
 pub const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_INTERP: u32 = 3;
@@ -175,7 +175,6 @@ impl<'a> ElfParser<'a> {
         Ok((dynamic, interpreter))
     }
 
-    #[cfg(any(test, feature = "boot-smoke-tests"))]
     pub(super) fn interpreted_load_plan(
         &self,
         resolved_path: &str,

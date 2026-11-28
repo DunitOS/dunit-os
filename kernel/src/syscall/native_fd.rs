@@ -187,9 +187,8 @@ pub(super) fn poll(records: *mut u8, count: usize, deadline_ns: u64) -> i64 {
     }
 }
 
-/// Eager private file snapshot, preserving the shared open-description offset.
-/// Pages after the final partial file page cannot be represented without
-/// SIGBUS/demand paging, so such ranges explicitly fail rather than fake them.
+/// Eager private file snapshot supporting `MAP_PRIVATE` and `MAP_PRIVATE | MAP_FIXED`
+/// segment placement (including DSO virtual reservations whose span exceeds EOF).
 pub(super) fn map_file(
     addr: usize,
     length: usize,
@@ -198,7 +197,13 @@ pub(super) fn map_file(
     fd: i64,
     offset: u64,
 ) -> i64 {
-    if flags != 2 || offset & 4095 != 0 || offset > i64::MAX as u64 {
+    const MAP_PRIVATE: u32 = 2;
+    const MAP_FIXED: u32 = 16;
+    if flags & !MAP_FIXED != MAP_PRIVATE || offset & 4095 != 0 || offset > i64::MAX as u64 {
+        return EINVAL;
+    }
+    let fixed = flags & MAP_FIXED != 0;
+    if fixed && addr == 0 {
         return EINVAL;
     }
     if fd < 0 || fd >= crate::process::MAX_PROCESS_FD as i64 {
@@ -225,15 +230,7 @@ pub(super) fn map_file(
     if stat.file_type != crate::fs::vfs::FileType::File {
         return EISDIR;
     }
-    let rounded_size = match stat.size.checked_add(4095) {
-        Some(size) => size & !4095,
-        None => return EINVAL,
-    };
-    let end = match offset.checked_add(length as u64) {
-        Some(end) => end,
-        None => return EINVAL,
-    };
-    if offset >= stat.size as u64 || end > rounded_size as u64 {
+    if offset > stat.size as u64 {
         return EINVAL;
     }
     let rounded_length = match length.checked_add(4095) {
@@ -241,7 +238,7 @@ pub(super) fn map_file(
         None => return EINVAL,
     };
     let mapped = match crate::process::with_current_process_mut(|process| {
-        process.map_anonymous(addr, length, true, false, false, true)
+        process.map_anonymous_with_options(addr, length, true, false, false, true, fixed)
     }) {
         Some(Ok(mapped)) => mapped,
         Some(Err(error)) => return process_error_to_errno(error),

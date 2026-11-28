@@ -54,6 +54,83 @@ pub fn prepare_process_elf_env_suspended(
 ) -> Result<(), ElfError> {
     prepare_process_elf_env_impl(pid, data, argv, extra_env, false)
 }
+const MAX_INTERP_PATH: usize = 256;
+const MAX_INTERP_BYTES: usize = 8 * 1024 * 1024;
+const PIE_MAIN_BIAS: usize = 0x40_0000;
+const INTERPRETER_BIAS: usize = 0x2000_0000;
+
+fn valid_interpreter_path(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() <= MAX_INTERP_PATH
+        && path.bytes().all(|b| b.is_ascii_graphic())
+        && !path.split('/').skip(1).any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+fn read_vfs_interpreter(path: &str) -> Result<Vec<u8>, ElfError> {
+    if !valid_interpreter_path(path) {
+        return Err(ElfError::UnsupportedDynamicLinking);
+    }
+    let mut vfs = crate::fs::vfs::get_vfs().ok_or(ElfError::UnsupportedDynamicLinking)?;
+    let fd = vfs
+        .open_at("/", path, crate::fs::vfs::OpenFlags::READ)
+        .map_err(|_| ElfError::UnsupportedDynamicLinking)?;
+    let result = (|| -> Result<Vec<u8>, ElfError> {
+        let stat = vfs
+            .fstat(fd)
+            .map_err(|_| ElfError::UnsupportedDynamicLinking)?;
+        if stat.file_type != crate::fs::vfs::FileType::File || stat.size > MAX_INTERP_BYTES {
+            return Err(ElfError::UnsupportedDynamicLinking);
+        }
+        let mut data = Vec::with_capacity(stat.size);
+        let mut buf = [0u8; 4096];
+        loop {
+            match vfs.read(fd, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if data.len().saturating_add(n) > MAX_INTERP_BYTES {
+                        return Err(ElfError::UnsupportedDynamicLinking);
+                    }
+                    data.extend_from_slice(&buf[..n]);
+                }
+                Err(_) => return Err(ElfError::UnsupportedDynamicLinking),
+            }
+        }
+        Ok(data)
+    })();
+    let _ = vfs.close(fd);
+    result
+}
+
+/// Validate a static executable or a `PT_INTERP`-linked executable before spawning.
+pub fn validate_executable(data: &[u8]) -> Result<(), ElfError> {
+    let parser = ElfParser::parse_image(data)?;
+    let (dynamic, interp) = parser.linker_requirement()?;
+    match interp {
+        Some(path) => {
+            if !valid_interpreter_path(path) {
+                return Err(ElfError::UnsupportedDynamicLinking);
+            }
+            let main_bias = if parser.header().elf_type == ELF_TYPE_DYN {
+                PIE_MAIN_BIAS
+            } else {
+                0
+            };
+            let _ = parser.load_plan(main_bias, PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE)?;
+            Ok(())
+        }
+        None if dynamic => Err(ElfError::UnsupportedDynamicLinking),
+        None => {
+            let main_bias = if parser.header().elf_type == ELF_TYPE_DYN {
+                PIE_MAIN_BIAS
+            } else {
+                0
+            };
+            let _ = parser.load_plan(main_bias, PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE)?;
+            Ok(())
+        }
+    }
+}
+
 fn prepare_process_elf_env_impl(
     pid: ProcessId,
     data: &[u8],
@@ -61,9 +138,29 @@ fn prepare_process_elf_env_impl(
     extra_env: &[&str],
     publish: bool,
 ) -> Result<(), ElfError> {
-    let parser = ElfParser::new(data)?;
-    let plan = parser.load_plan(0, PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE)?;
-    prepare_process_image(pid, &parser, &plan, None, argv, extra_env, publish)
+    let parser = ElfParser::parse_image(data)?;
+    let (dynamic, interp) = parser.linker_requirement()?;
+    let main_bias = if parser.header().elf_type == ELF_TYPE_DYN {
+        PIE_MAIN_BIAS
+    } else {
+        0
+    };
+    if let Some(interp_path) = interp {
+        let interp_data = read_vfs_interpreter(interp_path)?;
+        let (main, interpreter) = parser.interpreted_load_plan(
+            interp_path,
+            &interp_data,
+            main_bias,
+            INTERPRETER_BIAS,
+            PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE,
+        )?;
+        prepare_process_image(pid, &parser, &main, Some(&interpreter), argv, extra_env, publish)
+    } else if dynamic {
+        Err(ElfError::UnsupportedDynamicLinking)
+    } else {
+        let plan = parser.load_plan(main_bias, PAGE_SIZE..USER_STACK_TOP - USER_STACK_SIZE)?;
+        prepare_process_image(pid, &parser, &plan, None, argv, extra_env, publish)
+    }
 }
 
 fn prepare_process_image(

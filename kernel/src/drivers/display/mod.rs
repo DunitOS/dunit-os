@@ -39,9 +39,53 @@ impl Framebuffer {
     }
 }
 
+/// Hardware-agnostic scanout backend contract (Limine fixed GOP, Bochs VBE, or future GPU).
+trait DisplayBackend {
+    fn query_modes(&self, framebuffer: Option<Framebuffer>, out: &mut [Mode]) -> usize;
+    fn set_mode(&mut self, width: u32, height: u32) -> Result<Framebuffer, DisplayError>;
+    fn present(&mut self, rect: Option<(u32, u32, u32, u32)>) -> Result<(), DisplayError>;
+}
+
 enum Backend {
     Limine,
     Bochs(bochs::BochsVbe),
+}
+
+impl DisplayBackend for Backend {
+    fn query_modes(&self, framebuffer: Option<Framebuffer>, out: &mut [Mode]) -> usize {
+        match self {
+            Backend::Limine => {
+                let Some(framebuffer) = framebuffer else {
+                    return 0;
+                };
+                if out.is_empty() {
+                    return 0;
+                }
+                out[0] = Mode {
+                    width: framebuffer.width,
+                    height: framebuffer.height,
+                };
+                1
+            }
+            Backend::Bochs(device) => device.query_modes(out),
+        }
+    }
+
+    fn set_mode(&mut self, width: u32, height: u32) -> Result<Framebuffer, DisplayError> {
+        match self {
+            Backend::Limine => Err(DisplayError::Unsupported),
+            Backend::Bochs(device) => device
+                .set_mode(width, height)
+                .map(|()| device.framebuffer(width, height)),
+        }
+    }
+
+    fn present(&mut self, rect: Option<(u32, u32, u32, u32)>) -> Result<(), DisplayError> {
+        match self {
+            Backend::Limine => Ok(()),
+            Backend::Bochs(device) => device.present(rect),
+        }
+    }
 }
 
 struct DisplayState {
@@ -196,22 +240,7 @@ pub(crate) fn with_console_framebuffer(op: impl FnOnce(&Framebuffer)) {
 
 pub fn query_modes(out: &mut [Mode]) -> usize {
     let state = STATE.lock();
-    match &state.backend {
-        Backend::Limine => {
-            let Some(framebuffer) = state.framebuffer else {
-                return 0;
-            };
-            if out.is_empty() {
-                return 0;
-            }
-            out[0] = Mode {
-                width: framebuffer.width,
-                height: framebuffer.height,
-            };
-            1
-        }
-        Backend::Bochs(device) => device.query_modes(out),
-    }
+    state.backend.query_modes(state.framebuffer, out)
 }
 
 pub fn set_mode(pid: u64, width: u32, height: u32) -> Result<(), DisplayError> {
@@ -224,12 +253,7 @@ pub fn set_mode(pid: u64, width: u32, height: u32) -> Result<(), DisplayError> {
         if pid == 0 || state.owner != pid {
             return Err(DisplayError::AccessDenied);
         }
-        let result = match &mut state.backend {
-            Backend::Limine => return Err(DisplayError::Unsupported),
-            Backend::Bochs(device) => device
-                .set_mode(width, height)
-                .map(|()| device.framebuffer(width, height)),
-        };
+        let result = state.backend.set_mode(width, height);
         match result {
             Ok(framebuffer) => {
                 state.framebuffer = Some(framebuffer);
@@ -270,10 +294,14 @@ pub(crate) fn present<R>(
         state.framebuffer.ok_or(DisplayError::Unavailable)?
     };
     let result = copy(&framebuffer);
+    let clipped = rect.and_then(|(rx, ry, rw, rh)| {
+        let x = rx.min(framebuffer.width);
+        let y = ry.min(framebuffer.height);
+        let cw = rw.min(framebuffer.width.saturating_sub(x));
+        let ch = rh.min(framebuffer.height.saturating_sub(y));
+        (cw > 0 && ch > 0).then_some((x, y, cw, ch))
+    });
     let mut state = STATE.lock();
-    match &mut state.backend {
-        Backend::Limine => {}
-        Backend::Bochs(device) => device.present(rect)?,
-    }
+    state.backend.present(clipped)?;
     Ok(result)
 }

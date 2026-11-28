@@ -94,6 +94,22 @@ mod process {
         let mut sibling=registry::with_record(ProcessId(2),|_,r|execution::Lease::reserve(ProcessId(2),r)).unwrap();
         registry::with_quiescent_group(ProcessId(1),|p,r| {p.state=ProcessState::Dead;r.state=ProcessState::Dead;Ok(())}).unwrap();
         assert_eq!(sibling.start(),Err(ProcessError::NotRunnable));drop(sibling);
+        // Active execution records cancel metadata for remote CPUs, and a newly
+        // armed cancel prevents any group member from re-entering HAL.
+        registry::with_record(ProcessId(1),|p,r| {p.state=ProcessState::Ready;r.state=ProcessState::Ready;Ok(())}).unwrap();
+        registry::with_record(ProcessId(2),|p,r| {p.state=ProcessState::Ready;r.state=ProcessState::Ready;Ok(())}).unwrap();
+        let mut child_lease=registry::with_record(ProcessId(2),|_,r|execution::Lease::reserve(ProcessId(2),r)).unwrap();
+        child_lease.start().unwrap();
+        let cpu_mask = execution::arm_group_cancel(&mut registry::table(), ProcessId(1), -9);
+        assert_eq!(cpu_mask, 1);
+        assert_eq!(execution::group_cancel_code(&registry::table(), ProcessId(2)), Some(-9));
+        child_lease.returned();
+        drop(child_lease);
+        registry::with_record(ProcessId(2),|p,r| {p.state=ProcessState::Ready;r.state=ProcessState::Ready;Ok(())}).unwrap();
+        let mut blocked_reentry = registry::with_record(ProcessId(2),|_,r|execution::Lease::reserve(ProcessId(2),r)).unwrap();
+        assert_eq!(blocked_reentry.start(), Err(ProcessError::NotRunnable));
+        drop(blocked_reentry);
+
         println!("actual leases: 8000 entries, Ready before HAL return excluded, kill gate and stale PID identity OK");
     }
     pub fn cannot_send() { let lease=reserve().unwrap(); @SEND@ }

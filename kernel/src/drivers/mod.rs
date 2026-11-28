@@ -8,6 +8,7 @@ pub mod pci;
 pub mod registry;
 pub mod usb;
 pub mod virtio_blk;
+pub mod virtio_rng;
 
 pub fn init() {
     registry::register("fb0", registry::DeviceClass::Framebuffer, "framebuffer");
@@ -20,6 +21,7 @@ pub fn init() {
     block::init();
     ahci::init();
     virtio_blk::init();
+    virtio_rng::init();
     // DunitFS v2 boot self-test (feature-gated): запускается на отдельном
     // экземпляре ФС и полностью отбрасывается ДО auto_mount, чтобы не было двух
     // писателей на одном разделе.

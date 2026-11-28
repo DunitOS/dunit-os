@@ -12,6 +12,40 @@ pub(super) fn group_entered(table: &[ProcessRecord], owner: ProcessId) -> bool {
     })
 }
 
+pub(super) fn group_cancel_code(table: &[ProcessRecord], pid: ProcessId) -> Option<i32> {
+    let index = process_record_index(table, pid)?;
+    if let Some(code) = table[index].execution.pending_cancel() {
+        return Some(code);
+    }
+    let owner = table[index].owner?;
+    let owner_index = process_record_index(table, owner)?;
+    table[owner_index].execution.pending_cancel()
+}
+
+pub(super) fn arm_group_cancel(table: &mut [ProcessRecord], pid: ProcessId, code: i32) -> u64 {
+    let Some(index) = process_record_index(table, pid) else {
+        return 0;
+    };
+    let is_owner = table[index].owner.is_none();
+    let mut cpu_mask = 0u64;
+    for record in table.iter_mut() {
+        let matches = if is_owner {
+            record.pid == pid || record.owner == Some(pid)
+        } else {
+            record.pid == pid
+        };
+        if matches && !record.execution.finalizing() {
+            record.execution.request_cancel(code);
+            if let Some(cpu) = record.execution.active_cpu() {
+                if cpu < 64 {
+                    cpu_mask |= 1u64 << cpu;
+                }
+            }
+        }
+    }
+    cpu_mask
+}
+
 /// The Arc pins object identity, the ticket grants a single CPU admission.
 /// A lease cannot migrate, even before it has entered HAL.
 pub(super) struct Lease {
@@ -56,6 +90,9 @@ impl Lease {
                 ) {
                     return Err(ProcessError::NotRunnable);
                 }
+            }
+            if group_cancel_code(&table, self.pid).is_some() {
+                return Err(ProcessError::NotRunnable);
             }
             let record = &mut table[index];
             if record.state != ProcessState::Ready

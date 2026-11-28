@@ -2,6 +2,22 @@
 use super::*;
 const RETURN_TO_HAL: i64 = 0x0051_5953_4341_4C4C;
 
+fn try_arm_pending_cancel(pid: ProcessId, generation: u64) -> bool {
+    let cancel_code = {
+        let _irq = InterruptGuard::new();
+        let table = registry::table();
+        execution::group_cancel_code(&table, pid)
+    };
+    let Some(cancel_code) = cancel_code else {
+        return false;
+    };
+    crate::cpu::runtime().exit_code.store(cancel_code, Ordering::SeqCst);
+    crate::cpu::runtime().exit_kind.store(0, Ordering::SeqCst);
+    crate::cpu::runtime().exit_requested.store(true, Ordering::SeqCst);
+    crate::cpu::reschedule::capture(generation);
+    true
+}
+
 #[no_mangle]
 pub extern "C" fn syscall_return_boundary(result: i64) -> i64 {
     let Some(generation) = crate::cpu::reschedule::pending() else { return result; };
@@ -14,6 +30,9 @@ pub extern "C" fn syscall_return_boundary(result: i64) -> i64 {
         return RETURN_TO_HAL;
     }
     let Some(pid) = current_entity_id() else { return result; };
+    if try_arm_pending_cancel(pid, generation) {
+        return RETURN_TO_HAL;
+    }
     if with_task_record(pid, |process, record| {
         if record.state != ProcessState::Running || process.is_kernel {
             return Err(ProcessError::NotRunnable);
@@ -37,6 +56,9 @@ pub(crate) fn reschedule_user_interrupt(frame: &crate::interrupts::InterruptFram
     if crate::cpu::runtime().exit_requested.load(Ordering::Acquire)
         || crate::cpu::runtime().yield_requested.load(Ordering::Acquire) { return false; }
     let Some(pid) = current_entity_id() else { return false; };
+    if try_arm_pending_cancel(pid, generation) {
+        return true;
+    }
     if with_task_record(pid, |process, record| {
         if record.state != ProcessState::Running || process.is_kernel {
             return Err(ProcessError::NotRunnable);

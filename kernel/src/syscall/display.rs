@@ -148,7 +148,8 @@ pub(super) fn sys_fb_present(
     }
     #[cfg(feature = "boot-smoke-tests")]
     let mut probe = PresentProbe::new();
-    let result = driver::present(pid, None, |framebuffer| {
+    let dirty_rect = Some((dst_x, dst_y, width as u32, height as u32));
+    let result = driver::present(pid, dirty_rect, |framebuffer| {
         #[cfg(feature = "boot-smoke-tests")]
         { probe.start = crate::clock::pit_interrupts(); }
         // Preserve validation of the entire supplied image, including clipped

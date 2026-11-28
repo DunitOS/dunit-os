@@ -262,6 +262,20 @@ impl Csprng {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    fn mix_bytes(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(48) {
+            let mut words = [0u64; 6];
+            let mut count = 0usize;
+            for slice in chunk.chunks(8) {
+                let mut raw = [0u8; 8];
+                raw[..slice.len()].copy_from_slice(slice);
+                words[count] = u64::from_le_bytes(raw);
+                count += 1;
+            }
+            self.mix(&words[..count]);
+        }
+    }
+
     fn ensure_seeded(&mut self) {
         if self.seeded && self.bytes_since_reseed < RESEED_BYTES {
             return;
@@ -346,6 +360,31 @@ pub fn fill_bytes(out: &mut [u8]) {
     if out.is_empty() {
         return;
     }
-    RNG.lock().fill(out);
+    let mut rng = RNG.lock();
+    let needs_reseed = !rng.seeded || rng.bytes_since_reseed >= RESEED_BYTES;
+    if needs_reseed {
+        drop(rng);
+        let mut hw = [0u8; 32];
+        let got = crate::drivers::virtio_rng::try_fill_bytes(&mut hw);
+        let mut rng = RNG.lock();
+        if got > 0 {
+            rng.mix_bytes(&hw[..got]);
+        }
+        zeroize(&mut hw);
+        rng.fill(out);
+        return;
+    }
+    rng.fill(out);
+}
+
+/// Mix hardware entropy bytes (e.g. VirtIO-RNG) into the active CSPRNG pool.
+pub fn mix_hardware_bytes(bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let mut rng = RNG.lock();
+    rng.ensure_seeded();
+    rng.mix_bytes(bytes);
+    rng.bytes_since_reseed = 0;
 }
 

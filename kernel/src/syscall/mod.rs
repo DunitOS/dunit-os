@@ -1669,19 +1669,37 @@ fn write_terminal_foreground(data: &[u8]) {
 
 fn sys_mmap(addr: usize, length: usize, prot: u32, flags: u32, fd: i64, offset: u64) -> i64 {
     const MAP_PRIVATE: u32 = 2;
+    const MAP_FIXED: u32 = 16;
     const MAP_ANONYMOUS: u32 = 32;
     const MAP_GUARD: u32 = 64;
     if length == 0 || prot & !7 != 0 || prot & 6 == 6
-        || flags & !(MAP_PRIVATE | MAP_ANONYMOUS | MAP_GUARD) != 0
-        || flags & MAP_PRIVATE == 0 || addr & 4095 != 0 { return EINVAL; }
+        || flags & !(MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS | MAP_GUARD) != 0
+        || flags & MAP_PRIVATE == 0
+        || (flags & MAP_FIXED != 0 && (addr == 0 || flags & MAP_GUARD != 0))
+        || addr & 4095 != 0
+    {
+        return EINVAL;
+    }
     if flags & MAP_ANONYMOUS == 0 {
         return native_fd::map_file(addr, length, prot, flags, fd, offset);
     }
     // Anonymous legacy callers use only four arguments; fd/offset registers
     // are deliberately ignored rather than interpreting uninitialized values.
-    crate::process::with_current_process_mut(|process| process.map_anonymous(addr, length, prot & 2 != 0,
-            prot & 4 != 0, flags & MAP_GUARD != 0, prot != 0)
-            .map(|mapped| mapped as i64).unwrap_or_else(process_error_to_errno)).unwrap_or(EINVAL)
+    crate::process::with_current_process_mut(|process| {
+        process
+            .map_anonymous_with_options(
+                addr,
+                length,
+                prot & 2 != 0,
+                prot & 4 != 0,
+                flags & MAP_GUARD != 0,
+                prot != 0,
+                flags & MAP_FIXED != 0,
+            )
+            .map(|mapped| mapped as i64)
+            .unwrap_or_else(process_error_to_errno)
+    })
+    .unwrap_or(EINVAL)
 }
 
 fn sys_munmap(addr: usize, length: usize) -> i64 {
@@ -2131,7 +2149,7 @@ fn spawn_process_from_user(
 
     let data = read_vfs_file(&cwd, &resolved).map_err(vfs_error_to_errno)?;
 
-    if crate::elf::ElfParser::new(&data).is_err() {
+    if crate::elf::validate_executable(&data).is_err() {
         return Err(EIO);
     }
 

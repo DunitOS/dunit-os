@@ -564,7 +564,21 @@ pub fn kill_process(pid: ProcessId, code: i32) -> Result<bool, ProcessError> {
     }
 
     let exit = ProcessExit { pid, status: ProcessExitStatus::Exited(code) };
-    finalization::begin(exit, false)?;
+    if let Err(err) = finalization::begin(exit, false) {
+        if err == ProcessError::NotRunnable {
+            let cpu_mask = {
+                let _irq = InterruptGuard::new();
+                let mut table = process_table();
+                execution::arm_group_cancel(&mut table, pid, code)
+            };
+            for cpu in 0..64 {
+                if (cpu_mask & (1u64 << cpu)) != 0 {
+                    let _ = crate::cpu::reschedule::request(cpu);
+                }
+            }
+        }
+        return Err(err);
+    }
     let (fds, vm) = with_process_mut(pid, |process| {
         Ok((process.take_fd_resources(), process.take_vm_resources()))
     })?;

@@ -45,6 +45,12 @@ int main(int argc,char **argv) {
     char *map=mmap(0,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE,fd,0);CHECK(map!=MAP_FAILED);CHECK(!memcmp(map,"abcdef",6) && map[6]==0 && map[4095]==0);CHECK(lseek(fd,0,SEEK_CUR)==2);
     map[0]='X';CHECK(lseek(fd,0,SEEK_SET)==0);CHECK(read(fd,b,1)==1 && b[0]=='a');CHECK(munmap(map,4096)==0);
     errno=0;CHECK(mmap(0,4096,PROT_READ|PROT_WRITE|PROT_EXEC,MAP_PRIVATE,fd,0)==MAP_FAILED);
+    char *span=mmap(0,8192,PROT_READ,MAP_PRIVATE,fd,0);CHECK(span!=MAP_FAILED);CHECK(!memcmp(span,"abcdef",6) && span[4096]==0 && span[8191]==0);
+    char *fixed=mmap(span+4096,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_FIXED,fd,0);CHECK(fixed==span+4096);CHECK(!memcmp(fixed,"abcdef",6));fixed[0]='Z';
+    char *bss=mmap(span+4096,4096,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS,-1,0);CHECK(bss==span+4096 && bss[0]==0);
+    CHECK(lseek(fd,0,SEEK_SET)==0);CHECK(read(fd,b,1)==1 && b[0]=='a');
+    errno=0;CHECK(mmap(0,4096,PROT_READ,MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS,-1,0)==MAP_FAILED && errno==EINVAL);
+    CHECK(munmap(span,8192)==0);
     CHECK(unlink("/tmp/native-map")==0);
     int replacement=open("/tmp/native-map",O_CREAT|O_EXCL|O_RDWR,0600);CHECK(replacement>=0);CHECK(write(replacement,"new",3)==3);
     CHECK(lseek(fd,0,SEEK_SET)==0);CHECK(read(fd,b,6)==6 && !memcmp(b,"abcdef",6));CHECK(close(fd)==0);

@@ -538,7 +538,28 @@ impl Process {
         guarded: bool,
         accessible: bool,
     ) -> Result<usize, ProcessError> {
-        if self.is_kernel || length == 0 {
+        self.map_anonymous_with_options(
+            requested_addr,
+            length,
+            writable,
+            executable,
+            guarded,
+            accessible,
+            false,
+        )
+    }
+
+    pub fn map_anonymous_with_options(
+        &mut self,
+        requested_addr: usize,
+        length: usize,
+        writable: bool,
+        executable: bool,
+        guarded: bool,
+        accessible: bool,
+        fixed: bool,
+    ) -> Result<usize, ProcessError> {
+        if self.is_kernel || length == 0 || (fixed && (guarded || requested_addr == 0)) {
             return Err(ProcessError::InvalidMemoryRange);
         }
         let map_length = length
@@ -549,8 +570,9 @@ impl Process {
             map_length.checked_add(2 * USER_PAGE_SIZE)
         } else {
             Some(map_length)
-        }.ok_or(ProcessError::InvalidMemoryRange)?;
-        let start = if requested_addr == 0 {
+        }
+        .ok_or(ProcessError::InvalidMemoryRange)?;
+        let mut start = if requested_addr == 0 {
             self.next_mmap_addr
         } else {
             if requested_addr & (USER_PAGE_SIZE - 1) != 0 {
@@ -558,26 +580,85 @@ impl Process {
             }
             requested_addr
         };
-        let end = start
+        let mut end = start
             .checked_add(total_length)
             .ok_or(ProcessError::InvalidMemoryRange)?;
         if start < USER_MMAP_BASE || end > USER_MMAP_END {
             return Err(ProcessError::InvalidMemoryRange);
         }
 
-        let mut address_space = self
-            .address_space_mut()
-            .ok_or(ProcessError::NoAddressSpace)?;
-        let mut page = start;
-        while page < end {
-            match address_space
-                .translate_user_page(crate::memory::vmm::VirtualAddress::from_usize(page))
-            {
-                Ok(None) => {}
-                Ok(Some(_)) => return Err(ProcessError::AddressInUse),
-                Err(_) => return Err(ProcessError::InvalidMemoryRange),
+        if fixed {
+            for (&usable, &len) in &self.guard_regions {
+                let reservation_start = usable - USER_PAGE_SIZE;
+                let reservation_end = usable + len + USER_PAGE_SIZE;
+                if start < reservation_end && end > reservation_start {
+                    return Err(ProcessError::InvalidMemoryRange);
+                }
             }
-            page += USER_PAGE_SIZE;
+            for page in (start..end).step_by(USER_PAGE_SIZE) {
+                if self.shared_pages.contains_key(&page) {
+                    return Err(ProcessError::AddressInUse);
+                }
+            }
+        }
+
+        let mut address_space = self
+            .address_space
+            .as_ref()
+            .ok_or(ProcessError::NoAddressSpace)?
+            .lock();
+        if !fixed {
+            if requested_addr == 0 {
+                // Skip past any region previously claimed via MAP_FIXED or guards.
+                loop {
+                    let mut conflict = None;
+                    for (&usable, &len) in &self.guard_regions {
+                        let reservation_start = usable - USER_PAGE_SIZE;
+                        let reservation_end = usable + len + USER_PAGE_SIZE;
+                        if start < reservation_end && end > reservation_start {
+                            conflict = Some(reservation_end);
+                            break;
+                        }
+                    }
+                    if conflict.is_none() {
+                        let mut page = start;
+                        while page < end {
+                            match address_space.translate_user_page(
+                                crate::memory::vmm::VirtualAddress::from_usize(page),
+                            ) {
+                                Ok(None) => page += USER_PAGE_SIZE,
+                                Ok(Some(_)) => {
+                                    conflict = Some(page + USER_PAGE_SIZE);
+                                    break;
+                                }
+                                Err(_) => return Err(ProcessError::InvalidMemoryRange),
+                            }
+                        }
+                    }
+                    let Some(next_start) = conflict else {
+                        break;
+                    };
+                    start = next_start;
+                    end = start
+                        .checked_add(total_length)
+                        .ok_or(ProcessError::InvalidMemoryRange)?;
+                    if end > USER_MMAP_END {
+                        return Err(ProcessError::OutOfMemory);
+                    }
+                }
+            } else {
+                let mut page = start;
+                while page < end {
+                    match address_space
+                        .translate_user_page(crate::memory::vmm::VirtualAddress::from_usize(page))
+                    {
+                        Ok(None) => {}
+                        Ok(Some(_)) => return Err(ProcessError::AddressInUse),
+                        Err(_) => return Err(ProcessError::InvalidMemoryRange),
+                    }
+                    page += USER_PAGE_SIZE;
+                }
+            }
         }
 
         let mut page_flags = crate::memory::vmm::PageFlags::empty();
@@ -590,13 +671,11 @@ impl Process {
 
         let mut mapped_end = start;
         while mapped_end < end {
-            if address_space
-                .map_user_page(
-                    crate::memory::vmm::VirtualAddress::from_usize(mapped_end),
-                    page_flags,
-                )
-                .is_err()
-            {
+            let vaddr = crate::memory::vmm::VirtualAddress::from_usize(mapped_end);
+            if fixed {
+                let _ = address_space.unmap_user_page(vaddr);
+            }
+            if address_space.map_user_page(vaddr, page_flags).is_err() {
                 let mut rollback = start;
                 while rollback < mapped_end {
                     let _ = address_space
@@ -609,8 +688,8 @@ impl Process {
         }
 
         drop(address_space);
-        if requested_addr == 0 {
-            self.next_mmap_addr = end;
+        if !fixed && requested_addr == 0 {
+            self.next_mmap_addr = self.next_mmap_addr.max(end);
         }
         if !accessible {
             let accessible_start = if guarded { start + USER_PAGE_SIZE } else { start };
